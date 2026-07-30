@@ -40,6 +40,10 @@ export const HERO_CROP = Object.freeze({ faceFrac: 0.88, faceTopAt: 0.40, maxFac
 export const FACE_PROM_CEILING = 1.6; // renderer's hard stretch ceiling for the prominence-tighten step
 export const HERO_PROMINENCE = Object.freeze({ target: 0.42, cap: 0.50, trigMul: 0.6 }); // FACE_PROMINENCE.hero
 export const HERO_STRETCH_MAX = 1.2;  // imageQualityConfig HERO_STRETCH_MAX (hero crop > 1.2× fails hard QC)
+// Soft S6 scoring preference, not a hard reject. 1.35 matches the crop pre-filter cap so
+// both selectors use one consistent boundary. The 1.20 hard-QC cap remains stricter, but
+// its historical pass sample (n=5) is too narrow to reuse as a ranking preference.
+export const HERO_MIN_SOURCE_MAX_UPSCALE = 1.35;
 
 const _num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
@@ -130,6 +134,47 @@ export function heroCropUpscale(input) {
 export function isHeroCropSafe(input, limit = HERO_STRETCH_MAX) {
   const up = heroCropUpscale(input);
   return up !== null && up <= limit + 1e-9;
+}
+
+// Pick a hero candidate using a soft source-size preference.
+// - candidates already passed the caller's identity/clean/face policy and are in its quality order
+// - if at least one candidate is within the soft limit, preserve that order
+// - if every measured candidate is undersized, pick the lowest estimated upscale (largest usable source)
+// - unknown-only input returns no candidate so the caller can retain legacy selection and warn honestly
+// PURE: no env/IO/mutation. `candidate` is the original row supplied by the caller.
+export function selectHeroSourceCandidate(candidates = [], maxUpscale = HERO_MIN_SOURCE_MAX_UPSCALE) {
+  const limit = _num(maxUpscale);
+  if (!(limit > 0) || !Array.isArray(candidates)) {
+    return { candidate: null, measuredCount: 0, allBelowThreshold: false, reason: 'invalid-input' };
+  }
+  const measured = [];
+  for (let index = 0; index < candidates.length; index++) {
+    const candidate = candidates[index];
+    const estimatedUpscale = _num(candidate?.estimatedUpscale);
+    if (!(estimatedUpscale > 0)) continue;
+    measured.push({ candidate, estimatedUpscale, index });
+  }
+  if (!measured.length) {
+    return { candidate: null, measuredCount: 0, allBelowThreshold: false, reason: 'unmeasured' };
+  }
+  const sufficient = measured.find((row) => row.estimatedUpscale <= limit + 1e-9);
+  if (sufficient) {
+    return {
+      candidate: sufficient.candidate,
+      measuredCount: measured.length,
+      allBelowThreshold: false,
+      selectedUpscale: sufficient.estimatedUpscale,
+      reason: 'within-threshold',
+    };
+  }
+  const best = measured.slice().sort((a, b) => (a.estimatedUpscale - b.estimatedUpscale) || (a.index - b.index))[0];
+  return {
+    candidate: best.candidate,
+    measuredCount: measured.length,
+    allBelowThreshold: true,
+    selectedUpscale: best.estimatedUpscale,
+    reason: 'all-below-threshold',
+  };
 }
 
 // ============================================================
@@ -351,7 +396,7 @@ export function expandHeroRegionForStretchCap({ region, slotW, slotH, imgW, imgH
 }
 
 export default Object.freeze({
-  HERO_CROP, FACE_PROM_CEILING, HERO_PROMINENCE, HERO_STRETCH_MAX,
-  heroCropRegion, heroCropUpscale, isHeroCropSafe, zoomHeroRegionForFaceShare,
+  HERO_CROP, FACE_PROM_CEILING, HERO_PROMINENCE, HERO_STRETCH_MAX, HERO_MIN_SOURCE_MAX_UPSCALE,
+  heroCropRegion, heroCropUpscale, isHeroCropSafe, selectHeroSourceCandidate, zoomHeroRegionForFaceShare,
   resolveHeroNeighborOverlap, expandHeroRegionForStretchCap,
 });

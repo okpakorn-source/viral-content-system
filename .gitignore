@@ -96,3 +96,6 @@ data/face-cache.json
 data/identity-cache.json
 data/hero-vision-cache.json
 public/case-frames/
+
+# Local multi-model audit logs and task artifacts (never release)
+/.model-orchestrator/

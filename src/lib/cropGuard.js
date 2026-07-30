@@ -27,14 +27,26 @@ export const SLOT_UPSCALE_MAX = 1.6;              // ช่องรอง เ�
 const _num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const _pos = (v) => { const n = _num(v); return n !== null && n > 0 ? n : null; };
 
-// อ่านขนาดจริงของภาพต้นฉบับ (ต้องมี "ทั้งกว้างและสูง" ถึงคำนวณ aspect/cover-fit ได้) — ขาดตัวใดตัวหนึ่ง = null
-//   ★ realShortSide อย่างเดียวใช้ไม่ได้ (ไม่รู้ aspect) → ถือว่าวัดไม่ได้ (fail-closed)
-function readRealDims(row) {
+// อ่านขนาดจริงของภาพต้นฉบับ. Prefer the authoritative realWidth/realHeight pair.
+// The realShortSide fallback is explicitly opt-in so callers that do not enable the
+// AC-0232 source gate retain the exact legacy "dims unknown" behavior.
+function readRealDims(row, dimsFromShortSide = false) {
   if (row === null || typeof row !== 'object') return null;
   const w = _pos(row.realWidth);
   const h = _pos(row.realHeight);
-  if (w === null || h === null) return null;
-  return { w, h };
+  if (w !== null && h !== null) return { w, h };
+  if (dimsFromShortSide !== true) return null;
+  // If only triage.realShortSide survived persistence, combine it with root width/height
+  // strictly as an aspect ratio (never as source pixels); short-side without aspect stays unknown.
+  const shortSide = _pos(row.triage?.realShortSide);
+  const aspectW = _pos(row.width);
+  const aspectH = _pos(row.height);
+  if (shortSide === null || aspectW === null || aspectH === null) return null;
+  const aspect = aspectW / aspectH;
+  if (!(aspect > 0) || !Number.isFinite(aspect)) return null;
+  return aspect >= 1
+    ? { w: shortSide * aspect, h: shortSide }
+    : { w: shortSide, h: shortSide / aspect };
 }
 
 // ── cover-fit upscale ──
@@ -122,13 +134,14 @@ export function computeCropGuard(input) {
     //   เป็นคนอ่าน env แล้วส่งค่าเข้ามา · ไม่ระบุ (undefined) = พฤติกรรมเดิม byte-identical ทุกประการ
     const heroUpscaleMax = _pos(src.heroUpscaleMax) ?? HERO_UPSCALE_MAX;
     const heroDimsSoft = src.heroDimsSoft === true; // default false = เดิมเป๊ะ (hard ban วัดขนาดไม่ได้)
+    const dimsFromShortSide = src.dimsFromShortSide === true; // default false = legacy realWidth/realHeight authority only
 
     const byId = new Map();
     const guards = [];
     for (const row of pool) {
       const id = row?.id;
       const idStr = id != null ? String(id) : null;
-      const dims = readRealDims(row);
+      const dims = readRealDims(row, dimsFromShortSide);
       const hasRealDims = dims !== null;
 
       const heroUpscale = heroSlot ? coverFitUpscale(dims, heroSlot) : null;

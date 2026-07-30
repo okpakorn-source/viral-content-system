@@ -37,8 +37,11 @@ export async function resolve(specifier, context, nextResolve) {
 }`;
 register('data:text/javascript,' + encodeURIComponent(hook));
 
-const { evaluateCoverFormula } = await import('@/lib/coverFormulaCheck');
-const { formulaRoleOfSlotId, buildFormulaInputFromCoverResult } = await import('@/lib/megaAdapters');
+const {
+  evaluateCoverFormula,
+  formulaRoleOfSlotId,
+  buildFormulaInputFromCoverResult,
+} = await import('@/lib/coverFormulaCheck');
 const { pickLatestCovers } = await import('../scripts/dev-progress-server.mjs');
 const adaptersSrc = readFileSync(new URL('../src/lib/megaAdapters.js', import.meta.url), 'utf8');
 const archiveSrc = readFileSync(new URL('../src/lib/megaCoverArchive.js', import.meta.url), 'utf8');
@@ -201,12 +204,12 @@ test('source: formulaScore เรียกล้มต้อง console.warn (ad
   assert.ok(/console\.warn\('\[MEGA S7\] formula-check ล้ม \(advisory เท่านั้น ไม่กระทบปก\): '/.test(adaptersSrc));
 });
 
-test('source: formulaScore แนบเข้า coverCore แบบมีเงื่อนไข (ไม่มี = ไม่ใส่คีย์นี้เลย)', () => {
-  assert.ok(/\.\.\.\(formulaScore \? \{ formulaScore \} : \{\}\), \/\/ ★ แบตช์เฟส D ข้อ 1: คะแนนสูตร 478 ใบ/.test(adaptersSrc));
+test('source: formulaScore แนบเข้า coverCore ทุก path (object ปกติ; null เฉพาะ kill-switch)', () => {
+  assert.ok(/formulaScore, \/\/ AC-0232: default path always carries an object; explicit MEGA_FORMULA_CHECK=0 carries null/.test(adaptersSrc));
 });
 
 test('source: formulaScore ถูกส่งต่อไปยัง addMegaCover ด้วย (ต้องถึงคลังจริง ไม่ใช่แค่ dossierPatch)', () => {
-  assert.ok(/\.\.\.\(formulaScore \? \{ formulaScore \} : \{\}\) \}\); \/\/ audit: ธงคุณภาพต้องถึงคลังจากทางหลักด้วย/.test(adaptersSrc));
+  assert.ok(/qcFlags: Array\.isArray\(r\.qcFlags\) \? r\.qcFlags : \[\], formulaScore \}\); \/\/ audit: ธงคุณภาพ\+formulaScore ต้องถึงคลังจากทางหลัก/.test(adaptersSrc));
 });
 
 test('source: qcVerdict (การตัดสินใจเข้าคลัง/ผ่าน QC) ไม่ถูกแตะเลย — formulaScore เป็น advisory จริง ไม่มีผลต่อ pass/fail', () => {
@@ -217,10 +220,13 @@ test('source: qcVerdict (การตัดสินใจเข้าคลั�
 
 // ═══════════════════════════ (5) source-assertion: megaCoverArchive.js entry shape ═══════════════════════════
 
-test('source: entry.formulaScore เก็บเฉพาะเมื่อเป็น object จริง — undefined เมื่อผู้เรียกไม่ส่ง (byte-parity เดิมสำหรับผู้เรียกเก่า)', () => {
-  assert.ok(
-    /formulaScore: rec\.formulaScore && typeof rec\.formulaScore === 'object' \? rec\.formulaScore : undefined,/.test(archiveSrc)
-  );
+test('source: archive boundary resolve/persist formulaScore ทุก record และคง kill-switch', () => {
+  assert.ok(/export async function resolveArchiveFormulaScore\(rec = \{\}\)/.test(archiveSrc));
+  assert.ok(/if \(process\.env\.MEGA_FORMULA_CHECK === '0'\) return null;/.test(archiveSrc));
+  assert.ok(/const formulaScore = await resolveArchiveFormulaScore\(rec\);/.test(archiveSrc));
+  assert.ok(/formulaScore, \/\/ AC-0232: every new archive record has the field/.test(archiveSrc));
+  assert.doesNotMatch(archiveSrc, /import\(['"]@\/lib\/megaAdapters['"]\)/);
+  assert.match(archiveSrc, /from ['"]\.\/coverFormulaCheck\.js['"]/);
 });
 
 // ═══════════════════════════ (6) dev-progress-server.mjs — pickLatestCovers coverFormulaScore mapping ═══════════════════════════
@@ -237,6 +243,22 @@ test('pickLatestCovers: record ไม่มี formulaScore เลย (เรค
   assert.equal(c.coverFormulaScore, null);
 });
 
+test('pickLatestCovers: input_unavailable is hidden instead of rendering formula 0/0', () => {
+  const [c] = pickLatestCovers([{
+    id: 'x-unavailable',
+    at: '2026-07-29T00:00:00Z',
+    title: 't',
+    formulaScore: {
+      passed: 0,
+      total: 0,
+      score: null,
+      checks: [],
+      reason: 'input_unavailable',
+    },
+  }], 1);
+  assert.equal(c.coverFormulaScore, null);
+});
+
 test('pickLatestCovers: formulaScore เพี้ยน (ไม่ใช่ object เช่น string/number) → coverFormulaScore เป็น null ไม่ throw', () => {
   const [c1] = pickLatestCovers([{ id: 'x3', at: '2026-07-29T00:00:00Z', title: 't', formulaScore: 'oops' }], 1);
   assert.equal(c1.coverFormulaScore, null);
@@ -246,7 +268,7 @@ test('pickLatestCovers: formulaScore เพี้ยน (ไม่ใช่ obje
 
 test('source: dev-progress-server.mjs ตั้งใจใช้ชื่อ coverFormulaScore (ไม่ใช่ formulaScore เฉยๆ) กันชนกับ formulaScore ระดับบอร์ดจาก dev-progress-board.json', () => {
   const src = readFileSync(new URL('../scripts/dev-progress-server.mjs', import.meta.url), 'utf8');
-  assert.ok(/coverFormulaScore: \(c\.formulaScore/.test(src), 'ต้องใช้ชื่อ coverFormulaScore แยกจาก formulaScore ระดับบอร์ด');
+  assert.ok(/c\.formulaScore\.reason !== 'input_unavailable'/.test(src), 'input_unavailable ต้องไม่แสดงเป็นสูตร 0/0');
   assert.ok(/formulaScore: boardData\.formulaScore \|\| null/.test(src), 'formulaScore ระดับบอร์ด (คนละก้อน) ต้องยังอยู่เหมือนเดิม ไม่ถูกแทนที่');
 });
 

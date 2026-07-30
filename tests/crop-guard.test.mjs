@@ -35,6 +35,7 @@ process.env.MEGA_QUARANTINE = '0';     // ปิดกักกันขนา�
 process.env.POOL_CLEAN_GATE = '0';     // พูลไม่ถูกกรอง clean
 process.env.MEGA_S6_MIN_CLEAN = '0';   // ไม่ตัด clean=false
 process.env.MEGA_SOLVER_DIAGNOSTICS_V2 = '0';
+process.env.MEGA_HERO_MIN_SOURCE = '0'; // isolate cropGuard เดิม; AC-0232 gate มี integration/kill-switch tests แยก
 delete process.env.MEGA_SEMANTIC_SELECTION; // legacy mode
 delete process.env.MEGA_SELECTION_SPEC;
 delete process.env.MEGA_REF_HERO_V2;
@@ -102,6 +103,29 @@ await test('fail-closed: ไม่มี realWidth/realHeight → hasRealDims=fa
     assert.equal(r.heroUpscale, HERO ? r.heroUpscale : null); // heroUpscale=null เพราะ dims=null
     assert.equal(r.heroUpscale, null);
   }
+});
+
+await test('dimension authority: realShortSide fallback is opt-in; default remains legacy dims-unknown', async () => {
+  const input = {
+    pool: [{
+      id: 'SHORT-ASPECT',
+      width: 800,
+      height: 1000,
+      triage: { realShortSide: 900 },
+    }],
+    templateSpec: SPEC,
+  };
+  const legacy = computeCropGuard(input).byId.get('SHORT-ASPECT');
+  assert.equal(legacy.hasRealDims, false);
+  assert.equal(legacy.realWidth, null);
+  assert.equal(legacy.realHeight, null);
+  assert.equal(legacy.heroUpscale, null);
+
+  const r = computeCropGuard({ ...input, dimsFromShortSide: true }).byId.get('SHORT-ASPECT');
+  assert.equal(r.hasRealDims, true);
+  assert.equal(r.realWidth, 900);
+  assert.equal(r.realHeight, 1125);
+  assert.ok(Math.abs(r.heroUpscale - 1.2) < 1e-9);
 });
 
 await test('edgePenalty: หน้าชิดขอบ → penalty สูง · หน้ากลางเฟรม → 0 · ไม่มี faceBox → 0 neutral', async () => {
@@ -358,6 +382,42 @@ await test('TIER2 candidate-rank (post-brain reselect): dims-unknown ห้า�
   const pi = s6.dossierPatch.pickImages;
   assert.equal(pi.cropGuard.swapped, true, 'ต้องสลับ hero ออกจาก TOOBIG2 (ไม่ผ่านเพดานแม้ default)');
   assert.equal(pi.slots.hero.id, 'MEASURED_CAND', 'ต้องได้ MEASURED_CAND (วัดขนาดได้จริง) — ห้ามได้ UNKNOWN_CAND (วัดไม่ได้ แม้ edgePenalty เป็นกลาง 0)');
+});
+
+await test('F8 probe E: MEGA_HERO_MIN_SOURCE=0 keeps realShortSide-only row on legacy soft label and hero pick', async () => {
+  setPrefilter('1'); setHeroCap(null); setDimsSoft(null);
+  const SHORT_ASPECT = IMG(
+    'SHORT-ASPECT-HERO',
+    { person: 'ดวงเดือน', category: 'face-neutral', realShortSide: 400 },
+    { width: 1600, height: 900, realWidth: undefined, realHeight: undefined },
+  );
+  const captures = { brainArgs: [], fetches: [] };
+  const answer = { hero: { id: 'SHORT-ASPECT-HERO', reason: 'x', backups: [] }, reaction: { id: 'BIG' }, action: { id: 'F1' }, context: { id: 'F2' }, circle: { id: 'F3' } };
+  const s6 = await s6_slots(mkJob(), { origin: 'http://mock', _deps: mkDeps({ pool: [SHORT_ASPECT, BIG, F1, F2, F3], answer, captures }) });
+  const meta = captures.brainArgs[0].imagesMeta.find((m) => m.id === SHORT_ASPECT.id);
+  assert.ok(meta.heroDimsAvoid && /เลี่ยง/.test(meta.heroDimsAvoid), 'OFF: ต้องคงป้าย soft แบบ origin/main');
+  assert.equal('heroCropBlock' in meta, false, 'OFF: ห้ามตี realShortSide-only เป็นขนาดจริงแล้ว hard-ban');
+  const pi = s6.dossierPatch.pickImages;
+  assert.equal(pi.slots.hero.id, SHORT_ASPECT.id, 'OFF: hero ต้องคง brain pick แบบ origin/main');
+  assert.equal(pi.cropGuard.swapped, false);
+  assert.equal(pi.cropGuard.heroEligible, true);
+});
+
+await test('F8 probe G: MEGA_HERO_MIN_SOURCE=0 keeps realShortSide-only candidate out of automatic reselection', async () => {
+  setPrefilter('1'); setHeroCap(null); setDimsSoft(null);
+  const BLOCKED = IMG('BLOCKED-HERO', { person: 'ดวงเดือน', category: 'face-neutral' }, { realWidth: 270, realHeight: 675 });
+  const UNKNOWN_CAND = IMG(
+    'SHORT-ASPECT-CAND',
+    { person: 'ดวงเดือน', category: 'face-neutral', realShortSide: 1200 },
+    { width: 1600, height: 900, realWidth: undefined, realHeight: undefined },
+  );
+  const captures = { brainArgs: [], fetches: [] };
+  const answer = { hero: { id: BLOCKED.id, reason: 'x', backups: [] }, reaction: { id: 'F1' }, action: { id: 'F2' }, context: { id: 'F3' } };
+  const s6 = await s6_slots(mkJob(), { origin: 'http://mock', _deps: mkDeps({ pool: [BLOCKED, F1, F2, F3, UNKNOWN_CAND], answer, captures }) });
+  const pi = s6.dossierPatch.pickImages;
+  assert.equal(pi.slots.hero.id, BLOCKED.id, 'OFF: dims-unknown candidate must not replace the blocked hero');
+  assert.equal(pi.cropGuard.swapped, false);
+  assert.equal(pi.cropGuard.violation, true);
 });
 
 console.log(`\n1..${passed}`);

@@ -1,5 +1,5 @@
 // ============================================================
-// 🧮 coverFormulaCheck.js — ตัวเช็คสูตร 478 ใบ (เฟส D-2, 29 ก.ค. 69 — dormant)
+// 🧮 coverFormulaCheck.js — ตัวเช็คสูตร 478 ใบ (เฟส D-2, 29 ก.ค. 69 — advisory)
 // ------------------------------------------------------------
 // ที่มาสูตร: _research-igdara-15k/RESEARCH-REPORT.md (วิจัยปกเพจ "รวมไอจีดารา" 478 ใบ ≥15,000 ไลค์,
 //   28 ก.ค. 69) ประกอบกับ coverPagePlaybook.js (คัมภีร์ v3 ที่ inject เข้าสมองจริงอยู่แล้ว)
@@ -8,9 +8,8 @@
 // import เดียวที่มี = slotSolver.js (ก็ PURE + ไม่ล็อก) เพื่อ reuse hammingDistanceHex/PHASH_DUP_HAMMING_MAX
 // ตัวเดียวกับที่ megaAdapters.js ใช้อยู่แล้ว (ไม่เดาค่าคาลิเบรตใหม่/ไม่ก็อปปี้ให้ดริฟท์กันภายหลัง)
 //
-// 🔴 dormant: ไฟล์นี้ยังไม่ถูก import ใช้งานจริงที่ไหนเลยในท่อ — ยังไม่ต่อเข้า coverQcGate.js/ท่อ QC จริง
-//   แบตช์ถัดไป (หลัง B-2 จบ) จะ hook เข้าจริง — เลน 1 (megaAdapters/coverExecutorService/megaComposerService/
-//   panelCropGeometry) เป็นคนต่อสาย ไม่ใช่ไฟล์นี้ ไฟล์นี้แค่ "เตรียมปลายทางให้พร้อม"
+// 🔌 ใช้งานจริงแบบ advisory: megaAdapters S7 และ megaCoverArchive เรียกโมดูลนี้เพื่อคำนวณ/เก็บ formulaScore
+//   แต่ไม่ต่อเข้า coverQcGate และไม่มีผลต่อ pass/fail ของ QC; MEGA_FORMULA_CHECK=0 ปิดการคำนวณได้
 //
 // รับ input รูปแบบ (ทุกฟิลด์ optional — ไม่มี = check นั้นๆ degrade เป็น pass:null "วัดไม่ได้" ไม่ใช่ fail):
 //   {
@@ -33,6 +32,79 @@
 // ============================================================
 
 import { hammingDistanceHex, PHASH_DUP_HAMMING_MAX } from './slotSolver.js';
+
+// Composer slot id -> canonical formula role. Kept in this pure leaf so archive callers
+// never need to load megaAdapters/megaBrains/AI clients merely to shape formula input.
+export function formulaRoleOfSlotId(slotId, shape) {
+  const id = String(slotId || '');
+  if (shape === 'circle') return 'circle';
+  if (/main|hero/i.test(id)) return 'hero';
+  if (/^context/i.test(id) || /^evidence/i.test(id)) return 'context';
+  if (/^action/i.test(id)) return 'action';
+  if (/^moment/i.test(id)) return 'moment';
+  if (/^reaction/i.test(id)) return 'reaction';
+  return null;
+}
+
+// Build the evaluator's real slot/template input from S7/archive evidence.
+// Unknown numeric measurements stay undefined because Number(null) would fabricate zero.
+export function buildFormulaInputFromCoverResult({ qcFlags, manifestSlots, pickImagesSlots } = {}) {
+  const _qcFlags = Array.isArray(qcFlags) ? qcFlags : [];
+  const _mSlots = Array.isArray(manifestSlots) ? manifestSlots : [];
+  const _pickSlots = pickImagesSlots && typeof pickImagesSlots === 'object' ? pickImagesSlots : {};
+  const byRole = new Map();
+  const ensure = (role) => {
+    if (!byRole.has(role)) {
+      byRole.set(role, {
+        role,
+        faceSharePct: undefined,
+        faceVisible: undefined,
+        sameAsHeroPerson: null,
+        triage: {
+          newsScene: null,
+          textOverlay: undefined,
+          pHash64: null,
+        },
+      });
+    }
+    return byRole.get(role);
+  };
+  for (const [role, ps] of Object.entries(_pickSlots)) {
+    if (!ps || typeof ps.newsScene !== 'boolean') continue;
+    ensure(role).triage.newsScene = ps.newsScene;
+  }
+  for (const ms of _mSlots) {
+    const role = formulaRoleOfSlotId(ms?.slot, ms?.shape);
+    if (!role || ms?.measured?.faceSharePct == null) continue;
+    ensure(role).faceSharePct = ms.measured.faceSharePct;
+  }
+  for (const f of _qcFlags) {
+    let mm;
+    if ((mm = /^face_share_out:([^:]+):(-?\d+(?:\.\d+)?)$/.exec(f))) {
+      const role = formulaRoleOfSlotId(mm[1], mm[1] === 'circle' ? 'circle' : undefined);
+      if (role) {
+        const rec = ensure(role);
+        if (rec.faceSharePct == null) rec.faceSharePct = Number(mm[2]);
+      }
+    } else if ((mm = /^(blind_crop|person_cut):(.+)$/.exec(f))) {
+      const role = formulaRoleOfSlotId(mm[2]);
+      if (role) ensure(role).faceVisible = 0;
+    }
+  }
+  const heroPerson = String(_pickSlots.hero?.person || '').trim().toLowerCase();
+  const circlePerson = String(_pickSlots.circle?.person || '').trim().toLowerCase();
+  if (_pickSlots.circle) {
+    ensure('circle').sameAsHeroPerson = (heroPerson && circlePerson)
+      ? heroPerson === circlePerson
+      : null;
+  }
+  const slots = [...byRole.values()];
+  const template = {
+    panelCount: _mSlots.length || Object.keys(_pickSlots).length || null,
+    hasCircle: _mSlots.some((slot) => slot?.shape === 'circle') || !!_pickSlots.circle,
+  };
+  return { slots, template };
+}
 
 // ── เป้าจากวิจัย 478 ใบ (ตัวเลขระบุมาโดยตรงจากผู้ประสานงานเฟสนี้ — ยังไม่ได้คำนวณซ้ำจาก analysis/all-478.json
 //   ดิบในรอบนี้ เพราะ RESEARCH-REPORT.md ที่สรุปไว้ไม่มีตัวเลข facePct ระดับนี้ตรงๆ ให้ยืนยันคู่ขนาน) ──

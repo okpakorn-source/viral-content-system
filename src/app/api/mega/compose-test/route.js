@@ -319,6 +319,8 @@ export async function POST(req) {
         ...(primary && slots[primary]?._secondEyeFaceBox ? { _secondEyeFaceBox: slots[primary]._secondEyeFaceBox } : {}),
         // ★ เคสไรเดอร์ (28 ก.ค. 69): ต่อสาย _secondEyeHeroFaceHidden แบบเดียวกับ _secondEyeFaceBox เป๊ะ
         ...(primary && slots[primary]?._secondEyeHeroFaceHidden ? { _secondEyeHeroFaceHidden: slots[primary]._secondEyeHeroFaceHidden } : {}),
+        // AC-0232: parity with S7 — all-small/unmeasured hero-source warnings must reach composer QC here too.
+        ...(primary && slots[primary]?._heroMinSourceWarning ? { _heroMinSourceWarning: slots[primary]._heroMinSourceWarning } : {}),
         // ★ เคส AC-0201 รอบ 2 (28 ก.ค. 69): ต่อสาย _secondEyeSubSlotFlag แบบเดียวกับ _secondEyeHeroFaceHidden เป๊ะ
         ...(primary && slots[primary]?._secondEyeSubSlotFlag ? { _secondEyeSubSlotFlag: slots[primary]._secondEyeSubSlotFlag } : {}),
         // ★ MEGA_WATERMARK_GUARD (29 ก.ค. 69 — แบตช์ C): ต่อสาย _secondEyeWatermarkFlag + _watermarkEdge แบบเดียวกับ

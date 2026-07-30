@@ -27,6 +27,21 @@ import { runAirlockBatch, airlockOn } from '@/lib/imgAirlock'; // ★ 30 ก.ค
 //   อัปเดตมือเมื่อแก้กติกา compose/crop/hero — ใช้ stamp ลง manifest ให้ debug/replay ย้อนดูได้ว่ารอบนี้วิ่งด้วยกติกาไหน
 const COMPOSER_VERSION = 'w1e-20260710';
 
+// AC-0232: accept only the bounded warning vocabulary produced by S6. This keeps slotPlan metadata
+// from becoming an arbitrary qcFlag injection path while preserving the source id + measured ratio.
+export function normalizeHeroMinSourceWarning(value) {
+  if (typeof value !== 'string' || value.length > 180) return null;
+  const m = value.match(/^hero_source_(all_small|small_after_second_eye|unmeasured):([A-Za-z0-9_.-]{1,80})(?::([0-9]+(?:\.[0-9]+)?))?$/);
+  if (!m) return null;
+  const [, kind, sourceId, ratioRaw] = m;
+  if (kind === 'unmeasured') return ratioRaw === undefined
+    ? `hero_source_unmeasured:${sourceId}`
+    : null;
+  const ratio = Number(ratioRaw);
+  if (!(ratio > 0) || ratio > 100) return null;
+  return `hero_source_${kind}:${sourceId}:${ratio.toFixed(2)}`;
+}
+
 // ---------- โหลดภาพ 1 URL → Buffer (กฎที่พิสูจน์แล้ว CASE-366: 403/HTML-หลอก/ไฟล์ local/thumbnail สำรอง) ----------
 async function fetchOne(url, ms = 15000) {
   if (!url) return null;
@@ -1027,6 +1042,7 @@ function _strictPrepareV1({ decision, carrier, slotPlan }) {
         faces: Number(m.faces) || 0,
         clean: m.clean === false ? false : (m.clean === true ? true : null),
         newsScene: m.newsScene === false ? false : (m.newsScene === true ? true : null),
+        heroMinSourceWarning: normalizeHeroMinSourceWarning(m._heroMinSourceWarning),
       }),
     });
   });
@@ -1127,6 +1143,7 @@ function _strictPrepareV2({ decision, slotPlan }) {
         faces: m ? (Number(m.faces) || 0) : 0,
         clean: m ? (m.clean === false ? false : (m.clean === true ? true : null)) : null,
         newsScene: m ? (m.newsScene === false ? false : (m.newsScene === true ? true : null)) : null,
+        heroMinSourceWarning: m ? normalizeHeroMinSourceWarning(m._heroMinSourceWarning) : null,
       }),
     });
   });
@@ -1234,6 +1251,7 @@ async function composeCoreStrict(strictCtx) {
     loaded[i] = {
       slot: b.meta.slot, person: b.meta.person, isHero: b.meta.isHero, faces: b.meta.faces,
       clean: b.meta.clean, newsScene: b.meta.newsScene,
+      ...(b.meta.heroMinSourceWarning ? { _heroMinSourceWarning: b.meta.heroMinSourceWarning } : {}),
       composerSlotId: b.composerSlotId, refSlotId: b.refSlotId, candidateId: b.candidateId,
       // ★ V2: identity เต็ม(sourceAssetId/personId) เข้า loaded เพื่อ drift-check + manifest · V1 ไม่มี = ไม่เพิ่ม key
       ...(b.sourceAssetId !== undefined ? { sourceAssetId: b.sourceAssetId } : {}),
@@ -1246,6 +1264,10 @@ async function composeCoreStrict(strictCtx) {
     return { error: `strict primary โหลดไม่ได้: ${loadFail.join(',').slice(0, 180)}`, errorType: 'STRICT_PRIMARY_UNAVAILABLE', reasons: loadFail };
   }
   for (const f of trimFlags) if (f) qcFlags.push(f); // ★ ธง trim ตามลำดับ index (deterministic) ไม่ใช่ลำดับ fetch เสร็จ
+  const _strictHeroSourceWarning = normalizeHeroMinSourceWarning(
+    loaded.find((im) => im?.isHero)?._heroMinSourceWarning,
+  );
+  if (_strictHeroSourceWarning) qcFlags.push(_strictHeroSourceWarning);
   // ★ รอบ 2 (P1 คุณภาพ): aHash จริงเหมือน legacy — ด่าน blank_image ปลายทางห้ามถูก bypass
   //   (ธงได้ · เปลี่ยนภาพไม่ได้ — S6 authority คือผู้เลือก)
   const _sharp = (await import('sharp')).default;
@@ -1620,6 +1642,8 @@ async function composeCore({ slotPlan = [], refDNA = null, stableOrder = false, 
   //   (เหมือนแพทเทิร์น spec._featherCapped → 'feather_capped' บรรทัดบนเป๊ะ)
   const _heroRowRider = loaded.find((im) => im?.isHero);
   if (_heroRowRider?._secondEyeHeroFaceHidden) qcFlags.push('hero_face_hidden');
+  const _heroSourceWarning = normalizeHeroMinSourceWarning(_heroRowRider?._heroMinSourceWarning);
+  if (_heroSourceWarning) qcFlags.push(_heroSourceWarning);
   // ★ เคส AC-0201 รอบ 2 (28 ก.ค. 69): นโยบายกันช็อตซ้ำ/text ทับใหญ่ในช่องย่อย (ตาสอง S6) หาแทนที่ไม่เจอ →
   //   slots[role]._secondEyeSubSlotFlag ถูกแนบไว้ — ต่างจาก hero_face_hidden ตรงที่เกิดได้กับ "ช่องไหนก็ได้ไม่ใช่
   //   แค่ hero" จึงต้องวนทุกแถวที่โหลดมา (ไม่ใช่เจาะจงแถวเดียวแบบ hero) — อาจมีได้มากกว่า 1 ช่องพร้อมกัน

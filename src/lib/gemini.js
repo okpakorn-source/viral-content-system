@@ -439,7 +439,30 @@ const CLASSIFIER_ITEM_KEYS_BASE_FRONT = [...CLASSIFIER_ITEM_KEYS_BASE.slice(0, -
 const CLASSIFIER_ITEM_KEYS_SCENE_FRONT = [...CLASSIFIER_ITEM_KEYS_SCENE.slice(0, -1), 'faceFront', 'note'];
 const CLASSIFIER_ITEM_KEYS_BASE_BUSY_FRONT = [...CLASSIFIER_ITEM_KEYS_BASE_BUSY.slice(0, -1), 'faceFront', 'note'];
 const CLASSIFIER_ITEM_KEYS_SCENE_BUSY_FRONT = [...CLASSIFIER_ITEM_KEYS_SCENE_BUSY.slice(0, -1), 'faceFront', 'note'];
-function classifierItemKeys(fileTagOn, busyOn, frontalOn) {
+// ★ 30 ก.ค. 69 (MEGA_UNGUARDED_TAG — วิจัยปกจริง 390 viral vs 124 fail: "UNGUARDED CAPTURE" พบใน viral 92%
+//   แต่ fail 29% p=0.0001): เพิ่ม 4 ฟิลด์ bool วัด "จังหวะธรรมชาติ" (gazeAway/mouthOpen/inMotion/posedShot)
+//   default OFF (==='1' เท่านั้น) — unguardedOn=false เมื่อใดก็ตาม ต้องคืน const array "ชุดเดิมตัวเดียวกันเป๊ะ"
+//   (reference เดิม) = byte-parity ทั้งค่าและ identity เหมือนที่ frontalOn ทำไว้
+const UNGUARDED_KEYS = ['gazeAway', 'mouthOpen', 'inMotion', 'posedShot'];
+const withUnguarded = (keys) => [...keys.slice(0, -1), ...UNGUARDED_KEYS, 'note']; // additive ก่อน note (pattern เดียวกับ busy/faceFront)
+const CLASSIFIER_ITEM_KEYS_BASE_UG = withUnguarded(CLASSIFIER_ITEM_KEYS_BASE);
+const CLASSIFIER_ITEM_KEYS_SCENE_UG = withUnguarded(CLASSIFIER_ITEM_KEYS_SCENE);
+const CLASSIFIER_ITEM_KEYS_BASE_BUSY_UG = withUnguarded(CLASSIFIER_ITEM_KEYS_BASE_BUSY);
+const CLASSIFIER_ITEM_KEYS_SCENE_BUSY_UG = withUnguarded(CLASSIFIER_ITEM_KEYS_SCENE_BUSY);
+const CLASSIFIER_ITEM_KEYS_BASE_FRONT_UG = withUnguarded(CLASSIFIER_ITEM_KEYS_BASE_FRONT);
+const CLASSIFIER_ITEM_KEYS_SCENE_FRONT_UG = withUnguarded(CLASSIFIER_ITEM_KEYS_SCENE_FRONT);
+const CLASSIFIER_ITEM_KEYS_BASE_BUSY_FRONT_UG = withUnguarded(CLASSIFIER_ITEM_KEYS_BASE_BUSY_FRONT);
+const CLASSIFIER_ITEM_KEYS_SCENE_BUSY_FRONT_UG = withUnguarded(CLASSIFIER_ITEM_KEYS_SCENE_BUSY_FRONT);
+function classifierItemKeysUnguarded(fileTagOn, busyOn, frontalOn) {
+  if (frontalOn) {
+    if (fileTagOn) return busyOn ? CLASSIFIER_ITEM_KEYS_SCENE_BUSY_FRONT_UG : CLASSIFIER_ITEM_KEYS_SCENE_FRONT_UG;
+    return busyOn ? CLASSIFIER_ITEM_KEYS_BASE_BUSY_FRONT_UG : CLASSIFIER_ITEM_KEYS_BASE_FRONT_UG;
+  }
+  if (fileTagOn) return busyOn ? CLASSIFIER_ITEM_KEYS_SCENE_BUSY_UG : CLASSIFIER_ITEM_KEYS_SCENE_UG;
+  return busyOn ? CLASSIFIER_ITEM_KEYS_BASE_BUSY_UG : CLASSIFIER_ITEM_KEYS_BASE_UG;
+}
+function classifierItemKeys(fileTagOn, busyOn, frontalOn, unguardedOn) {
+  if (unguardedOn) return classifierItemKeysUnguarded(fileTagOn, busyOn, frontalOn);
   if (frontalOn) {
     if (fileTagOn) return busyOn ? CLASSIFIER_ITEM_KEYS_SCENE_BUSY_FRONT : CLASSIFIER_ITEM_KEYS_SCENE_FRONT;
     return busyOn ? CLASSIFIER_ITEM_KEYS_BASE_BUSY_FRONT : CLASSIFIER_ITEM_KEYS_BASE_FRONT;
@@ -458,7 +481,7 @@ function readClassifierBox(v) {
   if (y + h > 1) return { ok: false };
   return { ok: true, value: { x, y, w, h } };
 }
-function readClassifierItem(raw, requiredKeys, fileTagOn, busyOn, frontalOn) {
+function readClassifierItem(raw, requiredKeys, fileTagOn, busyOn, frontalOn, unguardedOn) {
   if (!guardExactObject(raw, requiredKeys)) return null;
   const index = ownRead(raw, 'index').value;
   if (!Number.isInteger(index) || index < 0) return null;
@@ -514,25 +537,57 @@ function readClassifierItem(raw, requiredKeys, fileTagOn, busyOn, frontalOn) {
     faceFront = ownRead(raw, 'faceFront').value;
     if (faceFront !== null && (!Number.isInteger(faceFront) || faceFront < 0 || faceFront > 2)) return null;
   }
+  // ★ MEGA_UNGUARDED_TAG==='1' เท่านั้น: 4 ฟิลด์ bool หรือ null (ไม่มีคนในรูป/ตัดสินไม่ได้) — requiredKeys มีคีย์
+  //   ชุดนี้เฉพาะ unguardedOn=true · ยอม null ตาม pattern newsScene/faceFront (บทเรียนเทสสด 21 ก.ค.: บังคับ bool
+  //   ล้วน = ภาพเอกสาร/ของ 1 ใบที่ตาตอบ null ล้มทั้งแบตช์) — "ไม่รู้" ต้องคงเป็น null ตรงๆ ห้ามแปลงเป็น false
+  let gazeAway, mouthOpen, inMotion, posedShot;
+  if (unguardedOn) {
+    gazeAway = ownRead(raw, 'gazeAway').value;
+    if (gazeAway !== null && !isBoolLiteral(gazeAway)) return null;
+    mouthOpen = ownRead(raw, 'mouthOpen').value;
+    if (mouthOpen !== null && !isBoolLiteral(mouthOpen)) return null;
+    inMotion = ownRead(raw, 'inMotion').value;
+    if (inMotion !== null && !isBoolLiteral(inMotion)) return null;
+    posedShot = ownRead(raw, 'posedShot').value;
+    if (posedShot !== null && !isBoolLiteral(posedShot)) return null;
+  }
   const note = ownRead(raw, 'note').value;
   if (typeof note !== 'string' || note.length > CLASSIFIER_MAX_STR) return null;
   const out = { index, category, quality, relevant, person, persons, emotion, clean, faceCount, faceBox: faceBoxR.value, peopleBox: peopleBoxR.value, note };
   if (fileTagOn) out.newsScene = newsScene;
   if (busyOn) { out.busy = busy; out.peopleCount = peopleCount; }
   if (frontalOn) out.faceFront = faceFront;
+  if (unguardedOn) { out.gazeAway = gazeAway; out.mouthOpen = mouthOpen; out.inMotion = inMotion; out.posedShot = posedShot; }
   return out;
+}
+// ★ MEGA_UNGUARDED_TAG — คะแนนรวม "จังหวะธรรมชาติ" 0-3 (pure, ไม่มี side-effect): (gazeAway+mouthOpen+inMotion)
+//   − (posedShot?1:0) แล้วคุมช่วง 0-3
+//   🔴 กับดักที่เคยทำระบบเพี้ยน (Number(null)=0 → "วัดไม่ได้" กลายเป็น "วัดได้ 0"): ครบ 4 ช่องเป็น boolean literal
+//   เท่านั้นถึงคำนวณ — ขาด/null/ผิดชนิดแม้ช่องเดียว = undefined ("ไม่รู้") ห้ามคืน 0 เด็ดขาด
+export function computeUnguardedScore(it) {
+  if (it === null || typeof it !== 'object') return undefined;
+  if (nodeUtilTypes.isProxy(it)) return undefined;
+  const g = ownRead(it, 'gazeAway').value;
+  const m = ownRead(it, 'mouthOpen').value;
+  const mv = ownRead(it, 'inMotion').value;
+  const p = ownRead(it, 'posedShot').value;
+  if (!isBoolLiteral(g) || !isBoolLiteral(m) || !isBoolLiteral(mv) || !isBoolLiteral(p)) return undefined;
+  const raw = (g ? 1 : 0) + (m ? 1 : 0) + (mv ? 1 : 0) - (p ? 1 : 0);
+  if (raw < 0) return 0;
+  if (raw > 3) return 3;
+  return raw;
 }
 // {items:[...]} เป๊ะ — ต้องมีครบ 1 รายการต่อทุก index ที่ส่งไป (0..expectedCount-1) ไม่ขาด/ไม่เกิน/ไม่ซ้ำ —
 // พังจุดใดจุดหนึ่ง = ปฏิเสธทั้งแบตช์ (ไม่มี partial filtering/truthiness/default-positive/safeParse fallback)
-function validateClassifierItemsV1(raw, expectedCount, fileTagOn, busyOn, frontalOn) {
+function validateClassifierItemsV1(raw, expectedCount, fileTagOn, busyOn, frontalOn, unguardedOn) {
   if (!guardExactObject(raw, ['items'])) return { ok: false, reason: 'TOP_LEVEL_SHAPE' };
   const itemsArr = guardArray(ownRead(raw, 'items').value, expectedCount);
   if (itemsArr === null) return { ok: false, reason: 'items' };
-  const requiredKeys = classifierItemKeys(fileTagOn, busyOn, frontalOn);
+  const requiredKeys = classifierItemKeys(fileTagOn, busyOn, frontalOn, unguardedOn);
   const seen = new Set();
   const out = [];
   for (const rawItem of itemsArr) {
-    const it = readClassifierItem(rawItem, requiredKeys, fileTagOn, busyOn, frontalOn);
+    const it = readClassifierItem(rawItem, requiredKeys, fileTagOn, busyOn, frontalOn, unguardedOn);
     if (it === null) return { ok: false, reason: 'items[]' };
     if (seen.has(it.index)) return { ok: false, reason: 'items[] duplicate index' };
     seen.add(it.index);
@@ -690,7 +745,7 @@ function isMalformedExternalSignal(signal) {
 //   parentController เดียวกัน — ไม่แทนที่ 90s wrapper deadline เดิม แค่เพิ่มแหล่ง abort อีกทาง (cascade เดียวกับ
 //   ที่ child attempt controller ผูกกับ parent อยู่แล้ว) — ใช้ platform contract ปกติ (.aborted/addEventListener)
 //   เพราะ signal ผ่านด่าน validate มาแล้ว ไม่ใช่ payload ข้อมูลที่ต้อง descriptor-safe อ่านค่า
-async function runClassifierStrict({ url, body, pin, onRetry, cost, expectedCount, fileTagOn, busyOn, frontalOn, externalSignal }) {
+async function runClassifierStrict({ url, body, pin, onRetry, cost, expectedCount, fileTagOn, busyOn, frontalOn, unguardedOn, externalSignal }) {
   const state = { attemptCount: 0, lastActualModelVersion: null };
   const parentController = new AbortController();
   const parentTimer = setTimeout(() => {
@@ -743,7 +798,7 @@ async function runClassifierStrict({ url, body, pin, onRetry, cost, expectedCoun
     const text = strictGeminiText(data);
     const parse = text === null ? { ok: false } : strictJsonParse(text);
     if (!parse.ok) throw assembleClassifierError('JSON_PARSE_FAILED', false, pin, state);
-    const schemaResult = validateClassifierItemsV1(parse.value, expectedCount, fileTagOn, busyOn, frontalOn);
+    const schemaResult = validateClassifierItemsV1(parse.value, expectedCount, fileTagOn, busyOn, frontalOn, unguardedOn);
     if (!schemaResult.ok) throw assembleClassifierError('SCHEMA_VALIDATION_FAILED', false, pin, state);
 
     if (cost) {
@@ -835,13 +890,18 @@ export async function geminiClassifyFrames({ frames, subjects, newsGist, onRetry
   // ★ 21 ก.ค. (MEGA_HERO_FRONTAL — เคส AC-0166 hero มุมข้าง/ก้มหน้า): ตาให้คะแนน "มุมการเห็นหน้า" 0-2
   //   default OFF (==='1' เท่านั้น) — เปิดแล้วทุกชั้น (prompt/validate/sanitize/triage) รู้จักพร้อมกัน (บทเรียน busyOn)
   const HERO_FRONTAL = process.env.MEGA_HERO_FRONTAL === '1';
+  // ★ 30 ก.ค. 69 (MEGA_UNGUARDED_TAG — หลักฐานวิจัยปกจริง 390 viral vs 124 fail: "UNGUARDED CAPTURE"
+  //   (ตาไม่มองกล้อง/ปากกำลังพูด/กำลังเคลื่อนไหว/ไม่โพสท่า) อยู่ใน viral 92% แต่ fail 29% p=0.0001 — ระบบเดิม
+  //   ไม่มีมิตินี้เลย): ตาตอบ 4 ฟิลด์ bool → triage คำนวณ unguardedScore 0-3
+  //   default OFF (==='1' เท่านั้น) — dormant รอผู้บริโภคฝั่งให้คะแนน hero แบตช์ถัดไป · OFF = byte-parity 100%
+  const UNGUARDED_TAG = process.env.MEGA_UNGUARDED_TAG === '1';
 
   const promptText = `จำแนกภาพแต่ละรูป (กำกับด้วย "รูปที่ N:") เพื่อนำไปทำ "ปกข่าวคอลลาจ"
 บุคคล/สิ่งของหลักในข่าว:
 ${subjectsBlock(subjects)}${newsGist ? `\nแก่นข่าว: ${newsGist}` : ''}
 
 ตอบเป็น JSON เท่านั้น:
-{ "items": [ { "index": <เลขรูป>, "category": "...", "quality": <1-10>, "relevant": true/false,${FILE_TAG ? ' "newsScene": true/false,' : ''} "person": "<ชื่อคนหลัก หรือ null>", "persons": ["<ชื่อคนในข่าวทุกคนที่เห็นชัดในรูป>"], "emotion": "<อารมณ์สีหน้า>", "clean": true/false, "faceCount": <จำนวนใบหน้าที่เห็นชัด>, "faceBox": {"x":0-1,"y":0-1,"w":0-1,"h":0-1} หรือ null, "peopleBox": {"x":0-1,"y":0-1,"w":0-1,"h":0-1} หรือ null,${CLUTTER_GUARD ? ' "busy": <0-2>, "peopleCount": <จำนวนคนทั้งหมด หรือ null>,' : ''}${HERO_FRONTAL ? ' "faceFront": <0-2 หรือ null>,' : ''} "note": "สั้นๆ" } ] }
+{ "items": [ { "index": <เลขรูป>, "category": "...", "quality": <1-10>, "relevant": true/false,${FILE_TAG ? ' "newsScene": true/false,' : ''} "person": "<ชื่อคนหลัก หรือ null>", "persons": ["<ชื่อคนในข่าวทุกคนที่เห็นชัดในรูป>"], "emotion": "<อารมณ์สีหน้า>", "clean": true/false, "faceCount": <จำนวนใบหน้าที่เห็นชัด>, "faceBox": {"x":0-1,"y":0-1,"w":0-1,"h":0-1} หรือ null, "peopleBox": {"x":0-1,"y":0-1,"w":0-1,"h":0-1} หรือ null,${CLUTTER_GUARD ? ' "busy": <0-2>, "peopleCount": <จำนวนคนทั้งหมด หรือ null>,' : ''}${HERO_FRONTAL ? ' "faceFront": <0-2 หรือ null>,' : ''}${UNGUARDED_TAG ? ' "gazeAway": true/false/null, "mouthOpen": true/false/null, "inMotion": true/false/null, "posedShot": true/false/null,' : ''} "note": "สั้นๆ" } ] }
 
 relevant = "ภาพนี้เกี่ยวกับข่าวนี้ไหม" (แยกจากคุณภาพ!) —
           true = มี "บุคคล/สิ่งของ/สถานที่/เหตุการณ์ในข่าวนี้" **แม้ภาพจะมีลายน้ำ/ตัวหนังสือ/เป็นการ์ด/คุณภาพต่ำ** (ยังเกี่ยว = เก็บไว้)
@@ -906,7 +966,12 @@ faceFront= มุมการเห็น "ใบหน้าคนหลัก"
   0 = ไม่เห็นหน้า — หันหลัง/เห็นแต่ท้ายทอย/หน้าถูกบังเกือบหมด
   1 = เห็นหน้าบางส่วน — มุมข้าง (โปรไฟล์), ก้มหน้า, เงยหน้ามาก, มือ/ผม/วัตถุบังหน้าเกินครึ่ง, ใส่แว่นดำใหญ่+ก้ม
   2 = เห็นเต็มหน้า — หน้าตรงหรือเกือบตรง (เอียงได้เล็กน้อย) เห็นตา-จมูก-ปากครบ ไม่ถูกบัง
-  ไม่มีคนในรูป/ตัดสินไม่ได้ = null` : ''}`;
+  ไม่มีคนในรูป/ตัดสินไม่ได้ = null` : ''}${UNGUARDED_TAG ? `
+gazeAway/mouthOpen/inMotion/posedShot = "จังหวะธรรมชาติ" ของคนหลักในรูป (ตอบทุกช่อง — ไม่มีคน/ตัดสินไม่ได้ = null)
+  gazeAway  = true ถ้าตา "ไม่ได้มองกล้อง" (มองไปทางอื่น/ก้มมอง/หลับตา) · มองเลนส์ตรงๆ = false
+  mouthOpen = true ถ้าปากเปิด กำลังพูด/ตะโกน/ร้องไห้/หัวเราะ · ปากปิดนิ่ง = false
+  inMotion  = true ถ้ากำลังเคลื่อนไหวจริง (เดิน ยกมือ กอด ก้มกราบ ทำงาน ยื่นของ) · ยืน/นั่งนิ่ง = false
+  posedShot = true ถ้าเป็นภาพ "จัดท่าถ่าย" (โพสให้กล้อง ยิ้มถ่ายรูป พรมแดง สตูดิโอ ภาพโปรไฟล์) · ภาพจังหวะสดที่ไม่ได้จัดท่า = false` : ''}`;
 
   const parts = [{ text: withHonestyDna(promptText) }];
   for (const f of frames) {
@@ -931,6 +996,7 @@ faceFront= มุมการเห็น "ใบหน้าคนหลัก"
     fileTagOn: FILE_TAG,
     busyOn: CLUTTER_GUARD,
     frontalOn: HERO_FRONTAL,
+    unguardedOn: UNGUARDED_TAG,
     externalSignal: signal,
   });
 }
@@ -945,9 +1011,9 @@ faceFront= มุมการเห็น "ใบหน้าคนหลัก"
 // กับที่ตรวจผล Gemini จริงทุกประการ — พังจุดใดจุดหนึ่ง = null (ไม่มีทาง getter/trap ใดถูกเรียกก่อนปฏิเสธ)
 // ★ MEGA_CLUTTER_GUARD: busyOn เป็น param เสริมท้ายสุด (optional, default false) — caller เดิมที่เรียกแค่ 2 args
 //   (fileTagOn) ได้พฤติกรรมเดิมเป๊ะ (byte-parity) เพราะ busyOn undefined → false → requiredKeys ชุดเดิม
-export function sanitizeStrictClassifierItem(it, fileTagOn, busyOn, frontalOn) {
-  const requiredKeys = classifierItemKeys(fileTagOn === true, busyOn === true, frontalOn === true);
-  const out = readClassifierItem(it, requiredKeys, fileTagOn === true, busyOn === true, frontalOn === true);
+export function sanitizeStrictClassifierItem(it, fileTagOn, busyOn, frontalOn, unguardedOn) {
+  const requiredKeys = classifierItemKeys(fileTagOn === true, busyOn === true, frontalOn === true, unguardedOn === true);
+  const out = readClassifierItem(it, requiredKeys, fileTagOn === true, busyOn === true, frontalOn === true, unguardedOn === true);
   if (out === null) return null;
   if (out.faceBox !== null) Object.freeze(out.faceBox);
   if (out.peopleBox !== null) Object.freeze(out.peopleBox);

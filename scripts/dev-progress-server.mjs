@@ -77,7 +77,11 @@ export function pickLatestCovers(coversArr, n = 3) {
       // ★ แบตช์เฟส D ข้อ 1 (29 ก.ค. 69 — เสียบ coverFormulaCheck): คะแนนสูตร 478 ใบต่อใบปก (ไม่ใช่ formulaScore
       //   ระดับบอร์ดจาก dev-progress-board.json ด้านล่าง — คนละก้อนคนละความหมาย ตั้งใจแยกชื่อฟิลด์กันสับสน)
       //   ไม่มี = null (เรคคอร์ดเก่า/ปิดสวิตช์ MEGA_FORMULA_CHECK — การ์ดจะไม่โชว์บรรทัดนี้เลย)
-      coverFormulaScore: (c.formulaScore && typeof c.formulaScore === 'object') ? { passed: c.formulaScore.passed ?? null, total: c.formulaScore.total ?? null, score: c.formulaScore.score ?? null } : null,
+      coverFormulaScore: (
+        c.formulaScore
+        && typeof c.formulaScore === 'object'
+        && c.formulaScore.reason !== 'input_unavailable'
+      ) ? { passed: c.formulaScore.passed ?? null, total: c.formulaScore.total ?? null, score: c.formulaScore.score ?? null } : null,
     }));
 }
 

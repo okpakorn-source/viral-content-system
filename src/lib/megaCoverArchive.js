@@ -15,6 +15,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { createStore } from '@/lib/persistStore';
+import { buildFormulaInputFromCoverResult, evaluateCoverFormula } from './coverFormulaCheck.js';
 import { getSupabase, isSupabaseReady } from './supabase.js';
 
 const store = createStore('mega-cover-runs');
@@ -50,6 +51,60 @@ export function nextArchiveId(jobId, existing = []) {
   return `${prefix}${maxN + 1}`;
 }
 
+function unavailableFormulaScore(reason) {
+  return { passed: 0, total: 0, score: null, checks: [], reason };
+}
+
+function compactFormulaScore(formulaScore) {
+  return {
+    ...formulaScore,
+    checks: Array.isArray(formulaScore?.checks)
+      ? formulaScore.checks.filter((check) => check?.pass !== null)
+      : [],
+  };
+}
+
+/**
+ * Resolve the per-cover formula score at the archive boundary.
+ * - Keep the S7 score when the caller already computed it.
+ * - Direct compose/ref callers are scored from their real qcFlags/manifest/picks using the existing evaluator.
+ * - Missing inputs or evaluator failures remain explicit objects, never a fabricated numeric score.
+ * - MEGA_FORMULA_CHECK=0 disables evaluation but still persists the field as null for record-shape honesty.
+ */
+export async function resolveArchiveFormulaScore(rec = {}) {
+  if (process.env.MEGA_FORMULA_CHECK === '0') return null;
+  if (rec?.formulaScore && typeof rec.formulaScore === 'object' && !Array.isArray(rec.formulaScore)) {
+    return compactFormulaScore(rec.formulaScore);
+  }
+  try {
+    const qcFlags = Array.isArray(rec?.qcFlags) ? rec.qcFlags : [];
+    const manifestSlots = Array.isArray(rec?.manifestSlots)
+      ? rec.manifestSlots
+      : (Array.isArray(rec?.manifest?.slots) ? rec.manifest.slots : []);
+    const pickImagesSlots = rec?.pickImagesSlots && typeof rec.pickImagesSlots === 'object'
+      ? rec.pickImagesSlots
+      : {};
+    const { slots, template } = buildFormulaInputFromCoverResult({
+      qcFlags,
+      manifestSlots,
+      pickImagesSlots,
+    });
+    const result = evaluateCoverFormula({ slots, qcFlags, template });
+    const checks = Array.isArray(result?.checks) ? result.checks : [];
+    const measurable = checks.filter((check) => check?.pass !== null);
+    return {
+      passed: measurable.filter((check) => check.pass === true).length,
+      total: measurable.length,
+      score: Number.isFinite(result?.score) ? result.score : null,
+      checks: measurable,
+      ...(measurable.length === 0 ? { reason: 'input_unavailable' } : {}),
+    };
+  } catch (e) {
+    console.warn('[megaCoverArchive] formula fallback ล้ม (เก็บคะแนนเป็น unavailable):', String(e?.message || e).slice(0, 150));
+    return unavailableFormulaScore('formula_check_error');
+  }
+}
+
 /** บันทึกปก 1 ใบเข้าคลัง (auto จากทุกจุดกดสร้างปก) — ล้มไม่ critical ต่อการทำปก
  *  rec.base64 (data URL) → เซฟไฟล์เครื่อง + แถวภาพคลาวด์ ให้ดู/โหลดได้ทั้งเครื่องทีมและ Vercel */
 export async function addMegaCover(rec = {}) {
@@ -61,6 +116,7 @@ export async function addMegaCover(rec = {}) {
   const id = nextArchiveId(rec.id, existingForRevision);
   const m = /^data:image\/(\w+);base64,(.+)$/.exec(rec.base64 || '');
   let coverPath = rec.coverPath || null;
+  const formulaScore = await resolveArchiveFormulaScore(rec);
 
   // ① ไฟล์ในเครื่อง (UI เครื่องทีมเปิดตรงได้) — Vercel เขียนดิสก์ไม่ได้ = ข้ามเงียบ ไปพึ่งคลาวด์
   if (m && !coverPath) {
@@ -91,6 +147,7 @@ export async function addMegaCover(rec = {}) {
     // ★ 27 ก.ค. 69 (นโยบาย "เก็บทุกใบ+ติดป้ายสถานะ"): 'pass' | 'manual_review' — undefined = ผู้เรียกเก่ายังไม่ส่ง (เดิมเป๊ะ ไม่บังคับ)
     qcStatus: rec.qcStatus === 'manual_review' ? 'manual_review' : (rec.qcStatus === 'pass' ? 'pass' : undefined),
     qcReasons: Array.isArray(rec.qcReasons) && rec.qcReasons.length ? rec.qcReasons.slice(0, 6) : undefined,
+    formulaScore, // AC-0232: every new archive record has the field (object by default; null only when kill-switch is explicit)
     hasCloudImage: false,
     trace: Array.isArray(rec.trace) ? rec.trace.map((t) => ({ stage: t.stage, status: t.status })) : undefined,
   };

@@ -13,6 +13,7 @@ import { loadImageBuffer } from './imageBuffer.js';
 import {
   geminiClassifyFrames, resolveGeminiClassifierPin,
   sanitizeStrictClassifierItem, isValidClassifierEvidence,
+  computeUnguardedScore, // ★ MEGA_UNGUARDED_TAG (30 ก.ค. 69) — คะแนน "จังหวะธรรมชาติ" 0-3 (pure, ครบ 4 ช่องเท่านั้นถึงคำนวณ)
 } from './gemini.js';
 import { applyRehost } from './imageStore.js';
 // ★ 26 ก.ค. 69 (เจ้าของอนุมัติ mapping): ตาสายปก gemini-2.5-flash → gemini-3.6-flash เฉพาะ vetImages/triageLibrary
@@ -396,10 +397,15 @@ function buildTriageStrict(it, src, strictOpts) {
   const busyOn = busyOnR.present && busyOnR.value === true;
   const frontalOnR = ownReadStrictOpt(strictOpts, 'frontalOn'); // ★ MEGA_HERO_FRONTAL — pattern เดียวกับ busyOn
   const frontalOn = frontalOnR.present && frontalOnR.value === true;
-  const sanitized = sanitizeStrictClassifierItem(it, fileTagOn, busyOn, frontalOn);
+  const unguardedOnR = ownReadStrictOpt(strictOpts, 'unguardedOn'); // ★ MEGA_UNGUARDED_TAG — pattern เดียวกับ busyOn เป๊ะ (absent = false = เดิม)
+  const unguardedOn = unguardedOnR.present && unguardedOnR.value === true;
+  const sanitized = sanitizeStrictClassifierItem(it, fileTagOn, busyOn, frontalOn, unguardedOn);
   if (sanitized === null) return null;
 
   const hasNewsScene = Object.prototype.hasOwnProperty.call(sanitized, 'newsScene'); // sanitized เป็นของเราเอง (frozen literal) — ปลอดภัย
+  // ★ MEGA_UNGUARDED_TAG: คำนวณครั้งเดียว (undefined = ตาตอบ null/ไม่ครบ 4 ช่อง = "วัดไม่ได้")
+  const hasUnguarded = Object.prototype.hasOwnProperty.call(sanitized, 'gazeAway');
+  const unguardedScore = hasUnguarded ? computeUnguardedScore(sanitized) : undefined;
   const emotion = sanitized.emotion || null;
   let category = sanitized.category;
   if (category === 'face-neutral' && POSITIVE_FACE_EMOTIONS.has(emotion)) category = 'face-emotional';
@@ -447,6 +453,16 @@ function buildTriageStrict(it, src, strictOpts) {
     //   pattern เดียวกับ newsScene (sanitized เป็น frozen literal ของเราเอง — hasOwnProperty ปลอดภัย)
     ...(Object.prototype.hasOwnProperty.call(sanitized, 'busy') ? { busy: sanitized.busy, peopleCount: sanitized.peopleCount } : {}),
     ...(Object.prototype.hasOwnProperty.call(sanitized, 'faceFront') ? { faceFront: sanitized.faceFront } : {}), // ★ MEGA_HERO_FRONTAL
+    // ★ MEGA_UNGUARDED_TAG (30 ก.ค. 69): 4 ป้ายดิบ (bool | null="ตาบอกว่าไม่รู้") + คะแนนรวม 0-3
+    //   🔴 unguardedScore แนบ "เฉพาะเมื่อคำนวณได้จริง" (ครบ 4 ช่องเป็น boolean) — ไม่ครบ = ไม่มีคีย์เลย
+    //   (undefined = "วัดไม่ได้") ห้ามเป็น null/0 เด็ดขาด: 0 คือ "วัดได้แล้วได้ศูนย์" คนละความหมาย
+    ...(hasUnguarded
+      ? {
+        gazeAway: sanitized.gazeAway, mouthOpen: sanitized.mouthOpen,
+        inMotion: sanitized.inMotion, posedShot: sanitized.posedShot,
+        ...(unguardedScore === undefined ? {} : { unguardedScore }),
+      }
+      : {}),
     brightness: Math.round(src?.brightness ?? 128),
     detail: Math.round(src?.detail ?? 60),
     note: sanitized.note,
@@ -499,6 +515,9 @@ export async function vetImages({ images, subjects, newsGist, onProgress, onRetr
   //   → null เงียบทุกใบ (tagged 0, failed 0) — resolve ค่าเดียวกับ gemini.js เป๊ะ แล้วส่งเข้า strictOpts ให้สองชั้นตรงกันเสมอ
   const BUSY_TAG = process.env.MEGA_CLUTTER_GUARD !== '0';
   const FRONTAL_TAG = process.env.MEGA_HERO_FRONTAL === '1'; // ★ 21 ก.ค. MEGA_HERO_FRONTAL — มุมการเห็นหน้า (ค่าเดียวกับ gemini.js เป๊ะ)
+  // ★ 30 ก.ค. 69 MEGA_UNGUARDED_TAG — ต้องอ่าน env ตัวเดียวกับ gemini.js เป๊ะ แล้วส่งเข้า strictOpts ทุกครั้ง
+  //   (ถ้าไม่ส่ง = ชุดคีย์สองชั้นไม่ตรง → sanitize เจอ key เกิน → null เงียบทุกใบ = บั๊ก tagged 0 ซ้ำรอย 20-21 ก.ค.)
+  const UNGUARDED_TAG = process.env.MEGA_UNGUARDED_TAG === '1';
 
   async function runOneBatch(bi) {
     const slice = batches[bi];
@@ -539,7 +558,7 @@ export async function vetImages({ images, subjects, newsGist, onProgress, onRetr
           //   (schema ที่ gemini.js บังคับ relevant ครบทุกใบอยู่แล้ว — เช็คนี้เป็น defense-in-depth)
           if (!it || typeof it.relevant === 'undefined') { out.push({ ...x.im }); failed++; return; }
           const triage = buildTriage(it, x.r, {
-            strict: true, evidence, caseId, batchIndex: bi, resultIndex: it.index, fileTagOn: FILE_TAG, busyOn: BUSY_TAG, frontalOn: FRONTAL_TAG,
+            strict: true, evidence, caseId, batchIndex: bi, resultIndex: it.index, fileTagOn: FILE_TAG, busyOn: BUSY_TAG, frontalOn: FRONTAL_TAG, unguardedOn: UNGUARDED_TAG,
           });
           if (!triage) { out.push({ ...x.im }); failed++; return; } // malformed strict item → ศูนย์ triage/admission
           out.push({ ...x.im, triage });
@@ -583,6 +602,9 @@ export async function triageLibrary({ images, subjects, newsGist, onProgress, on
   //   → null เงียบทุกใบ (tagged 0, failed 0) — resolve ค่าเดียวกับ gemini.js เป๊ะ แล้วส่งเข้า strictOpts ให้สองชั้นตรงกันเสมอ
   const BUSY_TAG = process.env.MEGA_CLUTTER_GUARD !== '0';
   const FRONTAL_TAG = process.env.MEGA_HERO_FRONTAL === '1'; // ★ 21 ก.ค. MEGA_HERO_FRONTAL — มุมการเห็นหน้า (ค่าเดียวกับ gemini.js เป๊ะ)
+  // ★ 30 ก.ค. 69 MEGA_UNGUARDED_TAG — ต้องอ่าน env ตัวเดียวกับ gemini.js เป๊ะ แล้วส่งเข้า strictOpts ทุกครั้ง
+  //   (ถ้าไม่ส่ง = ชุดคีย์สองชั้นไม่ตรง → sanitize เจอ key เกิน → null เงียบทุกใบ = บั๊ก tagged 0 ซ้ำรอย 20-21 ก.ค.)
+  const UNGUARDED_TAG = process.env.MEGA_UNGUARDED_TAG === '1';
 
   for (let i = 0; i < images.length; i += batchSize) {
     const slice = images.slice(i, i + batchSize);
@@ -614,7 +636,7 @@ export async function triageLibrary({ images, subjects, newsGist, onProgress, on
       if (!src) continue;
       if (typeof it.relevant === 'undefined') continue; // ★ audit B-R4: ตอบครึ่งฟิลด์ = ไม่ติดป้าย รอรอบหน้า (กันป้ายบวกฟรี)
       const triage = buildTriage(it, src, {
-        strict: true, evidence: result.evidence, caseId, batchIndex, resultIndex: it.index, fileTagOn: FILE_TAG, busyOn: BUSY_TAG, frontalOn: FRONTAL_TAG,
+        strict: true, evidence: result.evidence, caseId, batchIndex, resultIndex: it.index, fileTagOn: FILE_TAG, busyOn: BUSY_TAG, frontalOn: FRONTAL_TAG, unguardedOn: UNGUARDED_TAG,
       });
       if (!triage) continue; // malformed strict item → ศูนย์ triage/admission
       map[src.im.id] = triage;

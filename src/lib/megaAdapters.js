@@ -14,6 +14,10 @@ import { resolveRefSlotView } from '@/lib/refSlotContract'; // ★ D3-B3.2 (Code
 import { COVER_GEMINI_MODEL } from '@/lib/coverVisionModel'; // ★ MEGA_SECOND_EYE: โมเดลตาสอง default เดียวกับตาคัด/ตาหาหน้าทั้งสาย
 import { withHonestyDna } from '@/lib/aiHonestyDna'; // ★ การ์ดที่ 5 (28 ก.ค. 69 เคส AC-0195): DNA ความซื่อสัตย์ — ฉีดหน้า prompt ตาชั้นสอง
 import { hammingDistanceHex, PHASH_DUP_HAMMING_MAX } from '@/lib/slotSolver'; // ★ เฟส B-2 (29 ก.ค. 69, MEGA_SLOT_DEDUP_STRICT): pHash64 hamming — reuse ค่าคาลิเบรตเดียวกับ slotSolver/duplicate_scene (ไม่เดาค่าใหม่)
+import {
+  buildFormulaInputFromCoverResult as buildFormulaInputFromCoverResultLeaf,
+  formulaRoleOfSlotId as formulaRoleOfSlotIdLeaf,
+} from '@/lib/coverFormulaCheck';
 // ★ R2 (cover-ref-test queue mode): rt_* stage functions อยู่ที่ refTestPipeline.js — โหลดแบบ LAZY dynamic import
 //   ใน STAGE_FLOW (ด้านล่าง) เท่านั้น. ห้าม static import ที่นี่: refTestPipeline นำเข้า megaAdapters เอง (circular)
 //   และดึง import graph (imageStore/composer) ที่บาง harness stub ไม่ครบ — lazy = โหลดตอน tick เดิน rt_* จริงเท่านั้น.
@@ -1479,14 +1483,7 @@ export function inferBeatFromDreamShot(shot) {
 //   evidence — ใกล้เคียง context ที่สุด), ^action/^moment/^reaction→ตัวเอง, ที่เหลือ→null ไม่เดา) — export ให้
 //   เทสตรงได้ (กันสองจุดตีความ slotId ไม่ตรงกันในอนาคตด้วย ถ้ามีใครมา reuse)
 export function formulaRoleOfSlotId(slotId, shape) {
-  const id = String(slotId || '');
-  if (shape === 'circle') return 'circle';
-  if (/main|hero/i.test(id)) return 'hero';
-  if (/^context/i.test(id) || /^evidence/i.test(id)) return 'context';
-  if (/^action/i.test(id)) return 'action';
-  if (/^moment/i.test(id)) return 'moment';
-  if (/^reaction/i.test(id)) return 'reaction';
-  return null;
+  return formulaRoleOfSlotIdLeaf(slotId, shape);
 }
 
 // ★ แบตช์เฟส D ข้อ 1 (แก้รอบ 2): สร้าง { slots, template } สำหรับส่งเข้า evaluateCoverFormula (coverFormulaCheck.js)
@@ -1507,49 +1504,7 @@ export function formulaRoleOfSlotId(slotId, shape) {
 //     ยังพึ่ง duplicate_scene:<a>:<b> จาก qcFlags ได้เองอยู่แล้วถ้าธงนั้นมีจริง ไม่ต้องพึ่ง slots)
 //   PURE: ไม่ import/IO/env — export ให้เทสตรงได้ (เหมือน dreamScoreGuardOk/inferBeatFromDreamShot)
 export function buildFormulaInputFromCoverResult({ qcFlags, manifestSlots, pickImagesSlots } = {}) {
-  const _qcFlags = Array.isArray(qcFlags) ? qcFlags : [];
-  const _mSlots = Array.isArray(manifestSlots) ? manifestSlots : [];
-  const _pickSlots = pickImagesSlots && typeof pickImagesSlots === 'object' ? pickImagesSlots : {};
-  // ★ กับดักจริงที่พบจากโพรบเอง (29 ก.ค. 69): coverFormulaCheck.js ใช้ num(v)=Number(v) เช็ค Number.isFinite —
-  //   Number(null)===0 (finite!) ต่างจาก Number(undefined)===NaN (ไม่ finite) — ถ้าใส่ null ให้ faceSharePct/
-  //   faceVisible/triage.textOverlay (ทุกฟิลด์ที่ check อ่านผ่าน num()) มันจะถูกตีความเป็น "วัดได้ค่า 0" ไม่ใช่
-  //   "วัดไม่ได้" (fail เงียบๆ แบบผิดๆ แทนที่จะ degrade เป็น null ตามที่ตั้งใจ) → ต้องใช้ undefined สำหรับฟิลด์
-  //   เหล่านี้เท่านั้น (sameAsHeroPerson/triage.newsScene/triage.pHash64 เช็คด้วย typeof ไม่ใช่ num() — null ปลอดภัย)
-  const byRole = new Map();
-  const ensure = (role) => {
-    if (!byRole.has(role)) byRole.set(role, { role, faceSharePct: undefined, faceVisible: undefined, sameAsHeroPerson: null, triage: { newsScene: null, textOverlay: undefined, pHash64: null } });
-    return byRole.get(role);
-  };
-  for (const [role, ps] of Object.entries(_pickSlots)) {
-    if (!ps || typeof ps.newsScene !== 'boolean') continue;
-    ensure(role).triage.newsScene = ps.newsScene;
-  }
-  for (const ms of _mSlots) {
-    const role = formulaRoleOfSlotId(ms?.slot, ms?.shape);
-    if (!role || ms?.measured?.faceSharePct == null) continue;
-    ensure(role).faceSharePct = ms.measured.faceSharePct;
-  }
-  for (const f of _qcFlags) {
-    let mm;
-    if ((mm = /^face_share_out:([^:]+):(-?\d+(?:\.\d+)?)$/.exec(f))) {
-      const role = formulaRoleOfSlotId(mm[1], mm[1] === 'circle' ? 'circle' : undefined);
-      if (role) { const rec = ensure(role); if (rec.faceSharePct == null) rec.faceSharePct = Number(mm[2]); }
-    } else if ((mm = /^(blind_crop|person_cut):(.+)$/.exec(f))) {
-      const role = formulaRoleOfSlotId(mm[2]);
-      if (role) ensure(role).faceVisible = 0; // ยืนยันว่าไม่ผ่านแน่ๆ (ไม่รู้ 1 vs 2 ที่ "ผ่าน")
-    }
-  }
-  const heroPerson = String(_pickSlots.hero?.person || '').trim().toLowerCase();
-  const circlePerson = String(_pickSlots.circle?.person || '').trim().toLowerCase();
-  // ★ ต้อง ensure('circle') เสมอเมื่อรู้ชื่อทั้งคู่ — ไม่ใช่แค่ "ถ้า circle มีอยู่แล้วจากสัญญาณอื่น" (บั๊กที่เจอจาก
-  //   เทสของตัวเอง: circle ที่มีแค่ .person ไม่มี newsScene/faceSharePct/faceVisible เลย จะไม่เคยถูกสร้างเข้า
-  //   byRole มาก่อน ทำให้ sameAsHeroPerson หายไปทั้งที่รู้ชื่อจริงทั้งคู่)
-  if (_pickSlots.circle) {
-    ensure('circle').sameAsHeroPerson = (heroPerson && circlePerson) ? (heroPerson === circlePerson) : null;
-  }
-  const slots = [...byRole.values()];
-  const template = { panelCount: _mSlots.length || Object.keys(_pickSlots).length || null, hasCircle: _mSlots.some((s) => s?.shape === 'circle') || !!_pickSlots.circle };
-  return { slots, template };
+  return buildFormulaInputFromCoverResultLeaf({ qcFlags, manifestSlots, pickImagesSlots });
 }
 
 // ---------- S5b สกัดคีย์เวิร์ด (สมองอารมณ์ครบสเปกตรัม + ผูกชื่อ) ----------
@@ -5272,6 +5227,14 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   //       (brain serialize ทุก field ของ meta row เป็น JSON — ไม่แตะ megaBrains) → สมองเลี่ยงเลือกรูปครอปแตกเป็น hero
   //   OFF (==='0') = ไม่มี guard/ไม่มี field/ไม่มี log ใหม่แม้ byte เดียว (เส้น OFF ข้ามทั้งบล็อก)
   const _cropPrefilterOn = process.env.MEGA_CROP_PREFILTER !== '0';
+  // AC-0232: prefer a source that can fill the realized hero slot without severe enlargement.
+  // This is deliberately a soft gate: a thin pool still produces a cover, using the best measured
+  // source plus an explicit warning. MEGA_HERO_MIN_SOURCE=0 bypasses every new branch/field.
+  const _heroMinSourceOn = process.env.MEGA_HERO_MIN_SOURCE !== '0';
+  let _heroMinSourceMax = 1.35;
+  let _heroSourceMetricById = new Map();
+  let _selectHeroSourceCandidate = null;
+  let _heroMinSourcePatch = null;
   // ★ TIER2 (เคส AC-0196: crop pre-filter แบน 74/77 ใบ "ห้ามเป็น hero" — เหลือ hero จริงแค่ ~3 ใบ จำใจใช้ภาพคู่):
   //   (1) เพดานยืด hero override ได้ผ่าน env MEGA_HERO_UPSCALE_MAX (parseFloat, clamp เข้าช่วงปลอดภัย [1.0,1.6]
   //       เกิน/ต่ำกว่าช่วง = ดึงเข้าขอบที่ใกล้สุด + log เตือน) — ค่า default ใหม่ (ไม่ตั้ง env) = 1.35 (ของเดิม
@@ -5293,15 +5256,21 @@ export async function s6_slots(job, { origin, _deps } = {}) {
   }
   const _heroDimsSoftOn = !_tier2OffHero && process.env.MEGA_HERO_DIMS_SOFT !== '0';
   let _cropGuard = null; // ผลด่านครอป (ใช้ต่อ post-brain hard check) · null = ปิด/ไม่มี ref template
-  if (_cropPrefilterOn && _refDNA) {
+  if ((_cropPrefilterOn || _heroMinSourceOn) && _refDNA) {
     try {
-      console.log(`[MEGA S6] ⚙️ TIER2 hero-gate เริ่มด่าน: upscaleMax=${_heroUpscaleMaxEff}× dimsSoft=${_heroDimsSoftOn ? 'ON' : 'OFF'}${_tier2OffHero ? ' (MEGA_TIER2_OFF=1 → ปิดทั้งชุด TIER2)' : ''}`);
+      if (_cropPrefilterOn) console.log(`[MEGA S6] ⚙️ TIER2 hero-gate เริ่มด่าน: upscaleMax=${_heroUpscaleMaxEff}× dimsSoft=${_heroDimsSoftOn ? 'ON' : 'OFF'}${_tier2OffHero ? ' (MEGA_TIER2_OFF=1 → ปิดทั้งชุด TIER2)' : ''}`);
       const _cgDts = _deps?.dnaToTemplateSpec || (await import('@/lib/refTemplate')).dnaToTemplateSpec;
       const _cgSpec = typeof _cgDts === 'function' ? _cgDts(_refDNA) : null;
       if (_cgSpec) {
         const { computeCropGuard } = await import('@/lib/cropGuard');
-        _cropGuard = computeCropGuard({ pool: sorted, templateSpec: _cgSpec, heroUpscaleMax: _heroUpscaleMaxEff, heroDimsSoft: _heroDimsSoftOn });
-        if (_cropGuard?.heroSlot) {
+        _cropGuard = computeCropGuard({
+          pool: sorted,
+          templateSpec: _cgSpec,
+          heroUpscaleMax: _heroUpscaleMaxEff,
+          heroDimsSoft: _heroDimsSoftOn,
+          ...(_heroMinSourceOn ? { dimsFromShortSide: true } : {}),
+        });
+        if (_cropPrefilterOn && _cropGuard?.heroSlot) {
           let _cgBlocked = 0;
           let _cgDimsAvoid = 0;
           for (const m of meta) {
@@ -5325,10 +5294,74 @@ export async function s6_slots(job, { origin, _deps } = {}) {
           if (_cgBlocked) console.log(`[MEGA S6] ✂️ crop pre-filter: ป้าย "ห้ามเป็น hero" ${_cgBlocked}/${meta.length} ใบ (ครอปช่องหลักเกิน ${_heroUpscaleMaxEff}×${_heroDimsSoftOn ? '' : ' / วัดขนาดไม่ได้'})`);
           if (_cgDimsAvoid) console.log(`[MEGA S6] ✂️ crop pre-filter (soft): ป้าย "เลี่ยง hero: วัดขนาดไม่ได้" ${_cgDimsAvoid}/${meta.length} ใบ (ไม่ตัดพูล)`);
         }
+        if (_heroMinSourceOn && _cropGuard?.heroSlot) {
+          const _hg = await import('@/lib/heroCropGeometry');
+          _heroMinSourceMax = Number(_hg.HERO_MIN_SOURCE_MAX_UPSCALE) || 1.35;
+          _selectHeroSourceCandidate = typeof _hg.selectHeroSourceCandidate === 'function'
+            ? _hg.selectHeroSourceCandidate
+            : null;
+          const _slotW = Number(_cropGuard.heroSlot.w);
+          const _slotH = Number(_cropGuard.heroSlot.h);
+          const _readFace = (row) => {
+            const fb = row?.triage?.faceBox;
+            if (!fb || typeof fb !== 'object') return null;
+            const x1 = Number(fb.x1), y1 = Number(fb.y1), x2 = Number(fb.x2), y2 = Number(fb.y2);
+            if ([x1, y1, x2, y2].every(Number.isFinite)) {
+              return x1 >= 0 && y1 >= 0 && x2 <= 1.0001 && y2 <= 1.0001 && x2 > x1 && y2 > y1
+                ? { x1, y1, x2: Math.min(1, x2), y2: Math.min(1, y2) }
+                : null;
+            }
+            const x = Number(fb.x), y = Number(fb.y);
+            const w = Number(fb.w ?? fb.width), h = Number(fb.h ?? fb.height);
+            return [x, y, w, h].every(Number.isFinite)
+              && x >= 0 && y >= 0 && w > 0 && h > 0 && x + w <= 1.0001 && y + h <= 1.0001
+              ? { x1: x, y1: y, x2: Math.min(1, x + w), y2: Math.min(1, y + h) }
+              : null;
+          };
+          for (const row of sorted) {
+            const id = String(row?.id ?? '');
+            if (!id) continue;
+            const guard = _cropGuard.byId.get(id);
+            if (!guard?.hasRealDims) continue;
+            const shrinkRisk = row?.triage?.clean !== true
+              || row?.triage?.watermark === true
+              || row?.triage?.hasText === true
+              || row?.triage?.largeText === true;
+            const faceUpscale = typeof _hg.heroCropUpscale === 'function'
+              ? _hg.heroCropUpscale({
+                faceBox: _readFace(row),
+                imgW: guard.realWidth,
+                imgH: guard.realHeight,
+                slotW: _slotW,
+                slotH: _slotH,
+                hasShrinkTransformRisk: shrinkRisk,
+              })
+              : null;
+            // heroCropUpscale null is an explicit fail-closed result: missing geometry or a
+            // shrink transform may make the true crop worse. Never relabel cover-fit as measured.
+            if (!(Number.isFinite(faceUpscale) && faceUpscale > 0)) continue;
+            const coverFitUpscale = Number.isFinite(guard.heroUpscale) ? guard.heroUpscale : null;
+            const estimatedUpscale = Math.max(faceUpscale, coverFitUpscale || 0);
+            const metric = {
+              estimatedUpscale,
+              basis: 'face-crop',
+            };
+            _heroSourceMetricById.set(id, metric);
+            guard.heroSourceUpscale = estimatedUpscale;
+            guard.heroSourceBasis = metric.basis;
+          }
+        }
       }
     } catch (e) {
       _cropGuard = null; // guard ล้ม = เดินต่อแบบไม่มีด่าน (ห้ามทำ S6 พัง)
-      console.log('[MEGA S6] ✂️ crop pre-filter: คำนวณไม่สำเร็จ — ข้ามด่าน (เดินต่อแบบเดิม):', String(e?.message || '').slice(0, 50));
+      _heroSourceMetricById = new Map();
+      _selectHeroSourceCandidate = null;
+      if (_heroMinSourceOn) {
+        console.warn('[MEGA S6] ✂️ hero geometry gate: คำนวณไม่สำเร็จ — ข้ามด่าน (เดินต่อแบบเดิม):', String(e?.message || '').slice(0, 50));
+      } else {
+        // MEGA_HERO_MIN_SOURCE=0: preserve the pre-AC-0232 crop-prefilter fallback/log exactly.
+        console.log('[MEGA S6] ✂️ crop pre-filter: คำนวณไม่สำเร็จ — ข้ามด่าน (เดินต่อแบบเดิม):', String(e?.message || '').slice(0, 50));
+      }
     }
   }
 
@@ -6089,6 +6122,157 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     } catch (e) {
       _cropGuardPatch = null; // guard ล้ม = ไม่แนบธง (ห้ามทำ S6 พัง)
       console.log('[MEGA S6] ✂️ crop guard hard check ล้ม — ข้าม:', String(e?.message || '').slice(0, 50));
+    }
+  }
+
+  // ═══ AC-0232 HERO MIN-SOURCE SOFT GATE (default ON; MEGA_HERO_MIN_SOURCE=0 = legacy) ═══
+  // The earlier crop guard rejects only an unsafe full-source cover-fit. Renderer telemetry (`upscaled:main`)
+  // is measured after face-aware cropping and can therefore be much worse. Rank the already policy-eligible
+  // hero choices by that closer estimate. Never hard-fail: if every measured source is small, keep the best
+  // (lowest upscale / largest usable crop) and carry an explicit warning to QC/archive.
+  if (_heroMinSourceOn && _canonHeroId && _selectHeroSourceCandidate && _cropGuard?.heroSlot) {
+    try {
+      const _currentEntry = slots[_canonHeroId] || null;
+      const _currentRec = _currentEntry ? byId.get(String(_currentEntry.id)) : null;
+      const _qualityOrder = new Map(sorted.map((x, i) => [String(x.id), i]));
+      const _seenHeroSource = new Set();
+      let _options = [];
+      const _addOption = (rec, kind, slotKey = null, entry = null) => {
+        if (!rec || rec.rehostQuality === 'thumbnail' || (rec.triage?.faceCount ?? 0) < 1) return;
+        const id = String(rec.id);
+        if (!id || _seenHeroSource.has(id) || !_identityOk(_canonHeroId, rec)) return;
+        // Keep candidates that the older cover-fit guard rejected: that ratio is only a lower
+        // bound, while this gate ranks the closer face-aware estimate against the shared 1.35 preference.
+        const metric = _heroSourceMetricById.get(id) || null;
+        _seenHeroSource.add(id);
+        _options.push({
+          rec,
+          kind,
+          slotKey,
+          entry,
+          estimatedUpscale: metric?.estimatedUpscale ?? null,
+          sourceBasis: metric?.basis ?? null,
+        });
+      };
+      if (_currentRec) _addOption(_currentRec, 'current', _canonHeroId, _currentEntry);
+      for (const s of activeSlots) {
+        if (s === _canonHeroId || !slots[s]) continue;
+        const rec = byId.get(String(slots[s].id));
+        if (!rec) continue;
+        // A swap is legal only when the old hero can also satisfy the target slot's identity contract.
+        if (_idGated(s) && !_isHeroSlot(s) && _currentRec && !_identityOk(s, _currentRec)) continue;
+        _addOption(rec, 'assigned', s, slots[s]);
+      }
+      for (const rec of sorted) {
+        if (!rec || used.has(String(rec.id))) continue;
+        _addOption(rec, 'pool');
+      }
+      _options.sort((a, b) => {
+        if (a.kind === 'current') return b.kind === 'current' ? 0 : -1;
+        if (b.kind === 'current') return 1;
+        return (_qualityOrder.get(String(a.rec.id)) ?? Infinity)
+          - (_qualityOrder.get(String(b.rec.id)) ?? Infinity);
+      });
+      const _currentOption = _options.find((option) => option.kind === 'current') || null;
+      const _currentMetric = _currentEntry
+        ? _heroSourceMetricById.get(String(_currentEntry.id)) || null
+        : null;
+      const _retainUnmeasuredCurrent = !!_currentEntry
+        && !(Number(_currentMetric?.estimatedUpscale) > 0);
+      const _narrowWhenAvailable = (predicate) => {
+        const narrowed = _options.filter(predicate);
+        if (narrowed.length) _options = narrowed;
+      };
+      _narrowWhenAvailable((o) => isClean(o.rec));
+      if (HERO_SINGLE_ON || HERO_SOLO_ONLY) {
+        _narrowWhenAvailable((o) => (o.rec.triage?.faceCount ?? 0) === 1);
+      }
+      if (HERO_FACE_VISIBLE_ON) {
+        _narrowWhenAvailable((o) => {
+          const v = _faceHFrac(o.rec.triage?.faceBox);
+          return v != null && v >= HERO_FACE_VISIBLE_MIN;
+        });
+      }
+      if (HERO_FRONTAL_ON) _narrowWhenAvailable((o) => _faceFrontOf(o.rec) === 2);
+      if (HERO_PROMINENCE_ON) {
+        _narrowWhenAvailable((o) => (_faceHFrac(o.rec.triage?.faceBox) ?? -1) >= HERO_FACE_PROMINENCE_MIN);
+      }
+
+      // An unknown current source must never be displaced by a measured-but-bad fallback.
+      // Decide this from the pre-narrowing current so no policy filter can turn uncertainty into a swap.
+      const _chosen = _retainUnmeasuredCurrent
+        ? {
+          candidate: _currentOption,
+          measuredCount: _options.filter((option) => Number(option?.estimatedUpscale) > 0).length,
+          allBelowThreshold: false,
+          selectedUpscale: null,
+          reason: 'current-unmeasured',
+        }
+        : _selectHeroSourceCandidate(_options, _heroMinSourceMax);
+      let _action = 'legacy-retained';
+      if (_chosen.candidate && _currentEntry && String(_chosen.candidate.rec.id) !== String(_currentEntry.id)) {
+        const pick = _chosen.candidate;
+        if (pick.kind === 'assigned' && pick.slotKey && slots[pick.slotKey]) {
+          const _oldHero = slots[_canonHeroId];
+          slots[_canonHeroId] = slots[pick.slotKey];
+          slots[pick.slotKey] = _oldHero;
+          if (semContract) {
+            slots[_canonHeroId].refSlotId = _canonHeroId;
+            slots[_canonHeroId].legacySlot = _projMap.get(_canonHeroId) ?? null;
+            slots[pick.slotKey].refSlotId = pick.slotKey;
+            slots[pick.slotKey].legacySlot = _projMap.get(pick.slotKey) ?? null;
+          }
+          _action = `swap:${pick.slotKey}`;
+        } else if (pick.kind === 'pool') {
+          const _oldHero = slots[_canonHeroId];
+          used.add(String(pick.rec.id));
+          slots[_canonHeroId] = {
+            id: pick.rec.id,
+            imageUrl: pick.rec.imageUrl,
+            person: pick.rec.triage?.person || null,
+            category: pick.rec.triage?.category || null,
+            emotion: pick.rec.triage?.emotion || null,
+            clean: isClean(pick.rec),
+            newsScene: pick.rec.triage?.newsScene !== false,
+            faces: Number(pick.rec.triage?.faceCount) || 0,
+            dirtyFallback: dirtyFallbackIds.has(String(pick.rec.id)),
+            ...(semContract ? { refSlotId: _canonHeroId, legacySlot: _projMap.get(_canonHeroId) ?? null } : {}),
+            reason: `hero source-size preference (แทน ${_oldHero.id} ที่ต้องยืดมากกว่า ${_heroMinSourceMax.toFixed(2)}×)`,
+            ...(STORY_SEL_ON ? { storyFit: storyFitOf(pick.rec) } : {}),
+            backups: [String(_oldHero.id), ...((_oldHero.backups || []).map(String))].slice(0, 3),
+          };
+          _action = 'reselect:pool';
+        }
+      }
+
+      const _finalEntry = slots[_canonHeroId] || null;
+      const _finalMetric = _finalEntry ? _heroSourceMetricById.get(String(_finalEntry.id)) : null;
+      if (_finalEntry) {
+        if (_chosen.allBelowThreshold && _finalMetric?.estimatedUpscale > _heroMinSourceMax) {
+          _finalEntry._heroMinSourceWarning = `hero_source_all_small:${String(_finalEntry.id)}:${_finalMetric.estimatedUpscale.toFixed(2)}`;
+        } else if (_chosen.reason === 'unmeasured' || _chosen.reason === 'current-unmeasured') {
+          _finalEntry._heroMinSourceWarning = `hero_source_unmeasured:${String(_finalEntry.id)}`;
+        } else {
+          delete _finalEntry._heroMinSourceWarning;
+        }
+      }
+      _heroMinSourcePatch = {
+        maxUpscale: _heroMinSourceMax,
+        measuredCandidates: _chosen.measuredCount,
+        selectedId: _finalEntry ? String(_finalEntry.id) : null,
+        selectedUpscale: _finalMetric ? Number(_finalMetric.estimatedUpscale.toFixed(3)) : null,
+        selectedBasis: _finalMetric?.basis || null,
+        allSmall: _chosen.allBelowThreshold === true,
+        action: _action,
+      };
+      if (_finalEntry && _finalMetric) {
+        console.warn(`[MEGA S6] 📐 hero source gate: ${_action} → ${_finalEntry.id} ≈${_finalMetric.estimatedUpscale.toFixed(2)}× (${_finalMetric.basis})${_chosen.allBelowThreshold ? ' · ทั้งพูลเล็ก ใช้ใบใหญ่สุดพร้อมธง' : ''}`);
+      } else if (_finalEntry) {
+        console.warn(`[MEGA S6] 📐⚠️ hero source gate: ${_finalEntry.id} วัด source upscale ไม่ได้ → คงภาพเดิมพร้อมธง`);
+      }
+    } catch (e) {
+      _heroMinSourcePatch = null;
+      console.warn('[MEGA S6] 📐 hero source gate ล้ม — ข้ามแบบ fail-open:', String(e?.message || '').slice(0, 60));
     }
   }
 
@@ -7130,6 +7314,31 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     }
   }
 
+  // Second-eye may replace the hero after the source gate. Reconcile the warning with the actual final source;
+  // do not reselect here because a post-eye replacement would bypass the verification that just ran.
+  if (_heroMinSourcePatch !== null && _heroMinSourceOn && _canonHeroId && slots[_canonHeroId]) {
+    const _finalEntry = slots[_canonHeroId];
+    const _finalMetric = _heroSourceMetricById.get(String(_finalEntry.id)) || null;
+    if (_finalMetric?.estimatedUpscale > _heroMinSourceMax + 1e-9) {
+      const _sameAllSmallChoice = _heroMinSourcePatch?.allSmall === true
+        && String(_heroMinSourcePatch.selectedId || '') === String(_finalEntry.id);
+      _finalEntry._heroMinSourceWarning = _sameAllSmallChoice
+        ? `hero_source_all_small:${String(_finalEntry.id)}:${_finalMetric.estimatedUpscale.toFixed(2)}`
+        : `hero_source_small_after_second_eye:${String(_finalEntry.id)}:${_finalMetric.estimatedUpscale.toFixed(2)}`;
+    } else if (!_finalMetric) {
+      _finalEntry._heroMinSourceWarning = `hero_source_unmeasured:${String(_finalEntry.id)}`;
+    } else {
+      delete _finalEntry._heroMinSourceWarning;
+    }
+    if (_heroMinSourcePatch) {
+      _heroMinSourcePatch.selectedId = String(_finalEntry.id);
+      _heroMinSourcePatch.selectedUpscale = _finalMetric
+        ? Number(_finalMetric.estimatedUpscale.toFixed(3))
+        : null;
+      _heroMinSourcePatch.selectedBasis = _finalMetric?.basis || null;
+    }
+  }
+
   // ★ WAVE1A: _refHeroV2Patch was computed by the PRE-BRAIN gate above (Fix #6) and, on success, is attached
   //   additively below. HOLD already returned before the brain, so here it is either null (OFF) or the frozen
   //   success payload (ON). It never mutates slots/slotOrder/heroSlotId/slotContractHash or any legacy field.
@@ -7138,7 +7347,7 @@ export async function s6_slots(job, { origin, _deps } = {}) {
     nextAction: 'continue',
     summary: `จับคู่ ${filled}/${activeSlots.length} ช่อง${fallbackUsed ? ` (fallback ${fallbackUsed})` : ''}${brainOk ? '' : ' · สมองล่ม→กฎสำรองล้วน'}${storyTag}${quarantineTag} — ${(brain.note || '').slice(0, 80)}`,
     dossierPatch: {
-      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}), ...(_refHeroV2Patch ? { refHeroV2: _refHeroV2Patch } : {}), ...(_cropGuardPatch ? { cropGuard: _cropGuardPatch } : {}), ...(SOLVER_LIVE ? { s6_authority: _solverAuthorityLabel, ...(_solverInvalidReason ? { solverInvalidReason: _solverInvalidReason } : {}) } : {}), ...(CROSS_CASE_BORROW ? { crossCaseBorrow: { borrowedCount: _borrowedCount, borrowedPersons: _borrowedPersons } } : {}) },
+      pickImages: { slots, note: brain.note || '', poolSize: pool.length, brainOk, fallbackUsed, ...(STORY_SEL_ON ? { storySelOn: true } : {}), ...(semContract ? { semanticSelection: true, slotOrder: _slotOrder, heroSlotId: _canonHeroId, slotContractHash: _semAuthorityHash } : {}), ...(_jobTemplateV1 ? { refShotAuthority: cloneRefShotMarker(_jobRefShotMarker) } : {}), ...(solverShadow ? { solverShadow } : {}), ...(solverShadowV2 ? { solverShadowV2 } : {}), ...(_refHeroV2Patch ? { refHeroV2: _refHeroV2Patch } : {}), ...(_cropGuardPatch ? { cropGuard: _cropGuardPatch } : {}), ...(_heroMinSourcePatch ? { heroMinSource: _heroMinSourcePatch } : {}), ...(SOLVER_LIVE ? { s6_authority: _solverAuthorityLabel, ...(_solverInvalidReason ? { solverInvalidReason: _solverInvalidReason } : {}) } : {}), ...(CROSS_CASE_BORROW ? { crossCaseBorrow: { borrowedCount: _borrowedCount, borrowedPersons: _borrowedPersons } } : {}) },
       ...(job.dossier.refMatch ? { refMatch: job.dossier.refMatch } : {}),
       // ★ D3-B3.3 (Codex): template path echo local plain snapshot (ไม่ใช่ raw carrier) → S7/retry เห็น plain · legacy = raw byte เดิม
       ...((_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) ? { artBrief: (_jobTemplateV1 ? _templateArtBriefSnapshot : job.dossier.artBrief) } : {}),
@@ -7464,6 +7673,8 @@ export async function s7_cover(job, { origin, _deps } = {}) {
       //   composeCore/composeCoreStrict เห็น field นี้ผ่าน slotPlan → loaded[i] (spread ทั้งก้อน) แล้วยก qcFlag
       //   'hero_face_hidden' เมื่อจำใจใช้ hero ที่ยังหน้าไม่ชัด (นโยบาย hero แข็งข้อ 2 หาแทนที่ไม่เจอ)
       ...(primary && slots[primary]?._secondEyeHeroFaceHidden ? { _secondEyeHeroFaceHidden: slots[primary]._secondEyeHeroFaceHidden } : {}),
+      // AC-0232: carry the soft all-small/unmeasured source warning to the composer so it becomes a QC flag.
+      ...(primary && slots[primary]?._heroMinSourceWarning ? { _heroMinSourceWarning: slots[primary]._heroMinSourceWarning } : {}),
       // ★ เคส AC-0201 รอบ 2 (28 ก.ค. 69): ต่อสาย _secondEyeSubSlotFlag แบบเดียวกับ _secondEyeHeroFaceHidden เป๊ะ —
       //   ใช้ได้กับ "ช่องย่อยไหนก็ได้" (ไม่จำกัดแค่ hero) ที่นโยบายกันช็อตซ้ำ/text ทับใหญ่หาแทนที่ไม่เจอ → ยก qcFlag
       //   'subslot_duplicate_shot' / 'subslot_text_overlay' ที่ชั้นประกอบ (ดู composeCore ที่วนทุกแถว ไม่ใช่แค่ hero)
@@ -7825,6 +8036,7 @@ export async function s7_wait(job) {
         console.log(`[MEGA S7] 🧮 formula-check: ผ่าน ${formulaScore.passed}/${formulaScore.total} ข้อที่วัดได้ · วัดไม่ได้ ${_unmeasurableCount} ข้อ (score=${formulaScore.score ?? '-'})`);
       } catch (e) {
         console.warn('[MEGA S7] formula-check ล้ม (advisory เท่านั้น ไม่กระทบปก): ' + String(e?.message || e).slice(0, 150));
+        formulaScore = { passed: 0, total: 0, score: null, checks: [], reason: 'formula_check_error' };
       }
     }
 
@@ -7890,7 +8102,7 @@ export async function s7_wait(job) {
       manifest: r.manifest || null, // ★ Wave1 Batch E: ความจริงของรอบประกอบ (จาก composeAndVerify) — additive
       ...(finalAssignmentTrace ? { finalAssignmentTrace } : {}),
       qcVerdict, // ★ Wave2 A1: คำตัดสินด่าน (pass/reasons/suggestedStatus/advisory)
-      ...(formulaScore ? { formulaScore } : {}), // ★ แบตช์เฟส D ข้อ 1: คะแนนสูตร 478 ใบ (advisory) — ไม่มี = ไม่ใส่คีย์นี้เลย
+      formulaScore, // AC-0232: default path always carries an object; explicit MEGA_FORMULA_CHECK=0 carries null
       completedAt: new Date().toISOString(),
     };
 
@@ -7915,7 +8127,7 @@ export async function s7_wait(job) {
     let ent = null;
     try {
       const { addMegaCover } = await import('@/lib/megaCoverArchive');
-      ent = await addMegaCover({ id: job.id, title: job.dossier.desk?.title || '', source: 'mega', imageCaseId: job.dossier.images?.caseId || null, coverCaseId: r.caseId || '', coverPath, base64, template: r.template || '', score: r.score ?? null, throughMega: true, qcFlags: Array.isArray(r.qcFlags) ? r.qcFlags : [], ...(formulaScore ? { formulaScore } : {}) }); // audit: ธงคุณภาพต้องถึงคลังจากทางหลักด้วย · ★ แบตช์เฟส D ข้อ 1: formulaScore ก็ต้องถึงคลังจริงด้วยเช่นกัน
+      ent = await addMegaCover({ id: job.id, title: job.dossier.desk?.title || '', source: 'mega', imageCaseId: job.dossier.images?.caseId || null, coverCaseId: r.caseId || '', coverPath, base64, template: r.template || '', score: r.score ?? null, throughMega: true, qcFlags: Array.isArray(r.qcFlags) ? r.qcFlags : [], formulaScore }); // audit: ธงคุณภาพ+formulaScore ต้องถึงคลังจากทางหลัก; archive boundary เติม fallback ให้ direct callers
       if (!coverPath) coverPath = `/api/mega-covers/img?id=${encodeURIComponent(ent?.id || job.id)}`;
     } catch { if (!coverPath) coverPath = ''; /* คลังไม่ critical */ }
     return {
