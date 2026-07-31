@@ -301,11 +301,12 @@ export async function POST(request) {
     // ★ 23 ก.ค. (ผู้ใช้สั่ง) — รอบ 2 "เนื้อดิบมีมิติ": Gemini ถอดคำพูดจริง (ไม่เอาเพลง) → ถักทอเข้าประเด็น (enrichedRaw)
     //   🔴 อิสระจาก insight เดิม 100%: ล้ม/แน่น/หมดเวลา = ข้าม (insight เซฟไปแล้วข้างบน = ปลอดภัย) · ใช้ buffer/URL ซ้ำจาก ctx
     //   budget-aware (auditor #1) + clearTimeout (auditor C2) + ข้าม buffer >200MB (auditor #4)
+    const enrichedEnabled = process.env.CLIP_INSIGHT_ENRICHED === '1'; // default ปิด — เปิดรอบ 2 เฉพาะเมื่อเจ้าของตั้ง =1
     const ENRICH_MAXDUR_MS = 800_000;   // = maxDuration ของ route (เผื่อกรณี Vercel ตัดสั้นกว่า → มี C1 save-first กันไว้แล้ว)
     const ENRICH_SAVE_MARGIN_MS = 90_000;
     const enrichBudgetMs = ENRICH_MAXDUR_MS - (Date.now() - startedAt) - ENRICH_SAVE_MARGIN_MS;
     const bufTooBig = ctx.mode === 'buffer' && ctx.buffer && ctx.buffer.length > 200 * 1e6;
-    if (ctx.mode && !bufTooBig && enrichBudgetMs > 60_000) {
+    if (enrichedEnabled && ctx.mode && !bufTooBig && enrichBudgetMs > 60_000) {
       let enrichTimer;
       try {
         const { extractTranscriptQuotes, extractTranscriptQuotesFromVideoBuffer, buildIdentityFromInsight } = await import('@/lib/services/clipInsightService');
@@ -338,7 +339,7 @@ export async function POST(request) {
       } catch (e) {
         console.warn('[ClipInsight] รอบเนื้อดิบมีมิติล้ม/หมดเวลา (ข้าม ใช้ผลเดิม):', e.message?.slice(0, 70));
       } finally { clearTimeout(enrichTimer); } // ★ C2: เคลียร์ timer กันค้าง (ทั้งกรณีสำเร็จและล้ม)
-    } else if (bufTooBig) {
+    } else if (enrichedEnabled && bufTooBig) {
       console.log(`[ClipInsight] ⏭️ ข้ามเนื้อดิบมีมิติ: คลิปใหญ่ ${Math.round(ctx.buffer.length / 1e6)}MB (กันแรมพุ่ง) — insight เดิมทำงานปกติ`);
     }
 
