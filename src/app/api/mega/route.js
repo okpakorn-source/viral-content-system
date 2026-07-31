@@ -7,6 +7,7 @@
 // ============================================================
 
 import { NextResponse } from 'next/server';
+import { megaPipelineOff, megaOffPayload } from '@/lib/megaPipelineGate'; // 🛑 31 ก.ค. 69: ประตูปิดท่อปก
 import { newJob, listJobs, getJob, updateJob, listRuns, getFlags, setFlags, deleteJobs } from '@/lib/megaJobStore';
 import { cancelRefTestJob, duplicateRefTestJob } from '@/lib/refTestPipeline'; // ★ R2: จัดการงานคิว cover-ref-test
 
@@ -26,6 +27,13 @@ export async function POST(req) {
   try {
     const body = await req.json().catch(() => ({}));
     const action = body.action || '';
+
+    // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดท่อปก MEGA): ห้ามเปิด/ปลุกงานปกใหม่เมื่อท่อปิด
+    //    ปิดเฉพาะ action ที่ "สร้าง/ปลุกงาน" — cancel/clearTerminal/อ่านผล ยังใช้ได้ (ล้างของค้างได้ ไม่เสียเงิน)
+    //    เปิดคืน: MEGA_PIPELINE=1
+    if (['create', 'retry', 'resume', 'duplicate'].includes(action) && megaPipelineOff()) {
+      return NextResponse.json(megaOffPayload(), { status: 503 });
+    }
 
     if (action === 'create') {
       // ทีละงาน: มีงานเดินอยู่แล้ว → ไม่เปิดซ้อน (serial-first)

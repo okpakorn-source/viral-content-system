@@ -55,6 +55,9 @@ export const findDoneRun = async (...a) => (g().findDoneRun ? g().findDoneRun(..
 export const listRuns = async (...a) => (g().listRuns ? g().listRuns(...a) : []);
 export const getFlags = async () => (g().getFlags ? g().getFlags() : { id: 'mega-flags', paused: false, consecutiveFails: 0 });
 export const setFlags = async (...a) => (g().setFlags ? g().setFlags(...a) : null);
+// ★ 31 ก.ค. 69: stub ขาด deleteJobs ทั้งที่ src/app/api/mega/route.js import อยู่ → R1/R2 แดงมาก่อนหน้านี้แล้ว
+//   (ยืนยัน: stub บน origin/main ก็ไม่มี) — เติมให้ครบเงาของโมดูลจริง ไม่ได้แก้เพื่อหลบอะไร
+export const deleteJobs = async (...a) => (g().deleteJobs ? g().deleteJobs(...a) : null);
 `);
 const STUB_LEASE = _mod(`
 export async function acquireTickLease(){ return { ok: true, token: 't' }; }
@@ -103,9 +106,13 @@ async function runTickPOST({ env = {}, jobs = [], flow = {} }) {
     updateJob: async (id, patch) => { calls.updates.push({ id, patch }); },
     setFlags: async (f) => { calls.flags.push(f); },
   };
-  const KEYS = ['MEGA_REF_HERO_V2', 'MEGA_STRICT_RENDER'];
+  // ★ 31 ก.ค. 69: +MEGA_PIPELINE — ท่อปกถูกตั้งให้ "ปิดเป็นค่าเริ่มต้น" ตามคำสั่งเจ้าของ (ดู src/lib/megaPipelineGate.js)
+  //   เทสชุดนี้ตรวจตรรกะ fail-fast "ภายในสายพานปก" ซึ่งต้องมีท่อเปิดถึงจะเดินถึงจุดที่ตรวจ → ฮาร์เนสเปิดให้เอง
+  //   (ไม่ใช่การแก้เทสหลบปัญหา: ประตูปิดท่อมีเทสของตัวเองที่ tests/mega-pipeline-gate.test.mjs)
+  const KEYS = ['MEGA_REF_HERO_V2', 'MEGA_STRICT_RENDER', 'MEGA_PIPELINE'];
   const saved = {};
-  for (const k of KEYS) { saved[k] = process.env[k]; if (env[k] === undefined) delete process.env[k]; else process.env[k] = env[k]; }
+  const envWithPipeline = { MEGA_PIPELINE: '1', ...env };
+  for (const k of KEYS) { saved[k] = process.env[k]; if (envWithPipeline[k] === undefined) delete process.env[k]; else process.env[k] = envWithPipeline[k]; }
   try {
     const res = await tickPOST({ nextUrl: { origin: 'http://test-origin' } });
     return { body: res._body, status: res.status, calls };
@@ -493,7 +500,19 @@ test('I4 tick POST: rollback scenario — carrier ค้าง + V2 ปิด + 
 });
 
 // ============================================================ R — operator retry ต้องรีเซ็ตตัวนับ (sol R3 Medium)
-test('R1 mega POST action=retry: งาน failed ที่มีตัวนับ hold ค้าง → patch ต้องรีเซ็ต refHeroV2HoldCount=0 (หน้าต่างใหม่ 3 รอบ)', async () => {
+// ★ 31 ก.ค. 69: action 'retry' อยู่ใต้ประตูปิดท่อปก (default ปิด) — 2 เทสนี้ตรวจตรรกะ "ตัวนับ" ที่อยู่ลึกกว่าประตู
+//   จึงเปิดท่อเฉพาะในเทส แล้วคืนค่าเดิมทุกครั้ง (ประตูมีเทสของตัวเองที่ tests/mega-pipeline-gate.test.mjs)
+function withPipelineOn(fn) {
+  return async () => {
+    const saved = process.env.MEGA_PIPELINE;
+    process.env.MEGA_PIPELINE = '1';
+    try { return await fn(); } finally {
+      if (saved === undefined) delete process.env.MEGA_PIPELINE; else process.env.MEGA_PIPELINE = saved;
+    }
+  };
+}
+
+test('R1 mega POST action=retry: งาน failed ที่มีตัวนับ hold ค้าง → patch ต้องรีเซ็ต refHeroV2HoldCount=0 (หน้าต่างใหม่ 3 รอบ)', withPipelineOn(async () => {
   const { POST: megaPOST } = await import('../src/app/api/mega/route.js');
   const updates = [];
   globalThis.__B2_JOBSTORE = {
@@ -509,9 +528,9 @@ test('R1 mega POST action=retry: งาน failed ที่มีตัวนั
   } finally {
     delete globalThis.__B2_JOBSTORE;
   }
-});
+}));
 
-test('R2 mega POST action=retry: งานปกติ (ไม่มีตัวนับ) → patch ไม่มี key refHeroV2HoldCount (พฤติกรรมเดิมเป๊ะ)', async () => {
+test('R2 mega POST action=retry: งานปกติ (ไม่มีตัวนับ) → patch ไม่มี key refHeroV2HoldCount (พฤติกรรมเดิมเป๊ะ)', withPipelineOn(async () => {
   const { POST: megaPOST } = await import('../src/app/api/mega/route.js');
   const updates = [];
   globalThis.__B2_JOBSTORE = {
@@ -523,6 +542,27 @@ test('R2 mega POST action=retry: งานปกติ (ไม่มีตัว
     assert.strictEqual(Object.prototype.hasOwnProperty.call(updates[0].patch, 'refHeroV2HoldCount'), false, 'งานไม่มี field → patch เดิมทุก key');
   } finally {
     delete globalThis.__B2_JOBSTORE;
+  }
+}));
+
+// ★ 31 ก.ค. 69: คู่ตรงข้าม — ท่อปกปิด (ค่าเริ่มต้น) แล้ว retry ต้องถูกปฏิเสธ ไม่แตะคลังงานเลย
+test('R3 mega POST action=retry ตอนท่อปกปิด (default) → 503 MEGA_PIPELINE_DISABLED และห้าม updateJob แม้แต่ครั้งเดียว', async () => {
+  const { POST: megaPOST } = await import('../src/app/api/mega/route.js');
+  const updates = [];
+  const savedEnv = process.env.MEGA_PIPELINE;
+  delete process.env.MEGA_PIPELINE;
+  globalThis.__B2_JOBSTORE = {
+    getJob: async () => ({ id: 'J7', status: 'failed', quality: 'red', stage: 't3' }),
+    updateJob: async (id, patch) => { updates.push({ id, patch }); return { id, ...patch }; },
+  };
+  try {
+    const res = await megaPOST({ json: async () => ({ action: 'retry', id: 'J7' }) });
+    assert.strictEqual(res.status, 503);
+    assert.strictEqual(res._body.errorType, 'MEGA_PIPELINE_DISABLED');
+    assert.strictEqual(updates.length, 0, 'ท่อปิด = ห้ามแตะงานในคลังเลย');
+  } finally {
+    delete globalThis.__B2_JOBSTORE;
+    if (savedEnv === undefined) delete process.env.MEGA_PIPELINE; else process.env.MEGA_PIPELINE = savedEnv;
   }
 });
 

@@ -10,6 +10,7 @@
 // ============================================================
 
 import { NextResponse } from 'next/server';
+import { megaPipelineOff, megaOffPayload } from '@/lib/megaPipelineGate'; // 🛑 31 ก.ค. 69: ประตูปิดท่อปก
 import { readImages } from '@/lib/imageStore';
 import { getCase, listRecent } from '@/lib/caseStore';
 import { listRefCovers } from '@/lib/refCoverLibrary';
@@ -50,6 +51,8 @@ export async function GET(req) {
 
 export async function POST(req) {
   try {
+    // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดท่อปก MEGA) — เปิดคืน: MEGA_PIPELINE=1
+    if (megaPipelineOff()) return NextResponse.json(megaOffPayload(), { status: 503 });
     const body = await req.json().catch(() => ({}));
     const caseId = (body.caseId || '').trim();
     if (!caseId) return NextResponse.json({ success: false, error: 'ต้องระบุ caseId', errorType: 'BAD_INPUT' }, { status: 400 });

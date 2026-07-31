@@ -7,6 +7,7 @@
 // ============================================================
 
 import { NextResponse } from 'next/server';
+import { megaPipelineOff, megaOffPayload } from '@/lib/megaPipelineGate'; // 🛑 31 ก.ค. 69: ประตูปิดท่อปก
 import { composeAndVerify } from '@/lib/services/megaComposerService';
 
 export const runtime = 'nodejs';
@@ -14,6 +15,10 @@ export const maxDuration = 300;
 
 export async function POST(req) {
   try {
+    // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดท่อปก MEGA): โรงประกอบนี้คือจุดที่เสียเงินจริง (ตาเทียบ ref → callAI vision)
+    //    ผู้เรียกมี 2 ทาง: cover-ref-test (ปิดแล้ว) + queue worker (งาน composer:'mega' — กันซ้ำที่ worker ด้วย)
+    //    เปิดคืน: MEGA_PIPELINE=1
+    if (megaPipelineOff()) return NextResponse.json(megaOffPayload(), { status: 503 });
     const body = await req.json().catch(() => ({}));
     // ★ 10 ก.ค.: Wave1-A stableOrder default เปิด (race ลำดับโหลดภาพ) — ปิดคืน: MEGA_STABLE_ORDER=0
     const payload = {

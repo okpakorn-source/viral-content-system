@@ -49,13 +49,16 @@ export default function Sidebar() {
     { label: 'หน้าแรก (แดชบอร์ด)', icon: '📊', href: '/' },
 
     // ── 🏭 MEGA สายพานครบวงจร (7 ก.ค.) ──
-    { type: 'divider', label: '🏭 MEGA สายพาน' },
-    { label: 'MEGA คุมสายพาน', icon: '🏭', href: '/mega', highlight: true },
-    { label: 'เทสปกเทียบ ref', icon: '🎯', href: '/cover-ref-test' },
-    { label: 'ทางลัดประกอบจากเคสเดิม', icon: '⚡', href: '/mega-compose-test' }, // ★ 17 ก.ค.: ทางเข้า UI (จูนครอป/โครงเร็ว ~20 วิ ไม่ค้นภาพใหม่)
-    { label: 'คลังปก reference + DNA', icon: '🧬', href: '/ref-covers' },
-    { label: 'คลังงานปก MEGA', icon: '🗂️', href: '/mega-covers' },
-    { label: 'คลังเทคนิคปกแสนไลค์', icon: '📚', href: '/cover-techniques' },
+    // 🛑 31 ก.ค. 69 (เจ้าของสั่ง — เลิกพัฒนาท่อปกแล้ว): ถอดทั้งหมวดออกจากเมนู + ปิดท่อฝั่ง API
+    //    (ดู src/lib/megaPipelineGate.js) · หน้าเว็บ/โค้ดยังอยู่ครบ ไม่ได้ลบ · คลังปกเก่ายังเปิดดูได้ที่ /mega-covers
+    //    เปิดคืน: ปลดคอมเมนต์บล็อกนี้ + ตั้ง env MEGA_PIPELINE=1 (เครื่องทีม .env.local + Vercel)
+    // { type: 'divider', label: '🏭 MEGA สายพาน' },
+    // { label: 'MEGA คุมสายพาน', icon: '🏭', href: '/mega', highlight: true },
+    // { label: 'เทสปกเทียบ ref', icon: '🎯', href: '/cover-ref-test' },
+    // { label: 'ทางลัดประกอบจากเคสเดิม', icon: '⚡', href: '/mega-compose-test' },
+    // { label: 'คลังปก reference + DNA', icon: '🧬', href: '/ref-covers' },
+    // { label: 'คลังงานปก MEGA', icon: '🗂️', href: '/mega-covers' },
+    // { label: 'คลังเทคนิคปกแสนไลค์', icon: '📚', href: '/cover-techniques' },
 
     // ── 🛠️ เครื่องมือข่าว ──
     { type: 'divider', label: '🛠️ เครื่องมือข่าว' },

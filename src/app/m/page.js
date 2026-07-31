@@ -1346,7 +1346,8 @@ export default function MobileApp() {
             <button className="gh" onClick={() => copyText(cur?.content || '', result.caseId || jobId)}>คัดลอกเวอร์ชันนี้</button>
             <button className="gh" onClick={() => submitNews(text || cur?.content || '', { forceNew: true })}>เจนใหม่</button>
           </div>
-          <button className="gh" style={{ marginBottom: 9 }} onClick={coverFromNews}>🖼️ ทำปกจากข่าวนี้</button>
+          {/* 🛑 31 ก.ค. 69 (เจ้าของสั่ง): ปุ่ม "ทำปกจากข่าวนี้" ถูกถอดพร้อมแท็บทำปก — ท่อ MEGA ปิดใช้งาน
+          <button className="gh" style={{ marginBottom: 9 }} onClick={coverFromNews}>🖼️ ทำปกจากข่าวนี้</button> */}
           <button className="cta" onClick={() => { setPhase('idle'); setText(''); }}>ส่งข่าวเรื่องถัดไป</button>
         </>}
       </div>}
@@ -2135,7 +2136,9 @@ export default function MobileApp() {
         <button className={'tab' + (tab === 'write' ? ' on' : '')} onClick={() => setTab('write')}>{IC.send}ส่งข่าว</button>
         <button className={'tab' + (tab === 'clip' ? ' on' : '')} onClick={() => setTab('clip')}>{IC.clip}ถอดคลิป</button>
         <button className={'tab' + (tab === 'filter' ? ' on' : '')} onClick={() => setTab('filter')}>{IC.fil}สกัดเนื้อ</button>
-        <button className={'tab' + (tab === 'cover' ? ' on' : '')} onClick={() => setTab('cover')}>{IC.img}ทำปก</button>
+        {/* 🛑 31 ก.ค. 69 (เจ้าของสั่ง): ถอดแท็บ "ทำปก" ออกจากแอพ — ท่อ MEGA ปิดใช้งานแล้ว (ดู src/lib/megaPipelineGate.js)
+            เปิดคืน: เอาคอมเมนต์ออก + ตั้ง env MEGA_PIPELINE=1 (โค้ดแท็บ/ฟังก์ชันทั้งหมดยังอยู่ครบ ไม่ได้ลบ)
+        <button className={'tab' + (tab === 'cover' ? ' on' : '')} onClick={() => setTab('cover')}>{IC.img}ทำปก</button> */}
         <button className={'tab' + (tab === 'works' ? ' on' : '')} onClick={() => setTab('works')}>{IC.lib}ผลงาน</button>
         {/* ★ 27 ก.ค. 69 (เจ้าของสั่ง): เปิดให้ทุกคนที่ล็อกอินใช้ได้แล้ว — ตัด isAdmin guard ออก */}
         <button className={'tab' + (tab === 'desk' ? ' on' : '')} onClick={() => setTab('desk')}>{IC.desk}โต๊ะข่าว</button>

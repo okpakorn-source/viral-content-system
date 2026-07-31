@@ -11,6 +11,7 @@
 // ============================================================
 
 import { NextResponse } from 'next/server';
+import { megaPipelineOff, megaOffPayload } from '@/lib/megaPipelineGate'; // 🛑 31 ก.ค. 69: ประตูปิดท่อปก
 import { newJob, updateJob } from '@/lib/megaJobStore';
 import { runCoverRefTest, runS7CaptureOnly, enqueueRefTest, _CAPTURE_HOST } from '@/lib/refTestPipeline';
 
@@ -96,5 +97,7 @@ export async function handleCoverRefTestPost({
 
 // ── thin POST wrapper — real production wiring delegates straight to the handler above ──
 export async function POST(req) {
+  // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดท่อปก MEGA) — เปิดคืน: MEGA_PIPELINE=1
+  if (megaPipelineOff()) return NextResponse.json(megaOffPayload(), { status: 503 });
   return handleCoverRefTestPost({ req });
 }

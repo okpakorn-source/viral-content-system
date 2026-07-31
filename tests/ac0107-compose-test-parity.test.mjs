@@ -56,6 +56,11 @@ let fetchBomb = 0;
 const ORIG_FETCH = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
 globalThis.fetch = () => { fetchBomb++; throw new Error('NETWORK_FORBIDDEN'); };
 
+// ★ 31 ก.ค. 69: ท่อปก MEGA ถูกตั้งให้ "ปิดเป็นค่าเริ่มต้น" ตามคำสั่งเจ้าของ (src/lib/megaPipelineGate.js)
+//   เทสไฟล์นี้ตรวจตรรกะ "ภายใน" ของ compose-test (parity ด่าน QC) ซึ่งต้องมีท่อเปิดจึงจะเดินถึงจุดที่ตรวจ
+//   → เปิดให้เฉพาะในกระบวนการเทสนี้ (ประตูปิดท่อมีเทสของตัวเองที่ tests/mega-pipeline-gate.test.mjs)
+process.env.MEGA_PIPELINE = '1';
+
 // real coverQcGate (shared hard-gate verdict) + the compose-test route under test
 const { evaluateCoverQc } = await import('../src/app/../lib/coverQcGate.js');
 const { POST } = await import('../src/app/api/mega/compose-test/route.js');

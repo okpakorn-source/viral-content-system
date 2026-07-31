@@ -15,6 +15,8 @@
 import { NextResponse } from 'next/server';
 import { Agent } from 'undici';
 import { createJob, patchJob, finishJob, listJobs, getJob, claimTeamJob, removeJob, getBootId } from '@/lib/quickTestJobs';
+// 🛑 31 ก.ค. 69: ประตูปิดท่อปก MEGA (เจ้าของสั่ง) — กรองเฉพาะงานปก ไม่แตะ desk_*/ข่าว
+import { megaPipelineOff, isCoverJobKind, megaOffPayload } from '@/lib/megaPipelineGate';
 // ★ 27 ก.ค. 69: 3 ชนิดงานโต๊ะข่าว (desk_harvest/desk_search/desk_chief) — ยืม whitelist mode จาก taxonomy เดียวกับ /api/m/desk
 import { HARVEST_MODE_KEYS, HARVEST_MODES } from '@/lib/services/newsDesk/taxonomy';
 
@@ -293,7 +295,9 @@ export async function POST(req) {
       if (IS_CLOUD) return NextResponse.json({ success: false, error: 'action run ใช้บนเครื่องทีมเท่านั้น', errorType: 'CLOUD_CANNOT_RUN' }, { status: 400 });
       // ★ 27 ก.ค. 69 (sol-review วิกฤต 2): claim แยกช่องตามคลาส (cover/desk) แบบอิสระในรอบเดียวกัน —
       //   งานคลาสหนึ่งกำลังรันยาวอยู่ ไม่กันอีกคลาสถูกหยิบ (เดิม claimTeamJob() ตัวเดียวกันข้ามคลาสหมด รันได้ทีละงานทั้งระบบ)
-      const claimedCover = await claimTeamJob(COVER_KINDS);
+      // 🛑 31 ก.ค. 69: ท่อปกปิด → ไม่ claim งานปกเลย (งานปกเก่าที่ค้างคิวจะไม่ถูกหยิบมารันเผาเงิน)
+      //    งานโต๊ะข่าวด้านล่างยังหยิบตามปกติ — คนละคลาส ไม่กระทบกัน
+      const claimedCover = megaPipelineOff() ? null : await claimTeamJob(COVER_KINDS);
       if (claimedCover) runJob(claimedCover, origin).catch(() => {});
       const claimedDesk = await claimTeamJob(DESK_KINDS);
       if (claimedDesk) runJob(claimedDesk, origin).catch(() => {});
@@ -310,6 +314,12 @@ export async function POST(req) {
     const VALID_KINDS = new Set(['ref', 'compose', 'desk_harvest', 'desk_search', 'desk_chief']);
     const kind = VALID_KINDS.has(body.kind) ? body.kind : null;
     if (!kind) return badReq('ต้องระบุ kind = compose | ref | desk_harvest | desk_search | desk_chief');
+
+    // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดท่อปก): งานปก (compose/ref) ห้ามสร้างใหม่เมื่อท่อ MEGA ปิด
+    //    desk_* (โต๊ะข่าว) ผ่านตามปกติ — คิวใช้ร่วมกันแต่คนละคลาสงาน (ดู COVER_KINDS/DESK_KINDS ด้านบน)
+    if (isCoverJobKind(kind) && megaPipelineOff()) {
+      return NextResponse.json(megaOffPayload(), { status: 503 });
+    }
 
     let input;
     let label;

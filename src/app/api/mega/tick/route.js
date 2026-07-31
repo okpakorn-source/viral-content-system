@@ -11,6 +11,7 @@
 // ============================================================
 
 import { NextResponse } from 'next/server';
+import { megaPipelineOff, megaOffPayload } from '@/lib/megaPipelineGate'; // 🛑 31 ก.ค. 69: ประตูปิดท่อปก
 import crypto from 'crypto';
 import { listJobs, getJob, updateJob, addRun, findDoneRun, listRuns, getFlags, setFlags } from '@/lib/megaJobStore';
 import { STAGE_FLOW, unclaimCard } from '@/lib/megaAdapters';
@@ -298,9 +299,18 @@ async function _runTick(req) {
   }
 }
 
+// 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดท่อปก MEGA): ประตูอยู่ตรงแกนกลาง _tickGuarded() ครอบทั้ง POST และ GET
+//    (ผู้ตรวจจับได้ว่าถ้าวางแค่ POST → cron ฝั่ง Vercel ที่ยิง GET จะยังเดินสายพานปกได้เมื่อ MEGA_CRON_TICK=1)
+//    🔴 ไม่แตะ vercel.json — cron ยิงมาได้ตามเดิม เจอประตูปิดแล้วจบทันที ไม่มีค่าใช้จ่าย ไม่กระทบ cron งานอื่น
+//    เปิดคืน: MEGA_PIPELINE=1
+async function _tickGuarded(req) {
+  if (megaPipelineOff()) return NextResponse.json(megaOffPayload(), { status: 503 });
+  return _runTick(req);
+}
+
 // worker เครื่องทีม / ปุ่มบนหน้า /mega+/cover-ref-test → เดิน 1 จังหวะ (พฤติกรรมเดิมทุก byte)
 export async function POST(req) {
-  return _runTick(req);
+  return _tickGuarded(req);
 }
 
 // ★ Q3-1: Vercel cron ยิง GET เสมอ — ปิดไว้เป็น default (สวิตช์ตามวินัยโปรเจกต์)
@@ -309,5 +319,5 @@ export async function GET(req) {
   if (process.env.MEGA_CRON_TICK !== '1') {
     return NextResponse.json({ success: true, skipped: 'MEGA_CRON_TICK ปิดอยู่' });
   }
-  return _runTick(req);
+  return _tickGuarded(req);
 }

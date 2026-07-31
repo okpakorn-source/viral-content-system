@@ -23,6 +23,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
 import { NextResponse } from 'next/server';
+import { megaPipelineOff, megaOffPayload } from '@/lib/megaPipelineGate'; // 🛑 31 ก.ค. 69: ประตูปิดท่อปก
 import { cookies } from 'next/headers';
 import { getSession } from '@/lib/auth';
 import { listMegaCovers } from '@/lib/megaCoverArchive'; // ★ 27 ก.ค. 69 (sol-review ข้อ 6): เลิก hop HTTP ไป /api/mega-covers
@@ -165,6 +166,12 @@ export async function POST(request) {
       });
       return NextResponse.json(await r.json(), { status: r.status });
     }
+
+    // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดท่อปก MEGA — แท็บ "ทำปก" ในแอพถูกถอดออกแล้วด้วย)
+    //    วางไว้ "หลัง" บล็อก delete ตามที่ผู้ตรวจชี้ — ล้างคิวงานปกค้างผ่านแอพยังทำได้ (ไม่เสียเงิน)
+    //    ปิดเฉพาะการ "สั่งงานปกใหม่" ทุกโหมดใต้บรรทัดนี้ · GET (ดูคลังปกเก่า) ยังเปิดปกติ
+    //    เปิดคืน: MEGA_PIPELINE=1
+    if (megaPipelineOff()) return NextResponse.json(megaOffPayload(), { status: 503 });
 
     // ⚡ ทางลัดประกอบ (kind='compose') — ประกอบปกจากคลังเคสเดิม ไม่ค้นรูปใหม่ เร็วกว่าเต็มท่อมาก
     // ★ 27 ก.ค. ค่ำ: เติม refId (ไม่บังคับ) — ให้ปุ่ม "ประกอบใหม่ทั้งปก"/"เปลี่ยนตัวเอก"/"เปลี่ยนต้นแบบ" ใช้ทางเดียวกันนี้ได้
