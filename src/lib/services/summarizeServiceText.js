@@ -2136,7 +2136,7 @@ ${keyPoints}
   };
 }
 
-export async function getTopPrompts({ newsTitle, text, focusAngle, workflowId, excludePromptIds = [], _cachedNewsAnalysis = null, _cachedPromptLib = null }) {
+export async function getTopPrompts({ newsTitle, text, focusAngle, workflowId, excludePromptIds = [], _cachedNewsAnalysis = null, _cachedPromptLib = null, _cachedCatalogPicks = null }) {
   console.log(`[Analyze-Service] 🧠 getTopPrompts: "${newsTitle?.slice(0, 40)}"${focusAngle ? ` | Angle: ${focusAngle.slice(0, 30)}` : ''}${excludePromptIds.length > 0 ? ` | Excluding: ${excludePromptIds.length}` : ''}${_cachedNewsAnalysis ? ' | ♻️ cached-analysis' : ''}${_cachedPromptLib ? ' | ♻️ cached-lib' : ''}`);
   let actualNewsBody = text;
   let actualNewsTitle = newsTitle;
@@ -2269,6 +2269,52 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
     };
   });
 
+  // ═══ ★ 1 ส.ค. 69 ชั้นสารบัญ 201 ใบ (เจ้าของสั่งหลังประเมิน blind 5 ข่าว: ชนะ 2 · แพ้ฉิว 1 · เลือกตรงกัน 2) ═══
+  //   luna เปิดสารบัญ "ทุกใบในคลัง" (ชื่อ + ป้ายสาระจาก data/card-essences.json) คัดเข้ารอบ 14
+  //   → ทุกการ์ดมีสิทธิ์ถูกหยิบจริง 100% แก้ปัญหา top-8 วนใบเดิม/คลังกระจุก 2 หมวด (119/201)
+  //   ทำครั้งเดียวต่อข่าว — มุมถัดไปใช้โผแคช (_cachedCatalogPicks ส่งผ่าน autoFlow) · ล้ม/เกิน 45 วิ = ถอย top-8 เดิม
+  //   ปิดชั้นนี้: CARD_CATALOG_ALL=0 · ป้ายสาระรีเฟรช: node scripts/build-card-essences.mjs
+  let _catalogPicks = Array.isArray(_cachedCatalogPicks) && _cachedCatalogPicks.length > 0 ? _cachedCatalogPicks : null;
+  if (process.env.CARD_CATALOG_ALL !== '0' && process.env.CARD_PICKER_AI !== '0'
+      && !_catalogPicks && validPrompts.length > 20 && topPrompts.length > 1) {
+    try {
+      const { loadCardEssences } = await import('@/lib/services/cardEssences');
+      const _ess = loadCardEssences();
+      const _catCards = validPrompts.filter(p => p.id);
+      const _cat = _catCards.map((p, i) => `${i + 1}. ${p.promptName}${_ess[p.id] ? ' — ' + _ess[p.id] : ''}`);
+      const _catPrompt = `คุณเป็นบรรณารักษ์คลังพร้อมท์ข่าวไวรัล — คัดการ์ดที่ "แกนเรื่องเข้ากับข่าวนี้จริง" เข้ารอบ 14 ใบ
+
+=== ข่าว (เนื้อเต็มจากผู้ใช้) ===
+${String(actualNewsBody || '').replace(/\s+/g, ' ').slice(0, 2000)}
+=== จบข่าว ===
+
+=== สารบัญทั้งคลัง ${_cat.length} ใบ ===
+${_cat.join('\n')}
+=== จบสารบัญ ===
+
+เลือก 14 ใบ เรียงจากเหมาะสุด กติกา: ดูแกนเรื่องจริง ห้ามเลือกเพราะดัง · ธีมซ้ำกันไม่เกิน 2 ใบ (เปิดมุมเขียนหลากหลาย) · ห้ามเลือกแกนเรื่องที่ข่าวไม่มี · ข่าวมีผู้เสียชีวิต→ต้องมีการ์ดรองรับการจากไปติดโผ
+ตอบ JSON: { "picks": [เลข 14 ตัว] }`;
+      const _catPick = await Promise.race([
+        callAI({
+          prompt: _catPrompt,
+          model: process.env.CARD_PICKER_MODEL || MODEL_FAST_CHEAP, // gpt-5.6-luna
+          temperature: 0.1,
+          maxTokens: 8000, // สารบัญ 201 ใบ = reasoning หนัก เพดานต่ำ=ตอบว่าง (บทเรียนเดโม: 2500 ว่างเปล่า)
+        }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('Catalog timeout 45s')), 45000)),
+      ]);
+      const _nums = (_catPick?.picks || []).map(Number).filter(n => n >= 1 && n <= _catCards.length);
+      if (_nums.length >= 2) {
+        _catalogPicks = [...new Set(_nums.map(n => _catCards[n - 1].id))];
+        console.log(`[📖 Catalog] สารบัญ ${_cat.length} ใบ → คัดเข้ารอบ ${_catalogPicks.length} ใบ`);
+      } else {
+        console.log('[📖 Catalog] คำตอบใช้ไม่ได้ — ถอยใช้ top-8 สูตรเดิม');
+      }
+    } catch (_catErr) {
+      console.warn('[📖 Catalog] ล้ม — ถอยใช้ top-8 สูตรเดิม:', _catErr.message);
+    }
+  }
+
   // ★ 1 ส.ค. 69: AI CARD PICKER (luna) ที่จุดเลือกจริงของท่ออัตโนมัติ — เจ้าของสั่งหลังประลอง 6 โมเดล
   //   (กรรมการ Fable5 ปกปิดชื่อ: luna 3/3 ไม่กลับคำ · หลักฐานสด: ข่าวอาลัยเคยถูกสูตรจับการ์ดผิดเรื่องที่ score 98)
   //   สูตรคัด top-8 → luna อ่านเนื้อการ์ดจริงเลือก 1 → ใบที่เลือกขึ้นหัวแถว (prompts[0] = ใบที่ autoFlow ใช้จริง)
@@ -2277,9 +2323,21 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
   if (process.env.CARD_PICKER_AI !== '0' && topPrompts.length > 1) {
     try {
       // ★ Opus P2-7: จับคู่ scored↔card แล้วกรองใบไร้ id ออกก่อน — กัน find เจอใบผิด/ตรรกะเทียบ id เพี้ยน
-      const _aiPairs = scoredPrompts.slice(0, 8)
-        .map(s => ({ s, pr: validPrompts[s.index] }))
-        .filter(x => x.pr && x.pr.id);
+      // ★ สารบัญ 201: มีโผสารบัญ → ผู้เข้ารอบ = โผสารบัญ ∪ สูตร top-4 (กันเหนียว, ไม่เกิน 16) · ไม่มี = top-8 สูตรเดิม
+      let _aiPairs;
+      if (Array.isArray(_catalogPicks) && _catalogPicks.length >= 2) {
+        const _byId = new Map();
+        scoredPrompts.forEach(s => { const pr = validPrompts[s.index]; if (pr?.id && !_byId.has(pr.id)) _byId.set(pr.id, { s, pr }); });
+        const _pool = [];
+        const _seen = new Set();
+        for (const id of _catalogPicks) { const hit = _byId.get(id); if (hit && !_seen.has(id)) { _seen.add(id); _pool.push(hit); } }
+        for (const s of scoredPrompts.slice(0, 4)) { const pr = validPrompts[s.index]; if (pr?.id && !_seen.has(pr.id)) { _seen.add(pr.id); _pool.push({ s, pr }); } }
+        _aiPairs = _pool.slice(0, 16);
+      } else {
+        _aiPairs = scoredPrompts.slice(0, 8)
+          .map(s => ({ s, pr: validPrompts[s.index] }))
+          .filter(x => x.pr && x.pr.id);
+      }
       if (_aiPairs.length < 2) throw new Error('การ์ดมี id ไม่พอให้ AI เลือก');
       const _aiCands = _aiPairs.map((x, i) => {
         const _body = String(x.pr.promptText || '').replace(/\s+/g, ' ').slice(0, 600);
@@ -2351,5 +2409,5 @@ ${_aiCands.join('\n')}
 
   console.log(`[Analyze-Service] 🧠 getTopPrompts: Selected Top ${topPrompts.length} Prompts`);
   
-  return { prompts: topPrompts, newsAnalysis, _promptLib: validPrompts.length > 0 ? validPrompts.map(p => ({...p})) : [] };
+  return { prompts: topPrompts, newsAnalysis, _promptLib: validPrompts.length > 0 ? validPrompts.map(p => ({...p})) : [], _catalogPicks };
 }

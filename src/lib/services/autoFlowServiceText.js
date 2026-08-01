@@ -289,7 +289,8 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   const anglePrompts = [];
   let _cachedNewsAnalysis = null;
   let _cachedPromptLib = null;
-  
+  let _cachedCatalogPicks = null; // ★ สารบัญ 201: โผเข้ารอบต่อข่าว — จ่ายค่าสารบัญครั้งเดียว มุมถัดไปใช้ซ้ำ
+
   for (const angleObj of anglesToUse) {
     const focusAngle = `${angleObj.angle_name}: ${angleObj.description}`;
     const promptsRes = await getTopPrompts({
@@ -300,14 +301,18 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
       excludePromptIds: [...usedPromptIds],
       _cachedNewsAnalysis,
       _cachedPromptLib,
+      _cachedCatalogPicks,
     }).catch(() => null);
-    
+
     // Cache จากผลลัพธ์ครั้งแรก → ใช้ซ้ำครั้งถัดไป
     if (!_cachedNewsAnalysis && promptsRes?.newsAnalysis) {
       _cachedNewsAnalysis = promptsRes.newsAnalysis;
     }
     if (!_cachedPromptLib && promptsRes?._promptLib?.length > 0) {
       _cachedPromptLib = promptsRes._promptLib;
+    }
+    if (!_cachedCatalogPicks && promptsRes?._catalogPicks?.length > 0) {
+      _cachedCatalogPicks = promptsRes._catalogPicks;
     }
     
     let topPrompt = promptsRes?.prompts?.[0] || null;
