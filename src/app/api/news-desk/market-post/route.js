@@ -6,6 +6,7 @@
  * GET → รายการล่าสุด
  */
 import { NextResponse } from 'next/server';
+import { deskPipelineOff, deskOffPayload } from '@/lib/deskPipelineGate'; // 🛑 31 ก.ค. 69: สวิตช์ปิดโต๊ะข่าวชั่วคราว (เจ้าของสั่ง)
 import { createStore } from '@/lib/persistStore';
 import { callAI } from '@/lib/ai/openai';
 import { DESK_MODEL_FAST } from '@/lib/services/deskModelConfig';
@@ -38,6 +39,8 @@ async function pullContent(url) {
 }
 
 export async function POST(request) {
+  // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดโต๊ะข่าวชั่วคราว ไม่ให้กินโทเคน) — จุดนี้เผาเงินจริง (LLM/Serper/คิวเขียน) · เปิดคืน: DESK_PIPELINE=1
+  if (deskPipelineOff()) return NextResponse.json(deskOffPayload(), { status: 503 });
   try {
     const { url, note = '', user = 'ไม่ระบุ' } = await request.json();
     if (!url || !/^https?:\/\//.test(url)) {

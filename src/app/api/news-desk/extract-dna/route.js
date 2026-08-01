@@ -6,6 +6,7 @@
  * 🔴 ใช้เฉพาะโต๊ะข่าวกลาง
  */
 import { NextResponse } from 'next/server';
+import { deskPipelineOff, deskOffPayload } from '@/lib/deskPipelineGate'; // 🛑 31 ก.ค. 69: สวิตช์ปิดโต๊ะข่าวชั่วคราว (เจ้าของสั่ง)
 import { readFile } from 'fs/promises';
 import { extractDna, getDna } from '@/lib/services/newsDesk/dnaExtractor';
 
@@ -23,6 +24,8 @@ export async function GET() {
 }
 
 export async function POST(request) {
+  // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดโต๊ะข่าวชั่วคราว ไม่ให้กินโทเคน) — จุดนี้เผาเงินจริง (LLM/Serper/คิวเขียน) · เปิดคืน: DESK_PIPELINE=1
+  if (deskPipelineOff()) return NextResponse.json(deskOffPayload(), { status: 503 });
   try {
     const body = await request.json().catch(() => ({}));
     let raw = body.csv || '';

@@ -16,6 +16,7 @@
  * 🔴 ขอบเขต: รอบนี้ "หา+คัด+เก็บลีด" เท่านั้น — การ "ส่งเข้าคิวเขียน/เผยแพร่" ยังต้องผู้ใช้อนุมัติแยก (ไม่ auto)
  */
 import { NextResponse } from 'next/server';
+import { deskPipelineOff, deskOffPayload } from '@/lib/deskPipelineGate'; // 🛑 31 ก.ค. 69: สวิตช์ปิดโต๊ะข่าวชั่วคราว (เจ้าของสั่ง)
 import { writeFeed } from '@/lib/company/companyFeed';
 
 export const runtime = 'nodejs';
@@ -27,6 +28,8 @@ const JUDGE_MAX_PER_CLUSTER = 16; // ตรงกับ ResearchTab.js (คุ�
 const KEEP_MIN_SCORE = 60;        // ตรงกับ ResearchTab.js
 
 export async function POST(request) {
+  // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดโต๊ะข่าวชั่วคราว ไม่ให้กินโทเคน) — จุดนี้เผาเงินจริง (LLM/Serper/คิวเขียน) · เปิดคืน: DESK_PIPELINE=1
+  if (deskPipelineOff()) return NextResponse.json(deskOffPayload(), { status: 503 });
   const t0 = Date.now();
   try {
     const body = await request.json().catch(() => ({}));

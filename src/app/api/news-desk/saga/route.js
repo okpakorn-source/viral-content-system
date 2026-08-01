@@ -6,6 +6,7 @@
  * 🔴 ใช้เฉพาะโต๊ะข่าวกลาง
  */
 import { NextResponse } from 'next/server';
+import { deskPipelineOff, deskOffPayload } from '@/lib/deskPipelineGate'; // 🛑 31 ก.ค. 69: สวิตช์ปิดโต๊ะข่าวชั่วคราว (เจ้าของสั่ง)
 import { getAllSagas, addSaga, deactivateSaga, detectSagas } from '@/lib/services/newsDesk/sagaTracker';
 
 export const runtime = 'nodejs';
@@ -29,6 +30,10 @@ export async function POST(request) {
     if (body.action === 'deactivate' && body.id) {
       await deactivateSaga(body.id);
       return NextResponse.json({ success: true, id: body.id, active: false });
+    }
+    // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดโต๊ะข่าวชั่วคราว): detect = LLM · deactivate (ปิดมหากาพย์ — ฟรี) ผ่านตามเดิม
+    if (body.action === 'detect' && deskPipelineOff()) {
+      return NextResponse.json(deskOffPayload(), { status: 503 });
     }
     if (body.action === 'detect') {
       // สั่งสแกนหาซากาจากโต๊ะทันที (ข้าม throttle ไม่ได้ — กันยิง AI ถี่)

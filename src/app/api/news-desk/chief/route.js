@@ -5,6 +5,7 @@
  *        → วินิจฉัยช่องว่าง → "สั่งคำค้นพิเศษ" ให้ Scout เก็บเพิ่มทันที → สรุป brief สั้นแปะหน้าโต๊ะ + Discord
  */
 import { NextResponse } from 'next/server';
+import { deskPipelineOff, deskOffPayload } from '@/lib/deskPipelineGate'; // 🛑 31 ก.ค. 69: สวิตช์ปิดโต๊ะข่าวชั่วคราว (เจ้าของสั่ง)
 import { createStore } from '@/lib/persistStore';
 import { callAI } from '@/lib/ai/openai';
 import { runHarvest } from '@/lib/services/newsDesk/harvester';
@@ -26,6 +27,8 @@ async function getWebhookUrl() {
 }
 
 export async function POST(request) {
+  // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดโต๊ะข่าวชั่วคราว ไม่ให้กินโทเคน) — จุดนี้เผาเงินจริง (LLM/Serper/คิวเขียน) · เปิดคืน: DESK_PIPELINE=1
+  if (deskPipelineOff()) return NextResponse.json(deskOffPayload(), { status: 503 });
   const prev = _chiefLock;
   let release;
   _chiefLock = new Promise((r) => (release = r));

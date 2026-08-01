@@ -8,6 +8,7 @@
  * ห้ามแตะ contract ของ /api/clip-transcript/** และ /api/queue/** — ยิงผ่าน service เท่านั้น
  */
 import { NextResponse } from 'next/server';
+import { deskPipelineOff, deskOffPayload } from '@/lib/deskPipelineGate'; // 🛑 31 ก.ค. 69: สวิตช์ปิดโต๊ะข่าวชั่วคราว (เจ้าของสั่ง)
 import {
   classifyExtractRoute,
   extractArticle,
@@ -23,6 +24,8 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 420; // คลิป (โดยเฉพาะ FB/IG ที่รอเครื่องทีม) ช้า — poll เอง 6 นาที + เผื่อ insight เสริม
 
 export async function POST(request) {
+  // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดโต๊ะข่าวชั่วคราว ไม่ให้กินโทเคน) — จุดนี้เผาเงินจริง (LLM/Serper/คิวเขียน) · เปิดคืน: DESK_PIPELINE=1
+  if (deskPipelineOff()) return NextResponse.json(deskOffPayload(), { status: 503 });
   try {
     const body = await request.json().catch(() => null);
     const action = body?.action;

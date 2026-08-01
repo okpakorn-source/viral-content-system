@@ -60,13 +60,23 @@ const { POST } = await import('../src/app/api/quick-test/route.js');
 const mkReq = (body) => ({ json: async () => body, nextUrl: { origin: 'http://test-origin' } });
 
 function reset() { globalThis.__GATE_CREATED = []; globalThis.__GATE_CLAIMS = []; }
-function withEnv(v, fn) {
+// ★ 31 ก.ค. 69 (คำสั่งที่สอง): มีสวิตช์ที่สองแล้ว DESK_PIPELINE — helper รับทั้งคู่ {mega, desk}
+//   ไม่ส่ง = ลบ env (ค่าเริ่มต้นจริง = ปิดทั้งคู่ตามคำสั่งเจ้าของ)
+function withEnv(envs, fn) {
+  const cfg = (envs && typeof envs === 'object' && !Array.isArray(envs)) ? envs : { mega: envs };
   return async () => {
-    const saved = process.env.MEGA_PIPELINE;
-    if (v === undefined) delete process.env.MEGA_PIPELINE; else process.env.MEGA_PIPELINE = v;
+    const KEYS = { mega: 'MEGA_PIPELINE', desk: 'DESK_PIPELINE' };
+    const saved = {};
+    for (const [short, name] of Object.entries(KEYS)) {
+      saved[name] = process.env[name];
+      const v = cfg[short];
+      if (v === undefined) delete process.env[name]; else process.env[name] = v;
+    }
     reset();
     try { return await fn(); } finally {
-      if (saved === undefined) delete process.env.MEGA_PIPELINE; else process.env.MEGA_PIPELINE = saved;
+      for (const name of Object.values(KEYS)) {
+        if (saved[name] === undefined) delete process.env[name]; else process.env[name] = saved[name];
+      }
     }
   };
 }
@@ -85,25 +95,63 @@ test('ท่อปิด (ค่าเริ่มต้น): kind=ref → 503 �
   assert.deepEqual(globalThis.__GATE_CREATED, []);
 }));
 
-test('🔴 ท่อปิดแล้ว งานโต๊ะข่าวต้องยังสร้างได้ปกติ (ห้ามกระทบระบบข่าว)', withEnv(undefined, async () => {
+test('🔴 สองสวิตช์อิสระ: ปกปิดแต่โต๊ะข่าวเปิด (DESK_PIPELINE=1) → งานโต๊ะข่าวสร้างได้ปกติ', withEnv({ desk: '1' }, async () => {
   const res = await POST(mkReq({ kind: 'desk_harvest', mode: 'all' }));
-  assert.notStrictEqual(res.status, 503, 'โต๊ะข่าวห้ามโดนประตูปกจับ');
+  assert.notStrictEqual(res.status, 503, 'โต๊ะข่าวเปิดอยู่ ห้ามโดนประตูปกจับ');
   assert.strictEqual(res._body.success, true);
   assert.strictEqual(globalThis.__GATE_CREATED.length, 1, 'งานโต๊ะข่าวต้องถูกสร้างจริง');
   assert.strictEqual(globalThis.__GATE_CREATED[0].kind, 'desk_harvest');
 }));
 
-test('ท่อปิด: action=run ต้องไม่ไป claim งานปก — claim เฉพาะคลาสโต๊ะข่าว', withEnv(undefined, async () => {
+test('ท่อปิด+โต๊ะเปิด: action=run ไม่ claim งานปก แต่ claim คลาสโต๊ะข่าวตามปกติ', withEnv({ desk: '1' }, async () => {
   await POST(mkReq({ action: 'run' }));
   const flat = (globalThis.__GATE_CLAIMS || []).flat();
   assert.ok(!flat.includes('compose') && !flat.includes('ref'), 'ท่อปิด = ห้ามหยิบงานปกที่ค้างคิวมารัน');
-  assert.ok(flat.includes('desk_harvest'), 'งานโต๊ะข่าวต้องยังถูกหยิบตามปกติ');
+  assert.ok(flat.includes('desk_harvest'), 'โต๊ะข่าวเปิด = ต้องยังถูกหยิบตามปกติ');
 }));
 
-test('เปิดคืนด้วย MEGA_PIPELINE=1: kind=compose กลับมาสร้างงานได้เหมือนเดิม', withEnv('1', async () => {
+test('เปิดคืนด้วย MEGA_PIPELINE=1: kind=compose กลับมาสร้างงานได้เหมือนเดิม', withEnv({ mega: '1' }, async () => {
   const res = await POST(mkReq({ kind: 'compose', caseId: 'AC-0001' }));
   assert.notStrictEqual(res.status, 503);
   assert.strictEqual(res._body.success, true);
   assert.strictEqual(globalThis.__GATE_CREATED.length, 1);
   assert.strictEqual(globalThis.__GATE_CREATED[0].kind, 'compose');
+}));
+
+// ═══ 🛑 สวิตช์ที่สอง (31 ก.ค. คำสั่งเจ้าของ): ปิดโต๊ะข่าวกลางชั่วคราว ═══
+
+test('โต๊ะข่าวปิด (ค่าเริ่มต้น): kind=desk_harvest → 503 DESK_PIPELINE_DISABLED และไม่มีงานถูกสร้าง', withEnv({}, async () => {
+  const res = await POST(mkReq({ kind: 'desk_harvest', mode: 'all' }));
+  assert.strictEqual(res.status, 503);
+  assert.strictEqual(res._body.errorType, 'DESK_PIPELINE_DISABLED');
+  assert.deepEqual(globalThis.__GATE_CREATED, [], 'โต๊ะปิด = ห้ามมีงานโต๊ะข่าวเกิดในคิว');
+}));
+
+test('โต๊ะข่าวปิด (ค่าเริ่มต้น): desk_search/desk_chief → 503 ทั้งคู่', withEnv({}, async () => {
+  const r1 = await POST(mkReq({ kind: 'desk_search', keyword: 'ทดสอบ' }));
+  const r2 = await POST(mkReq({ kind: 'desk_chief' }));
+  assert.strictEqual(r1.status, 503);
+  assert.strictEqual(r2.status, 503);
+  assert.deepEqual(globalThis.__GATE_CREATED, []);
+}));
+
+test('โต๊ะข่าวปิด: action=run ต้องไม่ claim งานโต๊ะข่าวที่ค้างคิวเลย', withEnv({}, async () => {
+  await POST(mkReq({ action: 'run' }));
+  const flat = (globalThis.__GATE_CLAIMS || []).flat();
+  assert.ok(!flat.includes('desk_harvest') && !flat.includes('desk_search') && !flat.includes('desk_chief'),
+    'โต๊ะปิด = ห้ามหยิบงานโต๊ะข่าวค้างคิวมารันเผาโทเคน');
+}));
+
+test('อิสระต่อกันจริง: MEGA=1 + โต๊ะปิด → งานปกผ่าน งานโต๊ะ 503', withEnv({ mega: '1' }, async () => {
+  const cover = await POST(mkReq({ kind: 'compose', caseId: 'AC-0002' }));
+  assert.strictEqual(cover._body.success, true, 'สวิตช์โต๊ะข่าวห้ามไปปิดงานปก');
+  const desk = await POST(mkReq({ kind: 'desk_harvest', mode: 'all' }));
+  assert.strictEqual(desk.status, 503);
+  assert.strictEqual(desk._body.errorType, 'DESK_PIPELINE_DISABLED');
+}));
+
+test('เปิดโต๊ะคืนด้วย DESK_PIPELINE=1: desk_harvest กลับมาสร้างงานได้เหมือนเดิม', withEnv({ desk: '1' }, async () => {
+  const res = await POST(mkReq({ kind: 'desk_harvest', mode: 'all' }));
+  assert.strictEqual(res._body.success, true);
+  assert.strictEqual(globalThis.__GATE_CREATED.length, 1);
 }));

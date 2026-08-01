@@ -6,6 +6,7 @@
  * → ยิงค้นจริงผ่าน src/lib/services/deskV2/researchHunt.js (ไม่มี AI ในขั้นนี้) → คืน candidates + stats
  */
 import { NextResponse } from 'next/server';
+import { deskPipelineOff, deskOffPayload } from '@/lib/deskPipelineGate'; // 🛑 31 ก.ค. 69: สวิตช์ปิดโต๊ะข่าวชั่วคราว (เจ้าของสั่ง)
 import { huntClusters } from '@/lib/services/deskV2/researchHunt.js';
 import { getPublicDiscoveryConfig } from '@/lib/services/deskV2/researchDiscoveryConfig.js';
 
@@ -32,6 +33,8 @@ export async function GET() {
 const KNOWN_CHANNELS = ['videos', 'facebook', 'tiktok', 'youtube', 'google', 'reels']; // ★ 16 ก.ค.: +google (ลิงก์ข่าวสำนักต่างๆ — ผู้ใช้สั่ง)
 
 export async function POST(request) {
+  // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดโต๊ะข่าวชั่วคราว ไม่ให้กินโทเคน) — จุดนี้เผาเงินจริง (LLM/Serper/คิวเขียน) · เปิดคืน: DESK_PIPELINE=1
+  if (deskPipelineOff()) return NextResponse.json(deskOffPayload(), { status: 503 });
   try {
     const body = await request.json().catch(() => ({}));
 

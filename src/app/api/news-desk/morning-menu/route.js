@@ -5,6 +5,7 @@
  * ไม่มี webhook → คืนเมนูเป็น JSON (ใช้ดูผ่าน browser ได้)
  */
 import { NextResponse } from 'next/server';
+import { deskPipelineOff, deskOffPayload } from '@/lib/deskPipelineGate'; // 🛑 31 ก.ค. 69: สวิตช์ปิดโต๊ะข่าวชั่วคราว (เจ้าของสั่ง)
 import { runHarvest, pruneOldItems } from '@/lib/services/newsDesk/harvester';
 import { createStore } from '@/lib/persistStore';
 import { feedbackLinks } from '@/lib/services/newsDesk/feedbackLink';
@@ -153,6 +154,10 @@ async function buildAndSend(request) {
 }
 
 export async function GET(request) {
+  // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดโต๊ะข่าวชั่วคราว ไม่ให้กินโทเคน) — จุดนี้เผาเงินจริง (LLM/Serper/คิวเขียน) · เปิดคืน: DESK_PIPELINE=1
+  //    ★ ผู้ตรวจรอบ 3: ?dry=1 = พรีวิวฟรี (ไม่ harvest ไม่ส่ง Discord — ดู buildAndSend) ต้องไม่โดนหางเลข
+  const _dry = new URL(request.url).searchParams.get('dry') === '1';
+  if (!_dry && deskPipelineOff()) return NextResponse.json(deskOffPayload(), { status: 503 });
   try { return await buildAndSend(request); }
   catch (error) {
     console.error('[MorningMenu]', error.message);
@@ -161,5 +166,7 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
+  // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดโต๊ะข่าวชั่วคราว ไม่ให้กินโทเคน) — จุดนี้เผาเงินจริง (LLM/Serper/คิวเขียน) · เปิดคืน: DESK_PIPELINE=1
+  if (deskPipelineOff()) return NextResponse.json(deskOffPayload(), { status: 503 });
   return GET(request);
 }

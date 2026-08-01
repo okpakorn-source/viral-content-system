@@ -5,6 +5,7 @@
  *  ★ แยกจากระบบทำข่าวอัตโนมัติ 100% — แค่คลังเก็บผล/รันเทส ไม่แตะ pipeline เจน
  */
 import { NextResponse } from 'next/server';
+import { deskPipelineOff, deskOffPayload } from '@/lib/deskPipelineGate'; // 🛑 31 ก.ค. 69: สวิตช์ปิดโต๊ะข่าวชั่วคราว (เจ้าของสั่ง)
 import { createStore } from '@/lib/persistStore';
 
 export const runtime = 'nodejs';
@@ -45,6 +46,8 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
+  // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดโต๊ะข่าวชั่วคราว ไม่ให้กินโทเคน) — จุดนี้เผาเงินจริง (LLM/Serper/คิวเขียน) · เปิดคืน: DESK_PIPELINE=1
+  if (deskPipelineOff()) return NextResponse.json(deskOffPayload(), { status: 503 });
   try {
     const body = await request.json().catch(() => ({}));
     if (body.action === 'runTest') {

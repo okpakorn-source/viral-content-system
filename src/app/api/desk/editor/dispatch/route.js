@@ -12,6 +12,7 @@
  * 🔴 ห้าม fire-and-forget — await dispatchOne ให้จบก่อนตอบเสมอ (บทเรียนทีม: Vercel แช่แข็ง runtime หลัง route ตอบ)
  */
 import { NextResponse } from 'next/server';
+import { deskPipelineOff } from '@/lib/deskPipelineGate'; // 🛑 31 ก.ค. 69: สวิตช์ปิดโต๊ะข่าวชั่วคราว (เจ้าของสั่ง)
 import { dispatchOne } from '@/lib/services/deskV2/editorOutbox.js';
 import { sweepDeadWork } from '@/lib/services/deskV2/deskWatchdog.js';
 
@@ -25,6 +26,12 @@ const ROUTE_SAFE_MS = (300 - 20) * 1000;
 
 export async function GET(request) {
   const t0 = Date.now();
+  // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดโต๊ะข่าวชั่วคราว ไม่ให้กินโทเคน): cron ยิงมาทุก 1 นาที —
+  //    ปิดอยู่ = ตอบ 200 เปล่าๆ ทันที (ไม่ปล่อยใบเข้าคิวเขียน + ไม่กู้งานตาย = ไม่มี LLM ถูกเรียกเลย)
+  //    ใช้ 200 ไม่ใช่ 503 เพราะ cron/ปุ่ม "↻ เช็คตอนนี้" ไม่ควรเด้ง error รัวๆ · เปิดคืน: DESK_PIPELINE=1
+  if (deskPipelineOff()) {
+    return NextResponse.json({ success: true, skipped: 'โต๊ะข่าวกลางปิดชั่วคราว (DESK_PIPELINE) — ไม่ปล่อยงาน/ไม่กู้งาน', tookMs: Date.now() - t0 });
+  }
   try {
     const origin = request.nextUrl.origin;
     const result = await dispatchOne({ origin });

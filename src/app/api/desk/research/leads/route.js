@@ -7,6 +7,7 @@
  * แผนแม่บท: artifact research-engine-plan (16 ก.ค.)
  */
 import { NextResponse } from 'next/server';
+import { deskPipelineOff, deskOffPayload } from '@/lib/deskPipelineGate'; // 🛑 31 ก.ค. 69: สวิตช์ปิดโต๊ะข่าวชั่วคราว (เจ้าของสั่ง)
 import {
   listLeads,
   leadStats,
@@ -75,6 +76,9 @@ export async function POST(request) {
     }
 
     if (action === 'sendQueue') {
+      // 🛑 31 ก.ค. 69 (ผู้ตรวจรอบ 2): ส่งลีดเข้าคิวเขียนข่าว = จุดเกิดค่าใช้จ่าย LLM ปลายทาง — โต๊ะปิด = 503
+      //    action อื่นของ route นี้ (อ่าน/เปลี่ยนสถานะลีด) ฟรี ผ่านตามเดิม · เปิดคืน: DESK_PIPELINE=1
+      if (deskPipelineOff()) return NextResponse.json(deskOffPayload(), { status: 503 });
       if (!body?.id) {
         return NextResponse.json({
           success: false,

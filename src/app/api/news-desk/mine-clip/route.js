@@ -4,6 +4,7 @@
  * ใช้ได้เฉพาะเครื่องที่มี yt-dlp (local) สำหรับ FB/IG — YouTube/TikTok ใช้ได้ทุกที่
  */
 import { NextResponse } from 'next/server';
+import { deskPipelineOff, deskOffPayload } from '@/lib/deskPipelineGate'; // 🛑 31 ก.ค. 69: สวิตช์ปิดโต๊ะข่าวชั่วคราว
 import { mineClip } from '@/lib/services/newsDesk/interviewMiner';
 import { createStore } from '@/lib/persistStore';
 
@@ -15,6 +16,10 @@ export const maxDuration = 600; // ถอดเสียงคลิปยาว
 let _mineLock = Promise.resolve();
 
 export async function POST(request) {
+  // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดโต๊ะข่าวชั่วคราว ไม่ให้กินโทเคน): ขุดนาทีทอง = โหลดคลิป+ถอด+LLM = เผาเงิน
+  //    ปิดก่อนจับล็อก/อ่าน body — งาน mineclip จากคิวกลางจะได้ 503 แล้วปิดงานตามเส้น error ปกติ ไม่มีค่าใช้จ่าย
+  //    เปิดคืน: DESK_PIPELINE=1
+  if (deskPipelineOff()) return NextResponse.json(deskOffPayload(), { status: 503 });
   const prev = _mineLock;
   let release;
   _mineLock = new Promise((r) => (release = r));

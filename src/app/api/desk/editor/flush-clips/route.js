@@ -9,6 +9,7 @@
  * 🔴 kill-switch: DESK_CLIP_FLUSH=0 (ปิดใน service — คืน disabled)
  */
 import { NextResponse } from 'next/server';
+import { deskPipelineOff } from '@/lib/deskPipelineGate'; // 🛑 31 ก.ค. 69: สวิตช์ปิดโต๊ะข่าวชั่วคราว (เจ้าของสั่ง)
 import { flushReadyClips } from '@/lib/services/deskV2/clipFlush.js';
 
 export const runtime = 'nodejs';
@@ -16,6 +17,11 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 300; // งบจริงใน service = 240s + margin ตอบกลับ
 
 export async function GET(request) {
+  // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดโต๊ะข่าวชั่วคราว): route นี้ "กลั่น+ส่งเข้าคิวเขียนอัตโนมัติ" = เผาโทเคน
+  //    ตอบ 200 เปล่าๆ (เป็น cron/ปุ่มเช็ค ไม่ควรเด้ง error) · เปิดคืน: DESK_PIPELINE=1
+  if (deskPipelineOff()) {
+    return NextResponse.json({ success: true, skipped: 'โต๊ะข่าวกลางปิดชั่วคราว (DESK_PIPELINE)' });
+  }
   try {
     const result = await flushReadyClips({ origin: request.nextUrl.origin });
     return NextResponse.json({ success: true, ...result });

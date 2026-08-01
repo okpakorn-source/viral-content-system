@@ -17,6 +17,8 @@ import { Agent } from 'undici';
 import { createJob, patchJob, finishJob, listJobs, getJob, claimTeamJob, removeJob, getBootId } from '@/lib/quickTestJobs';
 // 🛑 31 ก.ค. 69: ประตูปิดท่อปก MEGA (เจ้าของสั่ง) — กรองเฉพาะงานปก ไม่แตะ desk_*/ข่าว
 import { megaPipelineOff, isCoverJobKind, megaOffPayload } from '@/lib/megaPipelineGate';
+// 🛑 31 ก.ค. 69 (คำสั่งที่สอง): สวิตช์ปิดโต๊ะข่าวกลางชั่วคราว — กรองเฉพาะงาน desk_* (ล่าข่าว/ค้นเอง/บก.ใหญ่ = เผาโทเคน)
+import { deskPipelineOff, isDeskJobKind, deskOffPayload } from '@/lib/deskPipelineGate';
 // ★ 27 ก.ค. 69: 3 ชนิดงานโต๊ะข่าว (desk_harvest/desk_search/desk_chief) — ยืม whitelist mode จาก taxonomy เดียวกับ /api/m/desk
 import { HARVEST_MODE_KEYS, HARVEST_MODES } from '@/lib/services/newsDesk/taxonomy';
 
@@ -296,10 +298,10 @@ export async function POST(req) {
       // ★ 27 ก.ค. 69 (sol-review วิกฤต 2): claim แยกช่องตามคลาส (cover/desk) แบบอิสระในรอบเดียวกัน —
       //   งานคลาสหนึ่งกำลังรันยาวอยู่ ไม่กันอีกคลาสถูกหยิบ (เดิม claimTeamJob() ตัวเดียวกันข้ามคลาสหมด รันได้ทีละงานทั้งระบบ)
       // 🛑 31 ก.ค. 69: ท่อปกปิด → ไม่ claim งานปกเลย (งานปกเก่าที่ค้างคิวจะไม่ถูกหยิบมารันเผาเงิน)
-      //    งานโต๊ะข่าวด้านล่างยังหยิบตามปกติ — คนละคลาส ไม่กระทบกัน
+      //    งานโต๊ะข่าวก็เช่นกันเมื่อสวิตช์โต๊ะข่าวปิด (คำสั่งที่สอง 31 ก.ค.) — สองสวิตช์อิสระ คนละคลาสงาน
       const claimedCover = megaPipelineOff() ? null : await claimTeamJob(COVER_KINDS);
       if (claimedCover) runJob(claimedCover, origin).catch(() => {});
-      const claimedDesk = await claimTeamJob(DESK_KINDS);
+      const claimedDesk = deskPipelineOff() ? null : await claimTeamJob(DESK_KINDS);
       if (claimedDesk) runJob(claimedDesk, origin).catch(() => {});
       const claimed = claimedCover || claimedDesk; // ★ คงชื่อฟิลด์เดิม (worker เก่าอ่าน d.claimed/d.kind เป็นค่าเดี่ยวสำหรับล็อก)
       if (!claimed) return NextResponse.json({ success: true, claimed: null });
@@ -319,6 +321,12 @@ export async function POST(req) {
     //    desk_* (โต๊ะข่าว) ผ่านตามปกติ — คิวใช้ร่วมกันแต่คนละคลาสงาน (ดู COVER_KINDS/DESK_KINDS ด้านบน)
     if (isCoverJobKind(kind) && megaPipelineOff()) {
       return NextResponse.json(megaOffPayload(), { status: 503 });
+    }
+
+    // 🛑 31 ก.ค. 69 (คำสั่งที่สอง — ปิดโต๊ะข่าวชั่วคราว): งานโต๊ะข่าว desk_* ห้ามสร้างใหม่เมื่อสวิตช์ปิด
+    //    สองสวิตช์อิสระต่อกัน · เปิดคืน: DESK_PIPELINE=1
+    if (isDeskJobKind(kind) && deskPipelineOff()) {
+      return NextResponse.json(deskOffPayload(), { status: 503 });
     }
 
     let input;

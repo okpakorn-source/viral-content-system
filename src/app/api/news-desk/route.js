@@ -5,6 +5,7 @@
  *      ทุก action ถูกบันทึกเข้า news-desk-feedback = ข้อมูลสอน "บรรณาธิการ AI"
  */
 import { NextResponse } from 'next/server';
+import { deskPipelineOff, deskOffPayload } from '@/lib/deskPipelineGate'; // 🛑 31 ก.ค. 69: สวิตช์ปิดโต๊ะข่าวชั่วคราว (เจ้าของสั่ง)
 import { createStore } from '@/lib/persistStore';
 import { applyMixGovernor, applyDiscoveryRanking } from '@/lib/services/newsDesk/deskBrain';
 import { enrichDeskItem, isClip, LIBRARY_KEYS, CLIP_SOURCES } from '@/lib/services/newsDesk/taxonomy';
@@ -247,6 +248,13 @@ export async function POST(request) {
   try {
     const { action, id, user = 'ไม่ระบุ', enabled } = await request.json();
 
+    // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดโต๊ะข่าวชั่วคราว ไม่ให้กินโทเคน): กันเฉพาะ action ที่เผาเงิน/ส่งเข้าคิวเขียน
+    //    (consult/research/reframe = LLM+Serper · reframeAuto/autopilot = เปิดโหมดอัตโนมัติ · sendWorkflow = ส่งเข้าคิวเขียนข่าว)
+    //    การ์ดฟรีทุกตัวผ่านตามเดิม: clearBoard/restore*/claim/dismiss/sent/used/shortlist/viral/flop ฯลฯ · เปิดคืน: DESK_PIPELINE=1
+    if (['consult', 'research', 'reframe', 'reframeAuto', 'autopilot', 'sendWorkflow'].includes(action) && deskPipelineOff()) {
+      return NextResponse.json(deskOffPayload(), { status: 503 });
+    }
+
     // ★ ล้างกระดาน (15 มิ.ย. คำสั่งทีม): เก็บการ์ด 'new' เข้ากรุ — เคลียร์โต๊ะก่อนสั่งหาข่าวชุดใหม่
     //   ★ 16 มิ.ย. (แก้บั๊ก): ห้ามแตะการ์ดใน "คลังส่งเช้า" (shortlisted) — ทีมตั้งใจเก็บไว้ส่งพนักงาน!
     if (action === 'clearBoard') {
@@ -436,7 +444,9 @@ export async function POST(request) {
     await store.update(id, (ex) => ({ ...ex, ...patch }));
 
     // ★ 2 ก.ค.: กด 🔥 ปังบนเว็บ → ดึงชื่อคนเข้า Living Watchlist (เหมือนคลิกจาก Discord)
-    if (action === 'viral' && item.title) {
+    // 🛑 31 ก.ค. 69 (ผู้ตรวจรอบ 2): addFromTitle เรียก callAI จริง — ตอนโต๊ะปิดให้ "ข้ามเฉพาะส่วนเสียเงิน"
+    //    การ์ดยังถูกตีป้าย viral ตามปกติ (ของฟรี) — แค่ไม่เข้า Watchlist อัตโนมัติชั่วคราว
+    if (action === 'viral' && item.title && !deskPipelineOff()) {
       try {
         const { addFromTitle } = await import('@/lib/services/newsDesk/watchlistService');
         await Promise.race([addFromTitle(item.title, 'viral'), new Promise(r => setTimeout(r, 6000))]);

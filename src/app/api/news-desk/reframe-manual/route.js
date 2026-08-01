@@ -4,6 +4,7 @@
  *   ★ ใช้ฟังก์ชันที่มีอยู่ (extractContent/gateKeywords/classifyBatch/reframeNews) — ไม่แตะ pipeline เจนข่าวอัตโนมัติ
  */
 import { NextResponse } from 'next/server';
+import { deskPipelineOff, deskOffPayload } from '@/lib/deskPipelineGate'; // 🛑 31 ก.ค. 69: สวิตช์ปิดโต๊ะข่าวชั่วคราว (เจ้าของสั่ง)
 import { extractContent } from '@/lib/scraper';
 import { gateKeywords, classifyBatch } from '@/lib/services/newsDesk/deskBrain';
 import { reframeNews } from '@/lib/services/newsDesk/reframeEngine';
@@ -13,6 +14,8 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
 export async function POST(request) {
+  // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดโต๊ะข่าวชั่วคราว ไม่ให้กินโทเคน) — จุดนี้เผาเงินจริง (LLM/Serper/คิวเขียน) · เปิดคืน: DESK_PIPELINE=1
+  if (deskPipelineOff()) return NextResponse.json(deskOffPayload(), { status: 503 });
   try {
     const body = await request.json().catch(() => ({}));
     const input = String(body.input || '').trim();

@@ -11,6 +11,7 @@
  * ยิงผ่าน editorBrain.js/editorOutbox.js เท่านั้น
  */
 import { NextResponse } from 'next/server';
+import { deskPipelineOff, deskOffPayload } from '@/lib/deskPipelineGate'; // 🛑 31 ก.ค. 69: สวิตช์ปิดโต๊ะข่าวชั่วคราว (เจ้าของสั่ง)
 import { studyDna, editorPick, getBrainStatus, getLatestPickRun } from '@/lib/services/deskV2/editorBrain.js';
 import { listOutbox, outboxStats, cancelOutbox } from '@/lib/services/deskV2/editorOutbox.js';
 import { getClipWatch } from '@/lib/services/deskV2/clipFlush.js'; // 🎬 18 ก.ค. 69: สถานะคลิปรอถอด (audit #2/#3)
@@ -44,6 +45,12 @@ export async function POST(request) {
     const body = await request.json().catch(() => null);
     const action = body?.action;
     const modelKey = body?.model === 'fast' ? 'fast' : 'primary'; // 🔴 รับแค่ 2 ค่านี้เท่านั้น กันชื่อโมเดลดิบ
+
+    // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดโต๊ะข่าวชั่วคราว): กันเฉพาะ action เผาเงิน (study/pick = LLM+ส่งเข้าคิวเขียน)
+    //    cancelOutbox (ยกเลิกงาน — ฟรี) ยังใช้ได้ · เปิดคืน: DESK_PIPELINE=1
+    if (['study', 'pick'].includes(action) && deskPipelineOff()) {
+      return NextResponse.json(deskOffPayload(), { status: 503 });
+    }
 
     if (action === 'study') {
       const maxExemplarsRaw = Number(body?.maxExemplars);

@@ -11,6 +11,7 @@
  *   อื่นๆ ทั้งหมด                  → ส่งเป็นคำสั่งให้ บก.ใหญ่ (วิเคราะห์+จัดการ)
  */
 import { NextResponse } from 'next/server';
+import { deskPipelineOff, deskOffPayload } from '@/lib/deskPipelineGate'; // 🛑 31 ก.ค. 69: สวิตช์ปิดโต๊ะข่าวชั่วคราว (เจ้าของสั่ง)
 import { createStore } from '@/lib/persistStore';
 import { runHarvest, runEditorNow, notifyDiscord } from '@/lib/services/newsDesk/harvester';
 
@@ -44,6 +45,8 @@ async function buildStatus() {
 }
 
 export async function POST(request) {
+  // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดโต๊ะข่าวชั่วคราว ไม่ให้กินโทเคน) — จุดนี้เผาเงินจริง (LLM/Serper/คิวเขียน) · เปิดคืน: DESK_PIPELINE=1
+  if (deskPipelineOff()) return NextResponse.json(deskOffPayload(), { status: 503 });
   try {
     const { text = '', user = 'Discord' } = await request.json();
     const t = String(text).trim();

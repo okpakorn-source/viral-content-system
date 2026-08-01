@@ -7,6 +7,7 @@
  * คืนผลวิเคราะห์ดิบให้ผู้เรียก — endpoint นี้ "ไม่" เขียนลงคลังเอง
  */
 import { NextResponse } from 'next/server';
+import { deskPipelineOff, deskOffPayload } from '@/lib/deskPipelineGate'; // 🛑 31 ก.ค. 69: สวิตช์ปิดโต๊ะข่าวชั่วคราว (เจ้าของสั่ง)
 import { synthesizeRun } from '@/lib/services/deskV2/dnaSynthesis.js';
 
 export const runtime = 'nodejs';
@@ -14,6 +15,8 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
 export async function POST(request) {
+  // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดโต๊ะข่าวชั่วคราว ไม่ให้กินโทเคน) — จุดนี้เผาเงินจริง (LLM/Serper/คิวเขียน) · เปิดคืน: DESK_PIPELINE=1
+  if (deskPipelineOff()) return NextResponse.json(deskOffPayload(), { status: 503 });
   const t0 = Date.now();
   try {
     const body = await request.json().catch(() => null);

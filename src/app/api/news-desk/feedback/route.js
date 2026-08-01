@@ -5,6 +5,7 @@
  * 🔴 ใช้เฉพาะโต๊ะข่าวกลาง — เขียน store เดียวกับปุ่ม viral/flop บนเว็บ (news-desk + news-desk-feedback)
  */
 import { NextResponse } from 'next/server';
+import { deskPipelineOff } from '@/lib/deskPipelineGate'; // 🛑 31 ก.ค. 69: สวิตช์ปิดโต๊ะข่าวชั่วคราว (เจ้าของสั่ง)
 import { createStore } from '@/lib/persistStore';
 import { verifyFeedback } from '@/lib/services/newsDesk/feedbackLink';
 
@@ -54,7 +55,9 @@ export async function GET(request) {
     } catch (e) { console.log('[Feedback] fb save failed:', e.message?.slice(0, 40)); }
 
     // ★ 2 ก.ค.: โพสต์ปังจริง → ดึงชื่อคนเข้า Living Watchlist (น้ำหนัก 3) — ระบบจะเกาะคนนี้ในรอบหาข่าวถัดๆ ไป
-    if (action === 'viral' && item?.title) {
+    // 🛑 31 ก.ค. 69 (ผู้ตรวจรอบ 2): addFromTitle เรียก callAI จริง — โต๊ะปิดให้ข้ามเฉพาะส่วนเสียเงินนี้
+    //    (การบันทึก feedback ด้านบน = ของฟรี ทำไปแล้วตามปกติ) · เปิดคืน: DESK_PIPELINE=1
+    if (action === 'viral' && item?.title && !deskPipelineOff()) {
       try {
         const { addFromTitle } = await import('@/lib/services/newsDesk/watchlistService');
         await Promise.race([addFromTitle(item.title, 'viral'), new Promise(r => setTimeout(r, 6000))]);

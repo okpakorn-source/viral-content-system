@@ -4,6 +4,7 @@
  * GET  → เหมือน POST (รองรับ Vercel Cron ภายหลัง)
  */
 import { NextResponse } from 'next/server';
+import { deskPipelineOff, deskOffPayload } from '@/lib/deskPipelineGate'; // 🛑 31 ก.ค. 69: สวิตช์ปิดโต๊ะข่าวชั่วคราว (เจ้าของสั่ง)
 import { runHarvest, pruneOldItems } from '@/lib/services/newsDesk/harvester';
 import { HARVEST_MODES } from '@/lib/services/newsDesk/taxonomy'; // ★ เฟส 5: โหมดหาข่าว
 
@@ -37,7 +38,9 @@ async function doHarvest(opts) {
   }
 }
 
-export async function POST(request) { return handleHarvest(request, false); }
+export async function POST(request) {
+  // 🛑 31 ก.ค. 69 (เจ้าของสั่งปิดโต๊ะข่าวชั่วคราว ไม่ให้กินโทเคน) — จุดนี้เผาเงินจริง (LLM/Serper/คิวเขียน) · เปิดคืน: DESK_PIPELINE=1
+  if (deskPipelineOff()) return NextResponse.json(deskOffPayload(), { status: 503 }); return handleHarvest(request, false); }
 
 async function handleHarvest(request, isCron) {
   if (HARVEST_PAUSED) return pausedResponse(); // ★ พักหาข่าวใหม่ชั่วคราว
@@ -96,5 +99,8 @@ async function handleHarvest(request, isCron) {
 }
 
 export async function GET(request) {
+  // 🛑 31 ก.ค. 69 (ผู้ตรวจรอบ 2 จับได้ว่า GET หลุด): เส้น cron ล่าข่าว = Serper+LLM เต็มๆ — ปิดเท่า POST
+  //    เปิดคืน: DESK_PIPELINE=1
+  if (deskPipelineOff()) return NextResponse.json(deskOffPayload(), { status: 503 });
   return handleHarvest(request, true); // cron — สลับรอบหนัก/เบาได้ (ประหยัด Serper)
 }
