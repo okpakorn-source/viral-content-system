@@ -224,7 +224,7 @@ Respond with JSON ONLY:
           'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
         },
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
+          model: 'gpt-5.6-luna',
           messages: [{ role: 'user', content: prompt }],
           temperature: 0.3,
           max_tokens: 800,
@@ -266,14 +266,14 @@ Respond with JSON ONLY:
       });
     }
 
-    console.log(`[CoverPlanner] ✅ ${parsedSlots.length} slots planned: ${parsedSlots.map(s => `${s.slotId}→${s.evidenceCategory}`).join(', ')} (model: gpt-4o-mini)`);
+    console.log(`[CoverPlanner] ✅ ${parsedSlots.length} slots planned: ${parsedSlots.map(s => `${s.slotId}→${s.evidenceCategory}`).join(', ')} (model: gpt-5.6-luna)`);
 
     return {
       layout: templateId,
       slots: parsedSlots,
       source: 'gpt',
       dna: dnaResult,
-      modelUsed: 'gpt-4o-mini',
+      modelUsed: 'gpt-5.6-luna',
     };
   } catch (e) {
     console.warn(`[CoverPlanner] GPT-4o-mini failed (${e.message?.slice(0, 80)}) → fallback`);

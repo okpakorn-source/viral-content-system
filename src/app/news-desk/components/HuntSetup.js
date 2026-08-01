@@ -222,7 +222,7 @@ export default function HuntSetup({
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {[
               { key: 'fast', name: 'mini', tag: '★ แนะนำ', color: UI.blue },
-              { key: 'primary', name: 'gpt-5.5', tag: 'ลึกสุด', color: UI.accent },
+              { key: 'primary', name: 'gpt-5.6-sol', tag: 'ลึกสุด', color: UI.accent },
             ].map((m) => {
               const sel = model === m.key;
               return (

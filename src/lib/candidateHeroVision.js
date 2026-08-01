@@ -298,7 +298,7 @@ async function _runVisionMeasure({ candidate, deps, env }) {
     const callP = Promise.resolve().then(() => callAI({
       prompt: HERO_VISION_PROMPT,
       imageContents: [candImg], // ภาพผู้สมัครใบเดียว (ไม่ต้องมี reference บุคคล — ต่างจาก B4)
-      model: 'gpt-4o-mini',
+      model: 'gpt-5.6-luna',
       temperature: 0,
       maxTokens: 300,
       signal: controller ? controller.signal : undefined,

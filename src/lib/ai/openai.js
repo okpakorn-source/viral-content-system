@@ -163,14 +163,22 @@ PASS 5: อ่านใหม่เหมือนเป็นคนอ่าน
   console.log(`[callAI] model=${model}, temp=${temperature}, maxTokens=${maxTokens}`);
   console.log(`[callAI] prompt preview (first 500ch): ${(prompt || userPrompt || '').slice(0, 500)}`);
 
-  // ★ gpt-5.5 / gpt-5.4-mini: ใช้ max_completion_tokens + ไม่รับ temperature (ใช้ default=1 เท่านั้น)
+  // ★ ตระกูล gpt-5.x: ใช้ max_completion_tokens + ไม่รับ temperature (ใช้ default=1 เท่านั้น)
   const modelsToTry = [model];
-  if (model === 'gpt-5.5') {
-    modelsToTry.push('gpt-4o');
+  // ★ 1 ส.ค. 69 (เจ้าของสั่งโล๊ะ <5.6): โซ่ไม้สองยกชุดเป็นตระกูล 5.6 — sol↔terra, luna→terra
+  //   (เดิมทุกเส้นตกไป gpt-4o ซึ่งตาย 400 ทุกครั้งเพราะรับ completion ได้แค่ 16384)
+  if (model === 'gpt-5.6-sol') {
+    modelsToTry.push('gpt-5.6-terra');
+  } else if (model === 'gpt-5.6-terra') {
+    modelsToTry.push('gpt-5.6-sol');
+  } else if (model === 'gpt-5.6-luna') {
+    modelsToTry.push('gpt-5.6-terra');
+  } else if (model === 'gpt-5.5') {
+    modelsToTry.push('gpt-5.6-terra');
   } else if (model === 'gpt-5.4-mini') {
-    modelsToTry.push('gpt-4o-mini');
-  } else if (model !== 'gpt-4o') {
-    modelsToTry.push('gpt-4o');
+    modelsToTry.push('gpt-5.6-luna');
+  } else if (model !== 'gpt-5.6-terra') {
+    modelsToTry.push('gpt-5.6-terra');
   }
 
   let lastError = null;
@@ -178,15 +186,19 @@ PASS 5: อ่านใหม่เหมือนเป็นคนอ่าน
     try {
       console.log(`[callAI] Trying model=${currentModel}`);
       const isNewModel = currentModel.startsWith('gpt-5') || currentModel.startsWith('o1') || currentModel.startsWith('o3');
-      
+
+      // ★ 1 ส.ค. 69 (ออดิต): gpt-4o/gpt-4o-mini รับ completion สูงสุด 16384 — ส่งเพดานดิบ (เช่น 24000) ทำไม้สองตาย 400 ทุกครั้ง
+      const _legacyCap = (currentModel === 'gpt-4o' || currentModel === 'gpt-4o-mini') ? 16384 : null;
+      const _maxTokens = _legacyCap ? Math.min(maxTokens, _legacyCap) : maxTokens;
+
       const response = await client.chat.completions.create({
         model: currentModel,
         messages,
         // ★ gpt-5.x ไม่รับ temperature ≠ 1 → ไม่ส่ง (ใช้ default)
         ...(isNewModel ? {} : { temperature }),
         ...(isNewModel
-          ? { max_completion_tokens: maxTokens }
-          : { max_tokens: maxTokens }),
+          ? { max_completion_tokens: _maxTokens }
+          : { max_tokens: _maxTokens }),
         response_format: { type: 'json_object' },
       // ★ 16 ก.ค. 69 (B4): รับ AbortSignal จาก withTimeoutSignal — timeout แล้วยกเลิก HTTP จริง ตัดจ่ายซ้อน
       }, signal ? { signal } : undefined);

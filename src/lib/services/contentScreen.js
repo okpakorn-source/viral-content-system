@@ -36,7 +36,7 @@ export async function screenContent(text, kind = 'content') {
     : 'โพสต์/เนื้อหาไวรัลที่จะเก็บเป็นแม่พิมพ์ของเพจ';
   try {
     const raw = await callAI({
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-sol',
       temperature: 0.1,
       maxTokens: 1200,
       prompt: `คุณคือ บก.คัดกรองของเพจข่าวไวรัลไทย ตรวจ${subject}

@@ -36,7 +36,7 @@ export async function withRetry(fn, { retries = 6, baseMs = 2000, maxMs = 30000,
 }
 
 // ── AI client (Claude ก่อน → OpenAI) ──
-const DEFAULTS = { anthropic: 'claude-opus-4-8', openai: 'gpt-4o' };
+const DEFAULTS = { anthropic: 'claude-opus-5', openai: 'gpt-5.6-sol' }; // ★ 1 ส.ค. 69 โล๊ะรุ่นเก่า (opus-4-8→opus-5 ตามที่ aiClient ทำ 26 ก.ค. · 4o→sol)
 function resolveProvider() {
   const forced = (process.env.ANALYSIS_PROVIDER || '').toLowerCase().trim();
   const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;

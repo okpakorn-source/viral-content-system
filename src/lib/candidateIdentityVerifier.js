@@ -286,7 +286,7 @@ async function _runVisionCompare({ candidate, ref, deps, env }) {
     const callP = Promise.resolve().then(() => callAI({
       prompt: IDENTITY_PROMPT,
       imageContents: [refImg, candImg], // IMAGE 1 = reference (ยืนยันแล้ว), IMAGE 2 = candidate
-      model: 'gpt-4o-mini',
+      model: 'gpt-5.6-luna',
       temperature: 0,
       maxTokens: 300,
       signal: controller ? controller.signal : undefined,

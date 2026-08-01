@@ -6,44 +6,45 @@
  * 
  * Last updated: 2026-06-08
  * 
- * ★ STRATEGY:
- *   gpt-5.5      = สมองใหญ่ / ตัดสินใจ / คุณภาพ
- *   gpt-5.4-mini = ลูกมือ / งานเร็ว / งานเยอะ / ประหยัด
+ * ★ STRATEGY (★ 1 ส.ค. 69 — เจ้าของสั่ง "โล๊ะโมเดลต่ำกว่า 5.6 ทั้งสาย"):
+ *   gpt-5.6-sol   = สมองใหญ่ / ตัดสินใจ / คุณภาพ / เขียนข่าว
+ *   gpt-5.6-terra = ไม้สองมาตรฐานทุกจุด (A/B 16 ก.ค.: เร็ว 3 เท่า ถูกครึ่ง คุณภาพเท่า)
+ *   gpt-5.6-luna  = ลูกมือ / งานเร็ว / งานเยอะ / ประหยัด
  */
 
 // ═══════════════════════════════════════════
-// ★ กลุ่ม 1: งานหนัก — ใช้ gpt-5.5
+// ★ กลุ่ม 1: งานหนัก — ใช้ gpt-5.6-sol
 //   วิเคราะห์ข่าว, วาง Workflow, ตัดสินใจ,
 //   ตรวจคุณภาพปก, Agent คุม, เหตุผลหลายชั้น
 // ═══════════════════════════════════════════
-export const MODEL_MAIN_REASONING  = 'gpt-5.5';  // สมองหลัก — reasoning หลายชั้น
-export const MODEL_NEWS_ANALYSIS   = 'gpt-5.5';  // วิเคราะห์ข่าว (clip-insight/news-hunt/topic-hunt + ตัวสำรองขั้นเขียน ยังใช้ค่านี้)
+export const MODEL_MAIN_REASONING  = 'gpt-5.6-sol';  // สมองหลัก — reasoning หลายชั้น (★ 1 ส.ค. 69 โล๊ะ 5.5→sol)
+export const MODEL_NEWS_ANALYSIS   = 'gpt-5.6-sol';  // วิเคราะห์ข่าว (clip-insight/news-hunt/topic-hunt + ตัวสำรองขั้นเขียน ยังใช้ค่านี้)
 // ★ 16 ก.ค. 69 (B6.2 — เจ้าของเคาะ): breakdown สายข่าว text → terra ตามผล A/B
 //   (เคสจริง: terra 42.1s vs gpt-5.5 125.4s, มุมข่าว 12=12 คุณภาพเท่ากัน, ราคาครึ่งเดียว $2.5/$15)
 //   แยกค่าเฉพาะจุด — ไม่แตะ MODEL_NEWS_ANALYSIS กลาง กันระบบอื่นเปลี่ยนตามโดยไม่ตั้งใจ; ถอยกลับ = ค่าเดียวนี้
 export const MODEL_BREAKDOWN       = 'gpt-5.6-terra';
-export const MODEL_COVER_JUDGE     = 'gpt-5.5';  // ตัดสิน/ให้คะแนนปก (Curator + Judge)
-export const MODEL_FINAL_QA        = 'gpt-5.5';  // ตรวจคุณภาพขั้นสุดท้าย
-export const MODEL_CONTENT_WRITE   = 'gpt-5.5';  // เขียนเนื้อหาข่าว
+export const MODEL_COVER_JUDGE     = 'gpt-5.6-sol';  // ตัดสิน/ให้คะแนนปก (Curator + Judge)
+export const MODEL_FINAL_QA        = 'gpt-5.6-sol';  // ตรวจคุณภาพขั้นสุดท้าย
+export const MODEL_CONTENT_WRITE   = 'gpt-5.6-sol';  // เขียนเนื้อหาข่าว (★ 1 ส.ค. 69: ตัวเขียนหลักตามคำสั่งโล๊ะ — ราคาเท่า 5.5 เป๊ะ)
 
 // ═══════════════════════════════════════════
-// ★ กลุ่ม 2: งานเร็ว/ประหยัด — ใช้ gpt-5.4-mini
+// ★ กลุ่ม 2: งานเร็ว/ประหยัด — ใช้ gpt-5.6-luna
 //   สรุปสั้น, แยกคีย์เวิร์ด, จัดรูป JSON,
 //   แคปชั่นสั้น, ตรวจคำผิด, งานซ้ำจำนวนมาก
 // ═══════════════════════════════════════════
-export const MODEL_FAST_CHEAP      = 'gpt-5.4-mini';  // ลูกมือ — งานเร็ว/เยอะ
-export const MODEL_KEYWORD_EXTRACT = 'gpt-5.4-mini';  // สกัดคีย์เวิร์ด
-export const MODEL_JSON_FORMATTER  = 'gpt-5.4-mini';  // จัดรูปแบบ JSON
-export const MODEL_CAPTION_DRAFT   = 'gpt-5.4-mini';  // แคปชั่นสั้น / สรุป
-export const MODEL_SPELL_CHECK     = 'gpt-5.4-mini';  // ตรวจคำผิดเบื้องต้น
+export const MODEL_FAST_CHEAP      = 'gpt-5.6-luna';  // ลูกมือ — งานเร็ว/เยอะ (★ 1 ส.ค. 69 โล๊ะ mini→luna)
+export const MODEL_KEYWORD_EXTRACT = 'gpt-5.6-luna';  // สกัดคีย์เวิร์ด
+export const MODEL_JSON_FORMATTER  = 'gpt-5.6-luna';  // จัดรูปแบบ JSON
+export const MODEL_CAPTION_DRAFT   = 'gpt-5.6-luna';  // แคปชั่นสั้น / สรุป
+export const MODEL_SPELL_CHECK     = 'gpt-5.6-luna';  // ตรวจคำผิดเบื้องต้น
 
 // ═══════════════════════════════════════════
 // ★ Aliases — backward compatibility
 // ═══════════════════════════════════════════
-export const MODEL_PRIMARY = MODEL_MAIN_REASONING;    // = gpt-5.5
-export const MODEL_FAST    = MODEL_FAST_CHEAP;         // = gpt-5.4-mini
-export const MODEL_VISION  = 'gpt-5.5';                // ★ อัปเกรด 10 มิ.ย. 2026 (เดิม gpt-4o legacy) — OCR ไทยแม่นขึ้น
-export const MODEL_HEAVY_FALLBACK = 'gpt-4o';          // fallback เมื่อ MODEL_PRIMARY ล้มเหลว/timeout
+export const MODEL_PRIMARY = MODEL_MAIN_REASONING;    // = gpt-5.6-sol
+export const MODEL_FAST    = MODEL_FAST_CHEAP;         // = gpt-5.6-luna
+export const MODEL_VISION  = 'gpt-5.6-sol';            // ★ อัปเกรด 10 มิ.ย. 2026 (เดิม gpt-4o legacy) — OCR ไทยแม่นขึ้น · ★ 1 ส.ค. 69 โล๊ะ→sol
+export const MODEL_HEAVY_FALLBACK = 'gpt-5.6-terra';   // fallback เมื่อ MODEL_PRIMARY ล้มเหลว/timeout (★ 1 ส.ค. 69: เดิม gpt-4o ตายทุกครั้งเพราะเพดาน 16384 — terra วัดจริง ~42s)
 
 // ★ COST LOOKUP (per 1M tokens, USD)
 // ★ 16 ก.ค. 69 (B1 audit fix): แก้ราคาให้ตรงหน้าราคาจริง — ค่าเดิม gpt-5.5 3/12 ต่ำกว่าจริง

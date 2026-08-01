@@ -212,7 +212,7 @@ export async function GET(request) {
     const routeSrc = await readFile(join(process.cwd(), 'src/app/api/summarize/route.js'), 'utf-8');
     const npSrc = await readFile(join(process.cwd(), 'src/lib/input-engine/narrativePayload.js'), 'utf-8').catch(() => '');
 
-    const hasSmartMatch = routeSrc.includes('AI Smart Prompt Match') || routeSrc.includes('gpt-4o-mini');
+    const hasSmartMatch = routeSrc.includes('AI Smart Prompt Match') || (routeSrc.includes('gpt-4o-mini') || routeSrc.includes('gpt-5.6-luna'));
     // Breakdown now flows through NarrativePayload (not old direct injection)
     const hasNarrativePayload = routeSrc.includes('buildNarrativePayload') && routeSrc.includes('formatNarrativePayload');
     const hasBreakdownInNP = npSrc.includes('key_points') && npSrc.includes('possible_angles') && npSrc.includes('conflicts');

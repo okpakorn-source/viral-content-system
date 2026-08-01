@@ -12,7 +12,7 @@
 
 import { callAI } from '@/lib/ai/openai';
 
-const MODEL_POLISH = 'gpt-5.5'; // ขัดเงา = งานภาษาละเอียด ใช้ตัวเก่งสุด
+const MODEL_POLISH = 'gpt-5.6-sol'; // ขัดเงา = งานภาษาละเอียด ใช้ตัวเก่งสุด (★ 1 ส.ค. 69 โล๊ะ 5.5→sol)
 
 function numbersIn(text) {
   return [...new Set((String(text).match(/\d[\d,]{1,}/g) || []).map(n => n.replace(/,/g, '')))];

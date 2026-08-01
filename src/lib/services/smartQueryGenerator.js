@@ -104,7 +104,7 @@ ${newsText.slice(0, 1500)}
         method: 'POST',
         headers: { 'Authorization': `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
+          model: 'gpt-5.6-luna', // ★ 1 ส.ค. 69 โล๊ะ mini→luna
           messages: [{ role: 'user', content: prompt }],
           max_completion_tokens: 1500,
           response_format: { type: 'json_object' },

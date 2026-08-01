@@ -74,7 +74,7 @@ export async function scoreEvidenceConfidence(imageUrl, expectedRole, heroName) 
           'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
         },
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
+          model: 'gpt-5.6-luna',
           messages: [{
             role: 'user',
             content: [
@@ -105,7 +105,7 @@ export async function scoreEvidenceConfidence(imageUrl, expectedRole, heroName) 
     const confidence = Math.max(0, Math.min(1, Number(parsed.confidence) || 0.5));
     const isTargetPerson = parsed.isTargetPerson === true;
 
-    console.log(`[EvidenceConfidence] ${expectedRole} → ${isTargetPerson ? '✅' : '❌'} confidence: ${confidence.toFixed(2)} — ${parsed.reason || ''} (gpt-4o-mini)`);
+    console.log(`[EvidenceConfidence] ${expectedRole} → ${isTargetPerson ? '✅' : '❌'} confidence: ${confidence.toFixed(2)} — ${parsed.reason || ''} (gpt-5.6-luna)`);
 
     return { isTargetPerson, confidence, reason: parsed.reason || '' };
   } catch (e) {

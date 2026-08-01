@@ -164,7 +164,7 @@ export async function resolveRelationships(identity, newsBody = '') {
 
     const gptResult = await callAI({
       prompt: gptPrompt,
-      model: 'gpt-4o',
+      model: 'gpt-5.6-sol', // ★ 1 ส.ค. 69 โล๊ะ 4o→sol
       temperature: 0.2,
       maxTokens: 1500,
     });
@@ -188,7 +188,7 @@ export async function resolveRelationships(identity, newsBody = '') {
       relationships,
       evidenceCategories,
       source: 'gpt4o_fallback',
-      modelUsed: 'gpt-4o',
+      modelUsed: 'gpt-5.6-sol',
     };
   } catch (gptErr) {
     console.warn(`[RelationshipResolver] GPT-4o fallback also failed: ${gptErr.message?.slice(0, 60)}`);

@@ -1139,7 +1139,7 @@ JSON เท่านั้น: {"images":[{"i":1,"person":"","emotion":"","scene
       const res = await callAI({
         prompt,
         imageContents: parts.map(p => ({ type: 'image_url', image_url: { url: `data:${p.inlineData.mimeType};base64,${p.inlineData.data}`, detail: 'high' } })),
-        model: 'gpt-4o', temperature: 0, maxTokens: 900,
+        model: 'gpt-5.6-sol', temperature: 0, maxTokens: 900, // ★ 1 ส.ค. 69 โล๊ะ 4o→sol (callAI ไม่ส่ง temperature ให้ gpt-5.x เอง)
       });
       const j = typeof res === 'object' ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
       for (const im of (j?.images || [])) {
@@ -1883,7 +1883,8 @@ async function judgeWithFallback(validCandidates, imageParts, prompt, newsTitle,
   // ★ 1 ก.ค. (แก้ Judge ล่มทุกใบ→random): เดิมใช้ MODEL_VISION='gpt-5.5' (reasoning ตอบ vision-JSON ไม่ได้) → ถูกข้าม
   //   → เหลือ Claude ตัวเดียว + token น้อย คำตอบถูกตัด → "unparseable" → random ทุกใบ
   //   แก้: ใช้ gpt-4o ตรงๆ (vision นิ่ง+ตอบ JSON ดี) + token 8000 (กันตัด) + parser ทน · 🔴 cover-only
-  const VISION_JUDGE_MODEL = 'gpt-4o';
+  // ★ 1 ส.ค. 69 (เจ้าของสั่งโล๊ะ <5.6): 4o→sol — 5.6 ตอบ vision-JSON ได้ (ต่างจาก gpt-5.5 ยุคคอมเมนต์บน)
+  const VISION_JUDGE_MODEL = 'gpt-5.6-sol';
   const openaiKey = process.env.OPENAI_API_KEY;
   if (openaiKey) {
     try {
