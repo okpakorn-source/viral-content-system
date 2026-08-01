@@ -348,6 +348,9 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
   //   → ตัดมุมทิ้ง ออกน้อยเวอร์ชันแต่ไม่บิดเบือน — มุมแรกเก็บเสมอ = การันตีมีผลลัพธ์อย่างน้อย 1 เวอร์ชัน
   const MIN_ANGLE_MATCH = Math.max(0, parseInt(process.env.ANGLE_MIN_MATCH_SCORE || '45', 10) || 45);
   for (let i = anglesToUse.length - 1; i >= 1; i--) {
+    // ★ 1 ส.ค. 69 (Opus P2-A): ใบที่ luna ตั้งใจเลือก (AI_PICKED) อ่านการ์ดเต็ม+เนื้อข่าวแล้ว — ห้ามใช้คะแนนสูตร
+    //   (ที่มันตัดสินว่าด้อยกว่าอยู่แล้ว) มาโยนทิ้ง ไม่งั้นฟีเจอร์ถูกล้างเงียบๆ ในเคสที่ควรช่วยที่สุด
+    if (anglePrompts[i]?._matchType === 'AI_PICKED') continue;
     const _score = Number(anglePrompts[i]?._matchScore ?? 0);
     if (_score < MIN_ANGLE_MATCH) {
       addLog('PromptSelect', `✂️ ตัดมุม "${anglesToUse[i].angle_name}" — พร้อมท์จับคู่หลวม (score ${_score} < ${MIN_ANGLE_MATCH}) เอาเฉพาะมุมที่แมตช์จริง`);

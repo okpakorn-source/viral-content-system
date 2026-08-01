@@ -328,6 +328,9 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   //   มุมแรกเก็บเสมอ = การันตีมีผลลัพธ์อย่างน้อย 1 เวอร์ชัน
   const MIN_ANGLE_MATCH = Math.max(0, parseInt(process.env.ANGLE_MIN_MATCH_SCORE || '45', 10) || 45);
   for (let i = anglesToUse.length - 1; i >= 1; i--) {
+    // ★ 1 ส.ค. 69 (Opus P2-A): ใบที่ luna ตั้งใจเลือก (AI_PICKED) อ่านการ์ดเต็ม+เนื้อข่าวแล้ว — ห้ามใช้คะแนนสูตร
+    //   (ที่มันตัดสินว่าด้อยกว่าอยู่แล้ว) มาโยนทิ้ง ไม่งั้นฟีเจอร์ถูกล้างเงียบๆ ในเคสที่ควรช่วยที่สุด
+    if (anglePrompts[i]?._matchType === 'AI_PICKED') continue;
     const _score = Number(anglePrompts[i]?._matchScore ?? 0);
     if (_score < MIN_ANGLE_MATCH) {
       addLog('PromptSelect', `✂️ ตัดมุม "${anglesToUse[i].angle_name}" — พร้อมท์จับคู่หลวม (score ${_score} < ${MIN_ANGLE_MATCH}) เอาเฉพาะมุมที่แมตช์จริง`);
@@ -339,7 +342,8 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   // ★ 16 ก.ค. 69 (B5 — ใต้สวิตช์ REF_WEIGHT_BY_MATCH=1): มุมแรกไม่เคยมีเกต (ลูปบนเริ่ม i>=1) —
   //   winner คะแนนต่ำ/ผิดเรื่องก็ถูกยึดเป็นแกนเวอร์ชันหลัก → สลับเป็น Built-in V12 (โทนกลาง ไม่มีธีมเฉพาะ)
   //   แทนการฝืนใช้พร้อมท์ผิดเรื่อง — ยังการันตีมีผลลัพธ์ ≥1 เวอร์ชันเหมือนเดิม
-  if (process.env.REF_WEIGHT_BY_MATCH === '1' && anglePrompts[0] && anglePrompts[0].id !== 'fallback_builtin') {
+  if (process.env.REF_WEIGHT_BY_MATCH === '1' && anglePrompts[0] && anglePrompts[0].id !== 'fallback_builtin'
+      && anglePrompts[0]._matchType !== 'AI_PICKED' /* ★ Opus P2-A: ใบที่ luna เลือกห้ามถูกสลับทิ้งด้วยคะแนนสูตร */) {
     const _s0 = Number(anglePrompts[0]._matchScore ?? 0);
     if (_s0 < MIN_ANGLE_MATCH) {
       addLog('PromptSelect', `🔁 มุมแรกจับคู่หลวม (score ${_s0} < ${MIN_ANGLE_MATCH}) → ใช้ Built-in V12 แทนพร้อมท์ผิดเรื่อง (REF_WEIGHT_BY_MATCH)`);
