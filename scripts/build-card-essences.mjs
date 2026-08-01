@@ -40,6 +40,13 @@ await Promise.all(batches.map(async (b) => {
   try { Object.assign(essences, JSON.parse(j.choices?.[0]?.message?.content || '{}')); } catch {}
 }));
 
-fs.writeFileSync(essFile, JSON.stringify(essences, null, 1), 'utf8');
+// ★ Opus P2-D: กันเขียนทับด้วยของที่แย่กว่าเดิม (คีย์ผิด/เน็ตหลุด/luna ตอบว่าง → ป้ายหายเกลี้ยง)
 const done = cards.filter(c => essences[c.id]).length;
+let oldCount = 0;
+if (fs.existsSync(essFile)) { try { oldCount = Object.keys(JSON.parse(fs.readFileSync(essFile, 'utf8'))).length; } catch {} }
+if (done < oldCount) {
+  console.error(`❌ ป้ายใหม่ (${done}) น้อยกว่าไฟล์เดิม (${oldCount}) — ไม่เขียนทับ ตรวจคีย์/เน็ตแล้วรันใหม่`);
+  process.exit(1);
+}
+fs.writeFileSync(essFile, JSON.stringify(essences, null, 1), 'utf8');
 console.log(`เสร็จ: มีป้าย ${done}/${cards.length} ใบ → data/card-essences.json`);

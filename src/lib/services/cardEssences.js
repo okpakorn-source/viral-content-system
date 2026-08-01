@@ -18,6 +18,10 @@ export function loadCardEssences() {
   } catch {
     _cache = {};
   }
+  // ★ Opus P1: ถ้าไฟล์หาย (เช่น ไม่ถูก trace ขึ้น Vercel) ต้องมีเสียงเตือน — ไม่งั้นสารบัญจืดลงแบบไม่มีใครรู้
+  if (Object.keys(_cache).length === 0) {
+    console.warn('[🏷️ CardEssences] ไม่พบป้ายสาระ (data/card-essences.json ว่าง/หาย) — สารบัญจะใช้ชื่อการ์ดล้วน');
+  }
   _cacheAt = Date.now();
   return _cache;
 }

@@ -16,6 +16,11 @@ const nextConfig = {
     // ★ 15 ก.ค. (แบตช์ 4 — บัค #10): /api/cover-ref-test ประกอบปก in-process (composeAndVerify) เหมือน compose-test
     //   ต้องได้ ref-covers + คลัง ref + ฟอนต์ไทย — ไม่ trace = ตาเทียบ ref เงียบหาย + ข้อความปกเป็น □□□ บนโฮสต์
     '/api/cover-ref-test': ['./public/ref-covers/**', './data/ref-cover-library.json', './src/assets/fonts/**'],
+    // ★ 1 ส.ค. 69 (Opus P1 — กับดักเดิมรอบ 3): ป้ายสาระสารบัญการ์ดอ่านด้วย fs.readFileSync (path runtime)
+    //   ไม่ trace = บน Vercel ไฟล์หาย → สารบัญเหลือชื่อการ์ดล้วนแบบเงียบๆ (คนละตัวกับที่ผ่านการประเมิน blind)
+    '/api/auto': ['./data/card-essences.json'],
+    '/api/auto/process': ['./data/card-essences.json'],
+    '/api/queue/worker': ['./data/card-essences.json'],
   },
 };
 

@@ -311,7 +311,8 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     if (!_cachedPromptLib && promptsRes?._promptLib?.length > 0) {
       _cachedPromptLib = promptsRes._promptLib;
     }
-    if (!_cachedCatalogPicks && promptsRes?._catalogPicks?.length > 0) {
+    // ★ Opus P2-C: แคชแม้ตอนล้ม ([]) — มุมถัดไปจะได้ไม่จ่ายค่าสารบัญซ้ำเปล่าๆ
+    if (_cachedCatalogPicks === null && Array.isArray(promptsRes?._catalogPicks)) {
       _cachedCatalogPicks = promptsRes._catalogPicks;
     }
     
