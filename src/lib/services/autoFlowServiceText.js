@@ -581,6 +581,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         matchScore: (typeof usedPreset.matchScore === 'number') ? usedPreset.matchScore : null,
         matchType: usedPreset.matchType || null,
         isBorrowed: usedPreset.isBorrowed || false,
+        aiPickReason: usedPreset.aiPickReason || null, // ★ 1 ส.ค. (Opus P2-E): เหตุผล luna ต้องทะลุถึงกล่องดำ/job_queue จริง
       } : null,
       stepTimings: {
         detect: ((step1Start - step0Start) / 1000).toFixed(1),

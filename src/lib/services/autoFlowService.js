@@ -589,6 +589,14 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
         viralScore: usedPreset.viralScore || null,
         matchReason: primaryResult.debug?.promptMatchReason || '',
         newsType: newsType || '',
+        // ★ 1 ส.ค. 69 (Opus P2-E + พอร์ต B5 จากแฝด TEXT): ฟิลด์ตรวจย้อนต้องทะลุถึงกล่องดำ/job_queue
+        promptName: usedPreset.promptName || '',
+        promptId: usedPreset.promptId || null,
+        promptSource: usedPreset.promptSource || usedPreset.source || '',
+        matchScore: (typeof usedPreset.matchScore === 'number') ? usedPreset.matchScore : null,
+        matchType: usedPreset.matchType || null,
+        isBorrowed: usedPreset.isBorrowed || false,
+        aiPickReason: usedPreset.aiPickReason || null,
       } : null,
       stepTimings: {
         detect: ((step1Start - step0Start) / 1000).toFixed(1),

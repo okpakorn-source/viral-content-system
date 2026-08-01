@@ -37,13 +37,20 @@ export function bbStep(arr, layer, before, after, extra = {}) {
   } catch { /* กล่องดำห้ามทำงานจริงพัง */ }
 }
 
-/** เซฟ trace ทั้งงานลงไฟล์รายวัน (JSONL) */
+/** เซฟ trace ทั้งงานลงไฟล์รายวัน (JSONL) — วันตามเวลาไทย + เพดานไฟล์ 10MB (Opus P2-C/H) */
 export function bbSaveTrace(trace) {
   try {
     const dir = _dir();
     fs.mkdirSync(dir, { recursive: true });
-    const day = new Date().toISOString().slice(0, 10);
-    fs.appendFileSync(path.join(dir, `trace-${day}.jsonl`), JSON.stringify(trace) + '\n', 'utf8');
+    const day = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10); // วันไทย (UTC+7)
+    const file = path.join(dir, `trace-${day}.jsonl`);
+    try {
+      if (fs.existsSync(file) && fs.statSync(file).size > 10 * 1024 * 1024) {
+        console.warn('[blackbox] ไฟล์วันนี้เกิน 10MB — หยุดเก็บเพิ่มของวันนี้');
+        return false;
+      }
+    } catch {}
+    fs.appendFileSync(file, JSON.stringify(trace) + '\n', 'utf8');
     return true;
   } catch {
     return false;
@@ -58,6 +65,8 @@ export function bbLoadTraces({ id = null, limit = 20 } = {}) {
     const files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).sort().reverse().slice(0, 7);
     const out = [];
     for (const f of files) {
+      // (Opus P2-C): ไฟล์ใหญ่ผิดปกติ (>15MB) ข้าม — กันอ่านทั้งก้อนเข้าหน่วยความจำจนเครื่องอืด
+      try { if (fs.statSync(path.join(dir, f)).size > 15 * 1024 * 1024) continue; } catch { continue; }
       const lines = fs.readFileSync(path.join(dir, f), 'utf8').trim().split('\n').reverse();
       for (const ln of lines) {
         if (!ln) continue;

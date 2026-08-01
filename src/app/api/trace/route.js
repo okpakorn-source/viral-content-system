@@ -13,6 +13,12 @@ export const runtime = 'nodejs';
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
+    // ★ Opus P2-A: กล่องดำมีเนื้อข่าวก่อนเผยแพร่+ร่างดิบ — ต้องใช้กุญแจแอดมิน (fail-closed แบบเดียวกับ queue/clear)
+    const adminKey = process.env.ADMIN_API_KEY;
+    const gotKey = searchParams.get('key') || request.headers.get('x-admin-key') || '';
+    if (!adminKey || gotKey !== adminKey) {
+      return NextResponse.json({ success: false, error: 'รหัสยืนยันไม่ถูกต้อง', errorType: 'ADMIN_KEY_REQUIRED' }, { status: 403 });
+    }
     const id = searchParams.get('id') || null;
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '20', 10) || 20));
     const traces = bbLoadTraces({ id, limit });

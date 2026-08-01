@@ -51,10 +51,11 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
 
     // ★ กล่องดำต่อเวอร์ชัน — ด่านแรก: ร่างดิบตัวเขียน → เนื้อหลังจัดระเบียบ (postProcess)
     const _bb = [];
-    bbStep(_bb, 'writer→postProcess', version._rawModelDraft ?? version.content, version.content,
-      version._rawModelDraft ? {} : { note: 'ไม่มีร่างดิบแนบมา (เส้นทางเก่า)' });
 
     try {
+      // (Opus P2-F: ทุกการเรียกกล่องดำต้องอยู่ในเกราะ try — กติกา "ห้ามทำงานจริงพัง")
+      bbStep(_bb, 'writer→postProcess', version._rawModelDraft ?? version.content, version.content,
+        version._rawModelDraft ? {} : { note: 'ไม่มีร่างดิบแนบมา (เส้นทางเก่า)' });
       if (!version.content || version.content.length < 50) {
         console.log(`[Pipeline] ${vLabel}: ⏭️ Skip (content too short)`);
         return { ...version, _correctionApplied: false, _blackbox: _bb };

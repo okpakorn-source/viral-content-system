@@ -248,6 +248,14 @@ export async function POST(request) {
           });
         } catch { /* กล่องดำห้ามทำงานจริงพัง */ }
 
+        // ★ Opus P2-D: ถอดของหนักออกจาก response/คิวหลังเซฟไฟล์แล้ว (~60-90KB/งาน) — หลักฐานเต็มอยู่ในไฟล์กล่องดำ
+        try {
+          const _lite = versions.map(({ _blackbox, _rawModelDraft, ...rest }) => rest);
+          versions.length = 0;
+          versions.push(..._lite);
+          if (analysisResult && Array.isArray(analysisResult.versions)) analysisResult.versions = versions;
+        } catch { /* ถอดไม่ได้ก็ส่งของเต็ม ไม่พัง */ }
+
         // 🗄️ Auto-save to news archive — server-side ที่เดียว (web/Discord ผ่าน queue ทั้งคู่)
         if (isFromQueue) {
           saveToArchiveServerSide({
