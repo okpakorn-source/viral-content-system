@@ -1501,6 +1501,8 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
 
         // === 🔍 POST-PROCESSING QUALITY FILTERS ===
         const actualSourceText = actualNewsBody || text || '';
+        // ★ 1 ส.ค. 69 กล่องดำ: เก็บร่างดิบจากตัวเขียนก่อนโดนจัดระเบียบ/แก้คำ — หลักฐานชี้ตัวการชั้นแรก
+        versions = versions.map(v => ({ ...v, _rawModelDraft: String(v.content || v.text || v.main_post || '').slice(0, 2500) }));
         versions = postProcessVersions(versions, actualSourceText, actualNewsTitle, lenCfg);
         console.log(`[Analyze-Service] ✅ Post-processing complete: ${versions.length} versions filtered`);
 

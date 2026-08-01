@@ -15,6 +15,7 @@ import { safeCorrect, guardCoreNews } from './safeCorrectionService';
 import { checkFactPreservation } from './factPreservationCheck';
 import { editorialPolish } from './editorialPolishService';
 import { semanticSanityCheck } from './semanticSanityCheck';
+import { bbStep } from '@/lib/trace/blackbox'; // ★ 1 ส.ค. 69 กล่องดำ: เก็บ before/after ทุกด่าน — ชี้ตัวการได้ไม่ต้องเดา
 // ★ 12 มิ.ย.: FlagFixer + ViralPolish ถูกปลดออกตามคำสั่งทีม ("AI เพี้ยน — ย้อน workflow กลับแบบ 11 มิ.ย. หัวค่ำ")
 //   ไฟล์ flagFixerService.js / viralPolishService.js ยังอยู่ เผื่ออนาคต — ห้ามต่อกลับโดยไม่ผ่านทีม
 
@@ -29,7 +30,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
   // === Bypass check ===
   if (process.env.SKIP_CORRECTION === 'true') {
     console.log('[CorrectionPipeline] ⏭️ SKIPPED (SKIP_CORRECTION=true)');
-    return versions.map(v => ({ ...v, _correctionApplied: false, _correctionSkipped: true }));
+    return versions.map(v => ({ ...v, _correctionApplied: false, _correctionSkipped: true, _blackbox: [{ layer: 'skip', note: 'SKIP_CORRECTION=true' }] }));
   }
 
   if (!versions || versions.length === 0) {
@@ -48,10 +49,15 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
   const correctionTasks = workVersions.map(async (version, i) => {
     const vLabel = version._sourceLabel || version.style || `V${i + 1}`;
 
+    // ★ กล่องดำต่อเวอร์ชัน — ด่านแรก: ร่างดิบตัวเขียน → เนื้อหลังจัดระเบียบ (postProcess)
+    const _bb = [];
+    bbStep(_bb, 'writer→postProcess', version._rawModelDraft ?? version.content, version.content,
+      version._rawModelDraft ? {} : { note: 'ไม่มีร่างดิบแนบมา (เส้นทางเก่า)' });
+
     try {
       if (!version.content || version.content.length < 50) {
         console.log(`[Pipeline] ${vLabel}: ⏭️ Skip (content too short)`);
-        return { ...version, _correctionApplied: false };
+        return { ...version, _correctionApplied: false, _blackbox: _bb };
       }
 
       console.log(`\n[Pipeline] ${vLabel}: Starting...`);
@@ -81,14 +87,18 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
           cleanSemanticDebug = { checked: false, error: semErr.message };
         }
 
+        bbStep(_bb, 'L4.6-ตัดประโยค(clean)', version.content, cleanContent, { issues: cleanSemanticDebug.issues || [] });
         const { polishedContent, changes } = editorialPolish(cleanContent);
         console.log(`  L5 Polish: ${changes.length} changes (clean path)`);
+        bbStep(_bb, 'L5-ขัดเกลา(clean)', cleanContent, polishedContent, { changes: changes.length });
         // ★ 1 ส.ค. 69 (Sol รอบ 2): เส้น clean ก็วิ่งผ่าน L4.6 ที่ "ลบท่อนพังทิ้ง" ได้เหมือนกัน — ต้องผ่านเกราะเดียวกันก่อนคืน
         const _cleanGuard = guardCoreNews(version.content, polishedContent);
         if (!_cleanGuard.ok) console.warn(`  ⛔ เกราะแก่นข่าว (clean path): ${_cleanGuard.reason} — ใช้ต้นฉบับ`);
+        bbStep(_bb, 'เกราะแก่นข่าว(clean)', polishedContent, _cleanGuard.ok ? polishedContent : version.content, { verdict: _cleanGuard.ok ? 'ผ่าน' : `ย้อนต้นฉบับ:${_cleanGuard.reason}` });
         return {
           ...version,
           content: _cleanGuard.ok ? polishedContent : version.content,
+          _blackbox: _bb,
           _correctionApplied: changes.length > 0 || cleanSemanticDebug.fixed,
           _correctionDebug: {
             coreGuard: _cleanGuard.ok ? 'passed' : `reverted:${_cleanGuard.reason}`,
@@ -109,6 +119,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
       const { correctedContent, rollbackContent, corrections } = await safeCorrect(version.content, audit.issues);
       const actualCorrections = corrections.filter(c => c.type !== 'skipped_low');
       console.log(`  L3 Correct: ${actualCorrections.length} applied`);
+      bbStep(_bb, 'L3-แก้คำ', version.content, correctedContent, { corrections: actualCorrections.slice(0, 5).map(c => ({ type: c.type, text: String(c.text || '').slice(0, 60) })) });
 
       // === Layer 4: Fact Preservation ===
       const factCheck = checkFactPreservation(version.content, correctedContent, newsData || {});
@@ -116,6 +127,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
 
       // เลือก content ตาม fact check
       let safeContent = factCheck.action === 'rollback' ? rollbackContent : correctedContent;
+      bbStep(_bb, 'L4-เช็คข้อเท็จจริง', correctedContent, safeContent, { action: factCheck.action, drifts: factCheck.drifts.length });
 
       // ★ 16 ก.ค. 69 (B3): rollback = ย้อนกลับไปใช้เนื้อ "ก่อนแก้" ที่ L2 บอกไว้แล้วว่ามีคำต้องห้ามฝังอยู่
       //   เดิมส่งต่อทั้งดิบโดยไม่ล้างซ้ำ → คำเสี่ยง Facebook หลุดออกไปพร้อมป้าย "แก้แล้ว"
@@ -174,6 +186,8 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
         }
       }
 
+      bbStep(_bb, 'L4.5-ล้างสถานที่หลอน', safeContent, scrubbedContent);
+
       // === Layer 4.6: Semantic Sanity Check (AI) ===
       let semanticContent = scrubbedContent;
       let semanticDebug = { checked: false };
@@ -192,19 +206,24 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
         semanticDebug = { checked: false, error: semErr.message };
       }
 
+      bbStep(_bb, 'L4.6-ตัดประโยค', scrubbedContent, semanticContent, { issues: semanticDebug.issues || [] });
+
       // === Layer 5: Editorial Polish ===
       const { polishedContent, changes } = editorialPolish(semanticContent);
       console.log(`  L5 Polish: ${changes.length} changes`);
+      bbStep(_bb, 'L5-ขัดเกลา', semanticContent, polishedContent, { changes: changes.length });
 
       // ★ 1 ส.ค. 69 (เกราะแก่นข่าวชั้นนอกสุด — เจ้าของสั่ง "แก่นข่าวต้องไม่เสีย"):
       //   L4.6 ลบท่อนพังทิ้ง "หลัง" ด่านเช็คข้อเท็จจริง L4 โดยไม่มีใครตรวจซ้ำ (เคสจริง: "ออกจากโรงพยาบาลแล้ว...8 เดือน" หายทั้งใบ)
       //   → ด่านสุดท้ายก่อนแทนต้นฉบับ: เลขเด่นครบ + เนื้อไม่หดเกินเพดาน ไม่ผ่านข้อเดียว = ใช้ต้นฉบับทั้งใบ
       const _coreGuard = guardCoreNews(version.content, polishedContent);
       if (!_coreGuard.ok) console.warn(`  ⛔ เกราะแก่นข่าว (ชั้นท่อ): ${_coreGuard.reason} — ใช้ต้นฉบับ`);
+      bbStep(_bb, 'เกราะแก่นข่าว', polishedContent, _coreGuard.ok ? polishedContent : version.content, { verdict: _coreGuard.ok ? 'ผ่าน' : `ย้อนต้นฉบับ:${_coreGuard.reason}` });
 
       return {
         ...version,
         content: _coreGuard.ok ? polishedContent : version.content,
+        _blackbox: _bb,
         _correctionApplied: true,
         _correctionDebug: {
           coreGuard: _coreGuard.ok ? 'passed' : `reverted:${_coreGuard.reason}`,
@@ -226,10 +245,12 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
     } catch (err) {
       // ===  FAIL-SAFE: ถ้า error → ใช้ original ===
       console.error(`[Pipeline] ${vLabel}: ERROR — ${err.message}`);
+      _bb.push({ layer: 'ERROR', error: err.message });
       return {
         ...version,
         _correctionApplied: false,
         _correctionError: err.message,
+        _blackbox: _bb,
       };
     }
   });

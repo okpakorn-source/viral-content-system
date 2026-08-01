@@ -23,6 +23,7 @@ import { scrapeArticle }   from '@/lib/providers/firecrawlProvider';
 import { scrapeTikTok, scrapeFacebook } from '@/lib/providers/apifyProvider';
 import { getYouTubeData }  from '@/lib/providers/youtubeProvider';
 import { logPipeline }     from '@/lib/pipelineLogger';
+import { bbSaveTrace }     from '@/lib/trace/blackbox'; // ★ 1 ส.ค. 69 กล่องดำ workflow — สืบย้อนหลังได้ไม่ต้องเดา
 import { logGeneration }   from '@/lib/services/generationLogger';
 import { createLogger }    from '@/lib/logger';
 
@@ -225,6 +226,27 @@ export async function POST(request) {
           pipeline:     'article_pipeline_enhanced',
         };
         addLog('Route', `✅ Enhanced pipeline: ${versions.length} versions in ${legacyData.totalTimeSeconds}s`);
+
+        // 🛡️ กล่องดำ: เซฟหลักฐานทุกด่านของงานนี้ลงไฟล์ (อ่านย้อนหลังผ่าน GET /api/trace) — ห้ามทำงานจริงพัง
+        try {
+          bbSaveTrace({
+            traceId: _wfId,
+            at: new Date().toISOString(),
+            title: String(legacyData.newsData?.newsTitle || '').slice(0, 120),
+            card: {
+              id: analysisResult?.usedPreset?.promptId || null,
+              name: analysisResult?.usedPreset?.promptName || analysisResult?.usedPreset?.name || null,
+              matchType: analysisResult?.usedPreset?.matchType || null,
+              aiPickReason: analysisResult?.usedPreset?.aiPickReason || null,
+            },
+            versions: versions.map(v => ({
+              promptId: v.promptId || null,
+              rawDraft: String(v._rawModelDraft || '').slice(0, 2000),
+              blackbox: v._blackbox || [],
+              corr: v._correctionDebug || null,
+            })),
+          });
+        } catch { /* กล่องดำห้ามทำงานจริงพัง */ }
 
         // 🗄️ Auto-save to news archive — server-side ที่เดียว (web/Discord ผ่าน queue ทั้งคู่)
         if (isFromQueue) {
