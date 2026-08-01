@@ -151,6 +151,16 @@ export async function DELETE(request) {
     const id = searchParams.get('id');
     
     if (id === 'all') {
+      // ★ 1 ส.ค. 69 (ออดิต): ลบทั้งคลัง (200+ ใบ) เดิมยิงได้ไม่ต้องมีกุญแจ — ใส่ด่าน fail-closed (ไม่ตั้ง env = ปฏิเสธเสมอ) ลบรายใบไม่กระทบ
+      const adminKey = process.env.ADMIN_API_KEY;
+      const gotKey = request.headers.get('x-admin-key') || '';
+      if (!adminKey || gotKey !== adminKey) {
+        return NextResponse.json({
+          success: false,
+          error: adminKey ? 'รหัสยืนยันไม่ถูกต้อง' : 'โหมดล้างทั้งระบบถูกล็อก — ตั้ง ADMIN_API_KEY ใน env ก่อนใช้',
+          errorType: 'ADMIN_KEY_REQUIRED',
+        }, { status: 403 });
+      }
       const result = await store.removeAll();
       return NextResponse.json({ success: true, ...result });
     }

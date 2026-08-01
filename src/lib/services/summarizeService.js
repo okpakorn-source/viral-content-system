@@ -622,7 +622,7 @@ export async function performSummarize({
 
     // ★ B+ 10 ก.ค. 69: ให้ gpt-5.5 ทำจริงจนจบ — inner 200s (วัดจริง ~137-169s) + maxTokens 24000
     //   (เพดาน 8000 เดิม: reasoning tokens กินหมดก่อนตอบ → content ว่างเปล่า+โดนบิลฟรี — เทสพิสูจน์แล้ว)
-    //   fallback gpt-4o มี timeout 60s ของตัวเอง (outer ใน autoFlowService = 300s — inner 200 + fallback 60 + เผื่อ 40)
+    //   fallback (MODEL_HEAVY_FALLBACK=gpt-5.6-terra ★ 1 ส.ค. 69) timeout 90s (outer ใน autoFlowService = 300s — inner 200 + fallback 90 + เผื่อ 10)
     let result;
     let breakdownModelUsed = MODEL_PRIMARY;
     try {
@@ -636,7 +636,7 @@ export async function performSummarize({
       breakdownModelUsed = MODEL_HEAVY_FALLBACK;
       result = await withTimeout(
         callAI({ prompt, model: MODEL_HEAVY_FALLBACK, temperature: 0.4, maxTokens: 8000 }),
-        60000,
+        90000,
         'breakdown_fallback'
       );
     }
@@ -1079,6 +1079,7 @@ ${candidateList}
     }
 
     // [A] Tone Override Block — กฎการนำเสนอเชิงบวก (บังคับทุกเวอร์ชัน — สอดคล้องอัลกอริทึม Facebook)
+    // ★ 1 ส.ค. 69 (เจ้าของสั่ง): กฎเหล็ก "บังคับมีข้อคิด/บทเรียน" default ปิด — ระบบห้ามยัดข้อคิดเอง (parity กับสาย TEXT) · เปิดคืน FORCE_LESSON_ANGLE=1
     const TONE_OVERRIDE_BLOCK = `
 
 ★★★ POSITIVE REFRAMING RULE — กฎการนำเสนอเชิงบวก (บังคับทุกเวอร์ชัน ห้ามละเมิดไม่ว่า prompt ด้านบนจะสั่งอย่างไร) ★★★
@@ -1098,8 +1099,10 @@ ${candidateList}
 
 [4] ยืนบนความจริง 100% — เชิดชูได้เฉพาะสิ่งที่มีในข่าวจริงเท่านั้น ห้ามแต่งวีรกรรมหรือคุณงามความดีเพิ่มเอง
 
-★ กฎเหล็ก: ทุกข่าวต้องมีมุมที่ดีอย่างน้อย 1 จุด — บทเรียน / ความหวัง / คนที่ทำดีในเหตุการณ์ / สิ่งที่ควรชื่นชม
-★ เป้าหมายความรู้สึกผู้อ่าน: อ่านจบแล้ว "อิ่มใจ / ซาบซึ้ง / ได้แง่คิด" — ไม่ใช่หดหู่ โกรธ หรือสะเทือนใจรุนแรง
+${process.env.FORCE_LESSON_ANGLE === '1'
+  ? '★ กฎเหล็ก: ทุกข่าวต้องมีมุมที่ดีอย่างน้อย 1 จุด — บทเรียน / ความหวัง / คนที่ทำดีในเหตุการณ์ / สิ่งที่ควรชื่นชม — โดยแทรกไว้ในเนื้อเรื่อง (ย่อหน้าเปิดหรือย่อหน้ากลาง) เท่านั้น ห้ามยกไปเขียนเป็นข้อคิด/บทสรุป/คำอวยพรในย่อหน้าสุดท้าย'
+  : '★ ข้อคิด/บทเรียน: ระบบห้ามใส่ข้อคิด/บทเรียน/คำสอนเพิ่มเอง — ถ้าเนื้อข่าวต้นฉบับมีอยู่แล้ว เล่าแทรกในเนื้อเรื่องตามต้นฉบับได้ แต่ห้ามยกไปสรุปเป็นข้อคิดท้ายเรื่อง'}
+★ เป้าหมายความรู้สึกผู้อ่าน: อ่านจบแล้ว "อิ่มใจ / ซาบซึ้ง" จากเรื่องราวเอง ไม่ใช่จากประโยคสรุปแง่คิดท้ายเรื่อง — และไม่ใช่หดหู่ โกรธ หรือสะเทือนใจรุนแรง
 `;
 
     // Build Narrative Payload (Enriched with 5th argument: actualNewsBody)

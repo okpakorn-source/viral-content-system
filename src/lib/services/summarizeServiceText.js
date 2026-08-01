@@ -635,7 +635,7 @@ export async function performSummarize({
     try {
       // ★ B+ 10 ก.ค. 69: ให้ gpt-5.5 ทำจริงจนจบ — inner 200s (วัดจริง ~137-169s) + maxTokens 24000
       //   (เพดาน 8000 เดิม: reasoning tokens กินหมดก่อนตอบ → content ว่างเปล่า+โดนบิลฟรี — เทสพิสูจน์แล้ว)
-      //   fallback gpt-4o มี timeout 60s ของตัวเอง — กันลากยาวจนชน outer แล้วตายทั้ง job
+      //   fallback (MODEL_HEAVY_FALLBACK=gpt-5.6-terra ★ 1 ส.ค. 69) timeout 90s ของตัวเอง — terra วัดจริง ~42s, กันลากยาวจนชน outer 300s แล้วตายทั้ง job
       let result;
       // ★ 16 ก.ค. 69 (B6.2 — เจ้าของเคาะ): breakdown → MODEL_BREAKDOWN (gpt-5.6-terra) ตามผล A/B
       //   terra เร็วกว่า 3 เท่า มุมข่าวเท่ากัน ราคาครึ่งเดียว — inner 200s คงเดิม (terra ใช้จริง ~42s เผื่อเหลือมาก)
@@ -653,7 +653,7 @@ export async function performSummarize({
         breakdownModelUsed = MODEL_HEAVY_FALLBACK;
         result = await withTimeoutSignal(
           (signal) => callAI({ prompt, model: MODEL_HEAVY_FALLBACK, temperature: 0.4, maxTokens: 8000, signal }),
-          60000,
+          90000,
           'breakdown_fallback'
         );
       }
@@ -734,7 +734,8 @@ export async function performSummarize({
     console.log(`[Analyze-Service] newsTitle: "${(actualNewsTitle || '').slice(0,80)}", textLen: ${actualNewsBody?.length}`);
 
     let smartPrompt = presetPrompt || null;
-    let promptSource = presetPrompt ? 'library' : 'preset';
+    // ★ 1 ส.ค. 69 (ออดิต): เส้นคิวหลุดไปใช้ Built-in ต้องไม่ติดป้าย 'library' — ป้ายหลอกทำให้ดู log ไม่ออกวันที่หลุดจริง
+    let promptSource = presetPrompt ? (presetPrompt.id === 'fallback_builtin' ? 'fallback_builtin' : 'library') : 'preset';
     let promptMatchReason = presetPrompt ? `🏛️ Pre-selected: "${presetPrompt.promptName || 'Library Prompt'}"` : '';
     let newsTypeDetected = '';
     let newsAnalysis = null;
@@ -745,7 +746,7 @@ export async function performSummarize({
     //   เดิมค่า default 0/BORROWED ค้างเพราะ STAGE 1/2 ถูกข้าม → job_queue โชว์ "ยืมพร้อมท์คะแนน 0" ปลอมทุกงาน
     if (presetPrompt) {
       if (typeof presetPrompt._matchScore === 'number') selectedPromptScore = presetPrompt._matchScore;
-      matchType = presetPrompt._matchType || 'PRE_SELECTED';
+      matchType = presetPrompt._matchType || (presetPrompt.id === 'fallback_builtin' ? 'FALLBACK' : 'PRE_SELECTED');
     }
     let matchedDimensions = [];
     let whyFallbackUsed = '';
@@ -1102,6 +1103,8 @@ ${candidateList}
     }
 
     // [A] Tone Override Block — กฎการนำเสนอเชิงบวก (บังคับทุกเวอร์ชัน — สอดคล้องอัลกอริทึม Facebook)
+    // ★ 1 ส.ค. 69 (เจ้าของสั่ง): กฎเหล็ก "บังคับมีข้อคิด/บทเรียน" default ปิด — ข่าวหลากหลาย ระบบห้ามยัดข้อคิดเอง
+    //   ถ้าอยากได้ข้อคิด ให้ผู้ใช้ใส่มาในเนื้อดิบเอง · เปิดกฎเดิมคืน: FORCE_LESSON_ANGLE=1
     const TONE_OVERRIDE_BLOCK = `
 
 ★★★ POSITIVE REFRAMING RULE — กฎการนำเสนอเชิงบวก (บังคับทุกเวอร์ชัน ห้ามละเมิดไม่ว่า prompt ด้านบนจะสั่งอย่างไร) ★★★
@@ -1120,8 +1123,10 @@ ${candidateList}
 [3] ห้ามแซะ ห้ามประจาน ห้ามโจมตีบุคคลตรงๆ ห้าม toxic — ใช้สำนวนและลีลาของ prompt ด้านบนได้ แต่ intent ต้องเป็นบวกเสมอ
 
 [4] ยืนบนความจริง 100% — เชิดชูได้เฉพาะสิ่งที่มีในข่าวจริงเท่านั้น ห้ามแต่งวีรกรรมหรือคุณงามความดีเพิ่มเอง
-★ กฎเหล็ก: ทุกข่าวต้องมีมุมที่ดีอย่างน้อย 1 จุด — บทเรียน / ความหวัง / คนที่ทำดีในเหตุการณ์ / สิ่งที่ควรชื่นชม
-★ เป้าหมายความรู้สึกผู้อ่าน: อ่านจบแล้ว "อิ่มใจ / ซาบซึ้ง / ได้แง่คิด" — ไม่ใช่หดหู่ โกรธ หรือสะเทือนใจรุนแรง
+${process.env.FORCE_LESSON_ANGLE === '1'
+  ? '★ กฎเหล็ก: ทุกข่าวต้องมีมุมที่ดีอย่างน้อย 1 จุด — บทเรียน / ความหวัง / คนที่ทำดีในเหตุการณ์ / สิ่งที่ควรชื่นชม — โดยแทรกไว้ในเนื้อเรื่อง (ย่อหน้าเปิดหรือย่อหน้ากลาง) เท่านั้น ห้ามยกไปเขียนเป็นข้อคิด/บทสรุป/คำอวยพรในย่อหน้าสุดท้าย'
+  : '★ ข้อคิด/บทเรียน: ระบบห้ามใส่ข้อคิด/บทเรียน/คำสอนเพิ่มเอง — ถ้าเนื้อข่าวต้นฉบับมีอยู่แล้ว เล่าแทรกในเนื้อเรื่องตามต้นฉบับได้ แต่ห้ามยกไปสรุปเป็นข้อคิดท้ายเรื่อง'}
+★ เป้าหมายความรู้สึกผู้อ่าน: อ่านจบแล้ว "อิ่มใจ / ซาบซึ้ง" จากเรื่องราวเอง ไม่ใช่จากประโยคสรุปแง่คิดท้ายเรื่อง — และไม่ใช่หดหู่ โกรธ หรือสะเทือนใจรุนแรง
 `;
 
     // Build Narrative Payload (Enriched with 5th argument: actualNewsBody)
@@ -1557,7 +1562,9 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
                   matchScore: (typeof smartPrompt._matchScore === 'number') ? Math.round(smartPrompt._matchScore) : null,
                   matchType: smartPrompt._matchType || (smartPrompt._isBorrowed ? 'BORROWED' : 'MATCHED'),
                 }
-              : { id: 'library', name: '📦 Library', source: 'library' },
+              : (promptSource === 'fallback_builtin'
+                  ? { id: 'fallback_builtin', name: '📦 Built-in Fallback V12', source: 'fallback_builtin' }
+                  : { id: 'library', name: '📦 Library', source: 'library' }),
             usedModel: usedModel || MODEL_NEWS_ANALYSIS,
             versions,
             news_reference: result.news_reference || '',

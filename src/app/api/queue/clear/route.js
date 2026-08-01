@@ -23,6 +23,19 @@ export async function POST(req) {
       mode = body.mode || 'stale';
     } catch { /* no body = default 'stale' */ }
 
+    // ★ 1 ส.ค. 69 (ออดิต): โหมด 'all' = ล้างคิวทั้งระบบ เดิมยิงได้ไม่ต้องมีกุญแจ — ใส่ด่าน fail-closed (ไม่ตั้ง env = ปฏิเสธเสมอ) โหมด 'stale' ปกติไม่กระทบ
+    if (mode === 'all') {
+      const adminKey = process.env.ADMIN_API_KEY;
+      const gotKey = req.headers.get('x-admin-key') || '';
+      if (!adminKey || gotKey !== adminKey) {
+        return NextResponse.json({
+          success: false,
+          error: adminKey ? 'รหัสยืนยันไม่ถูกต้อง' : 'โหมดล้างทั้งระบบถูกล็อก — ตั้ง ADMIN_API_KEY ใน env ก่อนใช้',
+          errorType: 'ADMIN_KEY_REQUIRED',
+        }, { status: 403 });
+      }
+    }
+
     const store = createStore('job_queue');
     const allJobs = await store.getAll();
     

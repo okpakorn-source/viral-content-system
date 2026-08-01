@@ -56,8 +56,20 @@ export default function PromptLibraryPage() {
 
   const handleDeleteAll = async () => {
     if (!confirm('⚠️ ยืนยันลบ Prompt ทั้งหมดใช่ไหม? (การกระทำนี้ย้อนกลับไม่ได้)')) return;
+    // ★ 1 ส.ค. 69 (ออดิต): ล้างคลังทั้งหมดต้องมีรหัสยืนยัน (ADMIN_API_KEY) — ยกเลิก/ว่าง = ไม่ยิง API
+    const adminKey = window.prompt('ใส่รหัสยืนยัน (ADMIN_API_KEY) เพื่อล้างคลังทั้งหมด');
+    if (!adminKey) return;
     setLoading(true);
-    await fetch(`/api/prompt-library?id=all`, { method: 'DELETE' });
+    try {
+      const res = await fetch(`/api/prompt-library?id=all`, {
+        method: 'DELETE',
+        headers: { 'x-admin-key': adminKey },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!data.success) alert(data.error || 'ล้างคลังไม่สำเร็จ');
+    } catch (err) {
+      alert(err.message || 'ล้างคลังไม่สำเร็จ');
+    }
     loadPrompts();
   };
 
