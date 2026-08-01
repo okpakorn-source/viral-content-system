@@ -28,7 +28,8 @@ export async function callRawJSON({ prompt, model, temperature = 0.5, maxTokens 
   else if (model !== 'gpt-5.6-terra') tryModels.push('gpt-5.6-terra');
 
   let lastErr = null;
-  for (const m of tryModels) {
+  // ★ 1 ส.ค. 69 (Sol รอบ 2): กันโซ่ซ้ำตัวเอง (เช่น env ชี้ terra ตรงๆ) — dedupe ก่อนยิง
+  for (const m of [...new Set(tryModels)]) {
     try {
       const isNew = m.startsWith('gpt-5') || m.startsWith('o1') || m.startsWith('o3');
       const resp = await client.chat.completions.create({

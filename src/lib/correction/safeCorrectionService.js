@@ -10,7 +10,7 @@
 import { callAI } from '@/lib/ai/openai';
 import { MODEL_FAST } from '@/lib/ai/modelConfig';
 // ★ 1 ส.ค. 69 (เกราะแก่นข่าว): ใช้ตัวสกัด "เลขเด่น" ตัวเดียวกับ flagFixer — แหล่งความจริงเดียว ไม่ก๊อปตรรกะซ้ำ
-import { keyNumbersOf } from './flagFixerService';
+import { keyNumbersOf, hasKeyNumber } from './flagFixerService';
 
 // ═══ ★ 1 ส.ค. 69 (เกราะแก่นข่าว) ═══════════════════════════════════════════
 // เหตุ (พิสูจน์แล้ว 1 ส.ค.): เวอร์ชันที่ติดป้าย _correctionApplied=true มีเนื้อพัง —
@@ -42,11 +42,8 @@ export function guardCoreNews(originalContent, candidateContent) {
 
   if (!candidate.trim()) return { ok: false, reason: 'ผลแก้ว่างเปล่า' };
 
-  // (ก) เลขเด่นของต้นฉบับต้องอยู่ครบทุกตัว (เทียบแบบไม่สนลูกน้ำ: "1,000" = "1000")
-  const flat = (s) => s.replace(/,/g, '');
-  const flatCandidate = flat(candidate);
-  const missing = keyNumbersOf(original)
-    .filter(k => !candidate.includes(k.num) && !flatCandidate.includes(flat(k.num)));
+  // (ก) เลขเด่นของต้นฉบับต้องอยู่ครบทุกตัว — ★ Sol รอบ 2: เทียบแบบขอบเลข+ผูกหน่วย (กัน "12" แมตช์ใน "312" / "12 คน" แทน "12 เดือน")
+  const missing = keyNumbersOf(original).filter(k => !hasKeyNumber(candidate, k));
   if (missing.length > 0) {
     return { ok: false, reason: `เลขสำคัญหาย ${missing.map(k => `${k.num} ${k.unit}`).join(', ')}` };
   }

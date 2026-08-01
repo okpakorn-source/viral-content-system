@@ -83,11 +83,15 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
 
         const { polishedContent, changes } = editorialPolish(cleanContent);
         console.log(`  L5 Polish: ${changes.length} changes (clean path)`);
+        // ★ 1 ส.ค. 69 (Sol รอบ 2): เส้น clean ก็วิ่งผ่าน L4.6 ที่ "ลบท่อนพังทิ้ง" ได้เหมือนกัน — ต้องผ่านเกราะเดียวกันก่อนคืน
+        const _cleanGuard = guardCoreNews(version.content, polishedContent);
+        if (!_cleanGuard.ok) console.warn(`  ⛔ เกราะแก่นข่าว (clean path): ${_cleanGuard.reason} — ใช้ต้นฉบับ`);
         return {
           ...version,
-          content: polishedContent,
+          content: _cleanGuard.ok ? polishedContent : version.content,
           _correctionApplied: changes.length > 0 || cleanSemanticDebug.fixed,
           _correctionDebug: {
+            coreGuard: _cleanGuard.ok ? 'passed' : `reverted:${_cleanGuard.reason}`,
             auditScore: audit.auditScore,
             issuesFound: 0,
             correctionsMade: 0,
