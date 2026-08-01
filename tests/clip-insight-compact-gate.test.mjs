@@ -166,7 +166,7 @@ test('CLIP_INSIGHT_ENRICHED defaults off and never calls the second-pass service
   assert.equal(response._body.data.rawData.length, 350);
   assert.equal(response._body.data.subStories.length, 1);
   // ★ 31 ก.ค. 69 (ผู้ตรวจเสนอแทน kill-switch): ทุก record ใหม่ต้องติดป้ายรุ่นพร้อมท์ ตรวจย้อนได้
-  assert.equal(records[0]?.promptRev, 'sub-selfcontained-0801', 'record ต้องติดป้ายรุ่นพร้อมท์');
+  assert.equal(records[0]?.promptRev, 'raw-natural-0801r5', 'record ต้องติดป้ายรุ่นพร้อมท์');
 });
 
 test("CLIP_INSIGHT_ENRICHED='1' calls the second-pass service once", async () => {
