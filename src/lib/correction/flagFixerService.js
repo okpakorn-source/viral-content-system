@@ -11,6 +11,7 @@
  */
 
 import { callAI } from '@/lib/ai/openai';
+import { callClaude, isClaudeAvailable } from '@/lib/ai/claudeClient'; // ★ 1 ส.ค. 69: ชั้นเขียนแทนประโยคใช้ตัวเขียนหลัก opus-5 ก่อน
 
 const MODEL_FIX = 'gpt-5.6-terra'; // ภาษาไทยลื่นพอ + เร็ว/ถูกกว่า write-tier (★ 1 ส.ค. 69 โล๊ะ 4o→terra)
 
@@ -35,7 +36,9 @@ export function hasKeyNumber(text, k) {
   const flat = String(text || '').replace(/,/g, '');
   const num = String(k.num || '').replace(/,/g, '');
   if (!num) return true;
-  return new RegExp(`(?<!\\d)${num}(?!\\d)\\s*${k.unit}`).test(flat);
+  // ★ 1 ส.ค. 69 (Sol รอบ 3 — P1): escape metacharacter ก่อนประกอบ regex — เลขทศนิยม "12.5" เคยกลายเป็น wildcard จับ "1235" ว่าผ่าน
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<!\\d)${esc(num)}(?!\\d)\\s*${esc(String(k.unit || ''))}`).test(flat);
 }
 
 const norm = (str) => String(str || '').replace(/\s+/g, ' ').trim();
@@ -154,11 +157,7 @@ export async function fixFlaggedVersions(versions, newsData) {
       orders.push('- ประโยคเปิดผิดกฎ (ลองนึก/ขึ้นต้นด้วยวันที่) → เขียนประโยคเปิดใหม่: เปิดด้วยภาพเหตุการณ์ ตัวเลขสะดุดใจ หรือคำพูดคนในข่าว');
     }
     try {
-      const result = await callAI({
-        model: MODEL_FIX,
-        temperature: 0.4,
-        maxTokens: 3000,
-        prompt: `นี่คือโพสต์ข่าวที่เขียนเสร็จแล้ว แก้เฉพาะจุดที่สั่งเท่านั้น — ส่วนอื่นต้องเหมือนเดิมทุกตัวอักษร
+      const _fixPrompt = `นี่คือโพสต์ข่าวที่เขียนเสร็จแล้ว แก้เฉพาะจุดที่สั่งเท่านั้น — ส่วนอื่นต้องเหมือนเดิมทุกตัวอักษร
 ห้ามเพิ่ม/ลดข้อเท็จจริง ห้ามเปลี่ยนโทน ความยาวใกล้เคียงเดิม
 
 จุดที่ต้องแก้:
@@ -168,8 +167,15 @@ ${orders.join('\n')}
 ${content}
 === จบ ===
 
-ตอบ JSON เท่านั้น (callAI ของระบบรับเฉพาะ JSON): {"fixedContent":"เนื้อโพสต์ฉบับแก้แล้วทั้งหมด"}`,
-      });
+ตอบ JSON เท่านั้น: {"fixedContent":"เนื้อโพสต์ฉบับแก้แล้วทั้งหมด"}`;
+      // ★ 1 ส.ค. 69 (เจ้าของสั่ง "GPT ที่แตะภาษาตรง → opus5"): ชั้นนี้เขียนประโยคแทนจริง → claude-opus-5 ก่อน · ล้ม/ไม่มีคีย์ → terra เดิม
+      let result;
+      try {
+        if (!isClaudeAvailable()) throw new Error('no-claude-key');
+        result = await callClaude({ model: 'claude-opus-5', maxTokens: 3000, prompt: _fixPrompt });
+      } catch (_clErr) {
+        result = await callAI({ model: MODEL_FIX, temperature: 0.4, maxTokens: 3000, prompt: _fixPrompt });
+      }
       // callAI คืน object เสมอ (json_object mode) — ดึง field ออกมา (เผื่อ string ไว้กัน client เปลี่ยน)
       const fixed = String((typeof result === 'object' ? result?.fixedContent : result) || '').trim();
       const orderLeak = /^(เปิดด้วย|มุม(มอง)?\s*[:：]|แนวเปิด|สไตล์เปิด|เขียนย่อหน้า)/.test(fixed);
