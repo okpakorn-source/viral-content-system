@@ -153,6 +153,12 @@ PASS 5: อ่านใหม่เหมือนคนอ่านจริง
     }
   }
 
+  // ★ 1 ส.ค. 69 (Sol รอบ 2): refusal อาจมาพร้อม partial content — ตัดสินจาก stop_reason ตรงๆ ก่อนแตะเนื้อ
+  if (response.stop_reason === 'refusal') {
+    console.warn(`[Claude] ⚠️ refusal (${response.stop_details?.category || 'n/a'}) — ส่งต่อตัวสำรองใน chain`);
+    throw new Error('Claude ปฏิเสธคำขอ (refusal) — ใช้ตัวสำรอง');
+  }
+
   // หา text block (กันกรณีมี thinking block นำหน้าใน model ใหม่ๆ)
   const content = response.content?.find?.(b => b.type === 'text')?.text || response.content?.[0]?.text;
   
@@ -169,11 +175,6 @@ PASS 5: อ่านใหม่เหมือนคนอ่านจริง
     feature: 'callClaude'
   });
 
-  // ★ 1 ส.ค. 69: opus-5 มีด่านความปลอดภัย — ถ้าปฏิเสธ (stop_reason=refusal) ให้ล้มแบบรู้สาเหตุ → SmartAI ไหลไปตัวสำรองเอง
-  if (!content && response.stop_reason === 'refusal') {
-    console.warn(`[Claude] ⚠️ refusal (${response.stop_details?.category || 'n/a'}) — ส่งต่อตัวสำรองใน chain`);
-    throw new Error('Claude ปฏิเสธคำขอ (refusal) — ใช้ตัวสำรอง');
-  }
   if (!content) throw new Error('Claude ไม่ส่งข้อมูลกลับ');
 
   // Parse JSON จาก response

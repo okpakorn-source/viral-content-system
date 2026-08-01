@@ -26,7 +26,16 @@ export function keyNumbersOf(sourceText) {
     const num = m[1].replace(/[,\.]+$/, '');
     if (num.replace(/\D/g, '').length >= 2 || /ล้าน|แสน|หมื่น/.test(m[2])) found.push({ num, unit: m[2] });
   }
-  return [...new Map(found.map(f => [f.num, f])).values()].slice(0, 3);
+  // ★ 1 ส.ค. 69 (Sol รอบ 2): dedupe ด้วย "เลข+หน่วย" — เดิม key เลขอย่างเดียวทำ "12 เดือน" กับ "12 คน" ยุบเหลือตัวเดียว
+  return [...new Map(found.map(f => [`${f.num}|${f.unit}`, f])).values()].slice(0, 3);
+}
+
+// ★ 1 ส.ค. 69 (Sol รอบ 2): ตัวเช็ค "เลข+หน่วยยังอยู่" แบบมีขอบเลข — กัน "12" ไปแมตช์ใน "312" และผูกหน่วยกันเลขคนละเรื่อง
+export function hasKeyNumber(text, k) {
+  const flat = String(text || '').replace(/,/g, '');
+  const num = String(k.num || '').replace(/,/g, '');
+  if (!num) return true;
+  return new RegExp(`(?<!\\d)${num}(?!\\d)\\s*${k.unit}`).test(flat);
 }
 
 const norm = (str) => String(str || '').replace(/\s+/g, ' ').trim();
@@ -58,7 +67,7 @@ export function detectFlags(versions, sourceText) {
   const keyNums = keyNumbersOf(sourceText);
   versions.forEach((v, i) => {
     const c = String(v.content || '');
-    const missing = keyNums.filter(k => !c.includes(k.num));
+    const missing = keyNums.filter(k => !hasKeyNumber(c, k)); // ★ 1 ส.ค. 69 (Sol รอบ 2): เช็คแบบขอบเลข+หน่วย
     if (missing.length > 0 && keyNums.length > 0 && missing.length >= keyNums.length) {
       // หาย"ทุกตัว" เท่านั้นถึงสั่งแก้ — หายบางตัวอาจเป็นการเลือกมุมเล่าโดยตั้งใจ
       problems[i].push('missing_numbers');
@@ -168,8 +177,7 @@ ${content}
         // ★ 1 ส.ค. 69 (เกราะแก่นข่าว): ผลแก้ต้องไม่ทำ "เลขเด่นที่เวอร์ชันนี้มีอยู่แล้ว" หายไปแม้ตัวเดียว
         //   (เทียบแบบไม่สนลูกน้ำ: "1,000" = "1000") — หายเมื่อไหร่ = ทิ้งผลแก้ ใช้ต้นฉบับของเวอร์ชันนั้น
         //   เจตนา: อย่างแย่สุดที่ยอมได้คือ "ธงยังไม่ถูกแก้" ไม่ใช่ "แก่นข่าวหาย"
-        const flat = (s) => String(s).replace(/,/g, '');
-        const lostNums = keyNumbersOf(content).filter(k => !fixed.includes(k.num) && !flat(fixed).includes(flat(k.num)));
+        const lostNums = keyNumbersOf(content).filter(k => !hasKeyNumber(fixed, k)); // ★ Sol รอบ 2: ขอบเลข+หน่วย
         if (lostNums.length > 0) {
           console.warn(`[Correction] ⛔ เกราะแก่นข่าว: V${i + 1} ผลแก้ทำเลขสำคัญหาย (${lostNums.map(k => `${k.num} ${k.unit}`).join(', ')}) — ใช้ต้นฉบับ`);
           return v;
