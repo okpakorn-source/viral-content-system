@@ -14,6 +14,7 @@
 
 import { callAI } from '@/lib/ai/openai';
 import { MODEL_FAST } from '@/lib/ai/modelConfig';
+import { callClaude, isClaudeAvailable } from '@/lib/ai/claudeClient'; // ★ 1 ส.ค. 69: ชั้นตัดสิน/ตัดประโยคจริง → opus-5 ก่อน
 
 const SANITY_CHECK_PROMPT = `คุณเป็นบรรณาธิการภาษาไทยระดับสูง ตรวจสอบเนื้อหาด้านล่างว่ามี "ประโยคที่ไร้ความหมาย" หรือ "คำผิดร้ายแรง" หรือไม่
 
@@ -59,12 +60,14 @@ export async function semanticSanityCheck(content) {
   try {
     const prompt = SANITY_CHECK_PROMPT.replace('{CONTENT}', content);
 
-    const result = await callAI({
-      model: MODEL_FAST,
-      temperature: 0.1,
-      maxTokens: 500,
-      prompt,
-    });
+    // ★ 1 ส.ค. 69 (เจ้าของสั่ง "GPT ที่แตะภาษาตรง → opus5"): ชั้นนี้ชี้ประโยคที่จะถูกตัดจริง → claude-opus-5 ก่อน · ล้ม/ไม่มีคีย์ → luna เดิม
+    let result;
+    try {
+      if (!isClaudeAvailable()) throw new Error('no-claude-key');
+      result = await callClaude({ model: 'claude-opus-5', maxTokens: 800, prompt });
+    } catch (_clErr) {
+      result = await callAI({ model: MODEL_FAST, temperature: 0.1, maxTokens: 500, prompt });
+    }
 
     if (!result || !result.hasIssues || !Array.isArray(result.issues) || result.issues.length === 0) {
       return { sanitizedContent: content, issuesFound: [], fixed: false };

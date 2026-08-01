@@ -62,7 +62,8 @@ const _isOverload = (e) => {
  * เรียก Gemini — ส่ง prompt + response เป็น JSON
  * เหมาะสำหรับ: extraction, summarization, fast tasks
  */
-export async function callGemini({ prompt, model = 'gemini-3.5-flash', temperature = 0.3, maxTokens = 4000 }) {
+// ★ 1 ส.ค. 69 (เจ้าของสั่ง): สายข่าว text → gemini-3.6-flash (ใหม่ ไว ไม่ล่ม) · ถอยกลับ: GEMINI_TEXT_MODEL=gemini-3.5-flash
+export async function callGemini({ prompt, model = process.env.GEMINI_TEXT_MODEL || 'gemini-3.6-flash', temperature = 0.3, maxTokens = 4000 }) {
   const client = getGeminiClient();
   if (!client) throw new Error('GEMINI_API_KEY ไม่ได้ตั้งค่า — ไปตั้งค่าที่ Settings');
 
