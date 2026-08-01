@@ -12,7 +12,7 @@ import { clusterMatch, findClusterScore, mapCategory, EMOTION_CLUSTERS, CONFLICT
 import { MODEL_PRIMARY, MODEL_FAST, MODEL_HEAVY_FALLBACK } from '@/lib/ai/modelConfig';
 import { withTimeout } from '@/lib/utils/withTimeout';
 
-const MODEL_GEMINI_PRO = 'gemini-3.5-flash'; // ★ อัปเกรด 10 มิ.ย. 2026 (เดิม gemini-2.5-pro เก่า 2 รุ่น)
+const MODEL_GEMINI_PRO = 'gemini-3.6-flash'; // ★ 1 ส.ค. 69 เจ้าของสั่ง 3.5→3.6 (ใหม่ ไว ไม่ล่ม)
 
 // ═══════════════════════════════════════════════════════════
 // 🔍 POST-PROCESSING QUALITY FILTERS
@@ -930,15 +930,28 @@ export async function performSummarize({
             promptMatchReason = `Engine match error: ${scorerErr.message}`;
           }
 
-          // --- STAGE 2.5: AI SEMANTIC FALLBACK (Gemini Flash) ---
-          // Only triggers when Stage 2 result is BORROWED (score < 40)
-          if (matchType === 'BORROWED' && smartPrompt && top10PromptScores.length > 0) {
-            console.log(`[Analyze-Service] 🤖 STAGE 2.5: AI Semantic Fallback triggered (matchType=BORROWED, score=${selectedPromptScore.toFixed(1)})`);
+          // --- STAGE 2.5: AI CARD PICKER (luna) ---
+          // ★ 1 ส.ค. 69: ยกระดับจาก "fallback เฉพาะ BORROWED" → สมองเลือกการ์ดทุกข่าว (เจ้าของสั่งหลังประลอง 6 โมเดล
+          //   กรรมการ Fable5 ปกปิดชื่อ: luna ถูก 3/3 ไม่กลับคำ · gemini 0.5/3 ห้ามนำ — memory: card-picker-brain-verdict)
+          //   ปิดคืนพฤติกรรมเดิม (AI เฉพาะ BORROWED): CARD_PICKER_AI=0 · เปลี่ยนสมอง: CARD_PICKER_MODEL
+          // หมายเหตุเส้นทาง (Opus ตรวจ 1 ส.ค.): สายคิว/autoFlow ส่ง presetPrompt มาเสมอ → บล็อกนี้ทำงานเฉพาะสายเรียกตรง
+          //   สมองเลือกการ์ดของท่ออัตโนมัติจริงอยู่ที่ getTopPrompts (ท้ายไฟล์นี้)
+          const _aiPickerOn = process.env.CARD_PICKER_AI !== '0';
+          const _legacyTrigger = matchType === 'BORROWED' && top10PromptScores.length > 0;
+          if (smartPrompt && (_aiPickerOn ? top10PromptScores.length > 1 : _legacyTrigger)) {
+            console.log(`[Analyze-Service] 🤖 STAGE 2.5: AI Card Picker (${_aiPickerOn ? 'always-on' : 'BORROWED-fallback'}, formula=${matchType}, score=${selectedPromptScore.toFixed(1)})`);
             try {
-              const top5Candidates = top10PromptScores.slice(0, 5);
-              const candidateList = top5Candidates.map((c, i) => 
-                `${i + 1}. "${c.name}" (id: ${c.id}) — Score: ${c.score.toFixed(1)}, Dimensions: ${c.matchedDimensions.join(', ')}`
-              ).join('\n');
+              const topCandidates = top10PromptScores.slice(0, _aiPickerOn ? 8 : 5);
+              // ★ โหมดใหม่: ป้อนเนื้อการ์ดจริง 600 ตัวอักษร (ผลประลอง: ผู้ชนะคือสมองที่อ่านเนื้อการ์ดจริง)
+              //   โหมดสวิตช์ปิด: คงรูปแบบเดิมของสาย URL เป๊ะ (ชื่อ+คะแนน+มิติ เท่านั้น)
+              const candidateList = topCandidates.map((c, i) => {
+                if (!_aiPickerOn) {
+                  return `${i + 1}. "${c.name}" (id: ${c.id}) — Score: ${c.score.toFixed(1)}, Dimensions: ${c.matchedDimensions.join(', ')}`;
+                }
+                const _full = validPrompts.find(vp => vp.id && vp.id === c.id);
+                const _body = String(_full?.promptText || c.excerpt || '').replace(/\s+/g, ' ').slice(0, 600);
+                return `${i + 1}. "${c.name}" (id: ${c.id}) — Score: ${c.score.toFixed(1)}, Dimensions: ${c.matchedDimensions.join(', ')}\n   โทน: ${c.tone || '-'} | เนื้อพร้อมท์: ${_body || '-'}`;
+              }).join('\n');
 
               const aiFallbackPrompt = `คุณเป็นผู้เชี่ยวชาญการเลือก prompt สำหรับเขียนข่าวไวรัล
 
@@ -947,19 +960,45 @@ export async function performSummarize({
 หมวดหมู่: ${newsTypeDetected}
 อารมณ์: ${(newsAnalysis?.emotionalTags || newsAnalysis?.emotionalThemes || []).join(', ')}
 ความขัดแย้ง: ${(newsAnalysis?.conflictTags || newsAnalysis?.conflictTypes || []).join(', ')}
-Archetype: ${newsAnalysis?.narrativeArchetype || '-'}
+Archetype: ${newsAnalysis?.narrativeArchetype || '-'}${_aiPickerOn ? `
+เนื้อข่าว (ย่อ): ${(actualNewsBody || '').replace(/\s+/g, ' ').slice(0, 400)}` : ''}
 === จบข่าว ===
 
-=== ตัวเลือก Prompt (Top 5) ===
+=== ตัวเลือก Prompt (Top ${topCandidates.length}) ===
 ${candidateList}
 === จบตัวเลือก ===
 
-จาก prompt ทั้ง 5 ตัวเลือกด้านบน เลือก 1 ตัวที่เหมาะสมที่สุดสำหรับข่าวนี้
-ตอบเป็น JSON: { "selectedIndex": <1-5>, "reason": "..." }`;
+จาก prompt ทั้ง ${topCandidates.length} ตัวเลือกด้านบน เลือก 1 ตัวที่เหมาะสมที่สุดสำหรับข่าวนี้
+${_aiPickerOn ? `เกณฑ์สำคัญ (เรียงตามน้ำหนัก):
+1. "แกนเรื่องของการ์ด" ต้องตรงเหตุการณ์จริงในข่าว — สำคัญกว่าโทนและคะแนน (การ์ดส่วนใหญ่โทนอบอุ่น-ชื่นชมคล้ายกันหมด ห้ามตัดสินจากโทนอย่างเดียว)
+2. ข่าวมีผู้เสียชีวิต → เลือกได้เฉพาะการ์ดที่รองรับการบอกการจากไปอย่างเคารพ ห้ามการ์ดโทนบวก/ภูมิใจ/อวยพรอนาคต
+3. ข่าวเลิกรา/มูฟออน ห้ามเลือกการ์ดโทนไว้อาลัย/การจากไป แม้คะแนนจะสูงกว่า
+4. อ่านเนื้อการ์ดจริงก่อนตัดสิน ห้ามเดาจากชื่อการ์ด
+` : ''}ตอบเป็น JSON: { "selectedIndex": <1-${topCandidates.length}>, "reason": "..." }`;
 
+              // ★ โหมดใหม่: luna นำ (แชมป์ประลอง 3/3) → Gemini สำรอง · เพดาน 1200 เพราะ luna เป็น reasoning model
+              //   (เพดานต่ำ=ตอบว่างเปล่า — บทเรียน AGENTS.md ข้อ 3, Opus P1-2) · โหมดสวิตช์ปิด: Gemini นำเพดาน 300 ตามเดิมเป๊ะ
               const { callGemini, isGeminiAvailable } = await import('@/lib/ai/geminiClient');
               let aiSelection = null;
-              if (isGeminiAvailable()) {
+              if (_aiPickerOn) {
+                try {
+                  aiSelection = await callAI({
+                    prompt: aiFallbackPrompt,
+                    model: process.env.CARD_PICKER_MODEL || MODEL_FAST, // gpt-5.6-luna
+                    temperature: 0.1, // สาย 5.x ถูกตัดทิ้งอัตโนมัติใน callAI
+                    maxTokens: 1200,
+                  });
+                } catch (lunaErr) {
+                  console.warn('[🤖 STAGE 2.5] luna ล่ม → ใช้ Gemini สำรอง:', lunaErr.message);
+                  if (!isGeminiAvailable()) throw lunaErr;
+                  aiSelection = await callGemini({
+                    prompt: aiFallbackPrompt,
+                    model: MODEL_GEMINI_PRO,
+                    temperature: 0.1,
+                    maxTokens: 400,
+                  });
+                }
+              } else if (isGeminiAvailable()) {
                 aiSelection = await callGemini({
                   prompt: aiFallbackPrompt,
                   model: MODEL_GEMINI_PRO,
@@ -967,7 +1006,7 @@ ${candidateList}
                   maxTokens: 300,
                 });
               } else {
-                // Fallback to callAI if Gemini not available
+                // Fallback to callAI if Gemini not available (พฤติกรรมเดิม)
                 aiSelection = await callAI({
                   prompt: aiFallbackPrompt,
                   model: MODEL_FAST,
@@ -976,29 +1015,40 @@ ${candidateList}
                 });
               }
 
-              if (aiSelection && aiSelection.selectedIndex >= 1 && aiSelection.selectedIndex <= 5) {
+              if (aiSelection && aiSelection.selectedIndex >= 1 && aiSelection.selectedIndex <= topCandidates.length) {
                 const aiPickIdx = aiSelection.selectedIndex - 1;
-                const aiPickedCandidate = top5Candidates[aiPickIdx];
-                const aiPickedPrompt = validPrompts.find(vp => vp.id === aiPickedCandidate.id);
+                const aiPickedCandidate = topCandidates[aiPickIdx];
+                const aiPickedPrompt = validPrompts.find(vp => vp.id && vp.id === aiPickedCandidate.id);
 
-                if (aiPickedPrompt && aiPickedPrompt.id !== smartPrompt.id) {
+                if (aiPickedPrompt && smartPrompt.id && aiPickedPrompt.id !== smartPrompt.id) {
                   console.log(`[🤖 STAGE 2.5] AI picked different prompt: "${aiPickedCandidate.name}" (was: "${smartPrompt.promptName}") — Reason: ${aiSelection.reason || '-'}`);
                   smartPrompt = aiPickedPrompt;
-                  promptSource = 'library(ai-fallback)';
-                  smartPrompt._isBorrowed = true;
-                  smartPrompt._borrowReason = `AI Fallback: ${aiSelection.reason || 'Gemini selected'}`;
+                  promptSource = _aiPickerOn ? 'library(ai-picked)' : 'library(ai-fallback)';
+                  // ★ เกรดสูตรของ "ใบที่ถูกเลือก" (Opus P2-4: เดิมใช้เกรดใบเก่าคู่กับคะแนนใบใหม่ ป้ายขัดกันเอง)
+                  smartPrompt._isBorrowed = _aiPickerOn ? aiPickedCandidate.matchType === 'BORROWED' : true;
+                  smartPrompt._borrowReason = smartPrompt._isBorrowed ? `AI Fallback: ${aiSelection.reason || 'AI selected'}` : null;
+                  smartPrompt._aiPickReason = aiSelection.reason || null;
                   smartPrompt._matchScore = aiPickedCandidate.score;
-                  smartPrompt._matchType = 'BORROWED(AI)';
+                  smartPrompt._formulaMatchType = aiPickedCandidate.matchType; // เกรดสูตรจริง — เกราะ REF_WEIGHT ใช้ตัวนี้
+                  smartPrompt._matchType = _aiPickerOn ? 'AI_PICKED' : 'BORROWED(AI)';
                   smartPrompt._matchedDimensions = aiPickedCandidate.matchedDimensions;
-                  promptMatchReason = `🤖 AI Fallback: "${smartPrompt.promptName}" (AI Reason: ${aiSelection.reason || '-'}, Original Score: ${selectedPromptScore.toFixed(1)})`;
+                  if (_aiPickerOn) {
+                    matchType = smartPrompt._matchType; // ป้าย debug ตรงความจริง (โหมดปิดคงค่าเดิมตาม legacy)
+                    smartPrompt.usageCount = (smartPrompt.usageCount || 0) + 1;
+                    smartPrompt.lastUsedAt = new Date().toISOString();
+                  }
+                  promptMatchReason = _aiPickerOn
+                    ? `🤖 AI เลือกการ์ด: "${smartPrompt.promptName}" (เหตุผล: ${aiSelection.reason || '-'} · สูตรเดิมให้ score ${selectedPromptScore.toFixed(1)})`
+                    : `🤖 AI Fallback: "${smartPrompt.promptName}" (AI Reason: ${aiSelection.reason || '-'}, Original Score: ${selectedPromptScore.toFixed(1)})`;
                 } else {
                   console.log(`[🤖 STAGE 2.5] AI confirmed original pick: "${smartPrompt.promptName}"`);
+                  if (_aiPickerOn) smartPrompt._aiPickReason = aiSelection?.reason || 'AI ยืนยันตัวเลือกสูตร';
                 }
               } else {
                 console.log(`[🤖 STAGE 2.5] AI returned invalid selection, keeping original pick`);
               }
             } catch (aiFallbackErr) {
-              console.warn('[Analyze-Service] STAGE 2.5 AI Fallback failed (keeping Stage 2 result):', aiFallbackErr.message);
+              console.warn('[Analyze-Service] STAGE 2.5 AI Card Picker failed (keeping Stage 2 result):', aiFallbackErr.message);
             }
           }
         } else {
@@ -1295,8 +1345,8 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
         ? 'คุณต้องสร้างเนื้อหา 1 เวอร์ชันที่ "ดีที่สุด" จากข่าวนี้ — มุมเล่าถูกล็อกตาม FOCUS ANGLE แต่ลีลา สำนวน และความคิดสร้างสรรค์ต้องจัดเต็มที่สุด ห้ามเขียนแข็งแบบรายงานข่าว\n'
         : 'คุณต้องสร้างเนื้อหาหลายเวอร์ชันจากข่าวนี้ โดยแต่ละเวอร์ชันใช้มุมเขียนต่างกัน\n') +
       `แต่ละเวอร์ชัน:\n` +
-      `- ความยาวบังคับ ${lenCfg.min}-${lenCfg.max} คำ ทุกประโยคต้องให้ข้อมูลใหม่ แบ่ง ${lenCfg.paraDesc} สำหรับ Facebook\n` +
-      `- โครงสร้าง ${lenCfg.paragraphs} ย่อหน้า: [ย่อหน้า 1] เปิดแรง hook ดึงอารมณ์ [ย่อหน้าตรงกลาง] เล่ารายละเอียด storytelling [ย่อหน้าสุดท้าย] ปิดท้ายด้วยประโยคบรรยายเรียบๆ ที่บอกเล่าความจริงโดยไม่ตีความหมายเพิ่มเติม\n` +
+      `- ความยาวบังคับ ${lenCfg.min}-${lenCfg.max} คำ ทุกประโยคต้องให้ข้อมูลใหม่ แบ่ง ${lenCfg.paraDesc} เป๊ะสำหรับ Facebook — ห้ามเกินจำนวนนี้ ประโยคปิดต้องอยู่ท้ายย่อหน้าสุดท้าย ห้ามแยกออกเป็นย่อหน้าใหม่\n` +
+      `- โครงสร้าง ${lenCfg.paragraphs} ย่อหน้า: [ย่อหน้า 1] เปิดแรง hook ดึงอารมณ์ [ย่อหน้าตรงกลาง] เล่ารายละเอียด storytelling [ย่อหน้าสุดท้าย] ปิดท้ายด้วยประโยคบรรยายเรียบๆ ที่บอกเล่าความจริงโดยไม่ตีความหมายเพิ่มเติม — จำนวนย่อหน้าต้องเป๊ะตามที่กำหนด ประโยคปิดต้องอยู่ท้ายย่อหน้าสุดท้าย ห้ามแยกออกมาเป็นย่อหน้าใหม่\n` +
       `- แต่ละย่อหน้าต้องมีอย่างน้อย ${lenCfg.sentences} ประโยค คั่นด้วย \\n\\n\n` +
       '- ต้องอ้างอิงข้อมูลจริงจากข่าว ห้ามแต่งเรื่องที่ไม่มีในข่าว — ★ FACT-LOCK: ห้ามเพิ่มบุคคล/ความสัมพันธ์/อาชีพ/รายละเอียดชีวิตที่ต้นฉบับไม่มี (เคยพลาด: เติม "กับภรรยา" ทั้งที่ข่าวไม่มีภรรยา) และห้ามบรรยายฉาก สีหน้า อิริยาบถ เหมือนไปเห็นเหตุการณ์มาเอง — ต้นฉบับไม่ได้บรรยายภาพไหน ให้เล่าจากข้อเท็จจริง หรือใช้ภาษาที่บอกชัดว่าเป็นการนึกตาม ("ภาพแบบนั้นใครเห็นก็...") เท่านั้น\n' +
       '- ⚠️ ห้ามตั้งคำถามปิดท้ายเด็ดขาด ห้ามจบด้วย "คุณคิดยังไง?", "เห็นด้วยไหม?" หรือคำถามใดๆ\n\n' +
@@ -1503,6 +1553,7 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
                   promptSource: promptSource || 'library',
                   matchScore: (typeof smartPrompt._matchScore === 'number') ? Math.round(smartPrompt._matchScore) : null,
                   matchType: smartPrompt._matchType || (smartPrompt._isBorrowed ? 'BORROWED' : 'MATCHED'),
+                  aiPickReason: smartPrompt._aiPickReason || null, // ★ 1 ส.ค.: แยก "luna ยืนยัน/เลือก" ออกจาก "luna ล่ม" ได้ในบันทึก
                 }
               : (promptSource === 'fallback_builtin'
                   ? { id: 'fallback_builtin', name: '📦 Built-in Fallback V12', source: 'fallback_builtin', promptSource: 'fallback_builtin', matchType: 'FALLBACK' }
@@ -1836,7 +1887,7 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
         '   - เวอร์ชัน 3: ผสมมุมข้อมูล + วิเคราะห์ (เน้นเนื้อหาครบถ้วน)\n\n' +
         `แต่ละเวอร์ชัน:\n` +
         `- ต้องยาวอย่างน้อย ${lenCfg.min} คำ ถึง ${lenCfg.max} คำ / ${lenCfg.paraDesc}\n` +
-        `- โครงสร้าง ${lenCfg.paragraphs} ย่อหน้า: [ย่อหน้าแรก] เปิดแรง hook → [ย่อหน้ากลาง] เล่ารายละเอียด → [ย่อหน้าสุดท้าย] ปิดด้วยประโยคบรรยายทรงพลัง\n` +
+        `- โครงสร้าง ${lenCfg.paragraphs} ย่อหน้า: [ย่อหน้าแรก] เปิดแรง hook → [ย่อหน้ากลาง] เล่ารายละเอียด → [ย่อหน้าสุดท้าย] ปิดด้วยประโยคบรรยายทรงพลัง (จำนวนย่อหน้าต้องเป๊ะตามนี้ — ประโยคปิดอยู่ท้ายย่อหน้าสุดท้าย ห้ามแยกเป็นย่อหน้าใหม่)\n` +
         '- ⚠️ ห้ามตั้งคำถามปิดท้าย ห้ามจบด้วยคำถามใดๆ\n' +
         '- ใช้ข้อมูลจากข่าวจริงเท่านั้น ห้ามแต่งเรื่องเพิ่ม\n' +
         '- ระบุว่าผสมจากมุมไหนบ้าง (ใน mixed_from)\n' +
@@ -2132,14 +2183,96 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
   const { scoreLibraryPrompts } = await import('@/lib/services/promptMatcher');
   const scoredPrompts = scoreLibraryPrompts(newsAnalysis, validPrompts, { mismatchPenalty: true });
 
+  // ★ 1 ส.ค. 69 (Opus P2-5 — พอร์ตจากแฝด TEXT 16 ก.ค.): แนบ _matchType/_isBorrowed จริงให้ทุกใบ
+  //   เดิมสาย URL แนบแค่ _matchScore → usedPreset.matchType ตกไป default 'MATCHED' หลอกทุกงาน
   const topPrompts = scoredPrompts.slice(0, 3).map(s => {
     const pr = validPrompts[s.index];
+    const _coreDims = (s.dims || []).filter(d => !String(d).startsWith('boost'));
+    const _mt = (s.score >= 60 && _coreDims.length >= 2) ? 'EXACT' : s.score >= 40 ? 'CLOSE' : 'BORROWED';
     return {
       ...pr,
       _matchScore: s.score,
-      _matchedDimensions: s.dims
+      _matchedDimensions: s.dims,
+      _matchType: _mt,
+      _isBorrowed: _mt === 'BORROWED',
     };
   });
+
+  // ★ 1 ส.ค. 69: AI CARD PICKER (luna) ที่จุดเลือกจริงของท่ออัตโนมัติ — เจ้าของสั่งหลังประลอง 6 โมเดล
+  //   (กรรมการ Fable5 ปกปิดชื่อ: luna 3/3 ไม่กลับคำ · หลักฐานสด: ข่าวอาลัยเคยถูกสูตรจับการ์ดผิดเรื่องที่ score 98)
+  //   สูตรคัด top-8 → luna อ่านเนื้อการ์ดจริงเลือก 1 → ใบที่เลือกขึ้นหัวแถว (prompts[0] = ใบที่ autoFlow ใช้จริง)
+  //   คะแนนสูตรติดตัวใบเดิม → ด่าน ANGLE_MIN_MATCH_SCORE ทำงานต่อ · ล้ม/ปิดสวิตช์ = ลำดับสูตรเดิมเป๊ะ
+  //   ปิด: CARD_PICKER_AI=0 · เปลี่ยนสมอง: CARD_PICKER_MODEL (default gpt-5.6-luna)
+  if (process.env.CARD_PICKER_AI !== '0' && topPrompts.length > 1) {
+    try {
+      // ★ Opus P2-7: จับคู่ scored↔card แล้วกรองใบไร้ id ออกก่อน — กัน find เจอใบผิด/ตรรกะเทียบ id เพี้ยน
+      const _aiPairs = scoredPrompts.slice(0, 8)
+        .map(s => ({ s, pr: validPrompts[s.index] }))
+        .filter(x => x.pr && x.pr.id);
+      if (_aiPairs.length < 2) throw new Error('การ์ดมี id ไม่พอให้ AI เลือก');
+      const _aiCands = _aiPairs.map((x, i) => {
+        const _body = String(x.pr.promptText || '').replace(/\s+/g, ' ').slice(0, 600);
+        const _tone = x.pr.tone || (x.pr.emotionalTags || []).join(',') || '-';
+        return `${i + 1}. "${x.pr.promptName}" (id: ${x.pr.id}) — Score: ${x.s.score.toFixed(1)}\n   โทน: ${_tone} | เนื้อพร้อมท์: ${_body || '-'}`;
+      });
+      // ★ Opus P2-6: ใช้เนื้อข่าวจริงที่ resolve จาก workflow แล้ว (actual*) ไม่ใช่พารามิเตอร์ดิบ
+      const _pickPrompt = `คุณเป็นผู้เชี่ยวชาญการเลือก prompt สำหรับเขียนข่าวไวรัล
+
+=== ข่าว ===
+หัวข้อ: ${actualNewsTitle || 'ไม่มีหัวข้อ'}
+${focusAngle ? `มุมที่กำลังเขียน: ${focusAngle}` : ''}
+เนื้อข่าว (ย่อ): ${String(actualNewsBody || '').replace(/\s+/g, ' ').slice(0, 400)}
+=== จบข่าว ===
+
+=== ตัวเลือก Prompt (Top ${_aiCands.length}) ===
+${_aiCands.join('\n')}
+=== จบตัวเลือก ===
+
+จาก prompt ทั้ง ${_aiCands.length} ตัวเลือกด้านบน เลือก 1 ตัวที่เหมาะสมที่สุดสำหรับข่าวนี้
+เกณฑ์สำคัญ (เรียงตามน้ำหนัก):
+1. "แกนเรื่องของการ์ด" ต้องตรงเหตุการณ์จริงในข่าว — สำคัญกว่าโทนและคะแนน (การ์ดส่วนใหญ่โทนอบอุ่น-ชื่นชมคล้ายกันหมด ห้ามตัดสินจากโทนอย่างเดียว)
+2. ข่าวมีผู้เสียชีวิต → เลือกได้เฉพาะการ์ดที่รองรับการบอกการจากไปอย่างเคารพ ห้ามการ์ดโทนบวก/ภูมิใจ/อวยพรอนาคต
+3. ข่าวเลิกรา/มูฟออน ห้ามเลือกการ์ดโทนไว้อาลัย/การจากไป แม้คะแนนจะสูงกว่า
+4. อ่านเนื้อการ์ดจริงก่อนตัดสิน ห้ามเดาจากชื่อการ์ด
+ตอบเป็น JSON: { "selectedIndex": <1-${_aiCands.length}>, "reason": "..." }`;
+
+      const _pick = await callAI({
+        prompt: _pickPrompt,
+        model: process.env.CARD_PICKER_MODEL || MODEL_FAST, // gpt-5.6-luna
+        temperature: 0.1, // สาย 5.x ถูกตัดทิ้งอัตโนมัติใน callAI
+        maxTokens: 1200, // ★ Opus P1-2: luna เป็น reasoning model เพดานต่ำ=ตอบว่างเปล่า (บทเรียน AGENTS.md ข้อ 3)
+      });
+
+      if (_pick && _pick.selectedIndex >= 1 && _pick.selectedIndex <= _aiPairs.length) {
+        const _s = _aiPairs[_pick.selectedIndex - 1].s;
+        const _pr = _aiPairs[_pick.selectedIndex - 1].pr;
+        if (_pr && topPrompts[0].id && _pr.id !== topPrompts[0].id) {
+          console.log(`[🤖 CardPicker] luna เลือก "${_pr.promptName}" แทนหัวแถวสูตร "${topPrompts[0].promptName}" — เหตุผล: ${_pick.reason || '-'}`);
+          const _coreDims2 = (_s.dims || []).filter(d => !String(d).startsWith('boost'));
+          const _mtBase = (_s.score >= 60 && _coreDims2.length >= 2) ? 'EXACT' : _s.score >= 40 ? 'CLOSE' : 'BORROWED';
+          const _aiEntry = {
+            ..._pr,
+            _matchScore: _s.score,
+            _matchedDimensions: _s.dims,
+            _matchType: 'AI_PICKED',
+            _formulaMatchType: _mtBase, // เกรดสูตรจริงของใบที่เลือก — เกราะ REF_WEIGHT ใช้ตัวนี้
+            _isBorrowed: _mtBase === 'BORROWED',
+            _aiPickReason: _pick.reason || null,
+          };
+          const _rest = topPrompts.filter(p => p.id !== _pr.id).slice(0, 2);
+          topPrompts.length = 0;
+          topPrompts.push(_aiEntry, ..._rest);
+        } else {
+          console.log(`[🤖 CardPicker] luna ยืนยันหัวแถวสูตร "${topPrompts[0].promptName}"`);
+          topPrompts[0]._aiPickReason = _pick.reason || 'AI ยืนยันตัวเลือกสูตร';
+        }
+      } else {
+        console.log('[🤖 CardPicker] luna ตอบนอกช่วง — ใช้ลำดับสูตรเดิม');
+      }
+    } catch (_pickErr) {
+      console.warn('[🤖 CardPicker] luna ล่ม — ใช้ลำดับสูตรเดิม:', _pickErr.message);
+    }
+  }
 
   console.log(`[Analyze-Service] 🧠 getTopPrompts: Selected Top ${topPrompts.length} Prompts`);
   
