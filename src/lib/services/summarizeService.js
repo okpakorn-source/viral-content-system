@@ -720,7 +720,8 @@ export async function performSummarize({
     console.log(`[Analyze-Service] newsTitle: "${(actualNewsTitle || '').slice(0,80)}", textLen: ${actualNewsBody?.length}`);
 
     let smartPrompt = presetPrompt || null;
-    let promptSource = presetPrompt ? 'library' : 'preset';
+    // ★ 1 ส.ค. 69 (Sol ตรวจจับ — parity สาย URL): เส้นที่ส่ง Built-in มาต้องไม่ติดป้าย 'library'
+    let promptSource = presetPrompt ? (presetPrompt.id === 'fallback_builtin' ? 'fallback_builtin' : 'library') : 'preset';
     let promptMatchReason = presetPrompt ? `🏛️ Pre-selected: "${presetPrompt.promptName || 'Library Prompt'}"` : '';
     let newsTypeDetected = '';
     let newsAnalysis = null;
@@ -1503,7 +1504,9 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
                   matchScore: (typeof smartPrompt._matchScore === 'number') ? Math.round(smartPrompt._matchScore) : null,
                   matchType: smartPrompt._matchType || (smartPrompt._isBorrowed ? 'BORROWED' : 'MATCHED'),
                 }
-              : { id: 'library', name: '📦 Library', source: 'library' },
+              : (promptSource === 'fallback_builtin'
+                  ? { id: 'fallback_builtin', name: '📦 Built-in Fallback V12', source: 'fallback_builtin', promptSource: 'fallback_builtin', matchType: 'FALLBACK' }
+                  : { id: 'library', name: '📦 Library', source: 'library' }),
             usedModel: usedModel || MODEL_PRIMARY,
             versions,
             news_reference: result.news_reference || '',

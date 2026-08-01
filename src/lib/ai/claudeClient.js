@@ -17,7 +17,9 @@ let claudeClient = null;
 // ★ A/B switch: เปลี่ยน model เขียนได้จาก .env โดยไม่ต้องแก้โค้ด
 //   ★ 10 มิ.ย. 2026: default → claude-opus-4-8 — สำนวน prose เหนือกว่า Sonnet ชัดเจนจากผล A/B
 //   (สลับกลับได้: CLAUDE_WRITE_MODEL=claude-sonnet-4-6)
-const DEFAULT_WRITE_MODEL = process.env.CLAUDE_WRITE_MODEL || 'claude-opus-4-8';
+// ★ 1 ส.ค. 69 (เจ้าของสั่ง "เอา claude opus5 มาเขียนดีที่สุด"): default → claude-opus-5
+//   ราคาเท่า 4.8 เป๊ะ ($5/$25 ต่อล้านโทเคน) · ถอยกลับ: CLAUDE_WRITE_MODEL=claude-opus-4-8
+const DEFAULT_WRITE_MODEL = process.env.CLAUDE_WRITE_MODEL || 'claude-opus-5';
 
 // Opus 4.7+ / Fable / Sonnet 5 ไม่รับ sampling params (temperature/top_p/top_k → 400)
 // ★ 16 ก.ค. 69 (B6): + sonnet-5/opus-5 — พิสูจน์ด้วย API จริง: "`temperature` is deprecated for this model"
@@ -119,9 +121,14 @@ PASS 5: อ่านใหม่เหมือนคนอ่านจริง
   console.log(`[Claude] model=${model}, temp=${stripSampling ? 'n/a (opus4.7+)' : temperature}, effort=${stripSampling ? writeEffort : 'n/a'}, maxTokens=${maxTokens}`);
   console.log(`[Claude] prompt preview: ${prompt.slice(0, 300)}...`);
 
+  // ★ 1 ส.ค. 69: opus-5/fable "คิดก่อนเขียน" เปิดเองอัตโนมัติ และช่วงคิดกิน max_tokens ร่วมกับเนื้อ
+  //   → เผื่อเพดานขั้นต่ำ 16000 กันเนื้อโดนตัดกลางคัน (ยังอยู่ในโซน non-streaming ปลอดภัย)
+  const _thinkingOn = /^claude-(opus-5|fable)/.test(model);
+  const effMaxTokens = _thinkingOn ? Math.max(maxTokens, 16000) : maxTokens;
+
   const requestBody = {
     model,
-    max_tokens: maxTokens,
+    max_tokens: effMaxTokens,
     // ★ Opus 4.7/4.8/Fable: ห้ามส่ง temperature (API จะ 400) — คุมความหลากหลายผ่าน prompt แทน
     ...(stripSampling ? { output_config: { effort: writeEffort } } : { temperature }),
     system: systemMsg,
@@ -162,6 +169,11 @@ PASS 5: อ่านใหม่เหมือนคนอ่านจริง
     feature: 'callClaude'
   });
 
+  // ★ 1 ส.ค. 69: opus-5 มีด่านความปลอดภัย — ถ้าปฏิเสธ (stop_reason=refusal) ให้ล้มแบบรู้สาเหตุ → SmartAI ไหลไปตัวสำรองเอง
+  if (!content && response.stop_reason === 'refusal') {
+    console.warn(`[Claude] ⚠️ refusal (${response.stop_details?.category || 'n/a'}) — ส่งต่อตัวสำรองใน chain`);
+    throw new Error('Claude ปฏิเสธคำขอ (refusal) — ใช้ตัวสำรอง');
+  }
   if (!content) throw new Error('Claude ไม่ส่งข้อมูลกลับ');
 
   // Parse JSON จาก response

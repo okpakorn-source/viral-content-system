@@ -1906,8 +1906,8 @@ async function judgeWithFallback(validCandidates, imageParts, prompt, newsTitle,
         body: JSON.stringify({
           model: VISION_JUDGE_MODEL,
           messages: [{ role: 'user', content: gptContent }],
-          max_tokens: 8000,        // ★ เดิม 4000 → ตัดกลางคันเมื่อมี 28 ภาพ → ขึ้น 8000 กันตัด
-          temperature: 0.2,
+          // ★ 1 ส.ค. 69 (Sol ตรวจจับ): sol เป็น gpt-5.x — max_completion_tokens + ไม่ส่ง temperature (เดิม 4000→8000 กันตัด 28 ภาพ)
+          max_completion_tokens: 8000,
         }),
       });
       if (gptRes.ok) {

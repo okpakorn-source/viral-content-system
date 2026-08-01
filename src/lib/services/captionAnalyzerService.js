@@ -64,8 +64,8 @@ export async function analyzeCaptionContext(image, expectedRole, heroName) {
         body: JSON.stringify({
           model: 'gpt-5.6-luna',
           messages: [{ role: 'user', content: prompt }],
-          temperature: 0.1,
-          max_tokens: 150,
+          // ★ 1 ส.ค. 69 (Sol ตรวจจับ): gpt-5.x — max_completion_tokens (เผื่อ reasoning 150→600) + ไม่ส่ง temperature
+          max_completion_tokens: 600,
         }),
         signal: controller.signal,
       });

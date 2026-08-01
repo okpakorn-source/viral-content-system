@@ -282,11 +282,13 @@ export function createStore(name) {
         }
 
         // ★ 1 ส.ค. 69 (ออดิต): sync local cache ตามกฎ AGENTS.md ข้อ 10 — เดิม update() ตกหล่นตัวเดียว ไฟล์ค้างตั้งแต่ 1 ก.ค.
-        _fileFallbackLoad(name).then(items => {
+        //   ★ Sol ตรวจจับ: read-modify-write ต้อง serialize ผ่าน _withLock กันชนกับตัวเขียนแคชอื่น (ตัว fire-and-forget คงไว้ ไม่บล็อกเส้นร้อน)
+        _withLock(name, async () => {
+          const items = await _fileFallbackLoad(name);
           if (!items.length) return; // ไฟล์อ่านพลาด/แคชว่าง — ห้ามเซฟทับจนเหลือรายการเดียว (getAll รอบถัดไป sync เต็มชุดเอง)
           const idx = items.findIndex(i => i.id === id);
           if (idx >= 0) items[idx] = updated; else items.unshift(updated);
-          _fileFallbackSave(name, items);
+          await _fileFallbackSave(name, items);
         }).catch(() => {});
 
         console.log(`[Store:${name}] ✅ Updated: ${id}`);

@@ -226,8 +226,8 @@ Respond with JSON ONLY:
         body: JSON.stringify({
           model: 'gpt-5.6-luna',
           messages: [{ role: 'user', content: prompt }],
-          temperature: 0.3,
-          max_tokens: 800,
+          // ★ 1 ส.ค. 69 (Sol ตรวจจับ): gpt-5.x — max_completion_tokens (เผื่อ reasoning 800→1600) + ไม่ส่ง temperature
+          max_completion_tokens: 1600,
         }),
         signal: controller.signal,
       });
