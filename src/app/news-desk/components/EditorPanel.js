@@ -394,7 +394,7 @@ export default function EditorPanel({ onToast, onAfterAction }) {
           <div>
             <div style={{ fontSize: 12.5, fontWeight: 800, color: UI.text, marginBottom: 6 }}>สมอง</div>
             <div style={{ display: 'flex', gap: 6 }}>
-              {[{ key: 'primary', name: 'gpt-5.5 ★' }, { key: 'fast', name: 'mini' }].map((m) => (
+              {[{ key: 'primary', name: 'gpt-5.6-sol ★' }, { key: 'fast', name: 'mini' }].map((m) => (
                 <button
                   key={m.key} type="button" onClick={() => setPickModel(m.key)} disabled={busy}
                   style={{

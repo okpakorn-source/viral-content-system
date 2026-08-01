@@ -11,7 +11,7 @@ export async function GET() {
       claude: !!process.env.ANTHROPIC_API_KEY,
       gemini: !!process.env.GEMINI_API_KEY,
       firecrawl: !!process.env.FIRECRAWL_API_KEY,
-      openaiModel: process.env.OPENAI_MODEL || 'gpt-4o',
+      openaiModel: process.env.OPENAI_MODEL || 'gpt-5.6-sol',
       activeModels: {
         extraction: process.env.GEMINI_API_KEY ? 'Gemini Flash' : 'GPT-4o',
         breakdown: 'GPT-4o',

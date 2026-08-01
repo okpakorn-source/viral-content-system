@@ -16,7 +16,7 @@
 const LOG = '[ShotPlanner]';
 
 // ใช้ model เดียวกับที่ระบบปกใช้ (gpt-4o) — อ่านจาก env ถ้ามี ไม่งั้น default
-const PLANNER_MODEL = process.env.COVER_SHOT_PLANNER_MODEL || 'gpt-4o';
+const PLANNER_MODEL = process.env.COVER_SHOT_PLANNER_MODEL || 'gpt-5.6-sol';
 
 /**
  * สมองวางแผนช็อต — อ่านข่าวเต็ม → แตกคีย์คน+เหตุการณ์+ของประกอบ → สร้างโควตาสั่ง Gemini

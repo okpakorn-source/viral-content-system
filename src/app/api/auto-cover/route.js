@@ -146,7 +146,7 @@ Score 1-10. Return ONLY valid JSON: {"score": 8, "reason": "brief"}`;
       method: 'POST',
       headers: { 'Authorization': `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: 'gpt-5.6-luna',
         messages: [{ role: 'user', content: [
           { type: 'text', text: prompt },
           { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}`, detail: 'low' } }
@@ -2724,7 +2724,7 @@ Return JSON:
           imageContents: [
             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${resizedCoverBase64}`, detail: 'low' } }
           ],
-          model: 'gpt-4o-mini',
+          model: 'gpt-5.6-luna',
           temperature: 0.3,
           maxTokens: 500,
         });
@@ -3574,7 +3574,7 @@ If the answer does NOT match the core story → score must be LOW`;
     const response = await callAI({
       prompt,
       imageContents,
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-sol',
       temperature: 0.1,
       // ★ 10 มิ.ย.: gpt-5.5 เป็น reasoning model — 2000 ถูก reasoning กินหมดจน content ว่าง → fallback gpt-4o ทุกครั้ง (คะแนนมั่ว/ปล่อยลายน้ำ)
       maxTokens: 6000,

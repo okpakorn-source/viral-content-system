@@ -40,7 +40,8 @@ export async function checkOpenAICredit({ timeoutMs = 12_000 } = {}) {
       method: 'POST',
       signal: controller.signal,
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1 }),
+      // ★ 1 ส.ค. 69 โล๊ะ mini→luna: 5.6 ต้องใช้ max_completion_tokens (cap 16 พอสำหรับ ping เช็คเครดิต — ดูแค่ HTTP status)
+      body: JSON.stringify({ model: 'gpt-5.6-luna', messages: [{ role: 'user', content: 'ping' }], max_completion_tokens: 16 }),
     });
     clearTimeout(timer);
     if (res.ok) return { ok: true, provider: 'openai' };

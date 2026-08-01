@@ -95,8 +95,9 @@ ${snippets}
       method: 'POST',
       headers: { 'Authorization': `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-4o-mini', messages: [{ role: 'user', content: ask }],
-        temperature: 0, max_tokens: 200, response_format: { type: 'json_object' },
+        // ★ 1 ส.ค. 69 โล๊ะ mini→luna: 5.6 ไม่รับ temperature≠1/max_tokens → ใช้ max_completion_tokens + เผื่อ reasoning (เพดานต่ำ=ตอบว่าง)
+        model: 'gpt-5.6-luna', messages: [{ role: 'user', content: ask }],
+        max_completion_tokens: 400, response_format: { type: 'json_object' },
       }),
     });
     if (!ores.ok) { console.log('[IdentityAnchor] openai HTTP', ores.status); return parsed; }

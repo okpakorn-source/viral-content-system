@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Header from '@/components/layout/Header';
 
 export default function SettingsPage() {
-  const [keys, setKeys] = useState({ openai: false, firecrawl: false, openaiModel: 'gpt-4o' });
+  const [keys, setKeys] = useState({ openai: false, firecrawl: false, openaiModel: 'gpt-5.6-sol' });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -104,7 +104,7 @@ export default function SettingsPage() {
             Model ปัจจุบัน: <strong style={{ color: 'var(--accent-light)' }}>{keys.openaiModel}</strong>
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
-            เปลี่ยน model ได้โดยเพิ่ม env <code>OPENAI_MODEL</code> (เช่น gpt-4o-mini, gpt-4o, gpt-3.5-turbo)
+            เปลี่ยน model ได้โดยเพิ่ม env <code>OPENAI_MODEL</code> (เช่น gpt-5.6-sol, gpt-5.6-luna)
           </div>
         </div>
       </div>

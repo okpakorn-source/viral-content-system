@@ -14,7 +14,7 @@ import { AI_HONESTY_DNA, honestyDnaOn } from './aiHonestyDna.js'; // ★ กา�
 
 const DEFAULTS = {
   anthropic: 'claude-opus-5', // ★ 26 ก.ค. 69 เจ้าของสั่งอัปเกรด default จาก claude-opus-4-8 → claude-opus-5 (ANALYSIS_MODEL ยัง override ได้เหมือนเดิม = ปุ่มถอยกลับ)
-  openai: 'gpt-4o',
+  openai: 'gpt-5.6-sol', // ★ 1 ส.ค. 69 เจ้าของสั่งโล๊ะ <5.6 (ANALYSIS_MODEL ยัง override ได้ = ปุ่มถอยกลับ)
 };
 
 export function resolveProvider() {

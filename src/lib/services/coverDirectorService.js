@@ -16,7 +16,7 @@ import { brainPromptBlock } from '@/lib/services/coverBenchmarkBrain'; // 🧠 r
 // เฟส 2 (1 ก.ค.): gpt-5.5 (reasoning) อ่อน vision-layout → เคยเลือกฮีโร่หน้าเล็ก/แบนเนอร์/หันหลัง (CASE-248)
 //   เปลี่ยนเป็น gpt-4o (vision จริง) เหมือนที่ Judge เปลี่ยนแล้วได้ผลดี · ครอบทั้ง directCover(211) + reviewCover/QC(493)
 //   temperature=0 ที่ส่งอยู่จะ active จริงกับ gpt-4o (gpt-5.5 บังคับ default=1) = layout นิ่งสุด · max_tokens 6000/4000 = headroom เกินพอ
-const DIRECTOR_MODEL = 'gpt-4o';
+const DIRECTOR_MODEL = 'gpt-5.6-sol';
 
 /** สร้าง thumbnail + ขนาดจริงของทุกภาพ สำหรับส่งให้ Vision */
 async function buildThumbnails(imageBuffers, maxImages = 10) {
@@ -798,7 +798,7 @@ fix: "recrop" = ภาพใช้ได้แต่ครอปใหม่ · 
   const res = await callAI({
     prompt,
     imageContents: [{ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${small.toString('base64')}`, detail: 'high' } }],
-    model: 'gpt-4o', temperature: 0, maxTokens: 500,
+    model: 'gpt-5.6-sol', temperature: 0, maxTokens: 500,
   });
   const j = typeof res === 'object' ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
   // Normalize ชื่อช่องจากตา → slotId จริง (บทเรียน CASE-339: gpt ตอบ "right_top" แต่ช่องจริงคือ "top_right" → recrop ถูกข้ามเงียบ)
@@ -850,7 +850,7 @@ ${spec}
    ⛔⛔ fx,fy ต้องเป็นใบหน้า "คน" เสมอ — ห้ามปักที่หน้าสัตว์/สิ่งของเด็ดขาด (บทเรียน: ปักหน้าหมา→หน้าคนตกริมขอบ) · ภาพคน+สัตว์: สมอ=หน้าคน แล้วสัตว์จะติดเฟรมเองจากขนาดกรอบ · ภาพไม่มีคนจริงๆ เท่านั้น จึงชี้จุดเด่น (สัตว์/เอกสาร) แทน
 ตอบ JSON เท่านั้น: {"crops":[{"slot":"main","x":0.10,"y":0.05,"w":0.50,"h":0.70,"fx":0.35,"fy":0.25,"fw":0.18,"fh":0.24},...]} ครบทุกช่องที่ให้มา`;
   const imageContents = items.map(it => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${it.b64}`, detail: 'high' } }));
-  const res = await callAI({ prompt, imageContents, model: 'gpt-4o', temperature: 0, maxTokens: 700 });
+  const res = await callAI({ prompt, imageContents, model: 'gpt-5.6-sol', temperature: 0, maxTokens: 700 });
   const j = typeof res === 'object' ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
   let applied = 0;
   // ★ FINAL5 (บทเรียนเดียวกับ CASE-339 ใน eyeAfter): gpt อาจตอบชื่อช่องสลับ token (right_top ≠ top_right) → normalize ก่อนจับคู่ ไม่งั้นครอปถูกข้ามเงียบ

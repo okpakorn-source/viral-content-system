@@ -15,14 +15,15 @@ export async function callRawJSON({ prompt, model, temperature = 0.5, maxTokens 
   const client = getOpenAIClient();
   if (!client) throw new Error('OPENAI_API_KEY ไม่ได้ตั้งค่า');
 
-  // fallback model เหมือน callAI: gpt-5.5→gpt-4o, gpt-5.4-mini→gpt-4o-mini
+  // fallback model (โล๊ะโมเดลต่ำกว่า 5.6 — 1 ส.ค. 69): sol→terra · terra→sol · luna→terra · gpt-5.5→gpt-5.6-terra · gpt-5.4-mini→gpt-5.6-luna
   const tryModels = [model];
-  if (model === 'gpt-5.5') tryModels.push('gpt-4o');
-  else if (model === 'gpt-5.4-mini') tryModels.push('gpt-4o-mini');
-  // 🔧 27 ก.ค. 69 (sol): สาย FAST ของโต๊ะข่าว (DESK_MODEL_FAST = gpt-5.6-luna) ต้องได้คู่ประหยัด gpt-4o-mini
-  //   ไม่งั้นตกไป branch สุดท้าย (gpt-4o เต็มราคา) — แพงเกินสายที่ตั้งใจให้ถูก/เร็ว
-  else if (model === DESK_MODEL_FAST) tryModels.push('gpt-4o-mini');
-  else if (model !== 'gpt-4o') tryModels.push('gpt-4o');
+  if (model === 'gpt-5.6-sol') tryModels.push('gpt-5.6-terra');
+  else if (model === 'gpt-5.6-terra') tryModels.push('gpt-5.6-sol');
+  else if (model === 'gpt-5.6-luna') tryModels.push('gpt-5.6-terra');
+  else if (model === 'gpt-5.5') tryModels.push('gpt-5.6-terra');
+  else if (model === 'gpt-5.4-mini') tryModels.push('gpt-5.6-luna');
+  // 🔧 สาย FAST โต๊ะข่าวที่ override ด้วย env (DESK_MODEL_FAST) ตกไปหา terra — ไม่ย้อนกลับไปหาโมเดลรุ่นเก่าอีก
+  else if (model === DESK_MODEL_FAST) tryModels.push('gpt-5.6-terra');
 
   let lastErr = null;
   for (const m of tryModels) {
