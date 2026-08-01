@@ -78,8 +78,17 @@ test('first-pass prompt restores compact Thai rule and removes all minimum-lengt
   });
 
   assert.ok(captured, 'Gemini mock must receive the first-pass request');
-  assert.match(captured.prompt, /(?:^|\n)- ภาษาไทย เขียนกระชับ อ่านเข้าใจง่าย(?:\n|$)/);
-  assert.doesNotMatch(captured.prompt, /600\+|1,500\+|2,500\+|ละเอียดสำคัญกว่าสั้น/);
+  // ★ 1 ส.ค. 69 (เจ้าของเคาะ 2 ขา): กระชับแบบเหมารวมทำถอดผิวเผิน → นิยามใหม่ กระชับที่คำ+ครบที่เหตุการณ์
+  assert.match(captured.prompt, /เขียนกระชับที่ "คำ"/);
+  assert.match(captured.prompt, /ครบ=พื้น · ไม่มีน้ำ=เพดาน/);
+  // ★ ผู้ตรวจไขว้ (1 ส.ค. รอบ 2 ขา): แบนโควตาเชิงรูปแบบ ไม่ใช่สตริงตายตัว — เลขโควตาใหม่หน้าไหนก็ห้ามกลับมา
+  assert.doesNotMatch(captured.prompt, /600\+|1,500\+|2,500\+|ละเอียดสำคัญกว่าสั้น|(?:อย่างน้อย|ไม่ต่ำกว่า)\s*[\d,]+\s*ตัวอักษร/);
+  // ★ ผู้ตรวจไขว้: การ์ดบล็อก "พื้น" ทั้ง 3 หัวใจ — ลบทีละจุดเทสต้องแดง (mutation-proof)
+  assert.match(captured.prompt, /★★ ความครบของ rawData \(พื้น/, 'บล็อกพื้นต้องอยู่');
+  assert.match(captured.prompt, /ทุกช่วงของคลิป/, 'พื้น: ไล่เก็บทุกช่วงคลิป');
+  assert.match(captured.prompt, /เล่าเป็น "ฉาก" ตามลำดับจริง/, 'พื้น: คลี่ฉากห้ามรวบ');
+  assert.match(captured.prompt, /ยกคำพูดจริงจากคลิปสั้นๆ/, 'พื้น: ถักคำพูด verbatim ในเนื้อ');
+  assert.match(captured.prompt, /ทุกคำพูดที่แทรกต้องระบุคนพูดกำกับเสมอ/, 'พื้น: คำพูดต้องมีเจ้าของ กันติดผิดปาก');
   assert.match(captured.prompt, /★★ กฎหลักฐานตัวตน/);
   assert.match(captured.prompt, /★★ เนื้อดิบแยกประเด็น \(subStories\)/);
   assert.equal(captured.maxTokens, 32000, 'first-pass response ceiling must stay at 32000');
@@ -166,7 +175,7 @@ test('CLIP_INSIGHT_ENRICHED defaults off and never calls the second-pass service
   assert.equal(response._body.data.rawData.length, 350);
   assert.equal(response._body.data.subStories.length, 1);
   // ★ 31 ก.ค. 69 (ผู้ตรวจเสนอแทน kill-switch): ทุก record ใหม่ต้องติดป้ายรุ่นพร้อมท์ ตรวจย้อนได้
-  assert.equal(records[0]?.promptRev, 'raw-natural-0801r5', 'record ต้องติดป้ายรุ่นพร้อมท์');
+  assert.equal(records[0]?.promptRev, 'raw-depth2legs-0801', 'record ต้องติดป้ายรุ่นพร้อมท์');
 });
 
 test("CLIP_INSIGHT_ENRICHED='1' calls the second-pass service once", async () => {
