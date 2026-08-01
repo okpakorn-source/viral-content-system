@@ -83,6 +83,15 @@ test('first-pass prompt restores compact Thai rule and removes all minimum-lengt
   assert.match(captured.prompt, /★★ กฎหลักฐานตัวตน/);
   assert.match(captured.prompt, /★★ เนื้อดิบแยกประเด็น \(subStories\)/);
   assert.equal(captured.maxTokens, 32000, 'first-pass response ceiling must stay at 32000');
+
+  // ★ 31 ก.ค. 69 (เจ้าของเคาะรอบสอง): ประเด็นย่อยต้อง "ครบในตัวเอง" ห้ามผูกกับความยาว rawData รวม
+  //   (สมอเก่า "เท่า rawData รวม" ทำให้ประเด็นย่อยหดตามตอนเนื้อรวมกระชับ — ห้ามกลับมา)
+  // ★ ผู้ตรวจไขว้รัด: ต้องปักหมุด "ทั้ง 2 จุด" แยกบริบท (กติกา + สคีมา JSON) — ลบทีละจุดเทสต้องแดง
+  assert.match(captured.prompt, /แต่ละ subStory\.rawData ต้อง "ลึกและครบในตัวเอง"/, 'จุดที่ 1 (บล็อกกติกา SUBSTORY_RULES) ต้องอยู่');
+  assert.match(captured.prompt, /ข้อเท็จจริงล้วน ลึกและครบในตัวเอง/, 'จุดที่ 2 (คำอธิบายฟิลด์ใน JSON template) ต้องอยู่');
+  assert.strictEqual((captured.prompt.match(/ลึกและครบในตัวเอง/g) || []).length, 2, 'ต้องมีครบทั้ง 2 จุด ไม่ขาดไม่เกิน');
+  assert.match(captured.prompt, /ใช้กับ rawData รวมเท่านั้น/, 'ต้องแยกขอบเขตกระชับ: เนื้อรวมเท่านั้น ไม่ลามประเด็นย่อย');
+  assert.doesNotMatch(captured.prompt, /เท่า rawData รวม/, 'สมอผูกความยาวแบบเก่าต้องไม่กลับมา');
 });
 
 async function runInsightRoute(enrichedValue, slug) {
@@ -139,7 +148,7 @@ async function runInsightRoute(enrichedValue, slug) {
       json: async () => ({ url: `https://www.tiktok.com/@unit/video/${slug}`, force: true, user: 'unit' }),
     });
     await new Promise((resolve) => setImmediate(resolve));
-    return { response, calls };
+    return { response, calls, records };
   } finally {
     if (previous === undefined) delete process.env.CLIP_INSIGHT_ENRICHED;
     else process.env.CLIP_INSIGHT_ENRICHED = previous;
@@ -147,7 +156,7 @@ async function runInsightRoute(enrichedValue, slug) {
 }
 
 test('CLIP_INSIGHT_ENRICHED defaults off and never calls the second-pass service', async () => {
-  const { response, calls } = await runInsightRoute(undefined, '7000000000000000001');
+  const { response, calls, records } = await runInsightRoute(undefined, '7000000000000000001');
   assert.equal(response.status, 200);
   assert.equal(response._body.success, true);
   assert.equal(calls.firstPass, 1);
@@ -156,6 +165,8 @@ test('CLIP_INSIGHT_ENRICHED defaults off and never calls the second-pass service
   assert.equal(response._body.data.transcriptQuotes, undefined);
   assert.equal(response._body.data.rawData.length, 350);
   assert.equal(response._body.data.subStories.length, 1);
+  // ★ 31 ก.ค. 69 (ผู้ตรวจเสนอแทน kill-switch): ทุก record ใหม่ต้องติดป้ายรุ่นพร้อมท์ ตรวจย้อนได้
+  assert.equal(records[0]?.promptRev, 'sub-selfcontained-0801', 'record ต้องติดป้ายรุ่นพร้อมท์');
 });
 
 test("CLIP_INSIGHT_ENRICHED='1' calls the second-pass service once", async () => {

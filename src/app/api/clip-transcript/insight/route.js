@@ -294,6 +294,9 @@ export async function POST(request) {
       category: insight.category || '', clipDurationSec: insight.clipDurationSec || 0,
       user: String(user || '').slice(0, 40), elapsedMs: Date.now() - startedAt, attempts,
       ...(lowQuality ? { lowQuality: true, qualityNote } : {}),
+      // ★ 31 ก.ค. 69 (ผู้ตรวจไขว้เสนอแทน kill-switch): ป้ายรุ่นพร้อมท์ — ตรวจย้อนได้ว่าเคสไหนถอดด้วยกติกาชุดไหน
+      //   'sub-selfcontained-0801' = ยุคกระชับ+ประเด็นย่อยครบในตัวเอง (แก้สมอ "เท่า rawData รวม" 1 ส.ค. 69)
+      promptRev: 'sub-selfcontained-0801',
       createdAt: new Date().toISOString(),
     };
     try { await store.add(baseRecord); } catch (e) { console.warn('[ClipInsight] เซฟคลัง (ก่อน enriched) ล้ม:', e.message?.slice(0, 50)); }
