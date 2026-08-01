@@ -151,8 +151,8 @@ Score 1-10. Return ONLY valid JSON: {"score": 8, "reason": "brief"}`;
           { type: 'text', text: prompt },
           { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}`, detail: 'low' } }
         ]}],
-        max_tokens: 200,
-        temperature: 0.2
+        // ★ 1 ส.ค. 69 (Sol ตรวจจับ): luna เป็น gpt-5.x — max_completion_tokens (เผื่อ reasoning 200→800) + ไม่ส่ง temperature
+        max_completion_tokens: 800
       }),
       signal: AbortSignal.timeout(15000) // 15s timeout
     });

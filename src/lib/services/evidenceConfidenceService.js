@@ -82,8 +82,8 @@ export async function scoreEvidenceConfidence(imageUrl, expectedRole, heroName) 
               { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}`, detail: 'low' } },
             ],
           }],
-          temperature: 0.1,
-          max_tokens: 200,
+          // ★ 1 ส.ค. 69 (Sol ตรวจจับ): gpt-5.x — max_completion_tokens (เผื่อ reasoning 200→800) + ไม่ส่ง temperature
+          max_completion_tokens: 800,
         }),
         signal: controller.signal,
       });

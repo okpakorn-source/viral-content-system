@@ -1563,7 +1563,7 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
                   matchType: smartPrompt._matchType || (smartPrompt._isBorrowed ? 'BORROWED' : 'MATCHED'),
                 }
               : (promptSource === 'fallback_builtin'
-                  ? { id: 'fallback_builtin', name: '📦 Built-in Fallback V12', source: 'fallback_builtin' }
+                  ? { id: 'fallback_builtin', name: '📦 Built-in Fallback V12', source: 'fallback_builtin', promptSource: 'fallback_builtin', matchType: 'FALLBACK' }
                   : { id: 'library', name: '📦 Library', source: 'library' }),
             usedModel: usedModel || MODEL_NEWS_ANALYSIS,
             versions,
@@ -2059,7 +2059,10 @@ ${keyPoints}
       .replace('{title}', newsData.news_title || '')
       .replace('{content}', newsData.news_body.slice(0, 6000))
       .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
-    const result = await callAI({ prompt, temperature: 0.6, maxTokens: 8000 });
+    // ★ 1 ส.ค. 69 (Sol ตรวจจับ — ทางเข้า legacy ไม่ผ่านกฎเขียนชุดใหม่): แนบกติกาห้ามยัดข้อคิด เว้นแต่เปิด FORCE_LESSON_ANGLE=1
+    const _legacyPrompt = process.env.FORCE_LESSON_ANGLE === '1' ? prompt
+      : prompt + '\n\n★ ห้ามใส่ข้อคิด/คำสอน/สัจธรรมที่ต้นฉบับไม่มี — ย่อหน้าสุดท้ายปิดด้วยการบรรยายข้อเท็จจริงเรียบๆ';
+    const result = await callAI({ prompt: _legacyPrompt, temperature: 0.6, maxTokens: 8000 });
     if (result && typeof result === 'object') {
       const summary = extractSummary(result);
       analysis = {

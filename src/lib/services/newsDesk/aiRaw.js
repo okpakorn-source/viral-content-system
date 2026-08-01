@@ -24,6 +24,8 @@ export async function callRawJSON({ prompt, model, temperature = 0.5, maxTokens 
   else if (model === 'gpt-5.4-mini') tryModels.push('gpt-5.6-luna');
   // 🔧 สาย FAST โต๊ะข่าวที่ override ด้วย env (DESK_MODEL_FAST) ตกไปหา terra — ไม่ย้อนกลับไปหาโมเดลรุ่นเก่าอีก
   else if (model === DESK_MODEL_FAST) tryModels.push('gpt-5.6-terra');
+  // ★ 1 ส.ค. 69 (Sol ตรวจจับ): โมเดลนอกลิสต์ (env override ชื่อแปลก/รุ่นเก่า) ต้องมีไม้สองเสมอ
+  else if (model !== 'gpt-5.6-terra') tryModels.push('gpt-5.6-terra');
 
   let lastErr = null;
   for (const m of tryModels) {

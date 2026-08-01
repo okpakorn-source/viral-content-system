@@ -195,8 +195,10 @@ async function callOpenAI({ system, user, model, maxTokens, temperature, signal,
       },
       body: JSON.stringify({
         model,
-        max_tokens: maxTokens,
-        temperature,
+        // ★ 1 ส.ค. 69 (Sol ตรวจจับ): gpt-5.x ไม่รับ max_tokens/temperature — ใช้ max_completion_tokens (แพทเทิร์นเดียวกับ aiRaw)
+        ...(String(model).startsWith('gpt-5')
+          ? { max_completion_tokens: maxTokens }
+          : { max_tokens: maxTokens, temperature }),
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: system },

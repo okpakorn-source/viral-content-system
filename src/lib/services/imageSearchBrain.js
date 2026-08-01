@@ -81,7 +81,8 @@ async function callOpenAI({ system, user, model, maxTokens, temperature }) {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
-    body: JSON.stringify({ model, max_tokens: maxTokens, temperature, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
+    // ★ 1 ส.ค. 69 (Sol ตรวจจับ): gpt-5.x ใช้ max_completion_tokens + ไม่ส่ง temperature
+    body: JSON.stringify({ model, ...(String(model).startsWith('gpt-5') ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens, temperature }), response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
   });
   if (!res.ok) {
     const body = await res.text();
