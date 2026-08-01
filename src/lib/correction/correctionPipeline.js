@@ -11,7 +11,7 @@
  */
 
 import { auditOutput } from './outputAuditService';
-import { safeCorrect } from './safeCorrectionService';
+import { safeCorrect, guardCoreNews } from './safeCorrectionService';
 import { checkFactPreservation } from './factPreservationCheck';
 import { editorialPolish } from './editorialPolishService';
 import { semanticSanityCheck } from './semanticSanityCheck';
@@ -192,11 +192,18 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
       const { polishedContent, changes } = editorialPolish(semanticContent);
       console.log(`  L5 Polish: ${changes.length} changes`);
 
+      // ★ 1 ส.ค. 69 (เกราะแก่นข่าวชั้นนอกสุด — เจ้าของสั่ง "แก่นข่าวต้องไม่เสีย"):
+      //   L4.6 ลบท่อนพังทิ้ง "หลัง" ด่านเช็คข้อเท็จจริง L4 โดยไม่มีใครตรวจซ้ำ (เคสจริง: "ออกจากโรงพยาบาลแล้ว...8 เดือน" หายทั้งใบ)
+      //   → ด่านสุดท้ายก่อนแทนต้นฉบับ: เลขเด่นครบ + เนื้อไม่หดเกินเพดาน ไม่ผ่านข้อเดียว = ใช้ต้นฉบับทั้งใบ
+      const _coreGuard = guardCoreNews(version.content, polishedContent);
+      if (!_coreGuard.ok) console.warn(`  ⛔ เกราะแก่นข่าว (ชั้นท่อ): ${_coreGuard.reason} — ใช้ต้นฉบับ`);
+
       return {
         ...version,
-        content: polishedContent,
+        content: _coreGuard.ok ? polishedContent : version.content,
         _correctionApplied: true,
         _correctionDebug: {
+          coreGuard: _coreGuard.ok ? 'passed' : `reverted:${_coreGuard.reason}`,
           auditScore: audit.auditScore,
           issuesFound: audit.issues.length,
           issueTypes: [...new Set(audit.issues.map(i => i.type))],

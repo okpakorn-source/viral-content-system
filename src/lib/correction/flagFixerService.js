@@ -15,7 +15,9 @@ import { callAI } from '@/lib/ai/openai';
 const MODEL_FIX = 'gpt-5.6-terra'; // ภาษาไทยลื่นพอ + เร็ว/ถูกกว่า write-tier (★ 1 ส.ค. 69 โล๊ะ 4o→terra)
 
 // ── ตรวจ: เลขเด่นพร้อมหน่วยจากต้นฉบับ (ตรรกะเดียวกับ extractKeyNumbers ฝั่ง summarize) ──
-function keyNumbersOf(sourceText) {
+// ★ 1 ส.ค. 69 (เกราะแก่นข่าว): เปิด export ให้ safeCorrectionService ใช้ตัวเดียวกัน
+//   (แหล่งความจริงเดียว — แก้เกณฑ์เลขเด่นที่นี่ที่เดียว ทั้งสองชั้นได้เหมือนกัน)
+export function keyNumbersOf(sourceText) {
   const s = String(sourceText || '');
   const found = [];
   const re = /(\d[\d,\.]*)\s*(บาท|ล้านบาท|แสนบาท|ล้าน|แสน|หมื่น|ปี|ไร่|กิโลเมตร|กม\.|คน|เดือน|วัน|%|เปอร์เซ็นต์|คัน|ทุน|แห่ง)/g;
@@ -163,6 +165,15 @@ ${content}
       const fixed = String((typeof result === 'object' ? result?.fixedContent : result) || '').trim();
       const orderLeak = /^(เปิดด้วย|มุม(มอง)?\s*[:：]|แนวเปิด|สไตล์เปิด|เขียนย่อหน้า)/.test(fixed);
       if (fixed && !orderLeak && fixed.length > content.length * 0.6 && fixed.length < content.length * 1.5) {
+        // ★ 1 ส.ค. 69 (เกราะแก่นข่าว): ผลแก้ต้องไม่ทำ "เลขเด่นที่เวอร์ชันนี้มีอยู่แล้ว" หายไปแม้ตัวเดียว
+        //   (เทียบแบบไม่สนลูกน้ำ: "1,000" = "1000") — หายเมื่อไหร่ = ทิ้งผลแก้ ใช้ต้นฉบับของเวอร์ชันนั้น
+        //   เจตนา: อย่างแย่สุดที่ยอมได้คือ "ธงยังไม่ถูกแก้" ไม่ใช่ "แก่นข่าวหาย"
+        const flat = (s) => String(s).replace(/,/g, '');
+        const lostNums = keyNumbersOf(content).filter(k => !fixed.includes(k.num) && !flat(fixed).includes(flat(k.num)));
+        if (lostNums.length > 0) {
+          console.warn(`[Correction] ⛔ เกราะแก่นข่าว: V${i + 1} ผลแก้ทำเลขสำคัญหาย (${lostNums.map(k => `${k.num} ${k.unit}`).join(', ')}) — ใช้ต้นฉบับ`);
+          return v;
+        }
         console.log(`[FlagFixer] ✅ V${i + 1} แก้: ${problems[i].join('+')}`);
         return { ...v, content: fixed, _flagsFixed: problems[i] };
       }

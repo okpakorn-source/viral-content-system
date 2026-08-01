@@ -9,6 +9,84 @@
 
 import { callAI } from '@/lib/ai/openai';
 import { MODEL_FAST } from '@/lib/ai/modelConfig';
+// ★ 1 ส.ค. 69 (เกราะแก่นข่าว): ใช้ตัวสกัด "เลขเด่น" ตัวเดียวกับ flagFixer — แหล่งความจริงเดียว ไม่ก๊อปตรรกะซ้ำ
+import { keyNumbersOf } from './flagFixerService';
+
+// ═══ ★ 1 ส.ค. 69 (เกราะแก่นข่าว) ═══════════════════════════════════════════
+// เหตุ (พิสูจน์แล้ว 1 ส.ค.): เวอร์ชันที่ติดป้าย _correctionApplied=true มีเนื้อพัง —
+//   ชั้นแก้คำแทนคำโดนกลางคำ ("ตามลำดับ" → "ตามลำจากไป") แล้วชั้นตรวจถัดไปลบท่อนที่พังทิ้งทั้งท่อน
+//   จนประโยคแก่นข่าวหายทั้งใบ (เช่น "หมู่บิ๊กออกจากโรงพยาบาลแล้ว...8 เดือน")
+// หลักการของเกราะนี้: การเกลาคำเป็นของแถม แก่นข่าวเป็นของหลัก —
+//   ผลแก้ที่ทำ "เลขสำคัญหาย" หรือ "เนื้อหด" ให้ทิ้งทั้งชุดแล้วใช้ต้นฉบับเสมอ
+//   อย่างแย่ที่สุดที่ยอมได้ = คำไม่ถูกเกลา (ไม่ใช่แก่นข่าวหาย)
+const CORE_GUARD_MIN_KEEP_DEFAULT = 0.75;
+
+function coreGuardMinKeep() {
+  const raw = parseFloat(process.env.CORRECTION_MIN_KEEP);
+  // นอกช่วง (0,1] = ค่าเพี้ยน → ใช้ค่าปลอดภัยเริ่มต้น (กันตั้งค่าผิดแล้วเกราะบ้าตีกลับทุกใบ)
+  if (!Number.isFinite(raw) || raw <= 0 || raw > 1) return CORE_GUARD_MIN_KEEP_DEFAULT;
+  return raw;
+}
+
+/**
+ * ด่านเทียบ ต้นฉบับ vs ผลแก้ — ใช้ก่อนเอาผลแก้ไปแทนต้นฉบับทุกครั้ง
+ * export ไว้ให้ชั้นอื่นในท่อ (เช่น correctionPipeline) เรียกใช้เกราะเดียวกันได้ ถ้าทีมสั่งต่อ
+ * @returns {{ ok: boolean, reason: string|null }}
+ */
+export function guardCoreNews(originalContent, candidateContent) {
+  const original = String(originalContent || '');
+  const candidate = String(candidateContent || '');
+
+  // ไม่ได้แตะเนื้อเลย → ผ่านทันที (กันเตือนหลอกบนเส้นที่ไม่มีอะไรเปลี่ยน)
+  if (candidate === original) return { ok: true, reason: null };
+
+  if (!candidate.trim()) return { ok: false, reason: 'ผลแก้ว่างเปล่า' };
+
+  // (ก) เลขเด่นของต้นฉบับต้องอยู่ครบทุกตัว (เทียบแบบไม่สนลูกน้ำ: "1,000" = "1000")
+  const flat = (s) => s.replace(/,/g, '');
+  const flatCandidate = flat(candidate);
+  const missing = keyNumbersOf(original)
+    .filter(k => !candidate.includes(k.num) && !flatCandidate.includes(flat(k.num)));
+  if (missing.length > 0) {
+    return { ok: false, reason: `เลขสำคัญหาย ${missing.map(k => `${k.num} ${k.unit}`).join(', ')}` };
+  }
+
+  // (ข) เนื้อต้องไม่หดเกินเพดาน (ตัวจับ "ท่อนถูกลบทิ้ง")
+  const minKeep = coreGuardMinKeep();
+  if (original.length > 0 && candidate.length < original.length * minKeep) {
+    const shrink = Math.round((1 - candidate.length / original.length) * 100);
+    return { ok: false, reason: `เนื้อหด ${shrink}% (เพดาน ${Math.round((1 - minKeep) * 100)}%)` };
+  }
+
+  return { ok: true, reason: null };
+}
+
+/**
+ * ทางออกเดียวของ safeCorrect — ผลแก้ทุกเส้นทางต้องผ่านด่านนี้ก่อนออกจาก service
+ * ไม่ผ่าน = คืนต้นฉบับของเวอร์ชันนั้น + log ชัด + ทิ้งรายการแก้ (เพราะไม่มีอันไหนถูกใช้จริง)
+ */
+function finalizeWithGuard(rollbackContent, correctedContent, corrections) {
+  const guard = guardCoreNews(rollbackContent, correctedContent);
+  if (guard.ok) {
+    return { correctedContent, rollbackContent, corrections, _coreGuard: 'passed' };
+  }
+
+  const dropped = [...new Set(corrections.filter(c => c.type !== 'skipped_low').map(c => c.type))];
+  console.warn(`[Correction] ⛔ เกราะแก่นข่าว: ${guard.reason} — ใช้ต้นฉบับ (ทิ้งการแก้ ${dropped.length ? dropped.join(', ') : 'ไม่มี'})`);
+  return {
+    correctedContent: rollbackContent,
+    rollbackContent,
+    // รายงานตามจริง: ไม่มีการแก้ไหนถูกใช้กับเนื้อที่คืนออกไป
+    corrections: [{
+      type: 'core_guard_revert',
+      original: `(ทิ้งผลแก้: ${dropped.length ? dropped.join(', ') : 'ไม่มี'})`,
+      fixed: '(ใช้ต้นฉบับ)',
+      reason: `เกราะแก่นข่าว: ${guard.reason}`,
+    }],
+    _coreGuard: `reverted:${guard.reason}`,
+  };
+}
+// ═══ จบเกราะแก่นข่าว ═══════════════════════════════════════════════════════
 
 /**
  * แก้ content ตาม issues ที่ audit พบ
@@ -23,7 +101,9 @@ export async function safeCorrect(content, issues) {
 
   try {
     if (!issues || issues.length === 0) {
-      return { correctedContent, rollbackContent, corrections };
+      // ★ 1 ส.ค. 69 (เกราะแก่นข่าว): เส้นนี้ยังไม่แตะเนื้อ (ผลแก้ = ต้นฉบับ) — ด่านจะปล่อยผ่านทันที
+      //   แต่ยังต้องเรียก เผื่ออนาคตมีใครแทรกการแก้ไว้ก่อนจุดนี้ จะได้ไม่มีทางออกไหนหลุดเกราะ
+      return finalizeWithGuard(rollbackContent, correctedContent, corrections);
     }
 
     // === แยก issues ตาม severity ===
@@ -179,9 +259,12 @@ ${correctedContent}
 
     console.log(`[SafeCorrection] Applied ${corrections.filter(c => c.type !== 'skipped_low').length} corrections`);
 
-    return { correctedContent, rollbackContent, corrections };
+    // ★ 1 ส.ค. 69 (เกราะแก่นข่าว): ทางออกหลัก — ผลแก้ทั้งชุด (direct replace + AI rewrite + ลบ bait)
+    //   ต้องผ่านด่านเทียบกับต้นฉบับก่อนเสมอ ไม่ผ่าน = ใช้ต้นฉบับ
+    return finalizeWithGuard(rollbackContent, correctedContent, corrections);
 
   } catch (err) {
+    // เส้น error: คืนต้นฉบับอยู่แล้ว = ปลอดภัยโดยโครงสร้าง ไม่ต้องผ่านด่าน (ผลแก้ไม่ได้ออกไปเลย)
     console.error('[SafeCorrection] Error:', err.message);
     return { correctedContent: rollbackContent, rollbackContent, corrections: [] };
   }
