@@ -44,7 +44,9 @@ const FORBIDDEN_WORDS = [
   { pattern: /กระสุน/g, type: 'forbidden_word', severity: 'medium', suggestion: 'วัตถุอันตราย' },
 
   // === ความรุนแรง (MEDIUM) ===
-  { pattern: /ดับ(?!เพลิง|ไฟ|กลิ่น|แสง)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'จากไป' },
+  // ★ 1 ส.ค. 69 (กรรมการเทสจับได้ — เคสจริง "ตามลำดับ"→"ตามลำจากไป" แล้วท่อนพังถูกลบทั้งท่อนจนแก่นข่าวหาย):
+  //   เพิ่ม lookbehind กันจับกลางคำ ลำดับ/อันดับ/ระดับ + lookahead ดับเบิล/ดับบลิว — สไตล์เดียวกับเคส "เส้นเลือด" ข้างล่าง
+  { pattern: /(?<!ลำ|อัน|ระ|ไฟ|เครื่อง)ดับ(?!เพลิง|ไฟ|กลิ่น|แสง|เบิล|บลิว)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'จากไป' },
   { pattern: /สิ้นใจ/g, type: 'forbidden_word', severity: 'medium', suggestion: 'จากไป' },
   { pattern: /สยอง/g, type: 'forbidden_word', severity: 'medium', suggestion: 'น่าตกใจ' },
   { pattern: /โหด(?!ร้อน)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'รุนแรง' },
