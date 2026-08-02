@@ -24,6 +24,20 @@ const HUNT = '/api/desk/research/hunt';
 const TRACE = '/api/desk/research/trace'; // ★ trace 17 ก.ค. (อ้างแบบ trace-design) — สมุดบันทึกย้อนหลัง
 const JUDGE_MAX_PER_CLUSTER = 16; // เพดานใบที่ส่งตัดสินต่อคลัสเตอร์ (คุมต้นทุน AI)
 const KEEP_MIN_SCORE = 60;        // เก็บลีดอัตโนมัติเฉพาะ verdict='keep' && matchScore≥60
+// 🐛 2 ส.ค. 69 — ค่าคุมความสดของกระดาน (เจ้าของสั่ง "แก้ให้มันอัพเดทจริงเสมอ")
+const LIB_LIMIT = 500;            // เท่าเพดานจริงของ API (เดิม UI ขอ 200 → ของเกินหายเงียบ)
+const LIB_REFETCH_MS = 120000;    // รีเฟรชเองทุก 2 นาที "เฉพาะตอนเปิดหน้าอยู่" (แท็บหลังบ้านไม่ยิง)
+const LIB_FOCUS_COOLDOWN_MS = 15000; // กลับมาที่แท็บแล้วรีเฟรช แต่ถี่สุดไม่เกินทุก 15 วิ (กัน egress พุ่ง)
+const LIB_FILTER_DEBOUNCE_MS = 400;  // พิมพ์/ปรับคะแนนขั้นต่ำ — รอให้หยุดก่อนค่อยยิง
+
+/** "อัพเดทเมื่อ" แบบอ่านง่าย — ของสดมากบอกว่า "เมื่อสักครู่" (ไม่ต้องเห็นวินาทีวิ่ง) */
+function agoLabel(ms) {
+  const sec = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (sec < 60) return 'เมื่อสักครู่';
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min} นาทีที่แล้ว`;
+  return `${Math.round(min / 60)} ชม.ที่แล้ว`;
+}
 
 // ★ trace: บันทึกสมุด/timeline แบบ fire-and-forget — apiFetch ไม่ throw เอง (ครอบ try เผื่อผิดคาด) ห้ามบล็อก/พัง UI หลัก
 function fireTrace(body) {
@@ -63,6 +77,7 @@ export default function ResearchTab({ onToast }) {
 
   // ── ส่วน 3: คลังลีดสะสม ──
   const [libLeads, setLibLeads] = useState([]);
+  const [libLoadedAt, setLibLoadedAt] = useState(0); // 🐛 2 ส.ค.: โชว์ "อัพเดทเมื่อ" ให้รู้ว่าของสดแค่ไหน
   const [libStats, setLibStats] = useState(null);
   const [libLoading, setLibLoading] = useState(false);
   const [fStatus, setFStatus] = useState('');
@@ -88,6 +103,10 @@ export default function ResearchTab({ onToast }) {
   const [sendNotes, setSendNotes] = useState({}); // { [id]: {kind,msg} }
   const [extractNotes, setExtractNotes] = useState({}); // R6: { [id]: {kind:'pending'|'error',msg} }
   const didInit = useRef(false);
+  // 🐛 2 ส.ค. 69 — ตัวคุมความสดของกระดาน
+  const lastLibFetchRef = useRef(0);   // เวลาที่โหลดคลังสำเร็จล่าสุด (กันยิงถี่)
+  const huntingRef = useRef(false);    // สถานะ "กำลังล่า" แบบอ่านได้ใน timer/handler โดยไม่ต้องผูก deps
+  useEffect(() => { huntingRef.current = hunting; }, [hunting]);
 
   const selectedSet = new Set(selectedIds);
   const pushStep = useCallback((line) => {
@@ -149,7 +168,10 @@ export default function ResearchTab({ onToast }) {
 
   const loadLibrary = useCallback(async () => {
     setLibLoading(true);
-    const params = new URLSearchParams({ limit: '200' });
+    // 🐛 2 ส.ค. 69 (เจ้าของสั่งเช็คบั๊กกระดาน): เดิมขอ 200 ใบตายตัว แต่คลังมี 274 ใบ
+    //   เรียงตามคะแนน → 74 ใบท้ายแถว "หายเงียบ" ไม่มีอะไรบอกว่าถูกตัด (เพดานจริงของ API = 500)
+    //   → ขอเต็มเพดาน + ถ้าชนเพดานจริงค่อยเตือนบนหน้าจอ (ดูป้ายใต้แถวกรอง)
+    const params = new URLSearchParams({ limit: String(LIB_LIMIT) });
     if (fStatus) params.set('status', fStatus);
     if (fChannel) params.set('channel', fChannel);
     if (fCluster) params.set('clusterId', fCluster);
@@ -157,8 +179,11 @@ export default function ResearchTab({ onToast }) {
     if (fQ.trim()) params.set('q', fQ.trim());
     const res = await apiFetch(`${LEADS}?${params.toString()}`);
     setLibLoading(false);
-    if (res.success) setLibLeads(res.leads || []);
-    else onToast?.(res.error || 'โหลดคลังลีดไม่สำเร็จ', 'err');
+    if (res.success) {
+      setLibLeads(res.leads || []);
+      setLibLoadedAt(Date.now());
+      lastLibFetchRef.current = Date.now();
+    } else onToast?.(res.error || 'โหลดคลังลีดไม่สำเร็จ', 'err');
   }, [fStatus, fChannel, fCluster, fMinScore, fQ, onToast]);
 
   useEffect(() => {
@@ -171,6 +196,42 @@ export default function ResearchTab({ onToast }) {
     loadLibStats();
     loadDiscoveryConfig();
   }, [loadClusters, loadLibrary, loadLibStats, loadDiscoveryConfig]);
+
+  // 🐛 2 ส.ค. 69 — บั๊ก "เปลี่ยนตัวกรองแล้วกระดานไม่ขยับ"
+  //   ตัวกรอง status/channel/cluster/minScore/q ถูกส่งไปกรองฝั่งเซิร์ฟเวอร์ แต่เดิมไม่มีใครสั่งโหลดใหม่
+  //   → ต้องกดปุ่มรีเฟรชเองทุกครั้ง (เห็นรายการเดิมค้าง คิดว่าตัวกรองพัง)
+  //   หน่วงนิดหน่อยกันยิงรัวตอนพิมพ์/ลากตัวเลข · ข้ามรอบแรก (โหลดตอนเปิดแท็บทำไปแล้ว)
+  useEffect(() => {
+    if (!didInit.current) return;
+    const t = setTimeout(() => { loadLibrary(); }, LIB_FILTER_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fStatus, fChannel, fCluster, fMinScore, fQ]);
+
+  // 🐛 2 ส.ค. 69 — บั๊ก "เปิดหน้าค้างไว้แล้วข่าวไม่อัพเดท"
+  //   เดิมไม่มีการรีเฟรชอัตโนมัติเลย: ล่าข่าวเสร็จจากเครื่อง/แท็บอื่น กระดานยังเป็นของเก่าจนกดรีเฟรชเอง
+  //   🔴 ยิงเฉพาะตอน "เปิดหน้าอยู่จริง" — แท็บที่ซ่อนอยู่ห้ามยิง (บทเรียน: getAll หนัก = egress พุ่ง เคยโดนระงับ)
+  //   ① กลับมาที่แท็บ → รีเฟรชทันที (แต่ถี่สุดทุก 15 วิ)  ② เปิดค้างไว้ → รีเฟรชเองทุก 2 นาที
+  //   ③ ระหว่างล่าอยู่ไม่ยิงซ้ำ (รอบล่าโหลดให้เองอยู่แล้วตอนจบ)
+  useEffect(() => {
+    const fresh = (cooldownMs) => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      if (huntingRef.current) return;
+      if (Date.now() - lastLibFetchRef.current < cooldownMs) return;
+      loadLibrary();
+      loadLibStats();
+    };
+    const onFocus = () => fresh(LIB_FOCUS_COOLDOWN_MS);
+    const onVis = () => { if (document.visibilityState === 'visible') fresh(LIB_FOCUS_COOLDOWN_MS); };
+    const timer = setInterval(() => fresh(LIB_REFETCH_MS - 5000), LIB_REFETCH_MS);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [loadLibrary, loadLibStats]);
 
   // ── เลือกคลัสเตอร์ ──
   function toggleCluster(id) {
@@ -671,6 +732,18 @@ export default function ResearchTab({ onToast }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
           <span style={{ fontSize: 15, fontWeight: 800, color: UI.text }}>🗃️ คลังลีดสะสม</span>
           <Chip color={UI.accent}>{fmtNum(s.total || libLeads.length)} ข่าว</Chip>
+          {/* 🐛 2 ส.ค.: บอกความสดของข้อมูล — เดิมไม่มีอะไรบอกเลยว่าที่เห็นอยู่เก่าแค่ไหน */}
+          {libLoadedAt > 0 && (
+            <span style={{ fontSize: 12, color: UI.muted }} title="กระดานรีเฟรชเองทุก 2 นาทีตอนเปิดหน้าอยู่ และทุกครั้งที่กลับมาที่แท็บนี้">
+              🕐 อัพเดท {agoLabel(libLoadedAt)}
+            </span>
+          )}
+          {/* 🐛 2 ส.ค.: เตือนเมื่อชนเพดาน — ของเกินห้ามหายเงียบ */}
+          {libLeads.length >= LIB_LIMIT && (
+            <span style={{ fontSize: 12, fontWeight: 700, color: UI.amber }} title={`แสดงได้สูงสุด ${LIB_LIMIT} ใบต่อครั้ง — ใช้ตัวกรองช่วยแคบลง`}>
+              ⚠️ ชนเพดาน {fmtNum(LIB_LIMIT)} ใบ (มีของเกินนี้)
+            </span>
+          )}
           <Btn variant="subtle" busy={libLoading} onClick={() => { loadLibrary(); loadLibStats(); }} style={{ marginLeft: 'auto', minHeight: 38, padding: '6px 12px', fontSize: 12.5 }}>↻ รีเฟรช</Btn>
         </div>
 
