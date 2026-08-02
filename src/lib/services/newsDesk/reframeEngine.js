@@ -143,7 +143,8 @@ ${angleList}
   ]
 }`;
   try {
-    const res = await callRawJSON({ prompt, model: DESK_MODEL_FAST, temperature: 0.6, maxTokens: 2800 });
+    // BRAIN: long-form 8-14 sentence prose needs deep writing judgment.
+    const res = await callRawJSON({ prompt, model: DESK_MODEL_BRAIN, temperature: 0.6, maxTokens: 2800, caller: 'reframe-generate' });
     const p = typeof res === 'object' ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
     if (!p.reframable || !Array.isArray(p.angles) || !p.angles.length) {
       return { ok: false, reason: 'ข่าวนี้แตกประเด็นเชิงบวกไม่ได้ (เป็นลบล้วน/ไม่มีมุมดี)' };
@@ -198,7 +199,8 @@ ${anglesText}
 (10 = แกนเดียวคมลึกถูกต้อง พร้อมเจน · 5 = พอใช้แต่ตื้น/เริ่มปนแกน · 0 = บิดเบือน/หลายมุนมั่ว/หักมุมไปมา)
 ตอบ JSON: {"score":0-10,"why":"เหตุผลสั้นๆ + ชี้ถ้ามีการปนแกน/หักมุม/บิดเบือน/ตื้น + แนะให้ลึกขึ้น"}`;
   try {
-    const res = await callRawJSON({ prompt, model: DESK_MODEL_BRAIN, temperature: 0.2, maxTokens: 450 });
+    // FAST: a 0-10 score plus a brief reason is lightweight classification.
+    const res = await callRawJSON({ prompt, model: DESK_MODEL_FAST, temperature: 0.2, maxTokens: 450, caller: 'reframe-judge' });
     const p = typeof res === 'object' ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
     return { score: Math.max(0, Math.min(10, Number(p.score) || 0)), why: String(p.why || '').slice(0, 320) };
   } catch (e) { return { score: 0, why: 'ประเมินไม่สำเร็จ: ' + (e.message || '').slice(0, 50) }; }

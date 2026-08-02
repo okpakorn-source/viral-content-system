@@ -6,12 +6,27 @@
  *  ★ ไม่แตะ openai.js/safetyFilter.js — แค่เรียก client ที่ export ไว้ (getOpenAIClient) แล้วไม่ run sanitize
  */
 import { getOpenAIClient } from '@/lib/ai/openai';
+import { logApiUsage } from '@/lib/ai/usageLogger';
 import { DESK_MODEL_FAST } from '@/lib/services/deskModelConfig'; // 🔧 27 ก.ค. 69 (sol): กันสาย FAST โต๊ะข่าว (gpt-5.6-luna) fallback ไป gpt-4o เต็มราคา
 
 const SYS = `คุณเป็นบรรณาธิการข่าวไทยมืออาชีพ ตอบเป็น JSON ที่ถูกต้องเท่านั้น ตาม schema ที่ระบุใน prompt
 กฎเหล็ก: ใช้เฉพาะข้อเท็จจริงจากข้อมูลที่ให้มา ห้ามแต่งเติม/บิดเบือน · ชื่อคน ตัวเลข สถานที่ คำพูด ต้องตรงต้นฉบับ 100% ห้ามเปลี่ยน/ย่อ/ตัด/แทนคำในชื่อเฉพาะ`;
 
-export async function callRawJSON({ prompt, model, temperature = 0.5, maxTokens = 2000 }) {
+function logDeskUsage({ model, usage, caller }) {
+  try {
+    Promise.resolve(logApiUsage({
+      provider: 'openai',
+      model,
+      inputTokens: usage?.prompt_tokens || 0,
+      outputTokens: usage?.completion_tokens || 0,
+      feature: `desk:${caller || 'unknown'}`,
+    })).catch((error) => console.warn('[desk:usage] Failed to save usage log:', error?.message || error));
+  } catch (error) {
+    console.warn('[desk:usage] Failed to save usage log:', error?.message || error);
+  }
+}
+
+export async function callRawJSON({ prompt, model, temperature = 0.5, maxTokens = 2000, caller = 'unknown' }) {
   const client = getOpenAIClient();
   if (!client) throw new Error('OPENAI_API_KEY ไม่ได้ตั้งค่า');
 
@@ -39,6 +54,8 @@ export async function callRawJSON({ prompt, model, temperature = 0.5, maxTokens 
         ...(isNew ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
         response_format: { type: 'json_object' },
       });
+      // Account for every completed provider response, even when its content is unusable.
+      logDeskUsage({ model: m, usage: resp.usage, caller });
       const content = resp.choices[0]?.message?.content;
       if (!content) throw new Error('AI returned empty content');
       return JSON.parse(content); // ★ ไม่ผ่าน sanitizeOutput — คงชื่อ/ข้อเท็จจริงเดิม

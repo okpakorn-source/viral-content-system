@@ -853,15 +853,48 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
         id: 'jk_' + (j.id || idOf(j.url)),
         title: String(j.title).slice(0, 200), url: j.url, source: j.source || '',
         lane: j.lane || '', category: j.category || '',
-        junkReason: j.junkReason || 'ตัดออก', junkAt: jnow,
+        // ★★ 2 ส.ค. 69 (ผู้ตรวจไขว้ชี้): ร่องรอย "ทำไมถูกกันออก" ต้องถึงถังขยะด้วย
+        //    ใบที่โมเดลคัดกรองตอบไม่ครบ/ก้อนล้มเหลว ถูกกันออกด้วย remakeable:false (fail-closed ใน deskBrain)
+        //    แต่ mapper เดิมทิ้ง classifyMissing/classifyNote → ในถังจะเห็นเหตุผลทั่วไป "ทำใหม่ไม่ได้..."
+        //    ทำให้แยกไม่ออกว่า "AI ตัดสินว่าทำใหม่ไม่ได้จริง" กับ "AI ยังไม่ได้ตรวจใบนี้เลย" ⇒ ตามรอย/กู้คืนผิดพลาด
+        junkReason: j.classifyMissing
+          ? `ยังไม่ผ่านการคัดกรอง — ${j.classifyNote || 'โมเดลตอบไม่ครบ'} (กันไว้ก่อน ไม่ใช่คำตัดสินว่าใช้ไม่ได้)`
+          : (j.junkReason || 'ตัดออก'),
+        ...(j.classifyMissing ? { classifyMissing: true, classifyNote: String(j.classifyNote || '').slice(0, 160) } : {}),
+        junkAt: jnow,
       }));
       if (rows.length) {
         await jstore.addMany(rows);
         stats.junked = rows.length;
+        // ★★ P2 เก็บงาน (2 ส.ค. 69 — ผู้ตรวจไขว้ชี้): ถังขยะเคยตัดเหลือ 400 ใบ "เงียบๆ ไม่มีสวิตช์"
+        //    ของในถังนี้ "กู้คืนขึ้นโต๊ะได้" (ปุ่ม restoreJunk ที่ src/app/api/news-desk/route.js) → เกินเพดาน = ของกู้คืนได้หายถาวร
+        //    และรอบนี้ถังหมุนเร็วขึ้น เพราะใบที่ AI ตอบไม่ครบถูกกันลงถัง (fail-closed) แทนที่จะผ่านฟรี
+        //    → เพดานปรับได้ DESK_JUNK_MAX (default 400 เท่าเดิม · 0 = ไม่ตัดเลย · ค่าขยะ = 400) + log ทุกครั้งที่ตัด
+        const junkMax = (() => {
+          const raw = String(process.env.DESK_JUNK_MAX ?? '').trim();
+          if (raw === '') return 400;
+          const n = Number(raw);
+          if (!Number.isFinite(n) || n < 0) return 400;      // ค่าขยะ/ติดลบ = ค่าเดิม (ไม่เงียบปิดเพดาน)
+          if (n === 0) return 0;                              // 0 = ไม่ตัดเลย
+          return Math.min(5000, Math.max(50, Math.floor(n))); // clamp กันตั้งเพี้ยนจนถังบวม/ตัดเกลี้ยง
+        })();
         const jall = await jstore.getAll();
-        if (jall.length > 400) {
-          const old = jall.sort((a, b) => new Date(a.junkAt || 0) - new Date(b.junkAt || 0)).slice(0, jall.length - 400);
-          for (const o of old) await jstore.remove(o.id).catch(() => {});
+        if (junkMax > 0 && jall.length > junkMax) {
+          const old = jall.sort((a, b) => new Date(a.junkAt || 0) - new Date(b.junkAt || 0)).slice(0, jall.length - junkMax);
+          // ★ ผู้ตรวจไขว้จับได้ (2 ส.ค.): เดิมนับ old.length ตรงๆ ทั้งที่ remove() ถูกกลืน error ด้วย .catch()
+          //   → ลบไม่สำเร็จแต่รายงานว่าสำเร็จ (โพรบพิสูจน์: ของยัง 402 ใบ แต่รายงานตัดไป 2) ⇒ ถังเกินเพดานเงียบ
+          //   นับเฉพาะที่ลบสำเร็จจริง + บอกจำนวนที่ล้มด้วย
+          let trimmed = 0, failed = 0;
+          for (const o of old) {
+            try { await jstore.remove(o.id); trimmed++; }
+            catch (e) { failed++; }
+          }
+          stats.junkTrimmed = trimmed;
+          if (failed) stats.junkTrimFailed = failed;
+          console.log(`[Harvester] 🗑️ ถังขยะเกินเพดาน ${junkMax} — ตัดสำเร็จ ${trimmed} ใบ${failed ? ` · ลบไม่สำเร็จ ${failed} ใบ (ถังยังเกินเพดาน)` : ''} (กู้คืนไม่ได้แล้ว · ปรับเพดานที่ DESK_JUNK_MAX, 0=ไม่ตัด)`);
+        } else if (junkMax === 0 && jall.length > 400) {
+          stats.junkTrimmed = 0;
+          console.log(`[Harvester] 🗑️ ถังขยะ ${jall.length} ใบ — ไม่ตัด (DESK_JUNK_MAX=0)`);
         }
       }
     } catch (e) { console.log('[Harvester] เก็บคลังขยะล้ม:', e.message?.slice(0, 50)); }
@@ -872,32 +905,54 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
   // ★★ 21 มิ.ย. (ผู้ใช้สั่ง): โต๊ะข่าว = "หน้าต่างของสด" ไม่ใช่กองสะสม — เกิน 48 ชม. "ลบจริง" ออกจาก DB
   //    เหตุผล: ตารางใหญ่ = getAll/อ่านหนัก = egress พุ่ง (เคยโดน Supabase ระงับ) · ค้นใหม่มาเติมเรื่อยอยู่แล้ว ลบของเก่าได้ปลอดภัย
   //    🔒 เก็บไว้เสมอ: คลังส่งเช้า(shortlisted) · ใช้แล้ว(used) · ส่งเขียน/กำลังหยิบ(sent/claimed) — ของทีม ห้ามแตะ
+  // ★★ P2 (2 ส.ค. — เจ้าของสั่ง): หยุดลบข่าวที่ยังไม่ได้ใช้อัตโนมัติ — ของที่ล่ามาต้องอยู่รอจนเจ้าของสั่งเคลียร์เอง
+  //   (หลักฐาน: ล่า 1,086 ใบ ได้ใช้จริง 15 ใบ (1.4%) เพราะโดนลบทิ้งก่อนได้ใช้)
+  //   ลบตามอายุ + เพดานจำนวน ทำงานต่อเมื่อ DESK_AUTO_PURGE === '1' เท่านั้น (default = ไม่ลบ)
+  //   ปรับค่าเมื่อเปิด: DESK_PURGE_HOURS (default 48 เท่าเดิม) · DESK_MAX_ITEMS (default 800 เท่าเดิม)
+  //   🔒 safety re-check (ผิดกฎ/สถาบันแง่ลบ) ยังลบต่อเหมือนเดิมทุกรอบ — ของผิดกฎห้ามค้างบนโต๊ะ
   try {
+    const purgeOn = process.env.DESK_AUTO_PURGE === '1';
+    const purgeHr = Math.max(1, Number(process.env.DESK_PURGE_HOURS) || 48); // default 48 เท่าเดิม
+    const maxItems = Math.max(1, Number(process.env.DESK_MAX_ITEMS) || 800); // default 800 เท่าเดิม
     const allNow = await store.getAll();
     const now = Date.now();
     let removed = 0;
-    const toRemove = [];
+    const toRemove = []; // safety — ลบเสมอ (คงเดิม)
+    const stale = [];    // เกินอายุ — ลบเฉพาะตอน purgeOn
     for (const it of allNow) {
       if (it.shortlisted || it.used || it.status === 'sent' || it.status === 'claimed') continue; // ของทีม — ไม่ลบ
       const ageHr = (now - new Date(it.harvestedAt || it.createdAt || 0).getTime()) / 36e5;
       // 1) safety re-check ล่าสุด — ผิดกฎ/สถาบันแง่ลบ = ลบทิ้งเลย (กันของหลุดก่อนอัปเดตด่าน)
       const g = gateKeywords(it);
       if (!g.pass || it.royalNegative === true) { toRemove.push(it.id); continue; }
-      // 2) อายุเกินกำหนด → ลบจริง (ผลค้นเฉพาะแนว 7 วัน · คะแนนดี≥9 72ชม. · ปกติ 48ชม.)
-      const cap = it.focusTag ? 168 : ((it.judgeScore ?? 0) >= 9 ? 72 : 48);
-      if (it.status === 'new' && ageHr > cap) { toRemove.push(it.id); continue; }
-      // 3) ที่ถูก dismiss ไว้ + เกิน 24 ชม. → ลบจริงเคลียร์ DB (ไม่ปล่อยค้างกินที่)
-      if (it.status === 'dismissed' && ageHr > 24) { toRemove.push(it.id); continue; }
+      // 2) อายุเกินกำหนด → ลบจริง (ผลค้นเฉพาะแนว 3.5× · คะแนนดี≥9 1.5× · ปกติ DESK_PURGE_HOURS) — เฉพาะตอนเปิด purge
+      const cap = it.focusTag ? purgeHr * 3.5 : ((it.judgeScore ?? 0) >= 9 ? purgeHr * 1.5 : purgeHr);
+      if (it.status === 'new' && ageHr > cap) { stale.push(it.id); continue; }
+      // 3) ที่ถูก dismiss ไว้ + เกินครึ่งหนึ่งของเกณฑ์อายุ → ลบจริงเคลียร์ DB (ไม่ปล่อยค้างกินที่) — เฉพาะตอนเปิด purge
+      if (it.status === 'dismissed' && ageHr > purgeHr / 2) { stale.push(it.id); continue; }
     }
     for (const id of toRemove) { await store.remove(id).catch(() => {}); removed++; }
-    // ★ เพดานจำนวน (กัน DB ล้นระหว่างวัน): เก็บ new ท็อป 800 ตามคะแนน ที่เหลือ "ลบจริง"
-    const liveNew = (await store.getAll()).filter(i => i.status === 'new' && !i.shortlisted && !i.used && !i.focusTag);
-    if (liveNew.length > 800) {
-      liveNew.sort((a, b) => (b.finalScore || 0) - (a.finalScore || 0));
-      for (const o of liveNew.slice(800)) { await store.remove(o.id).catch(() => {}); removed++; }
+    if (toRemove.length > 0) stats.safetyPurged = (stats.safetyPurged || 0) + toRemove.length;
+    if (purgeOn) {
+      for (const id of stale) { await store.remove(id).catch(() => {}); removed++; }
+      // ★ เพดานจำนวน (กัน DB ล้นระหว่างวัน): เก็บ new ท็อป DESK_MAX_ITEMS ตามคะแนน ที่เหลือ "ลบจริง"
+      const liveNew = (await store.getAll()).filter(i => i.status === 'new' && !i.shortlisted && !i.used && !i.focusTag);
+      if (liveNew.length > maxItems) {
+        liveNew.sort((a, b) => (b.finalScore || 0) - (a.finalScore || 0));
+        for (const o of liveNew.slice(maxItems)) { await store.remove(o.id).catch(() => {}); removed++; }
+      }
+      stats.autoPurged = removed;
+      stats.purgeSkipped = 0;
+      if (removed > 0) console.log(`[Harvester] 🧹 ลบของเก่าจริงออกจาก DB: ${removed} ใบ (เกิน ${purgeHr} ชม./เกินเพดาน ${maxItems}/ผิดกฎ) — กัน egress ล้น`);
+    } else {
+      // ตอนปิด: ไม่ลบอะไรเลยนอกจาก safety — นับว่า "ถ้าเปิด" จะโดนลบกี่ใบ (เกินอายุ + ส่วนเกินเพดานหลังหักตัวเกินอายุ)
+      const liveNewOff = allNow.filter(i => i.status === 'new' && !i.shortlisted && !i.used && !i.focusTag && !toRemove.includes(i.id));
+      const capOverflow = Math.max(0, liveNewOff.filter(i => !stale.includes(i.id)).length - maxItems);
+      const skipped = stale.length + capOverflow;
+      stats.autoPurged = 0;
+      stats.purgeSkipped = skipped;
+      if (skipped > 0) console.log(`[Harvester] 🧹 auto-purge ปิดอยู่ — ของเก่าเกินเกณฑ์ ${skipped} ใบ (เก็บไว้รอเจ้าของสั่งเคลียร์)`);
     }
-    stats.autoPurged = removed;
-    if (removed > 0) console.log(`[Harvester] 🧹 ลบของเก่าจริงออกจาก DB: ${removed} ใบ (เกิน 48 ชม./เกินเพดาน 800/ผิดกฎ) — กัน egress ล้น`);
   } catch (e) { console.log('[Harvester] auto-purge skip:', e.message?.slice(0, 40)); }
 
   // ════════════════════════════════════════════════════
@@ -909,51 +964,61 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
   } catch (e) { console.log('[AutoPilot] skip:', e.message?.slice(0, 50)); }
 
   // ★ Research Agent อัตโนมัติ (16 มิ.ย.: ลด 3→1 ใบ + กันค้าง 45 วิ — ตัวนี้เคยกินเวลา harvest ไป 1-3 นาที)
-  try {
-    const { deepResearch } = await import('./researchAgent');
-    const top = toAdd.filter(i => (i.judgeScore ?? 0) >= 8 && i.lane !== 'interview').sort((a, b) => (b.judgeScore || 0) - (a.judgeScore || 0))[0];
-    if (top) {
-      const timeout = new Promise(res => setTimeout(() => res({ ok: false, reason: 'timeout' }), 45000));
-      const r = await Promise.race([deepResearch(top).catch(e => ({ ok: false, reason: e.message })), timeout]);
-      if (r.ok) {
-        const boosted = Math.min(100, (top.finalScore || 0) + Math.max(0, r.readyScore - 5) * 2);
-        await store.update(top.id, (ex) => ({ ...ex, research: r, finalScore: boosted }));
-        stats.researched = 1;
+  // ★ P2 (2 ส.ค. — เจ้าของสั่ง): งานที่เสียเงินต้องเกิดจากการกดสั่งเท่านั้น — default ข้าม · ทำต่อเมื่อ DESK_AUTO_RESEARCH === '1'
+  if (process.env.DESK_AUTO_RESEARCH === '1') {
+    try {
+      const { deepResearch } = await import('./researchAgent');
+      const top = toAdd.filter(i => (i.judgeScore ?? 0) >= 8 && i.lane !== 'interview').sort((a, b) => (b.judgeScore || 0) - (a.judgeScore || 0))[0];
+      if (top) {
+        const timeout = new Promise(res => setTimeout(() => res({ ok: false, reason: 'timeout' }), 45000));
+        const r = await Promise.race([deepResearch(top).catch(e => ({ ok: false, reason: e.message })), timeout]);
+        if (r.ok) {
+          const boosted = Math.min(100, (top.finalScore || 0) + Math.max(0, r.readyScore - 5) * 2);
+          await store.update(top.id, (ex) => ({ ...ex, research: r, finalScore: boosted }));
+          stats.researched = 1;
+        }
       }
-    }
-  } catch (e) { console.log('[Harvester] auto-research skip:', e.message?.slice(0, 50)); }
+    } catch (e) { console.log('[Harvester] auto-research skip:', e.message?.slice(0, 50)); }
+  } else {
+    console.log('[Harvester] ⏭️ ข้าม auto-research (ปิดอยู่ — เปิดด้วย DESK_AUTO_RESEARCH=1 หรือสั่ง research เองจากโต๊ะ)');
+  }
 
   // ⛏️ AUTO-MINE (2 ก.ค. — แก้ "คลิป 22% ของโต๊ะแต่ถูกใช้ 0.6%"): คลิปที่ บก.ให้ ≥8 → ถอดเสียง+ขุดนาทีทองเองทันที
   //   การ์ดคลิปมีเนื้อ (fullText/นาทีทอง) ให้ทีมอ่านตัดสินได้เลย ไม่ต้องกดถอดเอง · สูงสุด 2 ใบ/รอบ กันกินเวลา harvest
   //   แพลตฟอร์ม: YouTube/TikTok ทุกเครื่อง · FB/IG เฉพาะเครื่องทีม (win32 — ตาม metaFrameExtractor)
-  try {
-    const _minePlatformOk = (u) => /youtube\.com|youtu\.be|tiktok\.com/i.test(u)
-      || (process.platform === 'win32' && /facebook\.com|fb\.watch|instagram\.com/i.test(u));
-    const mineCands = toAdd
-      .filter(i => (i.judgeScore ?? 0) >= 8 && !i.fullText && (i.isVideo || ['clip', 'video'].includes(i.lane)) && _minePlatformOk(String(i.url || '')))
-      .sort((a, b) => (b.judgeScore || 0) - (a.judgeScore || 0))
-      .slice(0, 2);
-    stats.mined = 0;
-    if (mineCands.length) console.log(`[AutoMine] ⛏️ คลิปเข้าเกณฑ์ถอดอัตโนมัติ ${mineCands.length} ใบ`);
-    for (const c of mineCands) {
-      try {
-        const { mineClip } = await import('./interviewMiner');
-        const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('mine timeout 90s')), 90000));
-        const mined = await Promise.race([mineClip(c.url), timeout]);
-        if (mined?.fullText) {
-          await store.update(c.id, (ex) => ({
-            ...ex,
-            fullText: mined.fullText, goldenMoments: mined.goldenMoments, captionSkeleton: mined.captionSkeleton,
-            mined: true, minedAt: new Date().toISOString(),
-            judgeScore: Math.max(ex.judgeScore || 0, mined.judgeScore || 0),
-            judgeReason: mined.judgeReason || ex.judgeReason,
-          }));
-          stats.mined++;
-          console.log(`[AutoMine] ✅ ถอดสำเร็จ: ${String(c.title).slice(0, 50)}`);
-        }
-      } catch (e) { console.log('[AutoMine] ⛏️ ถอดไม่สำเร็จ (ข้าม):', e.message?.slice(0, 60)); }
-    }
-  } catch (e) { console.log('[AutoMine] skip:', e.message?.slice(0, 40)); }
+  // ★ P2 (2 ส.ค. — เจ้าของสั่ง): งานที่เสียเงินต้องเกิดจากการกดสั่งเท่านั้น — default ข้าม · ทำต่อเมื่อ DESK_AUTO_MINECLIP === '1'
+  if (process.env.DESK_AUTO_MINECLIP === '1') {
+    try {
+      const _minePlatformOk = (u) => /youtube\.com|youtu\.be|tiktok\.com/i.test(u)
+        || (process.platform === 'win32' && /facebook\.com|fb\.watch|instagram\.com/i.test(u));
+      const mineCands = toAdd
+        .filter(i => (i.judgeScore ?? 0) >= 8 && !i.fullText && (i.isVideo || ['clip', 'video'].includes(i.lane)) && _minePlatformOk(String(i.url || '')))
+        .sort((a, b) => (b.judgeScore || 0) - (a.judgeScore || 0))
+        .slice(0, 2);
+      stats.mined = 0;
+      if (mineCands.length) console.log(`[AutoMine] ⛏️ คลิปเข้าเกณฑ์ถอดอัตโนมัติ ${mineCands.length} ใบ`);
+      for (const c of mineCands) {
+        try {
+          const { mineClip } = await import('./interviewMiner');
+          const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('mine timeout 90s')), 90000));
+          const mined = await Promise.race([mineClip(c.url), timeout]);
+          if (mined?.fullText) {
+            await store.update(c.id, (ex) => ({
+              ...ex,
+              fullText: mined.fullText, goldenMoments: mined.goldenMoments, captionSkeleton: mined.captionSkeleton,
+              mined: true, minedAt: new Date().toISOString(),
+              judgeScore: Math.max(ex.judgeScore || 0, mined.judgeScore || 0),
+              judgeReason: mined.judgeReason || ex.judgeReason,
+            }));
+            stats.mined++;
+            console.log(`[AutoMine] ✅ ถอดสำเร็จ: ${String(c.title).slice(0, 50)}`);
+          }
+        } catch (e) { console.log('[AutoMine] ⛏️ ถอดไม่สำเร็จ (ข้าม):', e.message?.slice(0, 60)); }
+      }
+    } catch (e) { console.log('[AutoMine] skip:', e.message?.slice(0, 40)); }
+  } else {
+    console.log('[Harvester] ⏭️ ข้าม auto-mineclip (ปิดอยู่ — เปิดด้วย DESK_AUTO_MINECLIP=1 หรือกดถอดคลิปเองจากโต๊ะ)');
+  }
 
   // ★ 17 มิ.ย.: แปลงมุมอัตโนมัติ (ดีฟอลต์ปิด — เปิดที่สวิตช์โต๊ะ "♻️") กันเปลือง OpenAI ตอนระบบยังไม่นิ่ง
   //   เปิดเมื่อไหร่ = ข่าวดราม่า/ปะทะที่เพิ่งเก็บ ≤3 ใบ/รอบ ถูกแปลงเป็นมุมบวกอัตโนมัติ
@@ -977,7 +1042,9 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
 // AUTO-PILOT — บก.เลือกเอง ส่งเจนเอง
 // ════════════════════════════════════════════════════
 async function getAutopilotConfig() {
-  const defaults = { enabled: true, minScore: 8, perEditorPerRound: 2, dailyCap: 20 };
+  // ★ P2 (2 ส.ค. — เจ้าของสั่ง): default = ปิด — งานที่เสียเงินต้องเกิดจากการกดสั่งเท่านั้น
+  //   เปิดได้ 2 ทาง: env DESK_AUTOPILOT=1 · record 'autopilot' ใน desk-settings (record override ได้เหมือนเดิม)
+  const defaults = { enabled: process.env.DESK_AUTOPILOT === '1', minScore: 8, perEditorPerRound: 2, dailyCap: 20 };
   try {
     const settings = createStore('desk-settings');
     const all = await settings.getAll();
@@ -1190,21 +1257,27 @@ export async function runAllEditors(mode = 'select') {
   return { mode, editors: results, totalPicked, totalJudged, summary };
 }
 
-/** ลบข่าวเก่าเกิน N วัน กันคลังบวม (เรียกตอน harvest) */
+/**
+ * ลบข่าวเก่าเกิน N วัน กันคลังบวม (เรียกตอน harvest / เมนูเช้า)
+ * ★★ P2 (2 ส.ค. — เจ้าของสั่ง): อยู่ใต้สวิตช์เดียวกับด่านล้างโต๊ะ — ลบต่อเมื่อ DESK_AUTO_PURGE === '1' เท่านั้น
+ *   ปิดอยู่ = ไม่ลบ คืน 0 + log บอกจำนวนที่ "จะ" ถูกลบถ้าเปิด (แบบเดียวกับด่าน A — ของที่ล่ามาต้องอยู่รอจนเจ้าของสั่งเคลียร์เอง)
+ *   🔒 ไม่ว่าเปิดหรือปิด: คลังส่งเช้า(shortlisted) / ใช้แล้ว(used) / ส่งเขียน(sent) / กำลังหยิบ(claimed) ห้ามถูกลบเด็ดขาด (เท่ากับด่าน A)
+ */
 export async function pruneOldItems(days = 3) {
   try {
     const store = createStore('news-desk');
     const all = await store.getAll();
     const cutoff = Date.now() - days * 864e5;
-    let removed = 0;
+    const purgeOn = process.env.DESK_AUTO_PURGE === '1';
+    let removed = 0, wouldRemove = 0;
     for (const it of all) {
-      const keep = it.status === 'claimed' || it.status === 'sent';
-      if (!keep && new Date(it.harvestedAt || 0).getTime() < cutoff) {
-        await store.remove(it.id);
-        removed++;
-      }
+      const keep = it.shortlisted || it.used || it.status === 'claimed' || it.status === 'sent'; // ของทีม — ไม่ลบ (เท่ากับด่าน A)
+      if (keep || new Date(it.harvestedAt || 0).getTime() >= cutoff) continue;
+      if (purgeOn) { await store.remove(it.id); removed++; }
+      else wouldRemove++;
     }
-    if (removed) console.log(`[Harvester] 🧹 pruned ${removed} old items`);
+    if (purgeOn && removed) console.log(`[Harvester] 🧹 pruned ${removed} old items`);
+    if (!purgeOn && wouldRemove) console.log(`[Harvester] 🧹 auto-purge ปิดอยู่ — ของเก่าเกิน ${days} วัน ${wouldRemove} ใบ (เก็บไว้รอเจ้าของสั่งเคลียร์)`);
     return removed;
   } catch { return 0; }
 }

@@ -12,18 +12,35 @@
  */
 
 import { createStore } from '@/lib/persistStore';
-import { DESK_MODEL_BRAIN } from '@/lib/services/deskModelConfig';
+import { logApiUsage } from '@/lib/ai/usageLogger';
+import { DESK_MODEL_BRAIN, DESK_MODEL_FAST } from '@/lib/services/deskModelConfig';
 
 const STORE = 'desk-dna';
 
-async function openaiJSON({ model = DESK_MODEL_BRAIN, messages, maxTokens = 3000, temperature = 0.3 }) {
+function logDeskUsage({ model, usage, caller }) {
+  try {
+    Promise.resolve(logApiUsage({
+      provider: 'openai',
+      model,
+      inputTokens: usage?.prompt_tokens || 0,
+      outputTokens: usage?.completion_tokens || 0,
+      feature: `desk:${caller || 'unknown'}`,
+    })).catch((error) => console.warn('[desk:usage] Failed to save usage log:', error?.message || error));
+  } catch (error) {
+    console.warn('[desk:usage] Failed to save usage log:', error?.message || error);
+  }
+}
+
+async function openaiJSON({ model = DESK_MODEL_BRAIN, messages, maxTokens = 3000, temperature = 0.3, caller = 'unknown' }) {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature, response_format: { type: 'json_object' } }),
   });
   if (!res.ok) throw new Error(`OpenAI ${res.status}: ${(await res.text()).slice(0, 150)}`);
-  return JSON.parse((await res.json()).choices?.[0]?.message?.content || '{}');
+  const data = await res.json();
+  logDeskUsage({ model, usage: data.usage, caller });
+  return JSON.parse(data.choices?.[0]?.message?.content || '{}');
 }
 
 // CSV parser (quoted fields)
@@ -85,7 +102,7 @@ export async function extractDna(rawCsv, { topN = 250, batch = 25, onLog = () =>
   const runChunk = async (chunk, ci) => {
     const list = chunk.map(p => `[${p.react}] ${p.t.slice(0, 130)}`).join('\n');
     try {
-      const r = await openaiJSON({ model: DESK_MODEL_BRAIN, temperature: 0.3, maxTokens: 3500, messages: [{ role: 'user', content: `${DNA_PROMPT}\n\nโพสต์ (รูปแบบ: [รีแอกชัน] พาดหัว):\n${list}` }] });
+      const r = await openaiJSON({ model: DESK_MODEL_FAST, temperature: 0.3, maxTokens: 3500, caller: 'dna-extract', messages: [{ role: 'user', content: `${DNA_PROMPT}\n\nโพสต์ (รูปแบบ: [รีแอกชัน] พาดหัว):\n${list}` }] });
       for (const th of (r.themes || [])) if (th.name) rawThemes.push(th);
     } catch (e) { onLog(`ก้อน ${ci} ล่ม: ${e.message.slice(0, 40)}`); }
   };
@@ -96,7 +113,7 @@ export async function extractDna(rawCsv, { topN = 250, batch = 25, onLog = () =>
   let themes = rawThemes;
   try {
     const merged = await openaiJSON({
-      model: DESK_MODEL_BRAIN, temperature: 0.2, maxTokens: 4000,
+      model: DESK_MODEL_BRAIN, temperature: 0.2, maxTokens: 4000, caller: 'dna-extract',
       messages: [{ role: 'user', content: `รวบ "แนวข่าว" ที่ซ้ำกันเป๊ะเท่านั้น — เหลือ 18-25 แนว (อย่ารวบจนกว้าง! เก็บความเจาะจงไว้)
 ★ คำค้นต้องเจาะจงตามจุดหักมุม (เช่น "เด็กยากจนสอบติดหมอ" ไม่ใช่ "สู้ชีวิต") — ตัดคำค้นกว้างลอยๆ ทิ้ง
 แนวดิบ: ${JSON.stringify(rawThemes.map(t => ({ n: t.name, c: t.category, nq: t.newsQueries, cq: t.clipQueries, r: t.exampleReact }))).slice(0, 13000)}

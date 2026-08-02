@@ -130,10 +130,98 @@ export function keywordGore(item) {
   return GORE_RE.test(`${item.title || ''} ${item.snippet || ''}`);
 }
 
-// ── ชั้น 1: จัดหมวด + วัดพิษ (เรียกทีละก้อน ก้อนละ ≤10 ข่าว ใน 1 call) ──
+// ════════════════════════════════════════════════════
+// ★★ 2 ส.ค. 69 (P4 ลดค่าคัดกรอง — จุดแพงสุดของโต๊ะข่าว ~฿73 จาก ฿111 ต่อรอบ)
+//   วัดแล้วพบว่าเงินไหลออกที่ "กติกาคัดกรอง ~5,500 ตัวอักษร ถูกส่งซ้ำใหม่ทุกคอล"
+//   2 มาตรการ — ทั้งคู่ไม่แตะถ้อยคำกติกาแม้แต่คำเดียว (ย้ายตำแหน่ง/ปรับตัวเลขเท่านั้น):
+//   ① เรียงพรอมต์ใหม่ให้หัวคงที่: [หัวเรื่อง+หมวดให้เลือก] → [รูปแบบ JSON] → [กติกา ★ ทุกบรรทัด] → [รายชื่อข่าว] ปิดท้าย
+//      เดิมวาง ${list} ไว้ "กลางพรอมต์" (ก่อนบล็อกกติกา) → หัวพรอมต์เปลี่ยนทุกก้อน
+//      = ส่วนลดค่าซ้ำ (prompt caching ของผู้ให้บริการ ซึ่งจับคู่จาก prefix ที่เหมือนกันเป๊ะ) ใช้ไม่ได้เลย
+//      ตอนนี้ทุกตัวอักษรก่อน ${list} เป็นค่าคงที่ 100% → ก้อนที่ 2 เป็นต้นไปเข้าแคชได้
+//   ② ก้อนใหญ่ขึ้น 10 → 25 ใบ/คอล → จำนวนคอล (= จำนวนครั้งที่ส่งกติกา) ลดลง 60%
+// ════════════════════════════════════════════════════
+const CLASSIFY_BATCH_DEFAULT = 25;
+const CLASSIFY_BATCH_MIN = 5;
+// ★ 2 ส.ค. 69 รอบ 2 (ผู้ตรวจไขว้): ลดเพดาน 40 → 30
+//   เหตุ: ก้อน 40 ใบ คำตอบที่มองเห็นเคสยาว ~8,960 โทเคน (คิดที่ 224/ใบ ดู _classifyMaxTokens)
+//   เกินครึ่งของเพดาน completion ที่ปลอดภัย → เหลือที่ให้ "โทเคนคิด" ของโมเดลสาย reasoning น้อยเกินไป
+//   30 ใบ = จุดที่ยังลดจำนวนคอลได้จริง (เทียบยุคก้อน 10 = ลด 67%) โดยเพดานยังไม่แตะขีดอันตราย
+const CLASSIFY_BATCH_MAX = 30;
+/** ขนาดก้อนต่อ 1 คอล — อ่าน env สดทุกครั้ง (ปรับได้ตอนรันโดยไม่ต้อง redeploy) + บีบเข้าช่วงที่ปลอดภัย */
+function _classifyBatchSize() {
+  const n = Number.parseInt(process.env.DESK_CLASSIFY_BATCH ?? '', 10);
+  if (!Number.isFinite(n)) return CLASSIFY_BATCH_DEFAULT;
+  return Math.min(CLASSIFY_BATCH_MAX, Math.max(CLASSIFY_BATCH_MIN, n));
+}
+// ★ เพดานคำตอบต้องโตตามขนาดก้อน — ค่าเดิม 1500 คือเพดานของก้อน 10 ใบ
+//   ถ้าคาไว้ที่ 1500 แล้วยิง 25 ใบ = คำตอบโดนตัดกลาง JSON → parse ไม่ผ่าน → ข่าวหายทั้งก้อน
+//
+// ★★ 2 ส.ค. 69 รอบ 2 — คิดใหม่จาก "เคสยาว" (ผู้ตรวจไขว้ชี้ว่ารอบแรกคิดจากเคสกลาง margin จริงเหลือ ~5%)
+//   วัดจริงจาก JSON 1 ใบ 18 ฟิลด์ ที่ทุกฟิลด์ยาวสุดเท่าที่กติกาอนุญาต
+//   (category='กตัญญู/ครอบครัวอบอุ่น' · country='เกาหลีใต้' · notability='semiKnown' · field='สัตว์เซเลบ'):
+//     · ความยาวจริง 362 ตัวอักษร = ASCII 319 + ไทย 43
+//     · ASCII ในโครง JSON หนาแน่น คิดแบบอนุรักษ์ 2.0 ตัวอักษร/โทเคน (ไม่ใช่ 2.5 แบบรอบแรก) → ~160 โทเคน
+//     · ไทยคิดแบบอนุรักษ์ 1.5 โทเคน/ตัวอักษร (ไทยแตกเป็นหลายโทเคนได้) → ~65 โทเคน
+//     · รวม ≈ 224 โทเคน/ใบ ที่ "มองเห็น" (visible completion)
+//   🔴 max_completion_tokens นับ "โทเคนคิด (reasoning)" ของโมเดลรวมด้วย — DESK_MODEL_FAST = gpt-5.6-luna
+//      (สาย reasoning) ⇒ ต้องกันที่ให้ส่วนคิดต่างหาก ไม่ใช่ให้พอแค่ตัวอักษรที่ตอบ
+//   ต่อใบ 300 = visible 224 + ที่ให้ส่วนคิด ~76/ใบ (≈ +34%)
+//   หัว 1200 = ปลอกนอก {"items":[...]} (~15 โทเคน) + ที่ให้ส่วนคิดคงที่ตอนอ่านกติกา ~7,500 ตัวอักษร
+//   ตรวจตัวเลขจริง:
+//     · ก้อน 30 (เพดานใหม่) → 1200 + 300×30 = 10,200 · visible เคสยาว 224×30 = 6,720
+//       ⇒ เหลือให้ส่วนคิด 3,480 โทเคน = margin 52% เหนือ visible (เทียบรอบแรก: ก้อน 40 เหลือ ~5%)
+//     · ก้อน 25 (default) → 1200 + 7,500 = 8,700 · visible 5,600 ⇒ เหลือ 3,100 (margin 55%)
+//     · เพดานสูงสุด 10,200 < 16,384 = ลิมิต completion ของ gpt-4o/4o-mini (openai.js:191 _legacyCap)
+//       ⇒ ถ้าตกไปไม้สองสายเก่า ก็ไม่โดนบีบเงียบ
+//   พื้น 1500 = ก้อนเล็กมากก็ไม่ให้ต่ำกว่าค่าเดิม (กันถดถอย)
+const CLASSIFY_TOKENS_PER_ITEM = 300;
+const CLASSIFY_TOKENS_HEAD = 1200;
+function _classifyMaxTokens(n) {
+  return Math.max(1500, CLASSIFY_TOKENS_HEAD + CLASSIFY_TOKENS_PER_ITEM * (Number(n) || 0));
+}
+
+// ════════════════════════════════════════════════════
+// ★★ 2 ส.ค. 69 รอบ 2 — ใบที่ "โมเดลไม่ได้จัดหมวด" ต้องถูกกันออกจากโต๊ะ (fail-CLOSED)
+// ------------------------------------------------------------
+// ของเดิมเติมแค่ 5 ฟิลด์ (category/tone/toxicity/fbRisk/toneable) → ฟิลด์ความปลอดภัยเป็น undefined
+// ด่านปลายทางใน harvester.js เช็ค "ค่าเจาะจง" ทุกด่าน ⇒ undefined ไม่ตรงเงื่อนไขไหนเลย = ผ่านฟรีทุกด่าน:
+//   · harvester.js:681  c.toxicity >= 3           → undefined >= 3 เป็น false ⇒ ผ่าน
+//   · harvester.js:689  c.foreignCountry          → undefined เป็น falsy      ⇒ ผ่าน (ข่าวต่างประเทศหลุด)
+//   · harvester.js:698  c.royalNegative === true  → undefined ≠ true          ⇒ ผ่าน (ข่าวอ่อนไหวหลุด)
+//   · harvester.js:711  c.remakeable === false    → undefined ≠ false         ⇒ ผ่าน (ข่าวขยะหลุด)
+//   · harvester.js:724  c.storyNature !== 'event' → undefined ≠ 'event'       ⇒ ผ่าน (ของเก่าหลุด)
+// ⇒ ยิ่งก้อนใหญ่/ยิ่งคำตอบพัง ยิ่งดันของที่ไม่เคยถูกประเมินเข้าโต๊ะทีละ 25-30 ใบรวด
+//
+// 🔴 คันโยกที่ใช้ตัด = remakeable:false — เป็นค่าเดียวที่ตัดครบ "ทั้ง 2 เส้น" ของ harvester:
+//   · เลน curated : harvester.js:710-717 → ตกไป junk พร้อม junkReason 'ทำใหม่ไม่ได้ (...)' (ไม่หายเงียบ)
+//   · เลน broad   : harvester.js:766     → ตกไป junk เหมือนกัน
+//     (เส้น broad ไม่ผ่านด่าน storyNature/บก.เลย — ถ้าไม่ใช้ remakeable จะไม่มีอะไรตัดของที่ไม่ถูกประเมิน)
+// ❌ จงใจไม่ปลอมเป็น royalNegative:true หรือ toxicity:3 — จะติดป้ายผิดว่า "ม.112 / เนื้อหารุนแรง"
+//    และทำ stats.royalNeg (harvester.js:699) เพี้ยน จนตามรอยไม่ได้ว่าที่จริงคือ "โมเดลไม่ตอบ"
+// ★ เกราะชั้น 2: prelimScore:0 — harvester.js:748 เรียงตัวเข้ารอบ บก. ด้วย prelimScore×2 ⇒ ลงล่างสุดเสมอ
+// ★ ร่องรอย: classifyMissing/classifyNote ติดไปกับใบนั้นตลอดทาง (junk ก็ spread ต่อ) ⇒ เปิดดูรู้เหตุทันที
+// ════════════════════════════════════════════════════
+function _classifyFailClosed(it, why) {
+  return {
+    ...it,
+    category: 'อื่นๆ', tone: 'กลาง', toxicity: 1, fbRisk: 1, toneable: false,
+    foreignCountry: null,                 // ไม่เดาประเทศ (ไม่มีข้อมูล) — การตัดใช้ remakeable แทน
+    storyNature: 'event', subject: 'ordinary', dramaType: 'none',
+    hasMainChar: false, staleTrend: true,
+    remakeable: false,                    // 🔴 คันโยกตัดจริง: harvester.js:711 (curated) + :766 (broad)
+    clipWorthy: false,
+    royalNegative: false,                 // ห้ามปลอมเป็น true (ติดป้าย ม.112 ผิด + สถิติเพี้ยน)
+    notability: 'unknown', storyIntensity: 0, prelimScore: 0, field: 'อื่นๆ',
+    classifyMissing: true,                // ★ ร่องรอยหลัก: ใบนี้ไม่เคยถูกโมเดลจัดหมวดจริง
+    classifyNote: String(why || 'โมเดลไม่ได้จัดหมวดใบนี้').slice(0, 120),
+  };
+}
+
+// ── ชั้น 1: จัดหมวด + วัดพิษ (เรียกทีละก้อน — ขนาดก้อน default 25 ปรับได้ที่ env DESK_CLASSIFY_BATCH) ──
 export async function classifyBatch(items) {
   const out = [];
-  // ★ 16 มิ.ย. (เร่งความเร็ว): ก้อนละ 10 ข่าว ยิงขนานทีละ 5 ก้อน (เดิมเรียงกันทุกก้อน = ช้า)
+  // ★ 16 มิ.ย. (เร่งความเร็ว): ยิงขนานทีละ 5 ก้อน (เดิมเรียงกันทุกก้อน = ช้า)
+  //   ★ 2 ส.ค. 69: ขนาดก้อนเดิม 10 → ย้ายไปคุมที่ _classifyBatchSize() (default 25, env DESK_CLASSIFY_BATCH)
   const _runChunk = async (chunk) => {
     // ★ 2 ก.ค.: บอก AI ว่ารายการไหนเป็น "คลิป" (แพลตฟอร์มไหน) vs "บทความ" → ประเมิน clipWorthy ได้ถูก
     const _isClipItem = (it) => !!(it.isVideo || it.lane === 'clip' || it.lane === 'video' || it.lane === 'interview'
@@ -150,8 +238,6 @@ export async function classifyBatch(items) {
       const res = await callAI({
         prompt: `จัดหมวดข่าวเพจไวรัลไทย ตอบ JSON เท่านั้น
 หมวดให้เลือก: ${DESK_CATEGORIES.join(', ')}
-ข่าว (รูปแบบ: เลข: [โดเมนต้นทาง] หัวข้อ | คำโปรย):
-${list}
 
 ตอบ: {"items":[{"i":0,"category":"...","tone":"บวก|กลาง|ลบ","toxicity":0-3,"fbRisk":0-3,"toneable":true/false,"country":"","storyNature":"pattern|event","subject":"celeb|public|ordinary","dramaType":"none|soft|hard","hasMainChar":true/false,"staleTrend":true/false,"remakeable":true/false,"clipWorthy":true/false,"royalNegative":true/false,"notability":"famous|semiKnown|unknown","storyIntensity":0-3,"prelimScore":0-10,"field":"บันเทิง|ดนตรี|อินฟลู|กีฬา|อีสปอร์ต|นางงาม|ครีเอเตอร์|เชฟ|ศิลปิน|ฮีโร่|การแพทย์|การศึกษา|ศาสนา|สายมู|ธุรกิจ|สัตว์เซเลบ|เซเลบ|ไวรัล|อื่นๆ"}]}
 - toxicity: 0=สะอาด 3=หดหู่/รุนแรง | fbRisk: ความเสี่ยงโดน Facebook ลดรีช/ลบ (เลือด ความรุนแรง เนื้อหาล่อแหลม)
@@ -193,15 +279,22 @@ ${list}
   contrast = ช่องว่างสุดขั้วในเรื่อง: จนมาก↔เก่งมาก · ตำแหน่งใหญ่↔ถ่อมตัวสุด · ให้ทั้งที่ตัวเองก็ลำบาก · เด็กเล็ก↔ความรับผิดชอบใหญ่
 - ★★★ prelimScore (3 ก.ค. — แก้คอขวด "ข่าวส่วนใหญ่ไม่เคยถูกประเมิน"): คะแนนเบื้องต้น 0-10 "น่าหยิบมาทำโพสต์เพจไวรัลไทยแค่ไหน"
   เกณฑ์เดียวกับ บก.: ตัวละครจริง+สตอรี่เข้ม (contrast/ตัวเลข/คำพูดเจาะใจ) = 7-10 · เรื่องดีแต่เรียบ = 4-6 · PR/ประกาศ/การเมือง/ไม่มีคน = 0-3
-  นี่คือคะแนนคัดรอบแรก (บก.ตัวจริงจะตัดสินซ้ำเฉพาะตัวท็อป) — ให้ตามจริง อย่าใจดีเกิน`,
+  นี่คือคะแนนคัดรอบแรก (บก.ตัวจริงจะตัดสินซ้ำเฉพาะตัวท็อป) — ให้ตามจริง อย่าใจดีเกิน
+
+ข่าว (รูปแบบ: เลข: [โดเมนต้นทาง] หัวข้อ | คำโปรย):
+${list}`,
         model: DESK_MODEL_FAST,
         temperature: 0.1,
-        maxTokens: 1500,
+        // ★ โตตามก้อน (ดูวิธีคิดที่ _classifyMaxTokens) — ห้ามกลับไปคาที่ 1500 เพราะก้อนใหญ่จะโดนตัดกลาง
+        maxTokens: _classifyMaxTokens(chunk.length),
       });
       const parsed = typeof res === 'object' ? res : JSON.parse(String(res).match(/\{[\s\S]*\}/)?.[0] || '{}');
+      const _answered = new Set(); // ★ จำว่าใบไหนถูกโมเดลตอบแล้ว (กันตอบซ้ำเลข i เดิม + ใช้เติมใบที่ขาดด้านล่าง)
       for (const r of parsed?.items || []) {
-        const it = chunk[r.i];
-        if (!it) continue;
+        const _i = Number(r?.i);
+        const it = chunk[_i];
+        if (!it || _answered.has(_i)) continue;
+        _answered.add(_i);
         out.push({
           ...it,
           category: DESK_CATEGORIES.includes(r.category) ? r.category : 'อื่นๆ',
@@ -234,14 +327,28 @@ ${list}
           field: typeof r.field === 'string' && r.field.trim() ? r.field.trim().slice(0, 20) : 'อื่นๆ',
         });
       }
+      // ★ 2 ส.ค. 69 (คู่กับก้อนใหญ่): ใบที่โมเดล "ตอบไม่ครบ" (ตอบมาแค่บางเลข) เดิมหายเงียบทั้งใบ
+      //   ★★ รอบ 2 (ผู้ตรวจไขว้): ไม่ทิ้งข่าวเหมือนเดิม แต่ต้อง fail-CLOSED — กันออกจากโต๊ะ + ทิ้งร่องรอย
+      //   (เดิมเติมค่ากลาง 5 ฟิลด์ = ผ่านทุกด่านของ harvester ฟรี — ดูเหตุผลเต็มที่ _classifyFailClosed)
+      const _missed = [];
+      chunk.forEach((it, idx) => {
+        if (_answered.has(idx)) return;
+        _missed.push(idx);
+        out.push(_classifyFailClosed(it, 'โมเดลตอบไม่ครบ — ไม่มีเลข i ของใบนี้ในคำตอบ'));
+      });
+      if (_missed.length) console.log(`[DeskBrain] ⚠️ classify ตอบไม่ครบ ${_missed.length}/${chunk.length} ใบ → กันออกจากโต๊ะ (remakeable=false)`);
     } catch (e) {
       console.log('[DeskBrain] classify chunk failed:', e.message?.slice(0, 60));
-      // ก้อนที่จัดไม่ได้ → ใส่หมวดอื่นๆ ไว้ก่อน ไม่ทิ้งข่าว
-      chunk.forEach(it => out.push({ ...it, category: 'อื่นๆ', tone: 'กลาง', toxicity: 1, fbRisk: 1, toneable: true }));
+      // ★★ รอบ 2: ทั้งก้อนพัง (คำตอบโดนตัด/JSON พัง/โมเดลล่ม) — ไม่ทิ้งข่าว แต่ต้องกันออกจากโต๊ะทั้งก้อน
+      //   ของเดิมเติมค่ากลางแล้วปล่อยผ่าน = ดัน 25-30 ใบที่ไม่เคยถูกประเมินเข้าโต๊ะรวดเดียว
+      console.log(`[DeskBrain] ⚠️ กันออกจากโต๊ะทั้งก้อน ${chunk.length} ใบ (remakeable=false, classifyMissing)`);
+      chunk.forEach(it => out.push(_classifyFailClosed(it, `จัดหมวดทั้งก้อนล้มเหลว: ${String(e?.message || '').slice(0, 60)}`)));
     }
   };
   const _chunks = [];
-  for (let i = 0; i < items.length; i += 10) _chunks.push(items.slice(i, i + 10));
+  const _batchSize = _classifyBatchSize();
+  for (let i = 0; i < items.length; i += _batchSize) _chunks.push(items.slice(i, i + _batchSize));
+  // ★ ความขนานคงเดิม: ยิงทีละ 5 ก้อนพร้อมกัน (16 มิ.ย.)
   for (let i = 0; i < _chunks.length; i += 5) {
     await Promise.all(_chunks.slice(i, i + 5).map(_runChunk));
   }

@@ -170,17 +170,48 @@ test('kind นอกลิสต์ที่รันบน :3900 (ไม่ร�
   assert.equal(r.scanned, 0);
 });
 
-test('ครอบคลุมทุก kind ใน ORPHAN_KINDS (compose/ref/desk_harvest/desk_search/desk_chief) — ทุกตัวกู้ได้เหมือนกันหมด', async () => {
+// ★ 2 ส.ค. 69 (P7 — เจ้าของสั่งลดค่าโทเคนโต๊ะข่าว): สเปกเปลี่ยนโดยตั้งใจ
+//   งานล่าข่าว (desk_*) ค้าง 1 งาน เคยถูกกู้แล้วรัน "ใหม่ทั้งรอบ" ได้ถึง 6 ครั้ง = จ่ายค่าค้น+AI 6 เท่า
+//   ตอนนี้ default ไม่กู้ desk_* (เปิดคืน DESK_ORPHAN_RECOVERY=1) · 🔴 ฝั่งปก (compose/ref) ต้องเหมือนเดิมทุกกรณี
+//   เทสเดิมข้อนี้ปักหมุด "ทุก kind กู้เหมือนกันหมด" ซึ่งขัดสเปกใหม่ → แยกเป็น 2 ข้อตามความจริงใหม่
+const COVER_KINDS_ORPHAN = ['compose', 'ref'];
+const DESK_KINDS_ORPHAN = ['desk_harvest', 'desk_search', 'desk_chief'];
+
+test('ฝั่งปก (compose/ref) กู้ได้เสมอ — ทั้งตอนสวิตช์โต๊ะข่าวปิดและเปิด (parity ห้ามกระทบ)', async () => {
   setEnv('MEGA_ORPHAN_RECOVERY', null);
-  const jobs = ORPHAN_KINDS.map((kind) => mkJob({ kind, claimedAt: isoAgo(200 * 1000) }));
-  const deps = mkDeps(jobs);
-  const r = await recoverOrphanJobs({ _deps: { ...deps, port: '3900' } });
-  assert.equal(r.scanned, ORPHAN_KINDS.length);
-  assert.equal(r.recovered, ORPHAN_KINDS.length);
-  for (const kind of ORPHAN_KINDS) {
-    const j = Array.from(deps.store.values()).find((x) => x.kind === kind);
-    assert.equal(j.status, 'pending', `${kind} ต้องกู้ได้`);
+  for (const deskFlag of [null, '1']) {
+    setEnv('DESK_ORPHAN_RECOVERY', deskFlag);
+    const jobs = COVER_KINDS_ORPHAN.map((kind) => mkJob({ kind, claimedAt: isoAgo(200 * 1000) }));
+    const deps = mkDeps(jobs);
+    const r = await recoverOrphanJobs({ _deps: { ...deps, port: '3900' } });
+    assert.equal(r.recovered, COVER_KINDS_ORPHAN.length, `ปกต้องกู้ครบ (DESK_ORPHAN_RECOVERY=${deskFlag})`);
+    for (const kind of COVER_KINDS_ORPHAN) {
+      const j = Array.from(deps.store.values()).find((x) => x.kind === kind);
+      assert.equal(j.status, 'pending', `${kind} ต้องกู้ได้`);
+    }
   }
+  setEnv('DESK_ORPHAN_RECOVERY', null);
+});
+
+test('งานโต๊ะข่าว (desk_*) default ไม่กู้ — เปิดคืนด้วย DESK_ORPHAN_RECOVERY=1 แล้วกู้ได้เหมือนเดิม', async () => {
+  setEnv('MEGA_ORPHAN_RECOVERY', null);
+  // default (ไม่ตั้ง) → ต้องไม่กู้ ปล่อยค้างให้คนตัดสินใจ (กันจ่ายค่าล่าข่าวซ้ำ 6 เท่า)
+  setEnv('DESK_ORPHAN_RECOVERY', null);
+  const jobsOff = DESK_KINDS_ORPHAN.map((kind) => mkJob({ kind, claimedAt: isoAgo(200 * 1000) }));
+  const depsOff = mkDeps(jobsOff);
+  const rOff = await recoverOrphanJobs({ _deps: { ...depsOff, port: '3900' } });
+  assert.equal(rOff.recovered, 0, 'โต๊ะข่าวปิดกู้ = ต้องไม่มีงานถูกกู้เลย');
+  for (const kind of DESK_KINDS_ORPHAN) {
+    const j = Array.from(depsOff.store.values()).find((x) => x.kind === kind);
+    assert.notEqual(j.status, 'pending', `${kind} ต้องคงสถานะเดิม ไม่ถูกดันกลับเข้าคิว`);
+  }
+  // เปิดคืน → พฤติกรรมเดิมทุกอย่าง
+  setEnv('DESK_ORPHAN_RECOVERY', '1');
+  const jobsOn = DESK_KINDS_ORPHAN.map((kind) => mkJob({ kind, claimedAt: isoAgo(200 * 1000) }));
+  const depsOn = mkDeps(jobsOn);
+  const rOn = await recoverOrphanJobs({ _deps: { ...depsOn, port: '3900' } });
+  assert.equal(rOn.recovered, DESK_KINDS_ORPHAN.length, 'เปิดสวิตช์แล้วต้องกู้ครบเหมือนเดิม');
+  setEnv('DESK_ORPHAN_RECOVERY', null);
 });
 
 test('claimedAt/startedAt/createdAt พังรูปแบบทั้งหมด (parse ไม่ได้) → ข้าม ปลอดภัยไว้ก่อน (fail-safe) ไม่ throw', async () => {

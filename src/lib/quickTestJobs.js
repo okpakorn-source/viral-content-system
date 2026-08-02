@@ -299,6 +299,13 @@ export async function recoverOrphanJobs({ env = process.env, _deps = {} } = {}) 
     if (!Number.isFinite(lastTouch)) continue; // timestamp พังรูปแบบ = ข้าม ปลอดภัยไว้ก่อน (fail-safe)
     const idleMs = now - lastTouch;
     if (idleMs <= staleMs) continue; // สดอยู่ — อาจมีโปรเซสอื่นกำลังทำงานจริงอยู่ ห้ามแตะ
+    // งานโต๊ะข่าวอาจรันยาวถึง ~30 นาทีและไม่มี checkpoint ระหว่างรอบ — default จึงปล่อยค้างให้คนตัดสินใจ
+    // เพื่อกันยิงค้นข่าว/AI ซ้ำทั้งรอบสูงสุด 6 ครั้ง; opt-in ด้วยค่า '1' เท่านั้นจึงกลับไปใช้กลไกเดิมด้านล่าง
+    if (j.kind.startsWith('desk_') && env.DESK_ORPHAN_RECOVERY !== '1') {
+      const _log = _deps.log || ((message) => console.warn(message));
+      _log(`🩹 ข้ามกู้งานกำพร้าโต๊ะข่าว ${j.id} (${j.kind}): DESK_ORPHAN_RECOVERY ไม่ใช่ 1 — ปล่อยค้างให้คนตัดสินใจ`);
+      continue;
+    }
     scanned++;
     const nextRetries = (j.retries || 0) + 1;
     try {

@@ -63,7 +63,8 @@ ${String(content || '').slice(0, 3500)}
 "mustAvoid":["สัญญาณว่าผิดเหตุการณ์ เช่น ปี พ.ศ. เก่า / เหตุการณ์คล้ายของคนอื่น"]}
 
 queries 4-6 ชุด เรียงจากแม่นสุดไปกว้างสุด`,
-    model: DESK_MODEL_BRAIN,
+    // FAST: generating 4-6 search-query variants is a lightweight routing task.
+    model: DESK_MODEL_FAST,
     temperature: 0.2,
     maxTokens: 4000,
   });

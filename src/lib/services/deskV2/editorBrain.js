@@ -236,17 +236,33 @@ async function loadSynthesisInput() {
   }
 }
 
+// ============================================================
+// 🔬 P5 (2 ส.ค. 69 — เจ้าของสั่ง): บก.AI อ่านคลังด้วย "ตัวเล็ก"
+// ------------------------------------------------------------
+// รอบย่อย (อ่าน exemplar ทีละ 80 ใบที่ย่อเหลือ 8 ฟิลด์สั้นๆ → สรุปข้อสังเกต ≤1500 ตัวอักษร)
+//   = งาน "บีบอัด" ไม่ใช่งานตัดสิน → ใช้โมเดลเร็ว/ประหยัด (DESK_MODEL_FAST) ได้โดยธรรมนูญไม่ตก
+// 🔴 รอบปิด (consolidate — กลั่นข้อสังเกตทุกก้อนเป็นธรรมนูญ) = งานตัดสิน → คง primary เสมอ ห้ามเปลี่ยน
+// kill-switch: DESK_STUDY_FAST=0 → รอบย่อยกลับไปใช้โมเดลเดิม (เหมือนก่อนแก้ทุกประการ)
+// หมายเหตุ: ถ้าผู้เรียกสั่ง modelKey='fast' อยู่แล้ว ทั้งสองรอบเป็น fast เหมือนเดิม (ไม่เปลี่ยนสัญญาเก่า)
+// ============================================================
+function studyChunkModel(mainModel, env = process.env) {
+  if (String(env?.DESK_STUDY_FAST ?? '') === '0') return mainModel; // ปิดสวิตช์ = พฤติกรรมเดิม
+  return DESK_MODEL_FAST;
+}
+
 /**
  * studyDna — บก. อ่านคลัง DNA ทั้งคลัง (STORE_EXEMPLARS) + synthesis เสริม (STORE_RUNS) → กลั่นเป็น "ธรรมนูญ บก."
  * เก็บถาวรใน STORE_BRAIN (id 'brain_latest' + สำเนา history รายวัน)
  * @param {object} args
  * @param {'primary'|'fast'} [args.modelKey] - 'fast' → DESK_MODEL_FAST, อื่นๆ ทั้งหมด → DESK_MODEL_BRAIN
+ *                                             (มีผลกับ "รอบปิด" เสมอ · รอบย่อยใช้ตัวเล็กอยู่แล้ว เว้นแต่ DESK_STUDY_FAST=0)
  * @param {number} [args.maxExemplars] - จำกัดจำนวนใบที่อ่าน (คุมงบเทส) — ค่าเริ่มต้น = อ่านทั้งคลัง
  * @returns {Promise<{charter:object, exemplarCount:number, aiCalls:number, tookMs:number}>}
  */
 export async function studyDna({ modelKey = 'primary', maxExemplars } = {}) {
   const t0 = Date.now();
   const model = modelKey === 'fast' ? DESK_MODEL_FAST : DESK_MODEL_BRAIN; // 🔴 รับแค่ 2 ค่านี้เท่านั้น
+  const chunkModel = studyChunkModel(model); // 🔬 P5: รอบย่อย = งานบีบอัด → ตัวเล็ก (รอบปิดยังใช้ `model`)
 
   const exStore = createStore(STORE_EXEMPLARS);
   const allExemplars = await exStore.getAll();
@@ -283,14 +299,14 @@ export async function studyDna({ modelKey = 'primary', maxExemplars } = {}) {
     aiCalls++;
     try {
       const aiResult = await callAiWithTimeout({
-        model,
+        model: chunkModel, // 🔬 P5: รอบย่อย = งานบีบอัด → ตัวเล็ก (DESK_STUDY_FAST=0 → กลับเป็นตัวเดิม)
         systemPrompt: studySystemPrompt,
         userPrompt,
         temperature: 0.3,
         maxTokens: STUDY_MAX_TOKENS,
         timeoutMs: STUDY_TIMEOUT_MS,
       });
-      const usedModel = aiResult?._modelUsed || model;
+      const usedModel = aiResult?._modelUsed || chunkModel;
       usdSpent += estimateCallCostUSD(usedModel, studySystemPrompt.length + userPrompt.length, JSON.stringify(aiResult).length);
       const obs = sanitizeText(aiResult?.observations, 1500);
       if (obs) observations.push(`[ก้อน ${idx + 1}/${chunks.length}] ${obs}`);
@@ -307,7 +323,7 @@ export async function studyDna({ modelKey = 'primary', maxExemplars } = {}) {
   const consolidateSystemPrompt = buildConsolidateSystemPrompt();
   const consolidateUserPrompt = buildConsolidateUserPrompt({ observations, synthesis: synthesisInput });
   const consolidateResult = await callAiWithTimeout({
-    model,
+    model, // 🔴 P5: รอบปิด = งานตัดสิน — ต้องเป็น `model` (primary) เสมอ ห้ามสลับเป็น chunkModel
     systemPrompt: consolidateSystemPrompt,
     userPrompt: consolidateUserPrompt,
     temperature: 0.3,
@@ -332,7 +348,8 @@ export async function studyDna({ modelKey = 'primary', maxExemplars } = {}) {
     totalAvailable,
     partial, // 🆕 true เมื่อ maxExemplars < ทั้งหมด (เทสย่อ/คุมงบ) — study เต็มทีหลังต้องสั่งใหม่ทับ
     synthesisUsed: !!synthesisInput,
-    model,
+    model,            // โมเดลรอบปิด (ตัดสิน)
+    modelChunk: chunkModel, // 🔬 P5: โมเดลรอบย่อย (บีบอัด) — ต่างจาก model ได้ ให้ตามรอยค่าใช้จ่ายย้อนหลังได้
     aiCalls,
     costEstTHB: Math.round(usdSpent * THB_PER_USD * 100) / 100,
   };
