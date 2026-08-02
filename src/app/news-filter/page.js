@@ -235,7 +235,8 @@ function NewsFilterContent() {
   const detectedUrl = inputText.trim().match(/^https?:\/\/\S+$/)?.[0] || '';
   const hasUrlInInput = /https?:\/\/\S+/.test(inputText.trim());
   // ★ 24 มิ.ย. (ผู้ใช้): ปิดสกัดจากลิงก์ชั่วคราว — รับเฉพาะข้อความคุณภาพที่ก๊อปมาวาง (ลิงก์ต้นทางคุณภาพไม่แน่นอน สกัดไม่ได้)
-  const URL_SCRAPE_DISABLED = true;
+  // ★ 2 ส.ค. 69 (ผู้ใช้สั่ง): เปิดสกัดจากลิงก์กลับ — ปิดคืนได้โดยเปลี่ยนเป็น true
+  const URL_SCRAPE_DISABLED = false;
   const isUrlOnly = URL_SCRAPE_DISABLED ? false : !!detectedUrl;
 
   // === URL Scrape Handler ===
@@ -684,7 +685,7 @@ function NewsFilterContent() {
             margin: '6px 0 0', fontSize: 13,
             color: 'var(--text-muted)', lineHeight: 1.5,
           }}>
-            ✍️ สรุปใจความข่าวมาก่อน แล้ววางเป็นข้อความ → ระบบกรองให้เหลือเฉพาะ &quot;แก่นข้อเท็จจริง&quot; ตัดคำเฟ้อ คำตีความ คำแต่งอารมณ์ออก (ห้ามก๊อปเนื้อเต็มจากเว็บ · ปิดสกัดลิงก์ชั่วคราว)
+            ✍️ วางสรุปใจความข่าว หรือวางลิงก์ข่าวก็ได้ → ระบบกรองให้เหลือเฉพาะ &quot;แก่นข้อเท็จจริง&quot; ตัดคำเฟ้อ คำตีความ คำแต่งอารมณ์ออก
           </p>
         </div>
       </div>
@@ -1004,14 +1005,14 @@ function NewsFilterContent() {
               background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
               fontSize: 12.5, color: '#ef4444', fontWeight: 700, lineHeight: 1.6,
             }}>
-              🔴 ต้อง &quot;สรุปใจความข่าว&quot; มาก่อนเท่านั้น แล้วค่อยวาง — ⛔ ห้ามก๊อปเนื้อข่าวเต็มๆ จากเว็บมาวาง (จะได้เนื้อกากๆ ไม่มีคุณภาพ)
+              💡 วางได้ 2 แบบ — &quot;สรุปใจความข่าว&quot; (คุณภาพดีที่สุด) หรือ &quot;ลิงก์ข่าว&quot; ให้ระบบดึงเนื้อมาให้ · ⛔ เลี่ยงการก๊อปเนื้อข่าวเต็มๆ ทั้งหน้ามาวาง
             </div>
 
             {/* Textarea */}
             <textarea
               value={inputText}
               onChange={e => { setInputText(e.target.value); setSourceUrl(''); }}
-              placeholder="✍️ สรุปใจความข่าวก่อน แล้ววาง 'สรุป' ที่นี่&#10;&#10;🔴 สำคัญสุด: ต้องสรุปใจความข่าวมาก่อนเท่านั้น&#10;⛔ ห้ามก๊อปเนื้อข่าวเต็มๆ จากเว็บมาวาง — จะได้เนื้อกากๆ ไม่มีคุณภาพ&#10;&#10;(ปิดสกัดจากลิงก์ชั่วคราว — รับเฉพาะข้อความสรุป)"
+              placeholder="✍️ วาง 'สรุปใจความข่าว' ที่นี่ (คุณภาพดีที่สุด)&#10;&#10;🔗 หรือวาง 'ลิงก์ข่าว' อย่างเดียว แล้วกดดึงเนื้อหา&#10;⛔ เลี่ยงการก๊อปเนื้อข่าวเต็มๆ ทั้งหน้ามาวาง — จะได้เนื้อปนเมนู/โฆษณา"
               style={{
                 width: '100%', minHeight: isUrlOnly ? 100 : 400, padding: 16,
                 borderRadius: 12, border: '1px solid var(--border)',
