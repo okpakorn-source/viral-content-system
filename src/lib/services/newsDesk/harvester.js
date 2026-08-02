@@ -14,6 +14,9 @@ import {
   loadArchiveTitles, isDuplicateOfArchive, editorialJudge, finalScore,
   getCategoryPerformance, keywordCategorize, keywordGore,
 } from './deskBrain';
+// ★ 2 ส.ค. 69: ตำราจำลิงก์ — ลิงก์ที่โต๊ะเคยจ่ายค่าคัดกรองไปแล้ว (แม้ตอนนี้ไม่อยู่บนโต๊ะ เช่นถูกตัดลงถังขยะ)
+//   ห้ามจ่ายซ้ำ · ปิดได้ด้วย DESK_SEEN_BOOK=0 (ตำราพัง = fail-open ถือว่าไม่เคยเจอ ข่าวไม่หาย)
+import { filterUnseen, markSeen } from './seenLinkBook';
 
 // ★ คลังคำค้นกระแส — ผ่าตัด 13 มิ.ย. 69 (ตัดคำกว้างที่ดูดขยะอากาศ/การเมือง/บอลออก)
 //   เน้นเรื่องคน-ไวรัล-ดราม่าที่เพจเล่นได้จริง ไม่ใช่ "ข่าวสังคมวันนี้/โหนกระแส" ที่ดูดมั่ว
@@ -658,11 +661,29 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
     fresh.push({ ...r, id });
   }
 
+  // ── 📕 ตำราจำลิงก์ (2 ส.ค. 69) — ด่านกันซ้ำเดิมเห็นแค่ "ของที่ยังอยู่บนโต๊ะ" ──
+  //   ใบที่ถูกตัดลงถังขยะ/ถูกเคลียร์ไปแล้ว จะกลับมาใหม่รอบหน้าและถูกจ่ายค่าคัดกรองซ้ำ
+  //   ตำรานี้จำลิงก์ที่ "เคยผ่านมือโต๊ะแล้ว" 30 วัน → เจอซ้ำ = ข้ามก่อนถึงชั้น AI
+  //   🔴 fail-open: ตำราพัง = ถือว่าไม่เคยเจอ เดินต่อตามปกติ (ห้ามลากรอบเก็บข่าวพัง)
+  let freshUnseen = fresh;
+  try {
+    const seenRes = await filterUnseen(fresh);
+    freshUnseen = seenRes.fresh;
+    stats.seenSkipped = seenRes.skipped.length;
+    stats.seenBookSize = seenRes.stats.book;
+    if (stats.seenSkipped > 0) {
+      console.log(`[Harvester] 📕 ตำราจำลิงก์: ข้าม ${stats.seenSkipped} ใบ (เคยจ่ายค่าคัดกรองแล้ว) · เหลือเข้าชั้น AI ${freshUnseen.length} ใบ`);
+    }
+  } catch (e) {
+    console.warn(`[Harvester] 📕 ตำราจำลิงก์พัง (${String(e.message || e).slice(0, 60)}) — เดินต่อแบบไม่ใช้ตำรา`);
+    freshUnseen = fresh;
+  }
+
   // ── ชั้น 0: คำต้องห้าม ──
   // ★ 16 มิ.ย.: ของที่ตัดออก (แง่ลบ/นอกแนว/เสี่ยง) ไม่ทิ้งหาย — เก็บเข้า "คลังขยะ" ให้ทีมรีวิว+เอากลับได้
   const junk = [];
   const gated = [];
-  for (const item of fresh) {
+  for (const item of freshUnseen) {
     const g = gateKeywords(item);
     if (!g.pass) { stats.gated++; junk.push({ ...item, junkReason: g.reason || 'คำต้องห้าม/นอกแนว' }); continue; }
     gated.push(item);
@@ -898,6 +919,18 @@ export async function runHarvest({ lanes = ['trend', 'good', 'broad', 'exa', 'cl
         }
       }
     } catch (e) { console.log('[Harvester] เก็บคลังขยะล้ม:', e.message?.slice(0, 50)); }
+  }
+
+  // ── 📕 จารึกตำราจำลิงก์ (2 ส.ค. 69) ──
+  //   จารึก "ทุกใบที่เข้าชั้น AI รอบนี้" ไม่ว่าจะขึ้นโต๊ะ ตกถังขยะ หรือถูกตัดกลางทาง
+  //   = ใบที่โต๊ะจ่ายค่าคัดกรองไปแล้ว รอบหน้าเจอลิงก์เดิมจะข้ามก่อนถึงชั้น AI
+  //   🔴 fail-open: จารึกไม่ได้ = แค่รอบหน้าจ่ายซ้ำ ห้ามทำให้รอบนี้พัง (ข่าวที่เก็บได้ต้องอยู่ครบ)
+  try {
+    const markRes = await markSeen(freshUnseen, { round: new Date().toISOString(), lanes });
+    stats.seenMarked = markRes.marked;
+    if (markRes.errors) stats.seenMarkErrors = markRes.errors;
+  } catch (e) {
+    console.warn(`[Harvester] 📕 จารึกตำราล้ม (${String(e.message || e).slice(0, 60)}) — รอบหน้าอาจจ่ายซ้ำ`);
   }
 
   // ★ ล้างโต๊ะอัตโนมัติ (14 มิ.ย. คำสั่งทีม — โต๊ะบวม 420 ใบ ของเก่าลอยค้าง เช่นเจนนี่/ลุงธีระ):

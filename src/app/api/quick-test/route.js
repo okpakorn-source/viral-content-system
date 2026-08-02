@@ -115,7 +115,12 @@ async function callOnce(job, origin) {
   // ★ 27 ก.ค. 69: 3 ชนิดงานโต๊ะข่าว — เรียกตรงเข้า /api/news-desk/* (ไม่ผ่าน middleware ป้องกัน คุมแค่ cover-ref-test/quick-test)
   //   ทุกตัวต้องใช้ dispatcher REF_LONG_AGENT เหมือน ref — undici headersTimeout/bodyTimeout ค่า default (300s) ตัดกลางทางถ้าไม่ตั้ง
   if (job.kind === 'desk_harvest' || job.kind === 'desk_search') {
-    const body = job.kind === 'desk_harvest' ? { mode: job.input.mode } : { keyword: job.input.keyword };
+    // ★ 2 ส.ค. 69: ส่ง confirm ต่อให้ปลายทาง — ด่าน "ข่าวเก่ายังไม่ได้ใช้เกินเกณฑ์" (DESK_UNUSED_BACKLOG)
+    //   ตอบ 409 ถ้าไม่ยืนยัน · งานที่มาทางคิวคือ "คนกดปุ่มสั่ง" อยู่แล้ว แต่เดิม confirm ไม่ถูกส่งต่อ
+    //   → ปุ่มล่าข่าวล้มถาวรเมื่อของค้างเกินเกณฑ์ (เจอจริงตอนเปิดใช้งาน 2 ส.ค.) · ผู้เรียกต้องส่ง confirm มาเองเท่านั้นถึงจะยืนยัน
+    const body = job.kind === 'desk_harvest'
+      ? { mode: job.input.mode, ...(job.input.confirm ? { confirm: true } : {}) }
+      : { keyword: job.input.keyword };
     // ★ 27 ก.ค. 69 (หลักฐานงานจริง): mode 'all' ลาก 11 เลนพร้อมกัน วัดจริง ~20-25 นาที ชนเพดาน 20 นาทีเดิม
     //   → ยกเป็น 30 นาทีเฉพาะ desk_harvest mode 'all' · โหมดเดี่ยว (~9 นาที) และ desk_search คงเดิม 20 นาที (พอเหลือ)
     const harvestTimeoutMs = (job.kind === 'desk_harvest' && job.input.mode === 'all') ? 30 * 60 * 1000 : 20 * 60 * 1000;
@@ -342,7 +347,9 @@ export async function POST(req) {
       const mode = String(body.mode || '').trim();
       if (!HARVEST_MODE_KEYS.includes(mode)) return badReq(`mode ไม่ถูกต้อง: ${mode}`);
       const modeInfo = HARVEST_MODES.find((m) => m.key === mode);
-      input = { mode };
+      // ★ 2 ส.ค. 69: เก็บ confirm ไว้ในงาน — ผู้เรียกยืนยันแล้วว่า "รู้ว่ามีของค้าง แต่จะล่าใหม่"
+      //   (ไม่ส่ง = ไม่ยืนยัน → ปลายทางตอบ 409 DESK_UNUSED_BACKLOG ตามด่านเตือน)
+      input = { mode, ...(body.confirm === true || body.confirm === 1 || body.confirm === '1' ? { confirm: true } : {}) };
       label = `🗞️ ล่าข่าว · ${modeInfo?.label || mode}`;
     } else if (kind === 'desk_search') {
       const keyword = String(body.keyword || '').trim();

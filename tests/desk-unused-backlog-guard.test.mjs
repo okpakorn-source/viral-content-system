@@ -13,6 +13,11 @@
 //      + Request ตัวจริงของ Node ที่ใช้เส้น clone() แบบ production)
 // แพทเทิร์น register-stub เดียวกับ tests/desk-pipeline-gate-reopen.test.mjs — ห้ามมี network/LLM จริง
 // ============================================================
+// ★ 2 ส.ค. 69 (เจอตอนเปิดใช้งานจริง): งานที่มาทางคิว quick-test เดิมไม่ส่ง confirm ต่อ
+//   → ปุ่มล่าข่าวล้มถาวรเมื่อของค้างเกินเกณฑ์ · หมุดด้านล่างอ่านซอร์ส quick-test ยืนยันว่าส่งต่อแล้ว
+import { readFileSync as _readSrc } from 'node:fs';
+import { fileURLToPath as _fu } from 'node:url';
+import { dirname as _dn, join as _jn } from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
@@ -309,3 +314,19 @@ test('POST body ว่าง/ไม่ใช่ JSON → ไม่ล้ม ใ�
   assert.strictEqual(res._body.success, true);
   assert.strictEqual(globalThis.__P8.lastOpts.lanes.length, 11, 'body พังต้องตกเป็นรอบหนักเต็มเลนตามเดิม');
 }));
+
+// ═══════════════════════════════════════════════════════════
+// ★ 2 ส.ค. 69: เส้นคิว quick-test ต้องส่ง confirm ต่อถึงปลายทาง
+//   (เจอจริงตอนเปิดใช้งาน: งานล่าข่าวผ่านคิวล้มด้วย DESK_UNUSED_BACKLOG เพราะ confirm หายกลางทาง)
+//   เป็นหมุดอ่านซอร์ส — เส้นคิวจริงต้องมี worker/คลัง ซึ่งอยู่นอกขอบเขตไฟล์นี้
+// ═══════════════════════════════════════════════════════════
+test('เส้นคิว: quick-test ต้องเก็บ confirm ลงงาน และส่งต่อให้ปลายทางตอนรัน', () => {
+  const ROOT = _jn(_dn(_fu(import.meta.url)), '..');
+  const src = _readSrc(_jn(ROOT, 'src/app/api/quick-test/route.js'), 'utf8');
+  // ตอนสร้างงาน: เก็บ confirm ไว้ใน input (รับเฉพาะค่ายืนยันจริง ไม่ใช่ค่าอะไรก็ได้)
+  assert.match(src, /input = \{ mode, \.\.\.\(body\.confirm === true \|\| body\.confirm === 1 \|\| body\.confirm === '1' \? \{ confirm: true \} : \{\}\) \}/,
+    'ตอนสร้างงานต้องเก็บ confirm ไว้ (และรับเฉพาะค่ายืนยันจริง)');
+  // ตอนรันงาน: ส่ง confirm ต่อไปยัง /api/news-desk/harvest
+  assert.match(src, /job\.input\.confirm \? \{ confirm: true \} : \{\}/,
+    'ตอนรันงานต้องส่ง confirm ต่อให้ปลายทาง ไม่งั้นด่านเตือนจะทำให้ปุ่มล่าข่าวล้มถาวร');
+});

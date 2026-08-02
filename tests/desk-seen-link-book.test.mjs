@@ -21,7 +21,8 @@ export function createStore() {
   return {
     async getAll() { if (G.failReads) throw new Error('STORE_DOWN_READ'); return G.data.map(x => ({ ...x })); },
     async add(item) { G.writes++; if (G.failWrites) throw new Error('STORE_DOWN_WRITE'); G.data.push(item); return item; },
-    async addMany(items) { G.writes += items.length; if (G.failWrites) throw new Error('STORE_DOWN_WRITE'); G.data.push(...items); return items; },
+    // ★ addManyThrows = จำลอง "เขียนเป็นก้อนพัง (ชนกุญแจ)" แต่เขียนทีละใบยังผ่าน — พิสูจน์ทางถอยของ markSeen
+    async addMany(items) { G.writes += items.length; if (G.failWrites || G.addManyThrows) throw new Error('STORE_DOWN_WRITE'); G.data.push(...items); return items; },
     async update(id, fn) { G.writes++; if (G.failWrites) throw new Error('STORE_DOWN_WRITE'); const i = G.data.findIndex(x => x.id === id); if (i < 0) throw new Error('ไม่พบ id: ' + id); G.data[i] = typeof fn === 'function' ? fn(G.data[i]) : { ...G.data[i], ...fn }; return G.data[i]; },
     async remove(id) { G.writes++; if (G.failWrites) throw new Error('STORE_DOWN_WRITE'); G.data = G.data.filter(x => x.id !== id); return { removed: true }; },
     async removeAll() { G.writes++; G.data = []; return { removedAll: true }; },
@@ -42,11 +43,11 @@ register(_mod(hook));
 
 globalThis.fetch = () => { throw new Error('NETWORK_FORBIDDEN'); };
 
-const { normalizeUrl, linkKey, filterUnseen, markSeen } = await import('../src/lib/services/newsDesk/seenLinkBook.js');
+const { normalizeUrl, linkKey, seenRowId, filterUnseen, markSeen } = await import('../src/lib/services/newsDesk/seenLinkBook.js');
 
 const DAY = 86400e3;
 const iso = (msAgo) => new Date(Date.now() - msAgo).toISOString();
-const rec = (url, msAgo = 0) => ({ id: linkKey(url), url: normalizeUrl(url), firstSeenAt: iso(msAgo), lastSeenAt: iso(msAgo), hits: 1 });
+const rec = (url, msAgo = 0) => ({ id: seenRowId(url), url: normalizeUrl(url), firstSeenAt: iso(msAgo), lastSeenAt: iso(msAgo), hits: 1 });
 const seed = (r) => globalThis.__SEENBOOK.data.push(r);
 
 const ENV_KEYS = ['DESK_SEEN_BOOK', 'DESK_SEEN_DAYS', 'DESK_SEEN_MAX'];
@@ -217,3 +218,40 @@ test('ค่าที่ไม่ใช่คำสั่งปิด (F5): 1/tr
     })();
   }
 });
+
+// ════════════════════════════════════════════════════
+// 🔴 บั๊กจริงที่จับได้จากล็อกเซิร์ฟเวอร์ (2 ส.ค. 69) — id ชนตารางกลาง
+// ------------------------------------------------------------
+// store_items มี PK ที่ id เดี่ยว ใช้ร่วมทุกคลัง → ถ้าตำราใช้ linkKey(url) เปล่าๆ
+// จะชนกับ id การ์ดบนโต๊ะ (md5(url) 12 ตัวเหมือนกัน) → insert ทั้งชุดถูกปฏิเสธ
+// "duplicate key value violates unique constraint store_items_pkey"
+// แล้ว persistStore.addMany ตีความว่า "ซ้ำ = ข้ามได้ ไม่พังทั้งรอบ" → ตำราว่างเงียบๆ
+// (อาการจริง: ล่าข่าว 3 รอบ ตำรายังมี 0 ใบ ทั้งที่ทุกอย่างรายงานสำเร็จ)
+// ════════════════════════════════════════════════════
+test('🔴 id ในคลังต้องมีคำนำหน้า sn_ — ห้ามชนกับ id การ์ดบนโต๊ะ (md5 url 12 ตัว)', seen({}, async () => {
+  const crypto = await import('node:crypto');
+  const url = 'https://news.com/story/xyz';
+  const deskId = crypto.createHash('md5').update(url).digest('hex').slice(0, 12); // = idOf() ของ harvester
+  assert.notEqual(seenRowId(url), deskId, 'id ตำราห้ามเท่ากับ id การ์ดบนโต๊ะ (ชน PK = เขียนไม่ลงทั้งชุด)');
+  assert.match(seenRowId(url), /^sn_[0-9a-f]{12}$/, 'ต้องเป็นรูปแบบ sn_<คีย์ 12 หลัก>');
+  assert.equal(seenRowId(url), 'sn_' + linkKey(url), 'ต้องเป็นคีย์เดิมแค่เติมคำนำหน้า (ของเก่ายังเทียบได้)');
+}));
+
+test('🔴 markSeen ต้องเขียน id ที่มีคำนำหน้า sn_ ลงคลังจริง แล้ว filterUnseen ต้องอ่านเจอ', seen({}, async () => {
+  const items = [{ url: 'https://news.com/pk-1' }, { url: 'https://news.com/pk-2' }];
+  const res = await markSeen(items);
+  assert.equal(res.added, 2);
+  const written = globalThis.__SEENBOOK.data.map(r => r.id);
+  assert.ok(written.every(id => id.startsWith('sn_')), 'ทุกแถวที่เขียนต้องมีคำนำหน้า sn_ · ที่เขียนจริง: ' + written.join(','));
+  const back = await filterUnseen(items);
+  assert.equal(back.skipped.length, 2, 'เขียนแล้วต้องอ่านเจอ (ไม่งั้นตำราไม่ประหยัดอะไรเลย)');
+}));
+
+test('🔴 เขียนทีละก้อน: ก้อนพัง 1 ก้อน ต้องไม่ทำให้ทั้งรอบหาย (ลงมือทีละใบแทน)', seen({}, async () => {
+  // จำลองคลังกลางที่ addMany พังเสมอ (เหมือนชนกุญแจ) แต่ add ทีละใบผ่าน
+  globalThis.__SEENBOOK.addManyThrows = true;
+  const items = Array.from({ length: 5 }, (_, i) => ({ url: `https://news.com/chunk-${i}` }));
+  const res = await markSeen(items);
+  assert.equal(res.added, 5, 'addMany พัง = ต้องตกลงมาเขียนทีละใบจนครบ ไม่ใช่หายทั้งรอบ');
+  assert.equal(globalThis.__SEENBOOK.data.length, 5, 'ของต้องอยู่ในคลังจริงครบ 5 ใบ');
+}));

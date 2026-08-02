@@ -48,7 +48,12 @@ export function createStore(name) {
 // ── deskBrain stub: ผ่านทุกด่าน (เว้น _gateFail) · ให้คะแนนคุมได้ผ่าน _judge ──
 const STUB_BRAIN = _mod(`
 export function gateKeywords(it) { return it._gateFail ? { pass: false, reason: 'test-gate' } : { pass: true }; }
-export async function classifyBatch(items) { return items.map(i => ({ ...i, toxicity: i.toxicity ?? 0, fbRisk: i.fbRisk ?? 0, category: i.category || 'กระแส' })); }
+export async function classifyBatch(items) {
+  // ★ 2 ส.ค. 69: จดว่า "ใครถูกส่งเข้าชั้น AI จริง" — ตัวชี้ขาดว่าตำราจำลิงก์ประหยัดได้จริงหรือแค่ log สวย
+  globalThis.__DESK.calls.classifyBatch = (globalThis.__DESK.calls.classifyBatch || 0) + 1;
+  globalThis.__DESK.calls.classifiedUrls = [...(globalThis.__DESK.calls.classifiedUrls || []), ...items.map(i => i.url)];
+  return items.map(i => ({ ...i, toxicity: i.toxicity ?? 0, fbRisk: i.fbRisk ?? 0, category: i.category || 'กระแส' }));
+}
 export function fitScore() { return 5; }
 export function freshScore() { return 5; }
 export async function loadArchiveTitles() { return []; }
@@ -83,8 +88,30 @@ const STUB_QUEUE = _mod(`
 export async function enqueueJob(payload, userId) { globalThis.__DESK.calls.enqueue++; globalThis.__DESK.calls.enqueueArgs = { payload, userId }; return { jobId: 'QJTEST123456' }; }
 `);
 
+// ★ 2 ส.ค. 69: ตำราจำลิงก์ต่อสายเข้า harvester แล้ว — สปายจับว่า "ใบซ้ำถูกกันก่อนถึงชั้น AI จริง"
+//   globalThis.__DESK.seenUrls = ชุดลิงก์ที่ตำราถือว่าเคยเจอแล้ว
+const STUB_SEENBOOK = _mod(`
+export async function filterUnseen(items) {
+  globalThis.__DESK.calls.filterUnseen++;
+  const set = globalThis.__DESK.seenUrls || new Set();
+  if (globalThis.__DESK.seenBookThrows) throw new Error('ตำราพัง (จำลอง)');
+  const fresh = [], skipped = [];
+  for (const it of (items || [])) (set.has(it.url) ? skipped : fresh).push(it);
+  globalThis.__DESK.calls.filterUnseenIn = (items || []).length;
+  return { fresh, skipped, stats: { total: (items || []).length, fresh: fresh.length, skipped: skipped.length, book: set.size, live: set.size, disabled: false } };
+}
+export async function markSeen(items, meta) {
+  globalThis.__DESK.calls.markSeen++;
+  globalThis.__DESK.calls.markSeenUrls = (items || []).map(i => i.url);
+  globalThis.__DESK.calls.markSeenMeta = meta;
+  if (globalThis.__DESK.markSeenThrows) throw new Error('จารึกพัง (จำลอง)');
+  return { marked: (items || []).length, added: (items || []).length, updated: 0, evicted: 0, errors: 0, disabled: false };
+}
+`);
+
 const hook = `
 export async function resolve(specifier, ctx, next) {
+  if (specifier === './seenLinkBook') return { url: ${JSON.stringify(STUB_SEENBOOK)}, shortCircuit: true };
   if (specifier === '@/lib/persistStore') return { url: ${JSON.stringify(STUB_PERSIST)}, shortCircuit: true };
   if (specifier === './deskBrain') return { url: ${JSON.stringify(STUB_BRAIN)}, shortCircuit: true };
   if (specifier === './deskMetrics') return { url: ${JSON.stringify(STUB_METRICS)}, shortCircuit: true };
@@ -128,13 +155,17 @@ const oldItem = (id, over) => ({ id, title: `การ์ด ${id} เรื่�
 // ผลค้น Serper ปลอม (ของใหม่ที่จะไหลเข้าโต๊ะในรอบนี้)
 const sItem = (n, extra = {}) => ({ title: `ข่าวทดสอบหมายเลข ${n} เรื่องราวน้ำดีของชาวบ้าน`, snippet: 'x', link: `https://news.test/story/${n}`, source: 'test', date: '3 ชั่วโมงที่ผ่านมา', imageUrl: '', ...extra });
 
-const ENV_KEYS = ['DESK_AUTO_PURGE', 'DESK_PURGE_HOURS', 'DESK_MAX_ITEMS', 'DESK_AUTOPILOT', 'DESK_AUTO_RESEARCH', 'DESK_AUTO_MINECLIP', 'DESK_JUNK_MAX', 'SERPER_API_KEY'];
+const ENV_KEYS = ['DESK_AUTO_PURGE', 'DESK_PURGE_HOURS', 'DESK_MAX_ITEMS', 'DESK_AUTOPILOT', 'DESK_AUTO_RESEARCH', 'DESK_AUTO_MINECLIP', 'DESK_JUNK_MAX', 'DESK_SEEN_BOOK', 'SERPER_API_KEY'];
 function desk(env, fn) {
   return async () => {
     const saved = {};
     for (const k of ENV_KEYS) { saved[k] = process.env[k]; if (env[k] === undefined) delete process.env[k]; else process.env[k] = env[k]; }
     if (env.SERPER_API_KEY === undefined) process.env.SERPER_API_KEY = 'test-key'; // serperNews ต้องมีคีย์ (fetch ถูก stub อยู่แล้ว)
-    globalThis.__DESK = { stores: {}, calls: { deepResearch: 0, mineClip: 0, enqueue: 0 }, serperItems: [] };
+    globalThis.__DESK = {
+      stores: {},
+      calls: { deepResearch: 0, mineClip: 0, enqueue: 0, filterUnseen: 0, markSeen: 0 },
+      serperItems: [], seenUrls: new Set(),
+    };
     const _log = console.log, _warn = console.warn;
     const logs = [];
     console.log = (...a) => { logs.push(a.join(' ')); };
@@ -475,4 +506,56 @@ test('D4 · เปิด purge: พฤติกรรมเดิมเป๊ะ
   assert.ok(byId('old-claimed'), 'claimed เก็บไว้เหมือนเดิม');
   assert.ok(byId('fresh'), 'ของสดต้องอยู่');
   assert.ok(globalThis.__DESK.logs.some(l => l.includes('pruned 2 old items')), 'ตอนเปิดต้อง log แบบเดิม');
+}));
+
+// ════════════════════════════════════════════════════
+// จุด S — 📕 ตำราจำลิงก์ต่อสายเข้า harvester (2 ส.ค. 69)
+// ------------------------------------------------------------
+// ต้องพิสูจน์ว่า "ประหยัดจริง" ไม่ใช่แค่ log สวย:
+//   S1 ใบที่ตำราจำได้ ต้องไม่ถูกส่งเข้า classifyBatch (ชั้นที่เสียเงิน) เลย
+//   S2 ใบใหม่ยังเข้าโต๊ะได้ตามปกติ + ถูกจารึกไว้รอบนี้
+//   S3 ตำราพัง = fail-open (ล่าต่อได้ ของไม่หาย)
+//   S4 จารึกพัง = รอบนี้ยังสำเร็จ (แค่รอบหน้าจ่ายซ้ำ)
+// ════════════════════════════════════════════════════
+test('S1 · ใบที่ตำราจำได้ ต้องไม่หลุดเข้าชั้น AI (classifyBatch) แม้แต่ใบเดียว', desk({}, async () => {
+  seedDesk([]);
+  globalThis.__DESK.serperItems = [sItem(1), sItem(2), sItem(3)];
+  globalThis.__DESK.seenUrls = new Set(['https://news.test/story/1', 'https://news.test/story/2']);
+  const stats = await run({ lanes: ['good'] });
+  const seenByAI = globalThis.__DESK.calls.classifiedUrls || [];
+  assert.strictEqual(globalThis.__DESK.calls.filterUnseen, 1, 'ต้องเรียกตำรา 1 ครั้งต่อรอบ');
+  assert.ok(!seenByAI.includes('https://news.test/story/1'), 'ใบที่เคยจ่ายแล้ว (1) ห้ามถูกส่งเข้า AI ซ้ำ');
+  assert.ok(!seenByAI.includes('https://news.test/story/2'), 'ใบที่เคยจ่ายแล้ว (2) ห้ามถูกส่งเข้า AI ซ้ำ');
+  assert.ok(seenByAI.includes('https://news.test/story/3'), 'ใบใหม่ต้องได้เข้า AI ตามปกติ');
+  assert.strictEqual(stats.seenSkipped, 2, 'สถิติต้องรายงานจำนวนที่ข้ามได้ถูกต้อง');
+}));
+
+test('S2 · ใบใหม่เข้าโต๊ะได้ตามปกติ และถูกจารึกไว้ให้รอบหน้าข้าม', desk({}, async () => {
+  seedDesk([]);
+  globalThis.__DESK.serperItems = [sItem(11, { title: 'ยายขายขนมครกเก็บเงินคืนเจ้าของกระเป๋า' }), sItem(12, { title: 'ลุงวินมอเตอร์ไซค์พาเด็กส่งโรงพยาบาลทันเวลา' })];
+  const stats = await run({ lanes: ['good'] });
+  assert.strictEqual(stats.added, 2, 'ใบใหม่ต้องขึ้นโต๊ะครบ');
+  assert.strictEqual(globalThis.__DESK.calls.markSeen, 1, 'ต้องจารึก 1 ครั้งต่อรอบ');
+  const marked = globalThis.__DESK.calls.markSeenUrls || [];
+  assert.ok(marked.includes('https://news.test/story/11') && marked.includes('https://news.test/story/12'),
+    'ต้องจารึกทุกใบที่เข้าชั้น AI รอบนี้ (ไม่งั้นรอบหน้าจ่ายซ้ำ)');
+  assert.strictEqual(stats.seenMarked, 2);
+}));
+
+test('S3 · ตำราพัง → fail-open ล่าต่อได้ ข่าวไม่หาย', desk({}, async () => {
+  seedDesk([]);
+  globalThis.__DESK.serperItems = [sItem(21, { title: 'ครูดอยเดินเท้าสามชั่วโมงไปสอนหนังสือเด็ก' }), sItem(22, { title: 'หนุ่มโรงงานเก็บเงินสิบปีสร้างบ้านให้แม่' })];
+  globalThis.__DESK.seenBookThrows = true;
+  const stats = await run({ lanes: ['good'] });
+  assert.strictEqual(stats.added, 2, 'ตำราพังห้ามทำให้ข่าวหาย — ต้องเข้าโต๊ะครบ');
+  assert.ok((globalThis.__DESK.logs || []).some(l => l.includes('ตำราจำลิงก์พัง')), 'ต้อง log ว่าตำราพัง ไม่ใช่เงียบ');
+}));
+
+test('S4 · จารึกพัง → รอบนี้ยังสำเร็จ (แค่รอบหน้าจ่ายซ้ำ)', desk({}, async () => {
+  seedDesk([]);
+  globalThis.__DESK.serperItems = [sItem(31)];
+  globalThis.__DESK.markSeenThrows = true;
+  const stats = await run({ lanes: ['good'] });
+  assert.strictEqual(stats.added, 1, 'จารึกพังห้ามล้มรอบล่า');
+  assert.ok((globalThis.__DESK.logs || []).some(l => l.includes('จารึกตำราล้ม')), 'ต้อง log ว่าจารึกล้ม');
 }));

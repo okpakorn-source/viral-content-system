@@ -23,6 +23,7 @@ const STORE_NAME = 'news-desk-seen';
 const DEFAULT_DAYS = 30;   // อายุความจำ default — ข่าวเก่ากว่านี้ให้เข้าใหม่ได้
 const DEFAULT_MAX = 20000; // เพดานเล่ม default — เกินตัดใบเก่าสุดทิ้ง กันคลังบวม
 const DAY_MS = 86400e3;
+const WRITE_CHUNK = 200;   // เขียนทีละก้อน — ก้อนพังไม่ลากทั้งรอบ (ดูเหตุผลที่จุดเขียน)
 
 // อ่าน env ทุกครั้งที่ถูกเรียก (ไม่ cache ตอน load) — สลับค่าระหว่างรอบได้โดยไม่ต้องรีสตาร์ท
 const _days = () => Math.max(1, Number(process.env.DESK_SEEN_DAYS) || DEFAULT_DAYS);
@@ -61,6 +62,18 @@ export function normalizeUrl(url) {
 /** คีย์เล่ม = md5 12 ตัวแรกของลิงก์ที่ล้างแล้ว (สั้น ชนกันยากพอสำหรับเพดาน 2 หมื่นใบ) */
 export function linkKey(url) {
   return crypto.createHash('md5').update(normalizeUrl(url)).digest('hex').slice(0, 12);
+}
+
+/**
+ * 🔴 id ที่ใช้ "ในคลัง" ต้องมีคำนำหน้า sn_ (2 ส.ค. 69 — เจอจากล็อกเซิร์ฟเวอร์จริง)
+ * ตาราง store_items มี PK ที่ id เดี่ยว (ไม่ใช่ id+store_name) → linkKey(url) เปล่าๆ ชนกับ
+ * id การ์ดบนโต๊ะที่ใช้ md5(url) 12 ตัวเหมือนกัน → insert ทั้งชุดถูกปฏิเสธ
+ * ("duplicate key value violates unique constraint store_items_pkey") แล้ว addMany ตีความว่า
+ * "ซ้ำ = ข้ามได้" → ตำราว่างเปล่าเงียบๆ ทั้งที่ทุกอย่างดูสำเร็จ
+ * (บทเรียนเดียวกับคลังขยะที่ต้องใช้คำนำหน้า 'jk_' ด้วยเหตุผลเดียวกัน)
+ */
+export function seenRowId(url) {
+  return `sn_${linkKey(url)}`;
 }
 
 const _ts = (rec) => Date.parse(rec?.lastSeenAt || rec?.firstSeenAt || 0) || 0;
@@ -108,7 +121,7 @@ export async function filterUnseen(items) {
   for (const item of list) {
     const url = _urlOf(item);
     if (!url) { fresh.push(item); continue; }
-    (live.has(linkKey(url)) ? skipped : fresh).push(item);
+    (live.has(seenRowId(url)) ? skipped : fresh).push(item);
   }
   stats.fresh = fresh.length;
   stats.skipped = skipped.length;
@@ -136,7 +149,7 @@ export async function markSeen(items, meta) {
     for (const item of list) {
       const url = _urlOf(item);
       if (!url) continue;
-      const key = linkKey(url);
+      const key = seenRowId(url);
       const ex = byId.get(key);
       if (ex) {
         const merged = { ...ex, lastSeenAt: nowIso, hits: (ex.hits || 1) + 1 };
@@ -159,9 +172,22 @@ export async function markSeen(items, meta) {
     const finalAdds = adds.filter(a => keptIds.has(a.id));
     const finalUpdates = updates.filter(u => keptIds.has(u.id));
     // เขียน — ห่อ try ทุกชุด ชุดพังไม่ลากทั้งรอบ (fail-open)
-    if (finalAdds.length) {
-      try { await store.addMany(finalAdds); res.added += finalAdds.length; }
-      catch (e) { res.errors++; console.warn(`[SeenBook] addMany พัง: ${String(e.message || e).slice(0, 60)}`); }
+    // ★ 2 ส.ค. 69 (บทเรียนจากของจริง): เขียนทีละก้อน ไม่ยิงรวดเดียวทั้งรอบ
+    //   คลังกลางเป็น insert ก้อนเดียว = ชนกุญแจใบเดียว "ทั้งก้อนไม่ถูกเขียน" แล้วถูกกลืนเป็น
+    //   "ซ้ำ = ข้ามได้" → ตำราว่างเงียบๆ · ก้อนละ 200 + ถ้าก้อนพังค่อยลงมือทีละใบ
+    //   (ยอมช้าขึ้นนิดในกรณีพัง ดีกว่าเสียทั้งรอบแบบไม่รู้ตัว)
+    for (let i = 0; i < finalAdds.length; i += WRITE_CHUNK) {
+      const chunk = finalAdds.slice(i, i + WRITE_CHUNK);
+      try {
+        await store.addMany(chunk);
+        res.added += chunk.length;
+      } catch (e) {
+        console.warn(`[SeenBook] เขียนก้อน ${chunk.length} ใบพัง (${String(e.message || e).slice(0, 50)}) — ลงมือทีละใบแทน`);
+        for (const one of chunk) {
+          try { await store.add(one); res.added++; }
+          catch (e2) { res.errors++; }
+        }
+      }
     }
     for (const u of finalUpdates) {
       try { await store.update(u.id, u); res.updated++; }
