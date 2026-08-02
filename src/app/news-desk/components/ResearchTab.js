@@ -15,6 +15,8 @@ import HuntSetup, { CHANNELS, AUTO_CFG_DEFAULT } from './HuntSetup.js';
 import LeadCard from './LeadCard.js';
 import LeadGroupView from './LeadGroupView.js';
 import EditorPanel from './EditorPanel.js'; // 🆕 E2 (17 ก.ค. 69): แผง "บก. AI" — คู่ขนานกับ backend ของ E1 (contract ล็อกแล้ว)
+// 🏷️ 2 ส.ค. 69 (เจ้าของสั่ง): กรองตามหมวดข่าว — เทียบคำล้วน ไม่ยิง backend ไม่มีค่าใช้จ่าย
+import { categorizeLead, countByCategory, LEAD_CATEGORIES } from '@/lib/services/deskV2/leadCategory';
 
 const LIB = '/api/desk/dna/library';
 const LEADS = '/api/desk/research/leads';
@@ -70,6 +72,7 @@ export default function ResearchTab({ onToast }) {
   const [fQ, setFQ] = useState('');
   // 🎨 รีดีไซน์: ลูกกรองด่วน (client-side lens บนลีดที่โหลดมา) + เรียง + พับตัวกรองเพิ่มเติม
   const [quickFilter, setQuickFilter] = useState('all'); // all|ready|kept|sent|interview
+  const [catFilter, setCatFilter] = useState('all');      // 🏷️ หมวดข่าว: all|namdee|interview|drama|celeb|commoner|help|unknown
   const [sortBy, setSortBy] = useState('score');          // score|newest|oldest
   const [showAdvanced, setShowAdvanced] = useState(false);
 
@@ -586,9 +589,16 @@ export default function ResearchTab({ onToast }) {
     const q = QUICK.find((x) => x.key === key);
     return q ? (libLeads || []).filter(q.match).length : 0;
   };
+
+  // 🏷️ 2 ส.ค. 69 (เจ้าของสั่ง): กรองตาม "หมวดข่าว" — แยกชั้นจาก "สถานะงาน" ด้านบน ใช้พร้อมกันได้
+  //   นับจากลีดที่โหลดมาแล้ว (client-side ล้วน ไม่ยิง backend ไม่เสียเงิน)
+  const catCounts = countByCategory(libLeads || []);
+  const catFilterOptions = LEAD_CATEGORIES.filter((c) => (catCounts[c.key] || 0) > 0);
+  const matchCategory = (l) => catFilter === 'all' || categorizeLead(l).key === catFilter;
+
   const viewLeads = (list) => {
     const q = QUICK.find((x) => x.key === quickFilter) || QUICK[0];
-    const arr = (list || []).filter(q.match);
+    const arr = (list || []).filter((l) => q.match(l) && matchCategory(l));
     return arr.sort((a, b) => {
       if (sortBy === 'newest') return Date.parse(b.savedAt || '') - Date.parse(a.savedAt || '') || 0;
       if (sortBy === 'oldest') return Date.parse(a.savedAt || '') - Date.parse(b.savedAt || '') || 0;
@@ -664,8 +674,32 @@ export default function ResearchTab({ onToast }) {
           <Btn variant="subtle" busy={libLoading} onClick={() => { loadLibrary(); loadLibStats(); }} style={{ marginLeft: 'auto', minHeight: 38, padding: '6px 12px', fontSize: 12.5 }}>↻ รีเฟรช</Btn>
         </div>
 
+        {/* 🏷️ แถวหมวดข่าว (2 ส.ค. 69) — แยกชั้นจากสถานะงานด้านล่าง ใช้พร้อมกันได้ · โชว์เฉพาะหมวดที่มีของจริง */}
+        {catFilterOptions.length > 0 && (
+          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: UI.muted, marginRight: 2 }}>หมวดข่าว</span>
+            {[{ key: 'all', label: 'ทั้งหมด', n: (libLeads || []).length }, ...catFilterOptions.map((c) => ({ key: c.key, label: c.label, n: catCounts[c.key] || 0 }))].map((c) => {
+              const on = catFilter === c.key;
+              return (
+                <button
+                  key={c.key}
+                  type="button"
+                  onClick={() => setCatFilter(c.key)}
+                  style={{
+                    minHeight: 34, padding: '6px 11px', borderRadius: 8, cursor: 'pointer',
+                    fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit',
+                    background: on ? `${UI.accent}22` : UI.card2, color: on ? UI.accent : UI.dim,
+                    border: `1.5px solid ${on ? UI.accent : UI.line}`,
+                  }}
+                >{c.label} {fmtNum(c.n)}</button>
+              );
+            })}
+          </div>
+        )}
+
         {/* 🎨 ลูกกรองด่วน (แตะเดียวกรอง โชว์จำนวนในตัว) + เรียงลำดับ */}
         <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: UI.muted, marginRight: 2 }}>สถานะงาน</span>
           {QUICK.map((q) => {
             const on = quickFilter === q.key;
             return (
@@ -735,7 +769,7 @@ export default function ResearchTab({ onToast }) {
           </div>
         ) : (
           <>
-            <div style={{ fontSize: 12.5, color: UI.dim, marginBottom: 10 }}>แสดง {fmtNum(viewLeads(libLeads).length)} จาก {fmtNum(libLeads.length)} ลีด{quickFilter !== 'all' ? ' (กรองด่วน)' : ''}</div>
+            <div style={{ fontSize: 12.5, color: UI.dim, marginBottom: 10 }}>แสดง {fmtNum(viewLeads(libLeads).length)} จาก {fmtNum(libLeads.length)} ลีด{quickFilter !== 'all' || catFilter !== 'all' ? ' (กรองอยู่)' : ''}</div>
             {leadGrid(viewLeads(libLeads))}
           </>
         )}

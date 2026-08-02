@@ -11,6 +11,14 @@
 import { useState } from 'react';
 import { UI, Btn, Chip } from './ui.js';
 import LeadTimeline from './LeadTimeline.js';
+// 🏷️ 2 ส.ค. 69 (เจ้าของสั่ง): ป้ายหมวดข่าวบนการ์ด — เดิมมีแต่ชื่อคลัสเตอร์ที่เป็นประโยคยาว กวาดสายตาหาไม่ได้
+import { categorizeLead, freshTagOf } from '@/lib/services/deskV2/leadCategory';
+
+// สีประจำหมวด — ให้จำด้วยสีได้โดยไม่ต้องอ่าน (คุมโทนเดียวกับป้ายอื่นบนการ์ด)
+const CAT_COLOR = {
+  namdee: '#059669', interview: '#7c3aed', drama: '#dc2626',
+  celeb: '#d97706', commoner: '#0891b2', help: '#db2777', unknown: '#94a3b8',
+};
 
 // สีป้าย match% ตามเกณฑ์: ≥80 เขียว · ≥60 เหลือง · ต่ำกว่านั้นแดงจาง
 function scoreColor(score) {
@@ -79,7 +87,11 @@ export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtract
   const foundLabel = foundAgo(lead.savedAt); // 🎨 "พบเมื่อ" (savedAt) — คำนวณครั้งเดียว
   const pubDate = String(lead.publishedHint || '').trim(); // 🗓️ วันที่ข่าวจริง (จากผลค้น) — คนละอันกับ "พบเมื่อ"
   const plat = platformOf(lead.channel);     // 🎨 ไอคอน+สีแพลตฟอร์ม (visual cue แทนรูป)
-  const archetype = String(lead.clusterArchetype || '').trim(); // 🎨 แนว/หมวดข่าว (จากคลัสเตอร์ครู)
+  const archetype = String(lead.clusterArchetype || '').trim(); // 🎨 ชื่อคลัสเตอร์ครู (ประโยคยาว — ย้ายลงบรรทัดล่าง)
+  // 🏷️ หมวดข่าว + ป้ายอมตะ/กระแส — เทียบคำล้วน ไม่มี AI ไม่มีค่าใช้จ่าย · จัดไม่ได้ = "ยังไม่จัดหมวด" (ไม่เดา)
+  const cat = categorizeLead(lead);
+  const freshTag = freshTagOf(lead);
+  const catColor = CAT_COLOR[cat.key] || CAT_COLOR.unknown;
   const sourceCount = Number(lead.sourceCount) || 0;
   const status = lead.status || 'new';
   const sm = STATUS_META[status];
@@ -110,13 +122,21 @@ export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtract
           display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 8,
           fontSize: 12, fontWeight: 800, background: `${plat.color}22`, color: plat.color,
         }}>{plat.icon} {plat.label}</span>
-        {archetype && (
+        {/* 🏷️ หมวดข่าว — ป้ายสั้นอ่านปราดเดียว (แทนชื่อคลัสเตอร์ประโยคยาวที่ย้ายลงบรรทัดล่าง) */}
+        <span
+          title={cat.source === 'ai' ? 'หมวดจากผลวิเคราะห์เนื้อข่าว' : cat.source === 'keyword' ? 'หมวดจากการเทียบคำ (อาจไม่แม่น 100%)' : 'ยังไม่มีข้อมูลพอจะจัดหมวด'}
+          style={{
+            padding: '3px 9px', borderRadius: 8, fontSize: 12, fontWeight: 800,
+            background: `${catColor}1f`, color: catColor, border: `1px solid ${catColor}44`,
+          }}
+        >{cat.label}</span>
+        {freshTag && (
           <span
-            title={archetype}
-            style={{ padding: '3px 9px', borderRadius: 8, fontSize: 12, fontWeight: 700, background: UI.card, color: UI.dim, border: `1px solid ${UI.line}`, maxWidth: 190, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-          >{archetype}</span>
+            title={freshTag.desc}
+            style={{ padding: '3px 9px', borderRadius: 8, fontSize: 12, fontWeight: 700, background: UI.card, color: UI.dim, border: `1px solid ${UI.line}` }}
+          >{freshTag.label}</span>
         )}
-        {lead.lane === 'interview' && <Chip color={UI.accent}>🎤 สัมภาษณ์</Chip>}
+        {lead.lane === 'interview' && cat.key !== 'interview' && <Chip color={UI.accent}>🎤 สัมภาษณ์</Chip>}
         {sentViaAuto && <Chip color={UI.accent}>⚡ ออโต้</Chip>}
         {sm && <Chip color={sm.color}>{sm.label}</Chip>}
         <span style={{
@@ -141,6 +161,12 @@ export default function LeadCard({ lead, onKeep, onDismiss, onExtract, onExtract
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', fontSize: 12, color: UI.dim }}>
         {pubDate && <span style={{ color: UI.amber, fontWeight: 700 }}>📅 {pubDate}</span>}
         {foundLabel && <span>🕐 พบเมื่อ {foundLabel}</span>}
+        {/* ชื่อคลัสเตอร์ครู — ย้ายมาบรรทัดนี้ (เดิมอยู่แถวหัว แย่งที่ป้ายหมวด) */}
+        {archetype && (
+          <span title={archetype} style={{ color: UI.muted, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            🧭 {archetype}
+          </span>
+        )}
         {lead.sourceHost && <span>🌐 {lead.sourceHost}</span>}
         {sourceCount > 1 && <span style={{ color: UI.blue }}>🔗 รวม {sourceCount} แหล่ง</span>}
         {/* 🆕 เฟส 7: ไฮไลต์จาก transcript — 🔒 gate ด้วย highlightConfirmOn (persist ค้างตอนปิด flag ต้องไม่โผล่) */}
