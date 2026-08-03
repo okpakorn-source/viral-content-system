@@ -107,7 +107,8 @@ function topicTimeRange(t) {
 
 // ความยาวของประเด็น: ถ้ามีเนื้อข้อความให้วัดตัวอักษร ถ้าไม่มีให้ใช้ duration / end-start
 function topicLength(t) {
-  for (const k of ['text', 'content', 'summary', 'body']) {
+  // ★ แก้ 3 ส.ค. (ผู้ตรวจไขว้ F10): v2 ใช้คีย์ rawStory → เดิมรายงาน "—" ทุกประเด็นเสมอ
+  for (const k of ['rawStory', 'text', 'content', 'summary', 'body']) {
     if (typeof t?.[k] === 'string') return `${t[k].length.toLocaleString('en-US')} ตัวอักษร`;
   }
   if (typeof t?.duration === 'number') return `${t.duration} วินาที`;
@@ -235,13 +236,19 @@ async function main() {
     const trimmed = rawStory.trimEnd();
     const lastChar = trimmed.length > 0 ? trimmed[trimmed.length - 1] : '';
     const danglingMark = /[ัิ-ฺ็-๎]$/.test(trimmed); // สระบน-ล่าง/วรรณยุกต์ลอยท้าย
-    const hitCap = trimmed.length >= 11900;
-    const openQuote = (trimmed.match(/[“"]/g) || []).length % 2 === 1; // เปิดคำพูดค้างไม่ปิด
-    endPass = trimmed.length > 0 && !danglingMark && !hitCap && !openQuote
+    // ★ แก้ 3 ส.ค. (ผู้ตรวจไขว้ F1): เดิมนับ “ กับ " แต่ไม่นับ ” → ข้อความที่ปิดคำพูดครบถูกตี FAIL
+    //   ต้องนับอัญประกาศเปิด/ปิดแยกคู่กัน + นับ " แบบคู่ต่างหาก
+    const qOpen = (trimmed.match(/“/g) || []).length;
+    const qClose = (trimmed.match(/”/g) || []).length;
+    const openQuote = qOpen !== qClose || ((trimmed.match(/"/g) || []).length % 2 === 1);
+    // ★ F2: ไม้บรรทัดจริงคือธง truncated ที่ระบบส่งมาเอง (ตัดจริงหรือไม่ ระบบรู้ดีที่สุด)
+    //   เดิมเดาจาก "อักขระสุดท้าย" ซึ่งภาษาไทยเดาไม่ได้ → ผ่านตลอดแม้เนื้อถูกตัดทิ้งหลายพันตัว
+    const flaggedTruncated = v2?.truncated === true;
+    endPass = trimmed.length > 0 && !danglingMark && !flaggedTruncated && !openQuote
       && (SENTENCE_ENDINGS.has(lastChar) || /[฀-๿a-zA-Z0-9)\]]/.test(lastChar));
     endDetail = endPass
       ? `จบสมบูรณ์ (ลงท้าย "${lastChar}")`
-      : `น่าจะถูกตัด: ${hitCap ? 'ชนเพดาน 12000 ตัวอักษร' : danglingMark ? 'ค้างที่วรรณยุกต์/สระลอย' : openQuote ? 'เปิดเครื่องหมายคำพูดค้าง' : `อักขระสุดท้าย "${lastChar || '(ว่าง)'}"`}`;
+      : `น่าจะถูกตัด: ${flaggedTruncated ? 'ระบบติดธง truncated=true (เนื้อเกินเพดาน ถูกตัดจริง)' : danglingMark ? 'ค้างที่วรรณยุกต์/สระลอย' : openQuote ? `เครื่องหมายคำพูดไม่ครบคู่ (เปิด ${qOpen} ปิด ${qClose})` : `อักขระสุดท้าย "${lastChar || '(ว่าง)'}"`}`;
   }
   checks.push({ name: 'rawStory ลงท้ายด้วยประโยคสมบูรณ์ (ไม่ถูกตัดกลางคำ)', pass: endPass, detail: endDetail });
 

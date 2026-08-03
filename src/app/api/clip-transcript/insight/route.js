@@ -220,7 +220,10 @@ function insightQualityIssues(insight) {
 export async function POST(request) {
   try {
     // ★ 8 ก.ค.: รับเพิ่ม force (ถอดใหม่ ไม่เอาผลจากคลัง) + user (ใครส่ง — เก็บเป็น metadata คลัง)
-    const { url: _rawUrl, force = false, user = '' } = await request.json();
+    // ★ 3 ส.ค. (ผู้ตรวจไขว้รอบ 2 F3): skipRawStoryV2 — ให้ผู้เรียก "ภายใน" (hunt / โต๊ะวิจัย) ปิดรอบ v2 ได้
+    //   เพราะสวิตช์ CLIP_RAWSTORY_V2 เป็นของทั้ง endpoint ถ้าไม่ปิด ระบบอื่นที่ยิงเข้ามาจะโดนรอบสองด้วย
+    //   (จ่าย Gemini เพิ่ม + กินงบเวลาของ caller จนงานหลักโดนตัด)
+    const { url: _rawUrl, force = false, user = '', skipRawStoryV2 = false } = await request.json();
     if (!_rawUrl || typeof _rawUrl !== 'string') {
       return NextResponse.json({ success: false, error: 'กรุณาวางลิงก์คลิป', errorType: 'MISSING_URL' }, { status: 400 });
     }
@@ -355,7 +358,7 @@ export async function POST(request) {
     // ★ 3 ส.ค. 69 (เจ้าของสั่ง) — รอบ "เนื้อดิบ v2": ดูคลิปอีกรอบ → เล่าเป็นเนื้อความธรรมชาติ คำพูดกลืนในเนื้อ
     //   🔴 สายใหม่แยก 100%: ไม่แตะ insight เดิม ไม่แตะรอบ enriched เดิม · ล้ม/แน่น/หมดเวลา = ข้ามเงียบ (ของเดิมเซฟไปแล้ว)
     //   ใช้ buffer/URL ซ้ำจาก ctx (ไม่โหลดคลิปใหม่) · เปิดด้วย env CLIP_RAWSTORY_V2=1
-    const rawStoryV2Enabled = process.env.CLIP_RAWSTORY_V2 === '1';
+    const rawStoryV2Enabled = process.env.CLIP_RAWSTORY_V2 === '1' && !skipRawStoryV2;
     const v2BudgetMs = ENRICH_MAXDUR_MS - (Date.now() - startedAt) - ENRICH_SAVE_MARGIN_MS;
     // ★ ผู้ตรวจไขว้ W1: รอบ v2 = อัปคลิปขึ้น Gemini ใหม่ทั้งก้อน + ดูใหม่ทั้งคลิป (กินหลายนาที)
     //   งบเหลือน้อยกว่านี้ = ยิงไปก็ถูกตัดกลางทาง จ่ายเงินฟรีและยึดสล็อตคิว → ข้ามไปเลยดีกว่า

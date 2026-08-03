@@ -64,7 +64,11 @@ const RAWSTORY_PROMPT = `คุณคือ "คนดูคลิปแล้�
 // Gemini อาจห่อ JSON object ด้วยอาเรย์หลายชั้นในคลิปใหญ่ จึงต้องแกะก่อน normalize เสมอ
 function _unwrapModelJson(p) {
   let out = p;
-  for (let i = 0; i < 3 && Array.isArray(out); i++) out = out[0];
+  for (let i = 0; i < 3 && Array.isArray(out); i++) {
+    // ★ ผู้ตรวจไขว้รอบ 2 (F6): โมเดลห่ออาเรย์หลายก้อน = ก้อนที่ 2+ ถูกทิ้ง — ต้องเห็นใน log ไม่ใช่หายเงียบ
+    if (out.length > 1) console.warn(`[RawStoryV2] ⚠️ โมเดลคืนอาเรย์ ${out.length} ก้อน — ใช้ก้อนแรก ก้อนที่เหลือถูกทิ้ง`);
+    out = out[0];
+  }
   return (out && typeof out === 'object') ? out : {};
 }
 
@@ -114,28 +118,45 @@ ${parts.join('\n')}
 function buildRawStoryPrompt(topicHints, identity) {
   const context = [buildTopicHintsBlock(topicHints), buildIdentityBlock(identity)].filter(Boolean).join('\n\n');
   if (!context) return RAWSTORY_PROMPT;
-  return RAWSTORY_PROMPT.replace('★★ รูปแบบคำตอบ', `${context}\n\n★★ รูปแบบคำตอบ`);
+  // ★ ผู้ตรวจไขว้รอบ 2 (F7): ใช้ฟังก์ชันแทนสตริง — ไม่งั้น $' / $& ที่ติดมากับหัวข้อ/แคปชั่นรอบแรก
+  //   จะถูกตีความเป็นรูปแบบพิเศษของ replace ทำให้พรอมต์เพี้ยนแบบมองไม่เห็น
+  return RAWSTORY_PROMPT.replace('★★ รูปแบบคำตอบ', () => `${context}\n\n★★ รูปแบบคำตอบ`);
 }
 
-function normalizeRawStory(p) {
+/** ★ export ไว้ให้เทสปักหมุดเรียกตรง (tests/clip-rawstory-v2.test.mjs) — โปรดักชันใช้ผ่าน extractRawStoryV2* เท่านั้น */
+export function normalizeRawStory(p) {
   p = _unwrapModelJson(p);
 
   // ★ 3 ส.ค. (ผู้ตรวจไขว้ W8): กรองก่อนตัดจำนวน — เดิม slice(0,10) มาก่อน ทำให้ประเด็นว่างกินโควตาจนของดีหล่น
   //   ★ W3: เพดานประเด็นย่อย 8000→4000 (กันเรคคอร์ดอ้วนจนด่าน dedup getAll ดึงหนัก)
-  const topics = Array.isArray(p?.topics) ? p.topics.map(topic => ({
-    title: truncateAtBoundary(topic?.title || topic?.topic, 200),
-    timeRange: truncateAtBoundary(topic?.timeRange || topic?.time, 40),
-    rawStory: truncateAtBoundary(topic?.rawStory || topic?.rawData, 4000),
-  })).filter(topic => topic.title && topic.rawStory).slice(0, 10).map((topic, i) => ({
-    no: i + 1,
-    ...topic,
-  })) : [];
+  const rawTopics = Array.isArray(p?.topics) ? p.topics : [];
+  const mapped = rawTopics.map(topic => {
+    const body = String(topic?.rawStory || topic?.rawData || topic?.text || topic?.content || '').trim();
+    return {
+      title: truncateAtBoundary(topic?.title || topic?.topic, 200),
+      timeRange: truncateAtBoundary(topic?.timeRange || topic?.time, 40),
+      rawStory: truncateAtBoundary(body, 4000),
+      truncated: body.length > 4000, // ★ F2: บอกตรงๆ ว่าประเด็นนี้ถูกตัด ไม่ใช่ให้เดาจากความยาว
+    };
+  });
+  const kept = mapped.filter(topic => topic.title && topic.rawStory);
+  const topics = kept.slice(0, 10).map((topic, i) => ({ no: i + 1, ...topic }));
+  // ★ ผู้ตรวจไขว้รอบ 2 (F5): ประเด็นที่รูปแบบไม่ครบจะหายเงียบจนแยกไม่ออกจาก "คลิปเรื่องเดียว" → ต้องเห็นใน log
+  const dropped = rawTopics.length - kept.length;
+  const over = kept.length - topics.length;
+  if (dropped > 0 || over > 0) {
+    console.warn(`[RawStoryV2] ⚠️ ประเด็นย่อยหายระหว่าง normalize: รูปแบบไม่ครบ ${dropped} · เกินเพดาน 10 อีก ${over} (โมเดลส่งมา ${rawTopics.length})`);
+  }
 
+  const story = String(p?.rawStory || '').trim();
   return {
-    rawStory: truncateAtBoundary(p?.rawStory, 12000),
+    rawStory: truncateAtBoundary(story, 12000),
     topics,
     note: truncateAtBoundary(p?.note, 300),
     promptRev: RAWSTORY_PROMPT_REV,
+    // ★ F2: ธงความจริงเรื่องการตัด — เดิมต้องเดาจากตัวอักษรสุดท้าย ซึ่งภาษาไทยเดาไม่ได้
+    truncated: story.length > 12000 || topics.some(t => t.truncated),
+    ...(dropped > 0 || over > 0 ? { topicsDropped: dropped + over } : {}),
   };
 }
 

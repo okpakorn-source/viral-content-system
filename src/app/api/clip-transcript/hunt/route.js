@@ -52,7 +52,8 @@ export async function POST(request) {
     // 1) เนื้อดิบ — ยิงภายในไปเครื่องถอดประเด็นเดิม (dedup/ด่าน QC/เก็บคลังถอดประเด็น ได้ครบตามเดิม)
     const insRes = await fetch(`${request.nextUrl.origin}/api/clip-transcript/insight`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, user }),
+      // ★ 3 ส.ค.: ปิดรอบ "เนื้อดิบ v2" สำหรับเส้นนี้ — hunt ต้องแบ่งงบ 800s ให้ค้น+คัดต่อ ถ้าปล่อยให้ดูคลิปรอบสองจะโดนตัดกลางทาง
+      body: JSON.stringify({ url, user, skipRawStoryV2: true }),
     });
     const insData = await insRes.json().catch(() => ({}));
     if (!insData.success) {

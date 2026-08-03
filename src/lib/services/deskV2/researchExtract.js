@@ -277,7 +277,9 @@ export async function extractClip(url, origin, opts = {}) {
   if (text.length < MIN_TEXT_FOR_SEND) {
     try {
       const insightTimeoutMs = Math.min(90_000, pollBudgetMs);
-      const ins = await _postJson(`${origin}/api/clip-transcript/insight`, { url: cleanUrl, user: 'research-desk' }, insightTimeoutMs);
+      // ★ 3 ส.ค.: skipRawStoryV2 — โต๊ะวิจัยใช้แค่ rawData/overview และตัดที่ 90s อยู่แล้ว
+      //   ถ้าปล่อยให้ระบบดูคลิปรอบสอง = จ่าย Gemini เพิ่มโดยไม่มีใครรออ่านผล
+      const ins = await _postJson(`${origin}/api/clip-transcript/insight`, { url: cleanUrl, user: 'research-desk', skipRawStoryV2: true }, insightTimeoutMs);
       if (ins.ok && ins.data && ins.data.success && ins.data.data) {
         const d = ins.data.data;
         const richerText = sanitizeText(d.rawData || d.overview || '', MAX_EXTRACT_CHARS);
