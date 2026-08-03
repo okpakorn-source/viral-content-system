@@ -352,6 +352,52 @@ export async function POST(request) {
       console.log(`[ClipInsight] ⏭️ ข้ามเนื้อดิบมีมิติ: คลิปใหญ่ ${Math.round(ctx.buffer.length / 1e6)}MB (กันแรมพุ่ง) — insight เดิมทำงานปกติ`);
     }
 
+    // ★ 3 ส.ค. 69 (เจ้าของสั่ง) — รอบ "เนื้อดิบ v2": ดูคลิปอีกรอบ → เล่าเป็นเนื้อความธรรมชาติ คำพูดกลืนในเนื้อ
+    //   🔴 สายใหม่แยก 100%: ไม่แตะ insight เดิม ไม่แตะรอบ enriched เดิม · ล้ม/แน่น/หมดเวลา = ข้ามเงียบ (ของเดิมเซฟไปแล้ว)
+    //   ใช้ buffer/URL ซ้ำจาก ctx (ไม่โหลดคลิปใหม่) · เปิดด้วย env CLIP_RAWSTORY_V2=1
+    const rawStoryV2Enabled = process.env.CLIP_RAWSTORY_V2 === '1';
+    const v2BudgetMs = ENRICH_MAXDUR_MS - (Date.now() - startedAt) - ENRICH_SAVE_MARGIN_MS;
+    // ★ ผู้ตรวจไขว้ W1: รอบ v2 = อัปคลิปขึ้น Gemini ใหม่ทั้งก้อน + ดูใหม่ทั้งคลิป (กินหลายนาที)
+    //   งบเหลือน้อยกว่านี้ = ยิงไปก็ถูกตัดกลางทาง จ่ายเงินฟรีและยึดสล็อตคิว → ข้ามไปเลยดีกว่า
+    const V2_MIN_BUDGET_MS = 300_000;
+    if (rawStoryV2Enabled && ctx.mode && !bufTooBig && v2BudgetMs > V2_MIN_BUDGET_MS) {
+      let v2Timer;
+      try {
+        const { extractRawStoryV2, extractRawStoryV2FromVideoBuffer } = await import('@/lib/services/clipRawStoryService');
+        const { buildIdentityFromInsight } = await import('@/lib/services/clipInsightService');
+        // โครงประเด็นจากรอบแรก (หัวข้อ+ช่วงเวลาเท่านั้น ไม่ส่งเนื้อความ — กันสำนวนรอบแรกไหลปน) + บัญชีชื่อที่ยืนยันแล้ว
+        const v2Hints = (insight?.subStories?.length ? insight.subStories : (insight?.topics || []))
+          .map(t => ({
+            topic: t?.topic || t?.title || '',
+            timeRange: t?.timeRange || (t?.timeStart ? `${t.timeStart}–${t.timeEnd || ''}` : ''),
+          }))
+          .filter(t => t.topic);
+        const v2Identity = buildIdentityFromInsight(insight, ctx.caption || null);
+        const rs = await Promise.race([
+          getClipVideoQueue().run(
+            () => (ctx.mode === 'buffer'
+              ? extractRawStoryV2FromVideoBuffer(ctx.buffer, ctx.mimeType, v2Hints, v2Identity)
+              : extractRawStoryV2({ url: ctx.url, topicHints: v2Hints, identity: v2Identity })),
+            { label: `rawstory-v2:${type}` }
+          ),
+          new Promise((_, rej) => { v2Timer = setTimeout(() => rej(new Error(`rawStoryV2 budget timeout ${Math.round(v2BudgetMs / 1000)}s`)), v2BudgetMs); }),
+        ]);
+        if (rs && (String(rs.rawStory || '').trim() || rs.topics?.length)) {
+          insight = { ...insight, rawStoryV2: rs };
+          store.update(caseId, (r) => ({ ...r, insight })).catch(() => {});
+          console.log(`[ClipInsight] ✅ เนื้อดิบ v2: ${rs.rawStory?.length || 0} ตัวอักษร · ประเด็นย่อย ${rs.topics?.length || 0} · rev=${rs.promptRev || '-'}`);
+        } else {
+          console.warn('[ClipInsight] เนื้อดิบ v2 คืนค่าว่าง (ข้าม ใช้ผลเดิม)');
+        }
+      } catch (e) {
+        console.warn('[ClipInsight] รอบเนื้อดิบ v2 ล้ม/หมดเวลา (ข้าม ใช้ผลเดิม):', e.message?.slice(0, 70));
+      } finally { clearTimeout(v2Timer); }
+    } else if (rawStoryV2Enabled && bufTooBig) {
+      console.log(`[ClipInsight] ⏭️ ข้ามเนื้อดิบ v2: คลิปใหญ่ ${Math.round(ctx.buffer.length / 1e6)}MB (กันแรมพุ่ง)`);
+    } else if (rawStoryV2Enabled && ctx.mode && v2BudgetMs <= V2_MIN_BUDGET_MS) {
+      console.log(`[ClipInsight] ⏭️ ข้ามเนื้อดิบ v2: งบเวลาเหลือ ${Math.round(v2BudgetMs / 1000)}s ไม่พอดูคลิปรอบสอง (ต้องการ ${V2_MIN_BUDGET_MS / 1000}s)`);
+    }
+
     // retention + สำเนาถาวร (fire-and-forget) — ★ 8 ก.ค.: retention 400 เคส + NDJSON ถาวร (ใช้ insight สุดท้ายที่มี enriched)
     (async () => {
       try {

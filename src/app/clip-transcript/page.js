@@ -260,10 +260,21 @@ export default function ClipTranscriptPage() {
     const parts = [];
     if (ins.headline) parts.push(`📌 ${ins.headline}`);
     if (ins.overview) parts.push(ins.overview);
+    // ★ 3 ส.ค.: เนื้อดิบ v2 (สายใหม่แยก — ก้อนธรรมชาติป้อนระบบข่าว)
+    //   วางก่อนสาขา multiTopic ที่ return ทันที (ผู้ตรวจไขว้ W6) — ไม่งั้นคลิปยาวจะคัดลอกไม่ได้ของใหม่
+    const rs2 = ins.rawStoryV2;
+    const rs2Parts = [];
+    if (rs2) {
+      if (rs2.rawStory) rs2Parts.push('— เนื้อดิบ v2 (พร้อมป้อนระบบข่าว) —\n' + rs2.rawStory);
+      if (rs2.topics?.length) {
+        rs2.topics.forEach((t, i) => rs2Parts.push(`— เนื้อดิบ v2 ประเด็น ${t.no || i + 1}: ${t.title || ''}${t.timeRange ? ` (${t.timeRange})` : ''} —\n${t.rawStory}`));
+      }
+      if (rs2.note) rs2Parts.push('— หมายเหตุเนื้อดิบ v2 —\n' + rs2.note);
+    }
     if (ins.multiTopic && ins.topics?.length) {
       parts.push(`— แยก ${ins.topics.length} ประเด็น —`);
       ins.topics.forEach((t) => parts.push(topicText(t)));
-      return parts.join('\n\n');
+      return [...parts, ...rs2Parts].join('\n\n');
     }
     if (ins.keyPoints?.length) parts.push('— ประเด็นสำคัญ —\n' + ins.keyPoints.map((k, i) => `${i + 1}. ${k.point}${k.detail ? ' — ' + k.detail : ''}`).join('\n'));
     if (ins.quotes?.length) parts.push('— คำพูดสำคัญ —\n' + ins.quotes.map(q => `“${q}”`).join('\n'));
@@ -282,7 +293,7 @@ export default function ClipTranscriptPage() {
       if (tq.punchyQuotes?.length) parts.push('— ประโยคเด็ด —\n' + tq.punchyQuotes.map(q => `“${q.quote}”${q.speaker ? ' — ' + q.speaker : ''}${q.why ? ' (' + q.why + ')' : ''}`).join('\n'));
       if (tq.transcript) parts.push('— บทพูดในคลิป (ไม่รวมเพลง) —\n' + tq.transcript);
     }
-    return parts.join('\n\n');
+    return [...parts, ...rs2Parts].join('\n\n');
   };
 
   // ★ 8 ก.ค. rev.2: จัดหมวดผล — dna(คนละคน แยกระดับ ใกล้/กลาง/กว้าง) vs same(คนเดิม)
@@ -732,7 +743,43 @@ export default function ClipTranscriptPage() {
                 )}
               </div>
             )}
+
             </>)}
+
+            {/* ★ 3 ส.ค. (เจ้าของสั่ง): เนื้อดิบ v2 — ก้อนธรรมชาติป้อนระบบข่าว
+                🔴 วางนอกเทอร์นารี multiTopic (ผู้ตรวจไขว้ W6) — คลิปยาวก็ต้องเห็นการ์ดนี้ · ไม่มี = ไม่โชว์ ของเดิมอยู่ครบด้านบน */}
+            {insight.rawStoryV2 && (
+              <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px dashed rgba(16,185,129,0.35)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: '#34d399' }}>🆕 เนื้อดิบ v2 — พร้อมป้อนระบบข่าว</div>
+                  {insight.rawStoryV2.rawStory && <button onClick={() => copy(insight.rawStoryV2.rawStory, 'rsv2')} style={{ padding: '3px 10px', borderRadius: 7, border: '1px solid rgba(16,185,129,0.4)', background: 'transparent', color: '#34d399', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>{copied === 'rsv2' ? '✅' : '📋 คัดลอกก้อนรวม'}</button>}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted,#888)', marginBottom: 12 }}>เล่าธรรมชาติทั้งคลิป คำพูดกลืนในเนื้อ · AI ถอด—โปรดตรวจชื่อ/คำเฉพาะ{insight.rawStoryV2.note ? ` · ${insight.rawStoryV2.note}` : ''}</div>
+                {insight.rawStoryV2.rawStory && (
+                  <div style={{ marginBottom: 14, fontSize: 13.5, lineHeight: 1.85, whiteSpace: 'pre-wrap', background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.18)', borderRadius: 10, padding: 14, maxHeight: 400, overflowY: 'auto' }}>{insight.rawStoryV2.rawStory}</div>
+                )}
+                {insight.rawStoryV2.topics?.length > 0 && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: '#fbbf24', marginBottom: 9 }}>🧩 เนื้อดิบ v2 · แยกประเด็น ({insight.rawStoryV2.topics.length}) — แต่ละอันอ่านจบเข้าใจเอง พร้อมเขียนข่าวเดี่ยว</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      {insight.rawStoryV2.topics.map((t, i) => (
+                        <div key={i} style={{ border: '1px solid rgba(16,185,129,0.3)', borderRadius: 10, padding: 12, background: 'rgba(16,185,129,0.04)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 7 }}>
+                            <div style={{ fontSize: 13.5, fontWeight: 800 }}>
+                              <span style={{ color: '#34d399' }}>ประเด็น {t.no || i + 1}:</span> {t.title}
+                              {t.timeRange && <span style={{ fontSize: 11, color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600, marginLeft: 6 }}>⏱️ {t.timeRange}</span>}
+                            </div>
+                            <button onClick={() => copy(`${t.title}${t.timeRange ? ` (${t.timeRange})` : ''}\n\n${t.rawStory}`, 'rsv2-t-' + i)}
+                              style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid rgba(16,185,129,0.4)', background: 'transparent', color: '#34d399', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>{copied === 'rsv2-t-' + i ? '✅' : '📋 คัดลอก'}</button>
+                          </div>
+                          <div style={{ fontSize: 13, lineHeight: 1.8, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 11 }}>{t.rawStory}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -901,6 +948,35 @@ export default function ClipTranscriptPage() {
                               <summary style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted,#888)', cursor: 'pointer' }}>💬 บทพูดในคลิป (ไม่รวมเพลง) — กดกาง{ins.transcriptQuotes.hasSong ? ' · มีเพลง (ข้ามเนื้อเพลง)' : ''}</summary>
                               <div style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 10, maxHeight: 260, overflowY: 'auto', marginTop: 6 }}>{ins.transcriptQuotes.transcript}</div>
                             </details>
+                          )}
+                        </div>
+                      )}
+
+                      {/* ★ 3 ส.ค.: คลังโชว์ "เนื้อดิบ v2" เท่าผลสด (ไม่มี = ไม่โชว์) */}
+                      {ins.rawStoryV2 && (
+                        <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px dashed rgba(16,185,129,0.35)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                            <div style={{ fontSize: 12.5, fontWeight: 800, color: '#34d399' }}>🆕 เนื้อดิบ v2 — พร้อมป้อนระบบข่าว{ins.rawStoryV2.note ? ` · ${ins.rawStoryV2.note}` : ''}</div>
+                            {ins.rawStoryV2.rawStory && <button onClick={() => copy(ins.rawStoryV2.rawStory, 'ic-rsv2-' + c.id)} style={{ padding: '3px 9px', borderRadius: 7, border: '1px solid rgba(16,185,129,0.4)', background: 'transparent', color: '#34d399', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>{copied === 'ic-rsv2-' + c.id ? '✅' : '📋 คัดลอกก้อนรวม'}</button>}
+                          </div>
+                          {ins.rawStoryV2.rawStory && (
+                            <div style={{ marginBottom: 10, fontSize: 12.5, lineHeight: 1.8, whiteSpace: 'pre-wrap', background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.18)', borderRadius: 8, padding: 11, maxHeight: 320, overflowY: 'auto' }}>{ins.rawStoryV2.rawStory}</div>
+                          )}
+                          {ins.rawStoryV2.topics?.length > 0 && (
+                            <div style={{ marginBottom: 10 }}>
+                              <div style={{ fontSize: 12, fontWeight: 800, color: '#fbbf24', marginBottom: 7 }}>🧩 เนื้อดิบ v2 · แยกประเด็น ({ins.rawStoryV2.topics.length})</div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                {ins.rawStoryV2.topics.map((t, i) => (
+                                  <div key={i} style={{ border: '1px solid rgba(16,185,129,0.3)', borderRadius: 9, padding: 11, background: 'rgba(16,185,129,0.04)' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+                                      <div style={{ fontSize: 13, fontWeight: 800 }}><span style={{ color: '#34d399' }}>ประเด็น {t.no || i + 1}:</span> {t.title}{t.timeRange && <span style={{ fontSize: 10.5, color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600, marginLeft: 6 }}>⏱️ {t.timeRange}</span>}</div>
+                                      <button onClick={() => copy(`${t.title}${t.timeRange ? ` (${t.timeRange})` : ''}\n\n${t.rawStory}`, 'ic-rsv2-t-' + c.id + '-' + i)} style={{ padding: '3px 9px', borderRadius: 7, border: '1px solid rgba(16,185,129,0.4)', background: 'transparent', color: '#34d399', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>{copied === 'ic-rsv2-t-' + c.id + '-' + i ? '✅' : '📋'}</button>
+                                    </div>
+                                    <div style={{ fontSize: 12.5, lineHeight: 1.75, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 10 }}>{t.rawStory}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
                           )}
                         </div>
                       )}
