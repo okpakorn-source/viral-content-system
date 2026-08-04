@@ -1725,7 +1725,9 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
         model: MODEL_FAST_CHEAP,
         prompt: blueprintPrompt,
         temperature: 0.3,
-        maxTokens: 1200,
+        // ★ 2 ส.ค. 69: 1200→8000 — ค่าเดิมจากยุคโมเดลเล็ก พอโล๊ะเป็น luna (reasoning คิดกินโควตา) เพดานไม่พอ
+        //   → ตอบว่างเปล่า ล้มเงียบ ~5/9 งาน (Blueprint: ❌ ใน log) — โรคเดียวกับที่แก้สำเร็จใน breakdown/picker/สารบัญ
+        maxTokens: 8000,
       });
 
       if (!blueprintResult?.core_emotion) {
