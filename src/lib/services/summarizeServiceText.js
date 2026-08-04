@@ -58,6 +58,24 @@ function postProcessVersions(versions, sourceText, newsTitle, lenCfg = null) {
       .replace(/\s+(แต่|และ|หรือ|เพราะ|ซึ่ง|โดยที่|โดย|จึง|ทั้งที่|เพื่อที่|เพื่อ|แล้วก็|ก่อนที่)\s*(\n\n)/g, '$2')
       .replace(/\s+(แต่|และ|หรือ|เพราะ|ซึ่ง|โดยที่|โดย|จึง|ทั้งที่|เพื่อที่|เพื่อ|แล้วก็|ก่อนที่)\s*$/g, '');
 
+    // 2.7 ★ เพดานย่อหน้าเชิงโค้ด (4 ส.ค. 69 — เทสจริง: ตัวเขียนแยกประโยคปิดเป็นย่อหน้าเกินกติกา)
+    //     เกินเพดาน + ย่อหน้าท้ายสั้น (≤160 ตัว = ประโยคปิดที่ถูกแยก) → ยุบกลับเข้าย่อหน้าก่อนหน้า
+    //     ย่อหน้าท้ายยาว = เนื้อจริง ไม่ยุบ (กันทำลายโครงข่าวยาว) — ปิดได้: PARA_CAP_ENFORCE=0
+    const _paraCap = parseInt(String(lenCfg?.paragraphs || '').match(/(\d+)\s*$/)?.[1] || '0', 10);
+    if (process.env.PARA_CAP_ENFORCE !== '0' && _paraCap > 0) {
+      const _paras = content.split(/\n\n+/).filter(p => p.trim());
+      let _merged = 0;
+      while (_paras.length > _paraCap && _paras[_paras.length - 1].trim().length <= 160) {
+        const _last = _paras.pop();
+        _paras[_paras.length - 1] = _paras[_paras.length - 1].trimEnd() + ' ' + _last.trim();
+        _merged++;
+      }
+      if (_merged > 0) {
+        content = _paras.join('\n\n');
+        console.log(`[Quality] 📐 V${idx + 1} ยุบย่อหน้าปิดที่แตกเกินกติกา ${_merged} ครั้ง (เหลือ ${_paras.length}/${_paraCap})`);
+      }
+    }
+
     // 3. Spell Check — ชื่อเฉพาะต้องตรงต้นฉบับ
     content = fixProperNouns(content, sourceNames);
 

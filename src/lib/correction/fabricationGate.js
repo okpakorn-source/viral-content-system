@@ -10,7 +10,8 @@
  *   2. โค้ดทวนคำ: คำเนื้อหาของประโยคนั้นมีในต้นฉบับ ≥60% = ยกฟ้อง (ฟรี ไม่ใช้ AI)
  *   3. luna ทวนซ้ำเฉพาะที่รอด (รวมกรณีเขียนคนละสำนวนความหมายเดียวกัน)
  *   4. ตัวเขียนหลัก (callClaude) ตัดเฉพาะที่ยืนยันแล้ว โดยเห็นต้นฉบับประกอบ
- *      แล้วผ่านเกราะแก่นข่าว (guardCoreNews) — แก้แล้วแก่นเสีย = ย้อนกลับเนื้อเดิม
+ *      แล้วผ่านเกราะเฉพาะด่าน — เลขจริง (มีทั้งในบทความและต้นฉบับ) ต้องอยู่ครบ + หดไม่เกิน 45%
+ *      ไม่ผ่าน = ย้อนกลับเนื้อเดิม (เลขที่นักเขียนแต่งเพิ่มเอง อนุญาตให้หายไปกับการผ่า)
  *
  * กติกาความปลอดภัย: ล้มขั้นไหน = ปล่อยเนื้อเดิมผ่าน (fail-open) ห้ามทำท่อพัง
  * ปิดได้: FAB_GATE=0
@@ -19,7 +20,6 @@
 import { callAI } from '@/lib/ai/openai';
 import { callClaude, isClaudeAvailable } from '@/lib/ai/claudeClient';
 import { MODEL_FAST_CHEAP } from '@/lib/ai/modelConfig';
-import { guardCoreNews } from './safeCorrectionService';
 
 // system prompt สั้น — กัน callClaude/callAI ยัดกฎเขียนข่าวก้อนใหญ่ที่ไม่เกี่ยวกับงานตรวจ (บทเรียน Opus NOTE-6)
 const GATE_CHECK_SYS = 'คุณคือผู้ตรวจข้อเท็จจริงของกองบรรณาธิการ เทียบบทความกับต้นฉบับอย่างเข้มงวด ตอบเป็น JSON เท่านั้น';
@@ -57,8 +57,10 @@ export async function fabricationGate(content, newsBody) {
       temperature: 0.1,
       maxTokens: 3000,
       systemPrompt: GATE_CHECK_SYS,
+      // ★ ถ้อยคำชุดนี้ = เวอร์ชันที่พิสูจน์ในแซนด์บ็อกซ์เป๊ะ (ยืนยัน 1-3 จุด/เคส) — ห้ามเติม "ฉาก" เข้ารายการจับ
+      //   (เทสจริง 4 ส.ค.: เติมคำว่า ฉาก แล้วด่านไล่จับสำนวนแต่งถึง 10 จุด/เวอร์ชัน จนการผ่าใหญ่เกินเกราะ)
       prompt:
-        'เทียบบทความกับต้นฉบับ ชี้ทุกข้อความที่เป็น "ของเกิน" — ข้อเท็จจริง/อาชีพ/แรงจูงใจ/ตัวเลข/เหตุการณ์/ฉาก (เวลา สถานที่ การกระทำ) ที่ต้นฉบับไม่มี\n' +
+        'เทียบบทความกับต้นฉบับ ชี้ทุกข้อความที่เป็น "ของเกิน" — ข้อเท็จจริง/อาชีพ/แรงจูงใจ/ตัวเลข/เหตุการณ์ที่ต้นฉบับไม่มี\n' +
         'สำนวนแต่ง/ภาพเปรียบ/การเรียบเรียงใหม่จากข้อเท็จจริงเดิม ไม่นับเป็นของเกิน\n' +
         `=== ต้นฉบับ ===\n${source.slice(0, 6000)}\n=== บทความ ===\n${content}\n=== จบ ===\n` +
         'ตอบ JSON: {"fabrications":["ข้อความของเกินที่พบ", ...]} — ไม่พบให้ตอบ {"fabrications":[]}',
@@ -114,11 +116,24 @@ export async function fabricationGate(content, newsBody) {
       return { content, debug };
     }
 
-    // เกราะแก่นข่าว: การผ่าต้องไม่ทำเลขเด่นหาย/เนื้อหดเกินเพดาน — ไม่ผ่าน = ย้อนเนื้อเดิม
-    const guard = guardCoreNews(content, fixedContent);
-    if (!guard.ok) {
-      debug.fixSkipped = `core-guard:${guard.reason}`;
-      console.warn(`  [FabGate] ⛔ เกราะแก่นข่าวหลังผ่า: ${guard.reason} — ย้อนเนื้อเดิม`);
+    // เกราะเฉพาะด่าน (ไม่ใช้ guardCoreNews — ตัวนั้นเทียบกับฉบับนักเขียนซึ่งมีของเกินปนอยู่:
+    //   เลขที่นักเขียนแต่งเองจะถูกบังคับเก็บ และเพดานหด 25% ตีกลับการผ่าที่ชอบธรรมบนข่าวสั้น)
+    //   (ก) เลขที่มีทั้งในบทความและในต้นฉบับจริง = แก่นข่าว ต้องอยู่ครบหลังผ่า — เลขที่แต่งเพิ่มลบได้
+    const numsOf = (s) => new Set((String(s).match(/\d[\d,\.]*/g) || []).map((n) => n.replace(/[,\.]+$/, '').replace(/,/g, '')));
+    const srcNums = numsOf(source);
+    const coreNums = [...numsOf(content)].filter((n) => srcNums.has(n));
+    const fixedNums = numsOf(fixedContent);
+    const missingNums = coreNums.filter((n) => !fixedNums.has(n));
+    if (missingNums.length > 0) {
+      debug.fixSkipped = `เลขจริงหาย:${missingNums.join(',')}`;
+      console.warn(`  [FabGate] ⛔ ผ่าแล้วเลขจริงหาย (${missingNums.join(', ')}) — ย้อนเนื้อเดิม`);
+      return { content, debug };
+    }
+    //   (ข) เพดานหด 45% — การผ่าของเกินหดเนื้อได้มากกว่างานขัดเกลา แต่หดเกินครึ่ง = ด่านเพี้ยน
+    if (fixedContent.length < String(content).length * 0.55) {
+      const shrink = Math.round((1 - fixedContent.length / String(content).length) * 100);
+      debug.fixSkipped = `เนื้อหด ${shrink}% (เพดานด่าน 45%)`;
+      console.warn(`  [FabGate] ⛔ ผ่าแล้ว${debug.fixSkipped} — ย้อนเนื้อเดิม`);
       return { content, debug };
     }
     debug.fixed = true;
