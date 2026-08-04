@@ -15,6 +15,7 @@ import { safeCorrect, guardCoreNews } from './safeCorrectionService';
 import { checkFactPreservation } from './factPreservationCheck';
 import { editorialPolish } from './editorialPolishService';
 import { semanticSanityCheck } from './semanticSanityCheck';
+import { fabricationGate } from './fabricationGate'; // ★ 4 ส.ค. 69 ด่านจับของเกิน — ผลทดลองศึก 6 นักเขียน (FAB_GATE=0 ปิดได้)
 import { bbStep } from '@/lib/trace/blackbox'; // ★ 1 ส.ค. 69 กล่องดำ: เก็บ before/after ทุกด่าน — ชี้ตัวการได้ไม่ต้องเดา
 // ★ 12 มิ.ย.: FlagFixer + ViralPolish ถูกปลดออกตามคำสั่งทีม ("AI เพี้ยน — ย้อน workflow กลับแบบ 11 มิ.ย. หัวค่ำ")
 //   ไฟล์ flagFixerService.js / viralPolishService.js ยังอยู่ เผื่ออนาคต — ห้ามต่อกลับโดยไม่ผ่านทีม
@@ -63,6 +64,21 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
 
       console.log(`\n[Pipeline] ${vLabel}: Starting...`);
 
+      // === ★ Layer 1.8: ด่านจับของเกิน (4 ส.ค. 69) ===
+      //   ตรวจก่อนทุกด่าน — ด่านถัดไป (L2..L5) จะได้ทำงานบนเนื้อที่ความจริงตรงต้นฉบับแล้ว
+      //   ล้ม/ปิดสวิตช์ = ปล่อยเนื้อเดิมผ่าน (fail-open ภายใน fabricationGate เอง)
+      let _fabDebug = null;
+      try {
+        const _gate = await fabricationGate(version.content, newsData?.newsBody);
+        bbStep(_bb, 'L1.8-ด่านของเกิน', version.content, _gate.content,
+          { sus: _gate.debug.sus, confirmed: _gate.debug.confirmed, fixed: _gate.debug.fixed, skipped: _gate.debug.skipped });
+        if (_gate.debug.fixed) version = { ...version, content: _gate.content };
+        _fabDebug = _gate.debug;
+      } catch (fabErr) {
+        console.warn(`  L1.8 FabGate: SKIPPED (${fabErr.message})`);
+        _fabDebug = { error: fabErr.message };
+      }
+
       // === Layer 2: Audit ===
       const audit = await auditOutput(version);
       console.log(`  L2 Audit: score=${audit.auditScore} issues=${audit.issues.length}`);
@@ -102,6 +118,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
           _blackbox: _bb,
           _correctionApplied: changes.length > 0 || cleanSemanticDebug.fixed,
           _correctionDebug: {
+            fabGate: _fabDebug,
             coreGuard: _cleanGuard.ok ? 'passed' : `reverted:${_cleanGuard.reason}`,
             auditScore: audit.auditScore,
             issuesFound: 0,
@@ -227,6 +244,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
         _blackbox: _bb,
         _correctionApplied: true,
         _correctionDebug: {
+          fabGate: _fabDebug,
           coreGuard: _coreGuard.ok ? 'passed' : `reverted:${_coreGuard.reason}`,
           auditScore: audit.auditScore,
           issuesFound: audit.issues.length,

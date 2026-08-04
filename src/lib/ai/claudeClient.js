@@ -19,7 +19,10 @@ let claudeClient = null;
 //   (สลับกลับได้: CLAUDE_WRITE_MODEL=claude-sonnet-4-6)
 // ★ 1 ส.ค. 69 (เจ้าของสั่ง "เอา claude opus5 มาเขียนดีที่สุด"): default → claude-opus-5
 //   ราคาเท่า 4.8 เป๊ะ ($5/$25 ต่อล้านโทเคน) · ถอยกลับ: CLAUDE_WRITE_MODEL=claude-opus-4-8
-const DEFAULT_WRITE_MODEL = process.env.CLAUDE_WRITE_MODEL || 'claude-opus-5';
+// ★ 4 ส.ค. 69 (เจ้าของสั่ง "เลือก opus 4.8 ประกอบเลย" หลังศึกตาบอด 6 นักเขียน × 5 ข่าวจริง):
+//   opus-4-8 อันดับเฉลี่ยดีสุด (2.60) สำนวน-ความแม่นสมดุลกว่า opus-5 · ราคาเท่ากัน
+//   ถอยกลับ: CLAUDE_WRITE_MODEL=claude-opus-5
+const DEFAULT_WRITE_MODEL = process.env.CLAUDE_WRITE_MODEL || 'claude-opus-4-8';
 
 // Opus 4.7+ / Fable / Sonnet 5 ไม่รับ sampling params (temperature/top_p/top_k → 400)
 // ★ 16 ก.ค. 69 (B6): + sonnet-5/opus-5 — พิสูจน์ด้วย API จริง: "`temperature` is deprecated for this model"
