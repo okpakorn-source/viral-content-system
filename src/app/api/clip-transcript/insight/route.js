@@ -1,17 +1,85 @@
 export const maxDuration = 800; // ★ 25 มิ.ย.: 300→800 — Gemini retry ได้ 4×180s=720s เกิน 300 → Vercel ฆ่าฟังก์ชันกลางคัน คืน error page (text) ทำหน้าเว็บ parse JSON พัง "An error o..." (แพลนรองรับ 800 เท่า queue worker)
 import { NextResponse } from 'next/server';
-import { extractClipInsight, extractInsightFromVideoBuffer, extractMultiTopicInsight, extractMultiTopicFromVideoBuffer } from '@/lib/services/clipInsightService';
+import { extractClipInsight, extractInsightFromVideoBuffer, extractMultiTopicInsight, extractMultiTopicFromVideoBuffer, currentInsightPromptRev } from '@/lib/services/clipInsightService';
 import { createStore } from '@/lib/persistStore';
 import { getClipVideoQueue } from '@/lib/services/clipQueue';
 import { randomUUID } from 'crypto';
 
+// ★ 4 ส.ค. 69 — ชุด "คุณภาพหลังคัดเลือก" 3 ประตู ปิดเป็นค่าเริ่มต้นทั้งหมด:
+//   CLIP_SOURCE_META=1 → ดึง metadata ต้นทาง (เพจ/หัวข้อ/แคปชั่น) แบบ best-effort แล้วส่งเข้ารอบแรก+รอบ v2
+//   CLIP_PROMPT_0804=1 → ป้ายรุ่นพรอมต์ชุดใหม่ (บล็อกพรอมต์จริงอยู่ฝั่ง service)
+//   CLIP_QC_GATES=1    → ด่านตรวจกลไก (ธงคุณภาพ) + ลองรอบ v2 ใหม่ 1 ครั้ง + สำรองโหลด TikTok ด้วย yt-dlp
+//   🔴 ประตูไม่เปิด = เส้นทางเดิมเป๊ะ 100% (ไม่โหลดโมดูลใหม่ · ไม่ยิงเน็ตเพิ่ม · ไม่เขียนคลังเพิ่ม)
+//   อ่าน env ตอนเรียก (ไม่แคชตอน import) — เทส/สคริปต์สลับค่าได้ระหว่างรัน
+const SOURCE_META_ON = () => process.env.CLIP_SOURCE_META === '1';
+const PROMPT_0804_ON = () => process.env.CLIP_PROMPT_0804 === '1';
+const QC_GATES_ON = () => process.env.CLIP_QC_GATES === '1';
+
+// ★ 4 ส.ค.: โมดูลใหม่ 2 ตัวโหลดแบบ lazy "ในบล็อกที่ประตูเปิดเท่านั้น" (สไตล์เดียวกับ clipRawStoryService ในไฟล์นี้)
+//   เหตุผล: ประตูปิด = ไม่แตะโมดูลใหม่เลย → เส้นทางเดิม/เทสปักหมุดเดิมไม่มีทางกระทบ แม้โมดูลยังไม่ถูกวาง
+//   '@/lib/services/clipSourceMetaService' → getClipSourceMeta(url, opts)
+//   '@/lib/services/clipQualityLint'       → lintLanguage / lintQuotePresence / lintTopicCoverage
+
+// ดึง metadata ต้นทาง — best-effort ล้วน: ล้ม/ไม่มีโมดูล/ไม่มีข้อมูล = คืน null แล้วเดินต่อ (ห้ามทำให้ถอดคลิปล้ม)
+async function _safeSourceMeta(url, opts) {
+  try {
+    const { getClipSourceMeta } = await import('@/lib/services/clipSourceMetaService');
+    const meta = await getClipSourceMeta(url, opts);
+    if (meta && (meta.uploader || meta.title || meta.caption)) {
+      console.log(`[ClipInsight] 📎 metadata ต้นทาง (${meta.source || '-'}): ${String(meta.uploader || '-').slice(0, 40)}`);
+      return meta;
+    }
+    return null;
+  } catch (e) {
+    console.warn('[ClipInsight] ดึง metadata ต้นทางไม่ได้ (เดินต่อแบบไม่มี meta):', String(e?.message || e).slice(0, 70));
+    return null;
+  }
+}
+
+// รวมเนื้อรอบ v2 (ก้อนรวม + ประเด็นย่อย) เป็นข้อความเดียวสำหรับด่านตรวจ — ไม่แตะของที่เก็บในคลัง
+function _v2Text(rs) {
+  return [String(rs?.rawStory || ''), ...((rs?.topics || []).map(t => String(t?.rawStory || t?.text || '')))]
+    .filter(s => s.trim()).join('\n');
+}
+
+// ★ ผู้ตรวจไขว้ 4 ส.ค. (#2): สาเหตุ v2 ล้มต้องอ่านรู้เรื่อง — service ส่งรหัสสั้นมา (message) + ข้อความจริง (cause)
+//   แปลงรหัสเป็นภาษาคน + พ่วงรายละเอียดจริงต่อท้าย (ไม่ทิ้งข้อมูลวินิจฉัย) — ผู้เรียกตัด 200 ตัวเองตอนเก็บ
+const _V2_ERR_TH = {
+  JSON_PARSE: 'คำตอบจากสมองอ่านไม่ออก',
+  GEMINI_EMPTY: 'สมองไม่ส่งเนื้อกลับมา',
+  UPLOAD_FAILED: 'อัปโหลดวิดีโอไม่สำเร็จ',
+  TIMEOUT: 'หมดเวลาระหว่างดูคลิป',
+  AUTH_FAILED: 'กุญแจระบบมีปัญหา',
+};
+function _v2ErrText(e) {
+  const code = String(e?.message || e || '').trim();
+  // Object.hasOwn — กันคีย์สืบทอด (เช่น message='constructor') ให้ค่าขยะ (ผู้ตรวจ N1)
+  const human = Object.hasOwn(_V2_ERR_TH, code) ? `${_V2_ERR_TH[code]} (${code})` : code;
+  const cause = e?.cause?.message ? ` — ${String(e.cause.message).slice(0, 100)}` : '';
+  return human + cause;
+}
+
+// ด่านตรวจ "มีคำพูดจริงไหม" — ฟังก์ชันบริสุทธิ์ฝั่ง lint แต่ห่อกันล้มไว้ (ล้ม = คืน null แล้วข้าม)
+async function _safeLintQuote(insight, storyText) {
+  try {
+    const { lintQuotePresence } = await import('@/lib/services/clipQualityLint');
+    return lintQuotePresence(insight, storyText);
+  } catch (e) {
+    console.warn('[ClipInsight] ด่านตรวจคำพูดล้ม (ข้าม):', String(e?.message || e).slice(0, 70));
+    return null;
+  }
+}
+
 // โหลดไฟล์วิดีโอ TikTok (tikwm) — ใช้บนคลาวด์ได้
 // ★ 22 ก.ค. 69: ใส่ timeout ทั้ง 2 จังหวะ — วันที่ tikwm ค้าง (เจอจริง: แขวนเกิน 7 นาที) งานเคยค้างจนโดนตัด 16 นาที/รอบแล้ววนใหม่
 //   fail เร็ว → เข้าคิว retry ปกติ (ทุก ~3 นาที) แทนการแขวนคิวยาว
-async function downloadTiktokBuffer(url) {
+//   ★ 4 ส.ค. 69: รับ sink (optional) — คืนข้อมูลโพสต์ที่ tikwm ส่งมาพร้อมลิงก์วิดีโออยู่แล้ว (ผู้โพสต์/แคปชั่น)
+//     ให้ผู้เรียกเอาไปทำ metadata ต้นทางได้โดยไม่ต้องยิง tikwm ซ้ำ · sink เป็นอ็อบเจ็กต์ชั่วคราวของผู้เรียก ไม่ถูกเก็บลงคลัง
+async function downloadTiktokBuffer(url, sink = null) {
   const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`, { signal: AbortSignal.timeout(30_000) });
   const data = await res.json();
   const playUrl = data?.data?.hdplay || data?.data?.play;
+  if (sink) sink.info = data?.data || null;
   if (!playUrl) throw new Error('tikwm: ไม่พบลิงก์วิดีโอ');
   const vres = await fetch(playUrl, { signal: AbortSignal.timeout(120_000) });
   const buf = Buffer.from(await vres.arrayBuffer());
@@ -44,7 +112,35 @@ async function downloadMetaBuffer(url, fmt) {
     const buf = await readFile(out);
     if (buf.length < 10000) throw new Error('วิดีโอเล็กเกินไป');
     return buf;
+  } catch (e) {
+    // ★ 4 ส.ค. 69: IG โดนกั้นโหลดแบบไม่ล็อกอิน — yt-dlp คืน "empty media response" ซึ่งอ่านแล้วไม่รู้ว่าต้องทำอะไร
+    //   เปลี่ยนเป็นข้อความตรงความจริง + ทางแก้จริง (เจ้าของต้องวางไฟล์กุญแจเอง — โค้ดฝั่งอ่านคุกกี้รองรับอยู่แล้วข้างบน)
+    const raw = `${e?.message || ''} ${e?.stderr || ''}`;
+    if (/empty media response/i.test(raw) && /instagram\.com/i.test(String(url))) {
+      const err = new Error('Instagram ต้องมีไฟล์กุญแจ bin/cookies.txt (แจ้งเจ้าของวางไฟล์) จึงจะโหลดได้');
+      err.code = 'IG_COOKIES_REQUIRED';
+      throw err;
+    }
+    throw e;
   } finally { await unlink(out).catch(() => {}); }
+}
+
+// ★ 4 ส.ค. 69 (ประตู CLIP_QC_GATES) — TikTok: tikwm ล้ม/ค้าง (เจอจริงเป็นช่วงๆ) → บนเครื่องทีมลองโหลดด้วย yt-dlp
+//   ใช้ helper โหลดวิดีโอเดิม (downloadMetaBuffer) ตรงๆ ไม่เพิ่มเส้นทางโหลดใหม่ · ประตูปิด/ไม่ใช่ win32 = โยน error เดิมออกไปเหมือนเดิมเป๊ะ
+async function _downloadTiktokWithFallback(url, sink = null) {
+  try {
+    return await downloadTiktokBuffer(url, sink);
+  } catch (e) {
+    if (!QC_GATES_ON() || process.platform !== 'win32') throw e;
+    console.warn(`[ClipInsight] 🔄 tikwm ล้ม (${String(e.message).slice(0, 60)}) → ลองโหลดด้วย yt-dlp (เครื่องทีม)`);
+    try {
+      return await downloadMetaBuffer(url);
+    } catch (e2) {
+      const err = new Error(`${e.message} · yt-dlp สำรองไม่ผ่าน: ${String(e2.message).slice(0, 80)}`);
+      err.code = e.code || e2.code || 'TIKTOK_DOWNLOAD_FAILED';
+      throw err;
+    }
+  }
 }
 
 // ★ 24 มิ.ย.: หาความยาวคลิป (วินาที) ด้วย yt-dlp — ใช้ตัดสินใจ "คลิปยาว→แยกทุกประเด็น"
@@ -162,6 +258,16 @@ async function buildInsight({ url, type }, ctx = null) {
   //   เหตุผล: Gemini ดูคลิป (เห็นภาพ+ตัวหนังสือบนจอ+ฟังเสียง) ถอดข้อมูลดิบมีประสิทธิภาพกว่ามาก
   //   ถ้า Gemini แน่น → โยน error ให้ผู้ใช้ "รอ/กดใหม่" ดีกว่าได้ผลด้อยจาก transcript ล้วน
   //   (ฟังก์ชัน transcript ยังอยู่ในโค้ด เผื่อเปิดใช้ภายหลัง — แค่ไม่เรียกในเส้นทาง insight)
+  // ★ 4 ส.ค. 69 (ประตู CLIP_SOURCE_META) — ดึง "หลักฐานระดับแคปชั่น/เพจ" ก่อนเรียกสมองดูคลิป
+  //   YouTube/FB/IG: ถามตรงจากตัวดึง meta · TikTok: รอ tikwm ที่โหลดวิดีโออยู่แล้ว (อยู่ล่างสุดของฟังก์ชัน) จะได้ไม่ยิงซ้ำ
+  //   ได้ null (ล้ม/ไม่มีข้อมูล) = เดินต่อแบบไม่มี meta — ห้ามทำให้เส้นทางถอดคลิปล้มเด็ดขาด
+  //   ผู้ตรวจไขว้ (#7): รอบถอดซ้ำ QC ส่ง meta เดิมมาทาง ctx — ใช้ซ้ำเลย ไม่ดึงใหม่ให้เสียเวลา (สูงสุด ~28s) แล้วทิ้งผล
+  let sourceMeta = (ctx && ctx.sourceMeta) || null;
+  if (!sourceMeta && SOURCE_META_ON() && type !== 'tiktok') {
+    sourceMeta = await _safeSourceMeta(url, { platform: type });
+    if (ctx && sourceMeta) ctx.sourceMeta = sourceMeta;
+  }
+  const _metaArg = () => (sourceMeta ? { sourceMeta } : undefined); // ประตูปิด = undefined → รูปแบบการเรียกเท่าเดิม
   if (type === 'youtube') {
     // ★ 26 มิ.ย. (ผู้ใช้สั่ง + ปรับเร็วขึ้น): YouTube ไฮบริด "อัจฉริยะ"
     //   - เครื่องทีม (win32 มี yt-dlp): ถ้าเพิ่งเจอ URL ค้าง (ใน 20 นาที) → ข้ามไปโหลดเองเลย (ไม่เสีย 170 วิ ซ้ำ)
@@ -171,7 +277,7 @@ async function buildInsight({ url, type }, ctx = null) {
     const downloadAndExtract = async () => {
       const buf = await downloadMetaBuffer(url, YT_FMT);
       if (ctx) { ctx.mode = 'buffer'; ctx.buffer = buf; ctx.mimeType = 'video/mp4'; } // ★ 23 ก.ค.: เก็บ buffer ให้รอบเนื้อดิบมีมิติใช้ซ้ำ
-      return await extractInsightFromVideoBuffer(buf, 'video/mp4');
+      return await extractInsightFromVideoBuffer(buf, 'video/mp4', _metaArg());
     };
     if (process.platform === 'win32') {
       if (Date.now() < _ytUrlBrokenUntil) {
@@ -179,7 +285,7 @@ async function buildInsight({ url, type }, ctx = null) {
         return await downloadAndExtract();
       }
       try {
-        const _r = await _raceTimeout(extractClipInsight({ url, platform: 'youtube' }), 170_000, 'YouTube URL passthrough');
+        const _r = await _raceTimeout(extractClipInsight({ url, platform: 'youtube', ...(sourceMeta ? { sourceMeta } : {}) }), 170_000, 'YouTube URL passthrough');
         if (ctx) { ctx.mode = 'youtube-url'; ctx.url = url; } // ★ 23 ก.ค.: รอบเนื้อดิบมีมิติใช้ URL passthrough เช่นกัน
         return _r;
       } catch (e) {
@@ -189,12 +295,18 @@ async function buildInsight({ url, type }, ctx = null) {
       }
     }
     if (ctx) { ctx.mode = 'youtube-url'; ctx.url = url; }
-    return await extractClipInsight({ url, platform: 'youtube' }); // cloud: URL passthrough เท่านั้น
+    return await extractClipInsight({ url, platform: 'youtube', ...(sourceMeta ? { sourceMeta } : {}) }); // cloud: URL passthrough เท่านั้น
   }
   // TikTok/FB/IG → โหลดไฟล์ให้ Gemini "ดูจริง" (เห็นภาพ+ตัวหนังสือบนจอ) — ไม่มี fallback ถอดเสียง
-  const buf = type === 'tiktok' ? await downloadTiktokBuffer(url) : await downloadMetaBuffer(url);
+  const tikwmSink = {}; // ★ 4 ส.ค.: กล่องรับข้อมูลโพสต์จาก tikwm (ใช้ต่อเมื่อประตู meta เปิดเท่านั้น)
+  const buf = type === 'tiktok' ? await _downloadTiktokWithFallback(url, tikwmSink) : await downloadMetaBuffer(url);
   if (ctx) { ctx.mode = 'buffer'; ctx.buffer = buf; ctx.mimeType = 'video/mp4'; } // ★ 23 ก.ค.: เก็บ buffer ให้รอบเนื้อดิบมีมิติใช้ซ้ำ
-  return await extractInsightFromVideoBuffer(buf, 'video/mp4');
+  // ★ 4 ส.ค. (ประตู CLIP_SOURCE_META): TikTok ทำ meta ตรงนี้ — ใช้ข้อมูลจาก tikwm ที่เพิ่งโหลดวิดีโอมา ไม่ยิงเน็ตซ้ำ
+  if (SOURCE_META_ON() && type === 'tiktok' && !sourceMeta) {
+    sourceMeta = await _safeSourceMeta(url, { platform: 'tiktok', tikwmInfo: tikwmSink.info || null });
+    if (ctx && sourceMeta) ctx.sourceMeta = sourceMeta;
+  }
+  return await extractInsightFromVideoBuffer(buf, 'video/mp4', _metaArg());
 }
 
 // ★ (เลิกใช้ชั่วคราว 26 มิ.ย. — เก็บไว้เผื่อเปิด fallback ถอดเสียงภายหลัง)
@@ -272,7 +384,7 @@ export async function POST(request) {
       console.warn(`[ClipInsight] ⚠️ ไม่ผ่านด่านคุณภาพ (${issues.join(' · ')}) → ถอดใหม่อัตโนมัติ 1 ครั้ง`);
       attempts = 2;
       try {
-        const retryInsight = await getClipVideoQueue().run(() => buildInsight({ url, type }), { label: `insight-qc-retry:${type}` });
+        const retryInsight = await getClipVideoQueue().run(() => buildInsight({ url, type }, ctx.sourceMeta ? { sourceMeta: ctx.sourceMeta } : null), { label: `insight-qc-retry:${type}` });
         const retryIssues = insightQualityIssues(retryInsight);
         if (retryIssues.length < issues.length || String(retryInsight?.rawData || '').length > String(insight?.rawData || '').length) {
           insight = retryInsight; issues = retryIssues; // เอารอบที่ดีกว่า
@@ -288,6 +400,10 @@ export async function POST(request) {
     // ★ 24 ก.ค. แก้บัค (auditor C1) — เซฟ insight ลงคลัง "ก่อน" ยิงรอบ enriched:
     //   ต่อให้ route โดน Vercel ฆ่ากลางรอบ enriched (หรือ maxDuration จริง < 800s) insight ก็อยู่ในคลังแล้ว
     //   → dedup คืนได้ทันทีเมื่อกด/รีเฟรช · ไม่ต้องพึ่งว่าแพลตฟอร์มตัดที่กี่วินาที (แข็งกว่าเดาเวลา)
+    // ★ 4 ส.ค. (ประตู CLIP_SOURCE_META): ติด metadata ต้นทางเข้า insight "ก่อน" เซฟรอบแรก → เก็บลงคลังฟรี ไม่เพิ่มการเขียน
+    //   ประตูปิด = ctx.sourceMeta ไม่มี → insight เท่าเดิมทุกฟิลด์
+    if (ctx.sourceMeta) insight = { ...insight, sourceMeta: ctx.sourceMeta };
+    const qualityFlags = []; // ★ 4 ส.ค. (ประตู CLIP_QC_GATES): รวบธงคุณภาพทุกใบ แล้วเขียนคลังครั้งเดียวตอนท้าย
     const caseId = randomUUID();
     const store = createStore('clip-insights');
     const baseRecord = {
@@ -305,7 +421,9 @@ export async function POST(request) {
       //    r5 ถอนบรรทัดเกราะ verbatim เสริม (เจ้าของสั่ง 1 ส.ค. "ปลายมิถุนาไม่มี เอาออก" — ข้อยกเว้นข้อคิดคนพูดเองยังคุ้มครองอยู่)
       //   'raw-depth2legs-0801' = + พื้น-เพดาน 2 ขา (เจ้าของเคาะหลังวินิจฉัย "ถอดผิวเผิน" 1 ส.ค. ค่ำ):
       //    พื้น=ครบเชิงเนื้อหาทุกช่วงคลิป (ไม่ใช่โควตาตัวอักษรแบบ 8 ก.ค.) · เพดาน=กฎภาษาเนื้อดิบเดิม (กันน้ำ/คำอวย)
-      promptRev: 'raw-depth2legs-0801',
+      //   ★ 4 ส.ค. 69 (ประตู CLIP_PROMPT_0804): เปิด = ต่อท้าย '-m0804' · ปิด = ค่าเดิมเป๊ะ (เทสปักหมุดยึดค่านี้อยู่)
+      //    ผู้ตรวจไขว้ (#6): ใช้ฟังก์ชันจาก service เป็นความจริงแหล่งเดียว — ห้าม hardcode ซ้ำตรงนี้
+      promptRev: currentInsightPromptRev(),
       createdAt: new Date().toISOString(),
     };
     try { await store.add(baseRecord); } catch (e) { console.warn('[ClipInsight] เซฟคลัง (ก่อน enriched) ล้ม:', e.message?.slice(0, 50)); }
@@ -363,8 +481,12 @@ export async function POST(request) {
     // ★ ผู้ตรวจไขว้ W1: รอบ v2 = อัปคลิปขึ้น Gemini ใหม่ทั้งก้อน + ดูใหม่ทั้งคลิป (กินหลายนาที)
     //   งบเหลือน้อยกว่านี้ = ยิงไปก็ถูกตัดกลางทาง จ่ายเงินฟรีและยึดสล็อตคิว → ข้ามไปเลยดีกว่า
     const V2_MIN_BUDGET_MS = 300_000;
-    if (rawStoryV2Enabled && ctx.mode && !bufTooBig && v2BudgetMs > V2_MIN_BUDGET_MS) {
+    // ★ 4 ส.ค. 69: แยก "หนึ่งรอบ v2" ออกเป็นฟังก์ชัน เพื่อยิงซ้ำได้โดยไม่ก๊อปโค้ด และไม่แตะหลักการเดิม
+    //   หลักการเดิมที่ยังอยู่ครบทุกข้อ: save-first (บล็อกนี้อยู่หลัง store.add) · งบขั้นต่ำ 300s · Promise.race + clearTimeout · ข้าม buffer >200MB
+    //   งบเวลาคิดใหม่ทุกครั้งที่ยิง (รอบสองเหลือน้อยลงเสมอ) — ประตูปิด = ยิงรอบเดียวเหมือนเดิมเป๊ะ
+    const runRawStoryV2 = async (extraOpts = null) => {
       let v2Timer;
+      const budgetMs = ENRICH_MAXDUR_MS - (Date.now() - startedAt) - ENRICH_SAVE_MARGIN_MS;
       try {
         const { extractRawStoryV2, extractRawStoryV2FromVideoBuffer } = await import('@/lib/services/clipRawStoryService');
         const { buildIdentityFromInsight } = await import('@/lib/services/clipInsightService');
@@ -376,29 +498,140 @@ export async function POST(request) {
           }))
           .filter(t => t.topic);
         const v2Identity = buildIdentityFromInsight(insight, ctx.caption || null);
-        const rs = await Promise.race([
+        // ★ 4 ส.ค.: ตัวเลือกเสริม — sourceMeta (ประตู CLIP_SOURCE_META) + emphasizeQuotes (ประตู CLIP_QC_GATES รอบยิงซ้ำ)
+        //   ไม่มีตัวเลือกเลย = ส่ง undefined/ไม่มีคีย์ → รูปแบบการเรียกเท่าเดิมทุกตัวอักษร
+        const v2Opts = { ...(ctx.sourceMeta ? { sourceMeta: ctx.sourceMeta } : {}), ...(extraOpts || {}) };
+        const hasOpts = Object.keys(v2Opts).length > 0;
+        return await Promise.race([
           getClipVideoQueue().run(
             () => (ctx.mode === 'buffer'
-              ? extractRawStoryV2FromVideoBuffer(ctx.buffer, ctx.mimeType, v2Hints, v2Identity)
-              : extractRawStoryV2({ url: ctx.url, topicHints: v2Hints, identity: v2Identity })),
+              ? extractRawStoryV2FromVideoBuffer(ctx.buffer, ctx.mimeType, v2Hints, v2Identity, hasOpts ? v2Opts : undefined)
+              : extractRawStoryV2({ url: ctx.url, topicHints: v2Hints, identity: v2Identity, ...v2Opts })),
             { label: `rawstory-v2:${type}` }
           ),
-          new Promise((_, rej) => { v2Timer = setTimeout(() => rej(new Error(`rawStoryV2 budget timeout ${Math.round(v2BudgetMs / 1000)}s`)), v2BudgetMs); }),
+          new Promise((_, rej) => { v2Timer = setTimeout(() => rej(new Error(`rawStoryV2 budget timeout ${Math.round(budgetMs / 1000)}s`)), budgetMs); }),
         ]);
-        if (rs && (String(rs.rawStory || '').trim() || rs.topics?.length)) {
-          insight = { ...insight, rawStoryV2: rs };
-          store.update(caseId, (r) => ({ ...r, insight })).catch(() => {});
-          console.log(`[ClipInsight] ✅ เนื้อดิบ v2: ${rs.rawStory?.length || 0} ตัวอักษร · ประเด็นย่อย ${rs.topics?.length || 0} · rev=${rs.promptRev || '-'}`);
-        } else {
+      } finally { clearTimeout(v2Timer); }
+    };
+    const v2HasContent = (rs) => !!(rs && (String(rs.rawStory || '').trim() || rs.topics?.length));
+    const v2BudgetLeftMs = () => ENRICH_MAXDUR_MS - (Date.now() - startedAt) - ENRICH_SAVE_MARGIN_MS;
+
+    if (rawStoryV2Enabled && ctx.mode && !bufTooBig && v2BudgetMs > V2_MIN_BUDGET_MS) {
+      let rs = null;
+      let v2Err = '';
+      try {
+        rs = await runRawStoryV2();
+        if (!v2HasContent(rs)) {
+          rs = null;
+          v2Err = 'รอบ v2 คืนค่าว่าง (โมเดลไม่ส่งเนื้อกลับมา)';
           console.warn('[ClipInsight] เนื้อดิบ v2 คืนค่าว่าง (ข้าม ใช้ผลเดิม)');
         }
       } catch (e) {
-        console.warn('[ClipInsight] รอบเนื้อดิบ v2 ล้ม/หมดเวลา (ข้าม ใช้ผลเดิม):', e.message?.slice(0, 70));
-      } finally { clearTimeout(v2Timer); }
+        v2Err = _v2ErrText(e);
+        console.warn('[ClipInsight] รอบเนื้อดิบ v2 ล้ม/หมดเวลา (ข้าม ใช้ผลเดิม):', v2Err.slice(0, 70));
+      }
+
+      // ★ B2 (ประตู CLIP_QC_GATES) — เดิม "ล้มแล้วข้ามเงียบ" ไม่มีใครรู้ว่าเคสไหนไม่มี v2 เพราะอะไร
+      //   ล้มครั้งแรก → งบเวลายังพอ (>= งบขั้นต่ำเดิม) ลองใหม่อีก 1 ครั้งเท่านั้น → ยังล้ม = บันทึกสาเหตุลงเคส
+      if (!rs && QC_GATES_ON()) {
+        const retryBudgetMs = v2BudgetLeftMs();
+        if (retryBudgetMs > V2_MIN_BUDGET_MS) {
+          console.warn(`[ClipInsight] 🔄 ลองรอบเนื้อดิบ v2 ใหม่อีก 1 ครั้ง (งบเวลาเหลือ ${Math.round(retryBudgetMs / 1000)}s)`);
+          try {
+            rs = await runRawStoryV2();
+            if (!v2HasContent(rs)) { rs = null; v2Err = 'รอบ v2 คืนค่าว่างทั้งสองครั้ง'; }
+          } catch (e2) {
+            v2Err = _v2ErrText(e2);
+            console.warn('[ClipInsight] รอบเนื้อดิบ v2 (ลองใหม่) ล้มอีก:', v2Err.slice(0, 70));
+          }
+        } else {
+          console.log(`[ClipInsight] ⏭️ ไม่ลองรอบ v2 ใหม่: งบเวลาเหลือ ${Math.round(retryBudgetMs / 1000)}s ไม่พอ (ต้องการ ${V2_MIN_BUDGET_MS / 1000}s)`);
+        }
+      }
+
+      if (rs) {
+        insight = { ...insight, rawStoryV2: rs };
+        // ★ 4 ส.ค. (บั๊กจริงจากรันแรก — ผู้ตรวจ #8): ต้อง await — เขียนแบบไม่รอ 2 นัดแข่งกันแล้วนัดเก่าทับนัดใหม่
+        //   (เคสจตุรงค์: ผลรอบย้ำคำพูดหายเพราะนัดแรกเขียนเสร็จทีหลัง) · .catch กันล้มเหมือนเดิม ไม่ทำเคสพัง
+        await store.update(caseId, (r) => ({ ...r, insight })).catch(() => {});
+        console.log(`[ClipInsight] ✅ เนื้อดิบ v2: ${rs.rawStory?.length || 0} ตัวอักษร · ประเด็นย่อย ${rs.topics?.length || 0} · rev=${rs.promptRev || '-'}`);
+      } else if (QC_GATES_ON() && v2Err) {
+        // เก็บสาเหตุไว้บน insight ก่อน — เขียนคลังรวบครั้งเดียวกับธงคุณภาพตอนท้าย (ประหยัด write)
+        insight = { ...insight, rawStoryV2Error: v2Err.slice(0, 200) };
+      }
+
+      // ★ B3 (ประตู CLIP_QC_GATES) — v2 ได้เนื้อ แต่ไม่มีคำพูดจริงสักคำ ทั้งที่รอบแรกยืนยันว่ามีคนพูด
+      //   → ยิงซ้ำอีก 1 ครั้งโดยย้ำให้ถักคำพูดจริง (emphasizeQuotes) · ยังไม่มี = ติดธงไว้ ไม่ทิ้งเงียบ
+      if (rs && QC_GATES_ON()) {
+        // ★ ผู้ตรวจไขว้ 4 ส.ค. (#1): ต้องส่ง note ของ v2 เข้าด่านด้วย — insight รอบแรกไม่มีฟิลด์ note
+        //   คลิปที่ v2 ระบุเองว่า "ไม่มีเสียงพูด(ของคนในภาพ)" จะได้ไม่โดนยิงซ้ำพร้อมพรอมต์ที่บอกผิดๆ ว่ามีคนพูด (กันนั่งเทียน+จ่ายฟรี)
+        const qp = await _safeLintQuote({ ...insight, note: rs?.note }, _v2Text(rs));
+        if (qp && qp.expected && !qp.present) {
+          const quoteBudgetMs = v2BudgetLeftMs();
+          if (quoteBudgetMs > V2_MIN_BUDGET_MS) {
+            console.warn(`[ClipInsight] 🔁 v2 ไม่มีคำพูดจริงทั้งที่คลิปมีคนพูด → ยิงซ้ำแบบย้ำคำพูด 1 ครั้ง (งบเหลือ ${Math.round(quoteBudgetMs / 1000)}s)`);
+            let rs2 = null;
+            try { rs2 = await runRawStoryV2({ emphasizeQuotes: true }); } catch (e3) {
+              console.warn('[ClipInsight] ยิงซ้ำแบบย้ำคำพูดล้ม (ใช้ผล v2 เดิม):', _v2ErrText(e3).slice(0, 70));
+            }
+            const qp2 = v2HasContent(rs2) ? await _safeLintQuote({ ...insight, note: rs2?.note }, _v2Text(rs2)) : null;
+            // ★ 4 ส.ค. (บทเรียนรันแรก): รอบยิงซ้ำเคยคืนของหด (349 ตัว) — จะทับของเดิมได้ต้อง "ไม่ด้อยกว่า":
+            //   มีคำพูดจริง + ยาวรวม >= 60% ของเดิม + ประเด็นย่อยไม่หาย · ไม่ผ่านเกณฑ์ = เก็บของเดิม + ติดธงให้คนดู
+            const _len = (x) => _v2Text(x).length;
+            const rs2Acceptable = qp2?.present && _len(rs2) >= _len(rs) * 0.6 && (rs2.topics?.length || 0) >= (rs.topics?.length || 0);
+            if (rs2Acceptable) {
+              rs = rs2;
+              insight = { ...insight, rawStoryV2: rs2 };
+              // 🔴 ต้องเขียนคลังทันทีและ await — คลังคือของจริงที่สายเขียนข่าวหยิบไปใช้ (เคสยิงซ้ำผ่าน = ไม่มีธง ไม่มีการเขียนรอบท้าย)
+              await store.update(caseId, (r) => ({ ...r, insight })).catch(() => {});
+              console.log('[ClipInsight] ✅ รอบย้ำคำพูดได้คำพูดจริงแล้ว — ใช้ผลรอบนี้แทน');
+            } else {
+              if (qp2?.present) console.warn(`[ClipInsight] ⚠️ รอบย้ำคำพูดมีคำพูดแต่เนื้อด้อยกว่าเดิม (${_len(rs2)}/${_len(rs)} ตัว) — เก็บของเดิม+ติดธง`);
+              qualityFlags.push({ area: 'v2', type: 'quote_missing' });
+            }
+          } else {
+            console.log(`[ClipInsight] ⏭️ ไม่ยิงซ้ำแบบย้ำคำพูด: งบเวลาเหลือ ${Math.round(quoteBudgetMs / 1000)}s ไม่พอ`);
+            qualityFlags.push({ area: 'v2', type: 'quote_missing' });
+          }
+        }
+      }
     } else if (rawStoryV2Enabled && bufTooBig) {
       console.log(`[ClipInsight] ⏭️ ข้ามเนื้อดิบ v2: คลิปใหญ่ ${Math.round(ctx.buffer.length / 1e6)}MB (กันแรมพุ่ง)`);
     } else if (rawStoryV2Enabled && ctx.mode && v2BudgetMs <= V2_MIN_BUDGET_MS) {
       console.log(`[ClipInsight] ⏭️ ข้ามเนื้อดิบ v2: งบเวลาเหลือ ${Math.round(v2BudgetMs / 1000)}s ไม่พอดูคลิปรอบสอง (ต้องการ ${V2_MIN_BUDGET_MS / 1000}s)`);
+    }
+
+    // ★ B4 4 ส.ค. 69 (ประตู CLIP_QC_GATES) — ด่านตรวจ "กลไก" ล้วน: ไม่เรียก AI ไม่ยิงเน็ต ไม่แก้เนื้อ
+    //   หน้าที่เดียวคือ "ติดธงให้เห็น" ว่าเนื้อที่ได้มีอาการต้องห้าม (ชวนติดตาม/สรุปสอนใจ/ป้ายตัวตน/เล่ากระบวนการ)
+    //   หรือคลิปยาวแต่ประเด็นย่อยไม่ครอบคลุมทั้งคลิป — คนตรวจงานเห็นแล้วตัดสินใจเองว่าจะถอดใหม่ไหม
+    if (QC_GATES_ON()) {
+      try {
+        const { lintLanguage, lintTopicCoverage } = await import('@/lib/services/clipQualityLint');
+        for (const f of (lintLanguage(String(insight?.rawData || '')) || [])) qualityFlags.push({ area: 'rawData', ...f });
+        const v2 = insight?.rawStoryV2;
+        if (v2) {
+          for (const f of (lintLanguage(_v2Text(v2)) || [])) qualityFlags.push({ area: 'v2', ...f });
+          // คลิปยาว (>=10 นาที) เท่านั้น — คลิปสั้นประเด็นเดียวไม่ต้องคุมความครอบคลุม · ไม่รู้ความยาว (0) = ข้าม ไม่ยิง yt-dlp เพิ่ม
+          const durSec = Number(insight?.clipDurationSec || 0);
+          if (durSec >= 600 && v2.topics?.length) {
+            const cov = lintTopicCoverage(v2.topics, durSec);
+            if (cov && cov.ok === false) {
+              qualityFlags.push({ area: 'v2', type: 'topics_gap' });
+              console.warn(`[ClipInsight] 🚩 ประเด็นย่อยไม่ครอบคลุมทั้งคลิป: ครอบ ${Math.round((cov.coveredRatio || 0) * 100)}% · ช่องโหว่ ${cov.gaps?.length || 0} ช่วง`);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[ClipInsight] ด่านตรวจคุณภาพล้ม (ข้าม ไม่กระทบผลงาน):', String(e?.message || e).slice(0, 70));
+      }
+      // เขียนคลังครั้งเดียวรวบทุกธง + สาเหตุที่ v2 ไม่สำเร็จ (ประหยัด write · fire-and-forget เหมือนจุดอื่นในไฟล์นี้)
+      if (qualityFlags.length || insight?.rawStoryV2Error) {
+        if (qualityFlags.length) insight = { ...insight, qualityFlags: qualityFlags.slice(0, 40) };
+        await store.update(caseId, (r) => ({ ...r, insight })).catch(() => {}); // await กันแข่งกับนัดก่อนหน้า (ผู้ตรวจ #8)
+        if (qualityFlags.length) {
+          console.warn(`[ClipInsight] 🚩 ธงคุณภาพ ${qualityFlags.length} ใบ: ${qualityFlags.slice(0, 8).map(f => `${f.area}/${f.type}`).join(' · ')}`);
+        }
+      }
     }
 
     // retention + สำเนาถาวร (fire-and-forget) — ★ 8 ก.ค.: retention 400 เคส + NDJSON ถาวร (ใช้ insight สุดท้ายที่มี enriched)

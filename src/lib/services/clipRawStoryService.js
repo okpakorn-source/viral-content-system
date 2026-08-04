@@ -1,5 +1,13 @@
 export const RAWSTORY_PROMPT_REV = 'rawstory-v2-0803';
 
+// ★ 4 ส.ค. 69 — ชุดกติกา 0804 (ไล่ประเด็นครบทั้งคลิป + ปิดคำโปรโมต/ข้อคิดหลุด)
+//   🔴 เปิดด้วย CLIP_PROMPT_0804=1 เท่านั้น · ไม่เปิด = พรอมต์และป้ายรุ่นเดิมเป๊ะทุกตัวอักษร
+export const RAWSTORY_PROMPT_REV_0804 = 'rawstory-v3-0804';
+
+// สวิตช์ต้องเป็น '1' เป๊ะ (กติกาเดิมของสายถอดคลิป — ค่า truthy อื่นถือว่าปิด) · อ่านตอนเรียก ไม่ใช่ตอนโหลดโมดูล
+const swOn = (name) => process.env[name] === '1';
+const currentPromptRev = () => (swOn('CLIP_PROMPT_0804') ? RAWSTORY_PROMPT_REV_0804 : RAWSTORY_PROMPT_REV);
+
 const RAWSTORY_PROMPT = `คุณคือ "คนดูคลิปแล้วเล่าให้คนเขียนข่าวฟัง" ดูคลิปนี้ตั้งแต่ต้นจนจบทั้งภาพและเสียง แล้วเขียนเนื้อดิบที่คนเขียนข่าวนำไปใช้ต่อได้ทันที
 
 เป้าหมายของงาน: คืนเนื้อความธรรมชาติที่เล่าเหตุการณ์ตามจังหวะจริงของคลิป ครบทุกช่วง ไม่มีน้ำ และไม่เติมข้อสรุปของผู้เล่า คำพูดต้องกลืนอยู่ในเนื้อเรื่องตรงจังหวะที่เกิด ไม่แยกเป็นคลังคำพูดหรือบทถอดเทป
@@ -61,6 +69,39 @@ const RAWSTORY_PROMPT = `คุณคือ "คนดูคลิปแล้�
 
 ก่อนส่งคำตอบ ให้ตรวจ rawStory รวมและ rawStory ของทุก topic อีกครั้ง: ประโยคแรกต้องเข้าเหตุการณ์ตามตำแหน่งที่กำหนด ทุกช่วงสำคัญต้องอยู่ครบ คำพูดต้องอยู่ในฉากของมัน และประโยคสุดท้ายต้องหยุดที่ข้อเท็จจริงที่คลิปยืนยันได้`;
 
+// ★ 4 ส.ค. 69 (งาน A2) — คลิปยาว 30-60 นาที เนื้อครึ่งท้ายหาย: ให้ไล่นับประเด็นทั้งคลิปก่อนเขียน
+//   🔴 บทเรียนโควตา (8 ก.ค.): ห้ามสั่ง "ต้องได้กี่ก้อน" — โควตาบังคับทำให้โมเดลนั่งเทียน จึงเขียนเป็น "ตามจริง" + เพดานเท่านั้น
+// ★ (งาน A3) — คำชวนติดตาม/โปรโมต = ห้ามทั้งหมวด ไม่ใช่ไล่แบนรายวลี · ย้ำประโยคท้าย + ป้ายตัวตนต่อท้ายชื่อ (v2 เดิมไม่มีข้อนี้)
+const RULES_0804 = `★★ ไล่ประเด็นให้ครบทั้งคลิปก่อนลงมือเขียน
+- ก่อนเขียน ให้ไล่นับประเด็นของคลิปตั้งแต่ต้นจนจบก่อนหนึ่งรอบ แล้วค่อยเขียน
+- จำนวนก้อนประเด็นให้เป็นไปตามเนื้อจริงของคลิป ไม่มีจำนวนที่ต้องทำให้ครบ คลิปที่เล่าเรื่องเดียวทั้งคลิปคือก้อนเดียวและถูกต้องแล้ว มากที่สุดไม่เกินสิบก้อน
+- คลิปยาวที่เนื้อหาแยกได้หลายประเด็น ช่วงเวลาของทุกประเด็นรวมกันต้องครอบช่วงที่มีเนื้อสำคัญของคลิป ห้ามเหลือช่วงยาวที่มีเนื้อแต่ไม่มีประเด็นใดรองรับ
+- แต่ละก้อนต้องเรียบเรียงให้อ่านรู้เรื่องและจบในตัวเอง ไม่ใช่บันทึกย่อหรือหัวข้อลอย
+
+★★ คำโปรโมตและบทสรุปของผู้เล่า (ห้ามเป็นหมวด ไม่ใช่ห้ามเป็นรายคำ)
+- คำชวนติดตามหรือคำโปรโมตของคลิป ช่อง เพจ หรือรายการ ทุกรูปแบบและทุกสำนวน ไม่ใช่เนื้อข่าว ห้ามนำมาเล่าและห้ามใช้ปิดเรื่อง ยกเว้นกรณีเดียวคือคำเหล่านั้นเป็นส่วนของเหตุการณ์ที่เป็นข่าวเอง
+- ย้ำประโยคสุดท้าย จบที่ข้อเท็จจริงตามลำดับคลิปเท่านั้น ห้ามจบด้วยบทเรียน ข้อคิด การพิสูจน์คุณค่า แรงบันดาลใจ หรือกระแสสังคม ทุกสำนวน ถ้าเผลอเขียนให้ลบทิ้งแล้วจบที่ข้อเท็จจริงก่อนหน้า
+- ห้ามใช้คำว่า "ชื่อดัง" และห้ามเติมฉายา คำยกย่อง หรือป้ายตัวตนต่อท้ายชื่อคน เรียกด้วยชื่อล้วน`;
+
+// ★ 4 ส.ค. 69 (งาน A4) — ใช้ตอน route สั่งถอดซ้ำเพราะด่านคำพูดไม่ผ่าน (ไม่ใช่ค่าเริ่มต้น)
+const EMPHASIZE_QUOTES_LINE = `คลิปนี้ตรวจพบว่ามีคนพูด: เนื้อดิบต้องถักคำพูดจริง (verbatim) ในเครื่องหมายคำพูดแทรกในเนื้อตามที่ได้ยินจริง ห้ามเปลี่ยนเป็นคำเล่าทางอ้อมทั้งหมด`;
+
+// ★ 4 ส.ค. 69 (งาน A1) — หลักฐานระดับแคปชั่น/เพจจากโพสต์ต้นทาง (ข้อความชุดเดียวกับฝั่ง insight ตามข้อตกลงกลาง)
+//   🔴 เปิดด้วย CLIP_SOURCE_META=1 เท่านั้น · ไม่มี meta หรือสวิตช์ปิด = คืน '' → พรอมต์เดิมเป๊ะ
+function buildSourceMetaBlock(sourceMeta) {
+  if (!swOn('CLIP_SOURCE_META') || !sourceMeta || typeof sourceMeta !== 'object') return '';
+  const parts = [];
+  const uploader = truncateAtBoundary(sourceMeta.uploader, 120);
+  const title = truncateAtBoundary(sourceMeta.title, 200);
+  const caption = truncateAtBoundary(sourceMeta.caption, 400);
+  if (uploader) parts.push(`ผู้โพสต์/เพจ: ${uploader}`);
+  if (title) parts.push(`หัวข้อ: ${title}`);
+  if (caption) parts.push(`แคปชั่น: ${caption}`);
+  if (!parts.length) return '';
+  return `📎 ข้อมูลจากโพสต์ต้นทาง (หลักฐานระดับแคปชั่น/เพจ ตามกฎหลักฐานตัวตน): ${parts.join(' · ')}
+ใช้ยืนยันชื่อคน/บริบทได้ · ถ้าขัดกับที่เห็นในคลิปให้เชื่อคลิปและระบุความไม่แน่ใจ · ห้ามคัดลอกสำนวนแคปชั่น ห้ามเอาคำโปรโมต/แฮชแท็กในแคปชั่นเข้าเนื้อ`;
+}
+
 // Gemini อาจห่อ JSON object ด้วยอาเรย์หลายชั้นในคลิปใหญ่ จึงต้องแกะก่อน normalize เสมอ
 function _unwrapModelJson(p) {
   let out = p;
@@ -115,8 +156,15 @@ ${parts.join('\n')}
 ใช้เพื่อสะกดชื่อและตรวจความครบเมื่อคลิปจริงมีหลักฐานรองรับเท่านั้น ข้อมูลนี้ไม่ใช่หลักฐานใหม่ ถ้าขัดกับสิ่งที่เห็นหรือได้ยินให้ยึดคลิปจริง และห้ามลอกสำนวนมาเป็นเนื้อเรื่อง`;
 }
 
-function buildRawStoryPrompt(topicHints, identity) {
-  const context = [buildTopicHintsBlock(topicHints), buildIdentityBlock(identity)].filter(Boolean).join('\n\n');
+/** @param {{sourceMeta?: object|null, emphasizeQuotes?: boolean}} [opts] — ทุกช่องไม่บังคับ · ว่างทั้งหมด = พรอมต์เดิมเป๊ะ */
+function buildRawStoryPrompt(topicHints, identity, opts = {}) {
+  const context = [
+    swOn('CLIP_PROMPT_0804') ? RULES_0804 : '',
+    buildSourceMetaBlock(opts?.sourceMeta),
+    buildTopicHintsBlock(topicHints),
+    buildIdentityBlock(identity),
+    opts?.emphasizeQuotes ? EMPHASIZE_QUOTES_LINE : '',
+  ].filter(Boolean).join('\n\n');
   if (!context) return RAWSTORY_PROMPT;
   // ★ ผู้ตรวจไขว้รอบ 2 (F7): ใช้ฟังก์ชันแทนสตริง — ไม่งั้น $' / $& ที่ติดมากับหัวข้อ/แคปชั่นรอบแรก
   //   จะถูกตีความเป็นรูปแบบพิเศษของ replace ทำให้พรอมต์เพี้ยนแบบมองไม่เห็น
@@ -153,23 +201,51 @@ export function normalizeRawStory(p) {
     rawStory: truncateAtBoundary(story, 12000),
     topics,
     note: truncateAtBoundary(p?.note, 300),
-    promptRev: RAWSTORY_PROMPT_REV,
+    promptRev: currentPromptRev(), // ปิด CLIP_PROMPT_0804 = RAWSTORY_PROMPT_REV เดิมเป๊ะ
     // ★ F2: ธงความจริงเรื่องการตัด — เดิมต้องเดาจากตัวอักษรสุดท้าย ซึ่งภาษาไทยเดาไม่ได้
     truncated: story.length > 12000 || topics.some(t => t.truncated),
     ...(dropped > 0 || over > 0 ? { topicsDropped: dropped + over } : {}),
   };
 }
 
-export async function extractRawStoryV2({ url, topicHints = null, identity = null }) {
-  const { callGeminiVideo } = await import('@/lib/ai/geminiClient');
-  const prompt = buildRawStoryPrompt(topicHints, identity);
-  const result = await callGeminiVideo({ prompt, youtubeUrl: url, maxTokens: 32000 });
-  return normalizeRawStory(result);
+// ★ 4 ส.ค. 69 (งาน A5) — ล้มแล้วต้องบอก "สาเหตุสั้นๆ" ให้ route เก็บลง insight.rawStoryV2Error ได้
+//   ⛔ ห้ามกลืน error เงียบในชั้นนี้เด็ดขาด — โยนต่อขึ้นไปเสมอ (route เป็นคนตัดสินใจว่าจะข้ามหรือถอดซ้ำ)
+//   ⛔ ห้ามพ่วงคีย์/ค่า env ลง message (ใช้เฉพาะข้อความ error ต้นทาง ตัดที่ 200 ตัว)
+function shortRawStoryError(e) {
+  const msg = String(e?.message || e || '').trim();
+  if (/parse|JSON/i.test(msg)) return 'JSON_PARSE';
+  if (/ไม่ส่งข้อมูลกลับ|ว่างเปล่า|\bempty\b/i.test(msg)) return 'GEMINI_EMPTY';
+  if (/อัปโหลด|upload|ประมวลผลวิดีโอไม่สำเร็จ|state=|ไฟล์วิดีโอเล็ก/i.test(msg)) return 'UPLOAD_FAILED';
+  if (/timeout|หมดเวลา|ETIMEDOUT|abort/i.test(msg)) return 'TIMEOUT';
+  if (/คีย์|api key|401|403/i.test(msg)) return 'AUTH_FAILED';
+  return msg.slice(0, 200) || 'RAWSTORY_V2_FAILED';
 }
 
-export async function extractRawStoryV2FromVideoBuffer(videoBuffer, mimeType = 'video/mp4', topicHints = null, identity = null) {
+// 🔴 ปิดสวิตช์ CLIP_QC_GATES = โยน error ตัวเดิมต่อขึ้นไปเป๊ะ + คืนผลว่างได้เหมือนเดิม (ไม่มีพฤติกรรมใหม่)
+async function runRawStory(callModel) {
+  const qcOn = swOn('CLIP_QC_GATES');
+  let result;
+  try {
+    result = await callModel();
+  } catch (e) {
+    if (!qcOn) throw e;
+    throw new Error(shortRawStoryError(e), { cause: e });
+  }
+  const out = normalizeRawStory(result);
+  if (qcOn && !String(out.rawStory || '').trim() && !out.topics.length) throw new Error('GEMINI_EMPTY');
+  return out;
+}
+
+/** @param {{url: string, topicHints?: any, identity?: any, sourceMeta?: object|null, emphasizeQuotes?: boolean}} args */
+export async function extractRawStoryV2({ url, topicHints = null, identity = null, sourceMeta = null, emphasizeQuotes = false }) {
+  const { callGeminiVideo } = await import('@/lib/ai/geminiClient');
+  const prompt = buildRawStoryPrompt(topicHints, identity, { sourceMeta, emphasizeQuotes });
+  return runRawStory(() => callGeminiVideo({ prompt, youtubeUrl: url, maxTokens: 32000 }));
+}
+
+/** @param {{sourceMeta?: object|null, emphasizeQuotes?: boolean}} [opts] — พารามิเตอร์ที่ 5 (ไม่ส่ง = พฤติกรรมเดิม) */
+export async function extractRawStoryV2FromVideoBuffer(videoBuffer, mimeType = 'video/mp4', topicHints = null, identity = null, opts = {}) {
   const { callGeminiVideoFile } = await import('@/lib/ai/geminiClient');
-  const prompt = buildRawStoryPrompt(topicHints, identity);
-  const result = await callGeminiVideoFile({ prompt, videoBuffer, mimeType, maxTokens: 32000 });
-  return normalizeRawStory(result);
+  const prompt = buildRawStoryPrompt(topicHints, identity, opts);
+  return runRawStory(() => callGeminiVideoFile({ prompt, videoBuffer, mimeType, maxTokens: 32000 }));
 }

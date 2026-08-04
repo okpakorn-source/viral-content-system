@@ -17,6 +17,9 @@ export async function callGeminiVideoFile(args) { return globalThis.__clipPrompt
 `);
 const STUB_CLIP_SERVICE = mod(`
 const state = () => globalThis.__clipRouteState;
+// ★ 4 ส.ค. 69: route ใช้ currentInsightPromptRev() จาก service (ความจริงแหล่งเดียว) — สตับต้องมี export นี้
+//   ค่าตรงกับ service จริง: ปิด CLIP_PROMPT_0804 = 'raw-depth2legs-0801' เป๊ะ (เทสข้าง Baseline ยังยึดค่านี้)
+export function currentInsightPromptRev() { return process.env.CLIP_PROMPT_0804 === '1' ? 'raw-depth2legs-0801-m0804' : 'raw-depth2legs-0801'; }
 export async function extractClipInsight(args) { return state().firstPass(args); }
 export async function extractInsightFromVideoBuffer(buffer, mimeType) { return state().firstPass({ buffer, mimeType }); }
 export async function extractMultiTopicInsight(args) { return state().firstPass(args); }

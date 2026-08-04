@@ -92,6 +92,49 @@ const RAW_LANGUAGE_RULES = `★★ กฎภาษาเนื้อดิบ (�
 - ปฏิกิริยาคนดู ("ชาวเน็ตคอมเมนต์ว่า...") ใส่ได้เฉพาะที่เห็นจริงในคลิป/แคปชั่น/คอมเมนต์ที่โชว์บนจอ — มองไม่เห็นห้ามเดา
 - "เขียนกระชับ" ใช้กับ rawData รวมเท่านั้น (subStories เอาความครบของประเด็นเป็นหลัก ตามกติกาของมัน) — และกระชับ = ตัดคำฟุ่มเฟือย/คำอวย ไม่ใช่ตัดข้อเท็จจริง`;
 
+// ════════════════════════════════════════════════════════════════════════════
+// ★ 4 ส.ค. 69 — ส่วนเสริมชุด 0804 (ทุกอย่างอยู่หลังสวิตช์ที่ปิดเป็นค่าเริ่มต้น)
+//   CLIP_SOURCE_META=1 → แนบบล็อกข้อมูลโพสต์ต้นทาง (เพจ/หัวข้อ/แคปชั่น) ท้ายพรอมต์
+//   CLIP_PROMPT_0804=1 → เพิ่มกฎภาษาชุดใหม่ + ป้ายรุ่นพรอมต์ใหม่
+//   🔴 สวิตช์ไม่เปิด หรือไม่มี sourceMeta = พรอมต์เดิมเป๊ะทุกตัวอักษร (เทสปักหมุดคุมอยู่)
+// ════════════════════════════════════════════════════════════════════════════
+const swOn = (name) => process.env[name] === '1'; // ต้องเป็น '1' เป๊ะ (กติกาเดิมของสายถอดคลิป)
+
+/** ป้ายรุ่นพรอมต์ฝั่ง insight — ค่าเดิมที่ route ติดให้ทุกเรคคอร์ด (ห้ามเปลี่ยนค่าฐาน) */
+export const INSIGHT_PROMPT_REV = 'raw-depth2legs-0801';
+/** เปิด CLIP_PROMPT_0804 = ค่าเดิม + '-m0804' · ปิด = ค่าเดิมเป๊ะ (ให้ route เรียกใช้แทนสตริงตายตัว) */
+export function currentInsightPromptRev() {
+  return swOn('CLIP_PROMPT_0804') ? `${INSIGHT_PROMPT_REV}-m0804` : INSIGHT_PROMPT_REV;
+}
+
+// ★ (งาน A3) กฎภาษาเพิ่มเติม — ห้าม "เป็นหมวด" ไม่ใช่ไล่แบนรายวลี · เพิ่มเท่าที่จำเป็น (พรอมต์ต้องผอม)
+const RAW_LANGUAGE_RULES_0804 = `★★ กฎภาษาเนื้อดิบ เพิ่มเติม (ใช้กับ rawData รวม + subStories + ทุกช่องเนื้อความ):
+- คำชวนติดตามหรือคำโปรโมตของคลิป ช่อง เพจ หรือรายการ ทุกรูปแบบและทุกสำนวน ไม่ใช่เนื้อข่าว ห้ามนำมาเล่าและห้ามใช้ปิดเรื่อง ⛔ ยกเว้นกรณีเดียวคือคำเหล่านั้นเป็นส่วนของเหตุการณ์ที่เป็นข่าวเอง (เช่น ข่าวเรื่องคำพูดในไลฟ์นั้นเอง)
+- ย้ำประโยคสุดท้าย จบที่ข้อเท็จจริงเท่านั้น ห้ามจบด้วยบทเรียน ข้อคิด การพิสูจน์คุณค่า แรงบันดาลใจ หรือกระแสสังคม ทุกสำนวน`;
+
+// ★ (งาน A1) บล็อกข้อมูลโพสต์ต้นทาง — ข้อความชุดเดียวกับฝั่งเนื้อดิบ v2 ตามข้อตกลงกลาง
+function buildSourceMetaBlock(sourceMeta) {
+  if (!swOn('CLIP_SOURCE_META') || !sourceMeta || typeof sourceMeta !== 'object') return '';
+  const parts = [];
+  const uploader = truncateAtBoundary(String(sourceMeta.uploader || '').trim(), 120);
+  const title = truncateAtBoundary(String(sourceMeta.title || '').trim(), 200);
+  const caption = truncateAtBoundary(String(sourceMeta.caption || '').trim(), 400);
+  if (uploader) parts.push(`ผู้โพสต์/เพจ: ${uploader}`);
+  if (title) parts.push(`หัวข้อ: ${title}`);
+  if (caption) parts.push(`แคปชั่น: ${caption}`);
+  if (!parts.length) return '';
+  return `📎 ข้อมูลจากโพสต์ต้นทาง (หลักฐานระดับแคปชั่น/เพจ ตามกฎหลักฐานตัวตน): ${parts.join(' · ')}
+ใช้ยืนยันชื่อคน/บริบทได้ · ถ้าขัดกับที่เห็นในคลิปให้เชื่อคลิปและระบุความไม่แน่ใจ · ห้ามคัดลอกสำนวนแคปชั่น ห้ามเอาคำโปรโมต/แฮชแท็กในแคปชั่นเข้าเนื้อ`;
+}
+
+/** ก้อนเสริมที่แทรก "ก่อนสคีมา JSON" — ว่างทั้งหมด = คืน '' (พรอมต์เดิมเป๊ะ) */
+function buildInsightAddons(opts) {
+  return [
+    swOn('CLIP_PROMPT_0804') ? RAW_LANGUAGE_RULES_0804 : '',
+    buildSourceMetaBlock(opts?.sourceMeta || null), // opts เป็น null/undefined ก็ต้องไม่พัง
+  ].filter(Boolean).join('\n\n');
+}
+
 // ── 2) ถอดประเด็นข่าว → ข้อมูลดิบ ──
 const INSIGHT_RULES = `กฎเหล็ก:
 - ⛔ ข้อเท็จจริงล้วน ห้ามแต่งเติม/เดา/ใส่ความเห็นตัวเอง — เอาเฉพาะที่มีในคลิปจริง
@@ -164,6 +207,14 @@ ${SUBSTORY_RULES}
 
 ${INSIGHT_SCHEMA}`;
 
+/** ★ 4 ส.ค. 69: พรอมต์ดูคลิป + ก้อนเสริม 0804 แทรกก่อนสคีมา JSON — ไม่มีก้อนเสริม = สตริงเดิมเป๊ะ
+ *  ใช้ฟังก์ชันใน replace (ไม่ใช่สตริง) — กัน $& / $' ที่อาจติดมากับแคปชั่นต้นทางทำพรอมต์เพี้ยนแบบมองไม่เห็น */
+function buildVideoInsightPrompt(opts = {}) {
+  const addons = buildInsightAddons(opts);
+  if (!addons) return VIDEO_INSIGHT_PROMPT;
+  return VIDEO_INSIGHT_PROMPT.replace('ตอบ JSON เท่านั้น:', () => `${addons}\n\nตอบ JSON เท่านั้น:`);
+}
+
 // ★ 1 ส.ค. 69 (ราก "เคสว่างคลิปใหญ่" — พิสูจน์ด้วยโพรบคำตอบดิบ): gemini-3.6 กับคลิปใหญ่ (>100k โทเคน)
 //   บางครั้งห่อคำตอบเป็นอาเรย์ [{...}] แทน {...} (finishReason=STOP เนื้อครบสมบูรณ์ 13k ตัวอักษร!)
 //   เดิม parse ผ่านแต่ normalize อ่านช่องจากอาเรย์ → ว่างทุกช่อง → เก็บเคสว่างติดธง lowQuality โดยไม่มี error
@@ -217,14 +268,15 @@ function normalizeInsight(p, engine) {
  * @param {string} args.url       ลิงก์คลิป (ใช้ตอน platform='youtube' ให้ Gemini ดู)
  * @param {string} args.platform  'youtube' = Gemini ดูคลิป | อื่น = ใช้ rawText + LLM
  * @param {string} args.rawText   บทถอดเสียง (จำเป็นเมื่อไม่ใช่ youtube หรือ fallback)
+ * @param {object} [args.sourceMeta] ★ 4 ส.ค.: {uploader,title,caption,source} จากโพสต์ต้นทาง — ไม่ส่ง/สวิตช์ปิด = พรอมต์เดิมเป๊ะ
  */
-export async function extractClipInsight({ url, platform, rawText = '' }) {
+export async function extractClipInsight({ url, platform, rawText = '', sourceMeta = null }) {
   // YouTube → ให้ Gemini ดูคลิปจริงจากลิงก์ตรง — ปล่อย error ขึ้นไปให้ route จัดการ fallback
   if (platform === 'youtube') {
     const { callGeminiVideo } = await import('@/lib/ai/geminiClient');
     // ★ 21 มิ.ย.: 8000→16000 · ★ 25 มิ.ย.: 16000→24000 (เพิ่ม subStories) · ★ 8 ก.ค.: 24000→32000
     //   (พรอมต์ใหม่บังคับ rawData ละเอียดขึ้นมาก — เผื่อ output กัน JSON ถูกตัดท้าย = ต้นเหตุเคส rawData ว่างในคลัง)
-    const r = await callGeminiVideo({ prompt: VIDEO_INSIGHT_PROMPT, youtubeUrl: url, maxTokens: 32000 });
+    const r = await callGeminiVideo({ prompt: buildVideoInsightPrompt({ sourceMeta }), youtubeUrl: url, maxTokens: 32000 });
     return normalizeInsight(r, 'gemini-video');
   }
 
@@ -241,7 +293,7 @@ ${INSIGHT_RULES}
 ${IDENTITY_RULES}
 
 ${SUBSTORY_RULES}
-
+${(() => { const a = buildInsightAddons({ sourceMeta }); return a ? `\n${a}\n` : ''; })()}
 === บทถอดเสียง ===
 ${text.slice(0, 12000)}
 === จบ ===
@@ -258,11 +310,12 @@ ${INSIGHT_SCHEMA}`;
  * ★ ถอดประเด็นจาก "ไฟล์วิดีโอ" ที่โหลดมาเอง (TikTok/Reels/FB) — Gemini ดูคลิปจริงจากไฟล์
  * @param {Buffer} videoBuffer
  * @param {string} mimeType
+ * @param {{sourceMeta?: object|null}} [opts] ★ 4 ส.ค.: พารามิเตอร์ที่ 3 — ไม่ส่ง = พฤติกรรมเดิมเป๊ะ
  */
-export async function extractInsightFromVideoBuffer(videoBuffer, mimeType = 'video/mp4') {
+export async function extractInsightFromVideoBuffer(videoBuffer, mimeType = 'video/mp4', opts = {}) {
   const { callGeminiVideoFile } = await import('@/lib/ai/geminiClient');
   // ★ 8 ก.ค.: 24000→32000 — เท่าเส้นทางลิงก์ตรง (พรอมต์ละเอียดขึ้น กัน JSON ถูกตัดท้าย)
-  const r = await callGeminiVideoFile({ prompt: VIDEO_INSIGHT_PROMPT, videoBuffer, mimeType, maxTokens: 32000 });
+  const r = await callGeminiVideoFile({ prompt: buildVideoInsightPrompt(opts), videoBuffer, mimeType, maxTokens: 32000 });
   return normalizeInsight(r, 'gemini-video');
 }
 

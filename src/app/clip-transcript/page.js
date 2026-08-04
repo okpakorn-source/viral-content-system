@@ -296,6 +296,67 @@ export default function ClipTranscriptPage() {
     return [...parts, ...rs2Parts].join('\n\n');
   };
 
+  // ★ 4 ส.ค.: ฟิลด์กำกับคุณภาพ (ใหม่ · optional ทั้งหมด — เคสเก่าไม่มี = ไม่โชว์อะไร ห้ามพัง)
+  //   🔴 ชิป/ธงเป็น "ข้อมูลกำกับ" เท่านั้น — ห้ามรวมเข้าปุ่มคัดลอกเนื้อ (insightCaseText ด้านบนไม่แตะ)
+  const QF_FIXED_LABEL = {
+    quote_missing: '💬 ไม่พบคำพูดจริง — ตรวจก่อนใช้',
+    topics_gap: '⏱️ ประเด็นอาจไม่ครอบทั้งคลิป',
+  };
+  // รวมธงชนิดเดียวกันเป็นชิปเดียว + จำนวน (กันชิปท่วมจอเวลาเจอคำซ้ำหลายที่)
+  const qualityChipList = (ins) => {
+    const flags = Array.isArray(ins?.qualityFlags) ? ins.qualityFlags : [];
+    const byType = new Map();
+    for (const f of flags) {
+      const type = f?.type ? String(f.type) : '';
+      if (!type) continue;
+      const g = byType.get(type) || { type, count: 0, matches: [] };
+      g.count += 1;
+      const m = f?.match ? String(f.match) : '';
+      if (m && !g.matches.includes(m)) g.matches.push(m);
+      byType.set(type, g);
+    }
+    return Array.from(byType.values()).map((g) => {
+      const fixed = QF_FIXED_LABEL[g.type];
+      const base = fixed || `🧹 พบคำควรตรวจ: ${g.matches[0] || g.type}`;
+      return {
+        key: g.type,
+        text: g.count > 1 ? `${base} ×${g.count}` : base,
+        title: g.matches.join(' · '),
+        warn: !!fixed,
+      };
+    });
+  };
+  // แถวชิปใต้เนื้อ: 📎 ต้นทาง (sourceMeta) + ธงคุณภาพ (qualityFlags) — ไม่มีทั้งคู่ = ไม่ render อะไรเลย
+  const renderQualityChips = (ins, small = false) => {
+    const chips = qualityChipList(ins);
+    const src = ins?.sourceMeta;
+    const srcName = src?.uploader || src?.title || '';
+    if (!chips.length && !srcName) return null;
+    const fs = small ? 10 : 10.5;
+    const pad = small ? '2px 8px' : '3px 9px';
+    const srcTip = [src?.title, src?.caption].filter(Boolean).join(' · ');
+    return (
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: small ? 12 : 14 }}>
+        {srcName && (
+          <span title={srcTip || ''} style={{ fontSize: fs, padding: pad, borderRadius: 20, background: 'rgba(59,130,246,0.12)', color: '#93c5fd', fontWeight: 700, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📎 ต้นทาง: {srcName}</span>
+        )}
+        {chips.map((ch) => (
+          <span key={ch.key} title={ch.title || ''} style={{ fontSize: fs, padding: pad, borderRadius: 20, background: ch.warn ? 'rgba(245,158,11,0.14)' : 'rgba(239,68,68,0.12)', color: ch.warn ? '#fbbf24' : '#f87171', fontWeight: 800, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ch.text}</span>
+        ))}
+      </div>
+    );
+  };
+  // แถบเตือน "เนื้อดิบ v2 ไม่สำเร็จ" — วางแทนที่ตำแหน่งการ์ด v2 (มี v2 แล้ว = ไม่เตือน)
+  const renderV2ErrorBar = (ins, small = false) => {
+    const msg = ins?.rawStoryV2Error;
+    if (!msg || ins?.rawStoryV2) return null;
+    return (
+      <div style={{ marginTop: small ? 12 : 18, fontSize: small ? 11.5 : 12, lineHeight: 1.6, padding: '9px 12px', borderRadius: 9, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.4)', color: '#fbbf24' }}>
+        ⚠️ <b>เนื้อดิบ v2 ไม่สำเร็จ</b>: {String(msg).slice(0, 200)} — กด 🔁 ถอดใหม่ได้
+      </div>
+    );
+  };
+
   // ★ 8 ก.ค. rev.2: จัดหมวดผล — dna(คนละคน แยกระดับ ใกล้/กลาง/กว้าง) vs same(คนเดิม)
   //   รองรับเคสเก่า: tag 'follow'→คนเดิม · 'theme'→แนวเดียวกันกว้าง
   const resultKind = (r) => {
@@ -780,6 +841,11 @@ export default function ClipTranscriptPage() {
                 )}
               </div>
             )}
+
+            {/* ★ 4 ส.ค.: v2 ล้ม → แถบเตือนแทนตำแหน่งการ์ด v2 · ชิปกำกับ (ต้นทาง/ธงคุณภาพ)
+                ฟิลด์ใหม่ optional ทั้งหมด — เคสเก่าไม่มี = ไม่โชว์อะไร · ไม่เข้าปุ่มคัดลอกเนื้อ */}
+            {renderV2ErrorBar(insight)}
+            {renderQualityChips(insight)}
           </div>
         )}
 
@@ -980,6 +1046,11 @@ export default function ClipTranscriptPage() {
                           )}
                         </div>
                       )}
+
+                      {/* ★ 4 ส.ค.: คลังต้องเห็นเท่าผลสด — แถบเตือน v2 ล้ม + ชิปกำกับ (ต้นทาง/ธงคุณภาพ)
+                          บทเรียนเก่า 24 ก.ค.: ลืมการ์ดคลัง แล้วผู้ใช้นึกว่าฟีเจอร์หาย */}
+                      {renderV2ErrorBar(ins, true)}
+                      {renderQualityChips(ins, true)}
                     </div>
                   )}
                 </div>
