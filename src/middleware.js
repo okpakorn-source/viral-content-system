@@ -77,9 +77,30 @@ function guardErrorResponse() {
   );
 }
 
+// ★ 4 ส.ค. 69: ปิดโต๊ะข่าวถาวร (เจ้าของสั่ง "ปิดไปเลย ไม่เกิดประโยชน์และอาจทำให้ระบบอื่นล่ม")
+//   ปิดที่ด่านเดียวคุมครบทุก route ทั้ง Vercel+เครื่องทีม — เปิดคืนชั่วคราว: ตั้ง DESK_REOPEN=1
+const _DESK_PREFIXES = ['/api/desk/', '/api/news-desk/', '/api/company/newsdesk-run'];
+
+function deskClosedResponse() {
+  return NextResponse.json(
+    {
+      success: false,
+      error: 'โต๊ะข่าวถูกปิดถาวรแล้ว (เจ้าของสั่ง 4 ส.ค. 69) — เปิดคืนชั่วคราวด้วย env DESK_REOPEN=1',
+      errorType: 'DESK_CLOSED',
+    },
+    { status: 503 }
+  );
+}
+
 // thin wrapper — ดึงค่าจริงจาก request/env แล้วส่งให้ pure function ตัดสิน
 export function middleware(req) {
   try {
+    const pathname = req.nextUrl?.pathname || '';
+    // ── ด่านโต๊ะข่าว: ปิดทุกเส้นทาง desk เว้นแต่ตั้งธงเปิดคืนเอง ──
+    if (_DESK_PREFIXES.some(p => pathname === p || pathname.startsWith(p))) {
+      if (process.env.DESK_REOPEN === '1') return NextResponse.next();
+      return deskClosedResponse();
+    }
     const headerKey = req.headers.get('x-cover-test-key');
     const decision = _coverTestGuardDecision({
       localOpen: process.env.COVER_TEST_LOCAL_OPEN,
@@ -95,5 +116,5 @@ export function middleware(req) {
 }
 
 export const config = {
-  matcher: ['/api/cover-ref-test', '/api/quick-test'],
+  matcher: ['/api/cover-ref-test', '/api/quick-test', '/api/desk/:path*', '/api/news-desk/:path*', '/api/company/newsdesk-run'],
 };

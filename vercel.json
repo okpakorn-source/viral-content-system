@@ -12,14 +12,6 @@
     {
       "path": "/api/queue/worker",
       "schedule": "* * * * *"
-    },
-    {
-      "path": "/api/mega/tick",
-      "schedule": "* * * * *"
-    },
-    {
-      "path": "/api/desk/editor/dispatch",
-      "schedule": "* * * * *"
     }
   ]
 }
