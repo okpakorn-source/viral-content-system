@@ -124,33 +124,10 @@ client.on('messageCreate', async (message) => {
     return message.reply(`📊 **สถานะระบบ:**\n${getQueueStatus()}\nกำลังทำงาน: ${activeCount} | รอคิว: ${queue.length}`);
   }
 
-  // 1.4 ★ !โต๊ะ <คำสั่ง> — ศูนย์คำสั่งโต๊ะข่าว เหมือนเว็บทุกประการ (11 มิ.ย. 69)
-  //     สถานะ/คิว · หาข่าว · บก.น้ำดี/ดราม่า/สัมภาษณ์ ทำเลย · อื่นๆ = สั่ง บก.ใหญ่วิเคราะห์
+  // 1.4 🛑 6 ส.ค. 69 (เจ้าของสั่ง): ระบบโต๊ะข่าวถูกลบทั้งชุด — คำสั่ง !โต๊ะ ไม่มีปลายทางแล้ว
+  //     คงตัวรับไว้เพื่อ "ตอบให้รู้เรื่อง" แทนการยิงไป 404 แล้วเด้ง error ดิบใส่หน้าทีม
   if (content.startsWith('!โต๊ะ') || content.toLowerCase().startsWith('!desk')) {
-    const cmd = content.replace(/^!(โต๊ะ|desk)\s*/i, '').trim();
-    if (!cmd) {
-      return message.reply(
-        'วิธีสั่งโต๊ะข่าว:\n' +
-        '`!โต๊ะ สถานะ` — สรุปคลัง+คิว\n' +
-        '`!โต๊ะ หาข่าว` — เก็บข่าวรอบใหม่ทุกเลน (~3-6 นาที)\n' +
-        '`!โต๊ะ บก.น้ำดี ทำเลย` / `บก.ดราม่า ลุย` / `บก.สัมภาษณ์ เช็ค`\n' +
-        '`!โต๊ะ <ข้อความอะไรก็ได้>` — ส่งเป็นคำสั่งให้ บก.ใหญ่ AI'
-      );
-    }
-    const deskWait = await message.reply(`🗞️ รับคำสั่ง: "${cmd.slice(0, 80)}" — กำลังทำงาน...`);
-    try {
-      const base = API_URL.replace(/\/api\/.*$/, '');
-      const res = await axios.post(`${base}/api/news-desk/command`,
-        { text: cmd, user: message.author.username },
-        { timeout: 540000 } // หาข่าว/บก.ใหญ่ ใช้เวลาได้ถึง ~9 นาที
-      );
-      const d = res.data || {};
-      const replyText = d.reply || d.summary || (d.success ? '✅ เสร็จแล้ว — รายละเอียดอยู่ในช่องแจ้งเตือนโต๊ะข่าว' : `❌ ${d.error || 'ไม่สำเร็จ'}`);
-      await deskWait.edit(String(replyText).slice(0, 1900));
-    } catch (err) {
-      await deskWait.edit(`❌ คำสั่งโต๊ะล้มเหลว: ${String(err.message).slice(0, 200)}`).catch(() => {});
-    }
-    return;
+    return message.reply('🛑 โต๊ะข่าวถูกยุบถาวรแล้ว — ส่งลิงก์หรือข้อความข่าวเข้ามาในห้องนี้ได้เลย ระบบจะเขียนให้เหมือนเดิม');
   }
 
   // 1.5 (ถอด 18 ก.ค. 69 — คำสั่งเจ้าของ: "!ปัง ไม่มีคนใช้ เอาออกเลย") — คำสั่ง !ปัง feedback ถูกลบทั้งชุด

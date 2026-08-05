@@ -8,7 +8,7 @@ import dynamic from 'next/dynamic';
 // 🗞️ โต๊ะข่าว (v1) — taxonomy.js isomorphic (ระบุไว้ในไฟล์ต้นทาง) ใช้ฝั่ง client ได้ตรงๆ ไม่ต้อง hardcode ซ้ำ
 // ★ 27 ก.ค. 69 (เจ้าของอนุมัติ — อัปเกรดแท็บโต๊ะข่าวให้ครบเท่าโต๊ะกลาง): +LIBRARIES/isClip/enrichDeskItem
 //   enrichDeskItem เติม library/sourceType/imageUrl/freshClass/reliability/editorial ให้ทุกใบฝั่ง client (API บาง tab ไม่ enrich มาให้)
-import { HARVEST_MODES, LIBRARIES, isClip, enrichDeskItem } from '@/lib/services/newsDesk/taxonomy';
+import { HARVEST_MODES, LIBRARIES, isClip, enrichDeskItem } from '@/lib/services/newsDeskShared/taxonomy';
 // ★ 28 ก.ค. 69 (แก้บั๊ก "มือถือค้างบันเดิลรุ่นเก่า"): เทียบรุ่นแอพนี้กับ mRev ที่ /api/m/cover ตอบมา — ต่างกันเตือนแตะรีโหลด
 import { M_APP_REV } from '@/lib/mAppRev';
 
@@ -2140,8 +2140,9 @@ export default function MobileApp() {
             เปิดคืน: เอาคอมเมนต์ออก + ตั้ง env MEGA_PIPELINE=1 (โค้ดแท็บ/ฟังก์ชันทั้งหมดยังอยู่ครบ ไม่ได้ลบ)
         <button className={'tab' + (tab === 'cover' ? ' on' : '')} onClick={() => setTab('cover')}>{IC.img}ทำปก</button> */}
         <button className={'tab' + (tab === 'works' ? ' on' : '')} onClick={() => setTab('works')}>{IC.lib}ผลงาน</button>
-        {/* ★ 27 ก.ค. 69 (เจ้าของสั่ง): เปิดให้ทุกคนที่ล็อกอินใช้ได้แล้ว — ตัด isAdmin guard ออก */}
-        <button className={'tab' + (tab === 'desk' ? ' on' : '')} onClick={() => setTab('desk')}>{IC.desk}โต๊ะข่าว</button>
+        {/* 🛑 6 ส.ค. 69 (เจ้าของสั่ง): ถอดแท็บ "โต๊ะข่าว" — ระบบถูกลบทั้งชุด ประตู /api/m/desk ตอบ 410 DESK_REMOVED
+            โค้ดแท็บด้านล่างยังอยู่แต่เข้าไม่ถึงแล้ว (เก็บกวาดรอบหน้าเมื่อแตะแอพมือถือโดยตรง)
+        <button className={'tab' + (tab === 'desk' ? ' on' : '')} onClick={() => setTab('desk')}>{IC.desk}โต๊ะข่าว</button> */}
       </div></div>
       {toast && <div className="toast">{toast}</div>}
 

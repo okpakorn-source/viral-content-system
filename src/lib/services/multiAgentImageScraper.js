@@ -2276,7 +2276,7 @@ async function extractFromUserSources(sourceLinks = [], context = '') {
             if (isYouTube) {
               try {
                 const { fetchYouTubeThumbFrames } = await import('@/lib/services/youtubeThumbFrames');
-                const { youtubeVideoId } = await import('@/lib/services/newsDesk/taxonomy');
+                const { youtubeVideoId } = await import('@/lib/services/newsDeskShared/taxonomy');
                 const id = youtubeVideoId(link);
                 if (id) {
                   const tf = await fetchYouTubeThumbFrames([id], { perVideo: 3, maxTotal: 4 });

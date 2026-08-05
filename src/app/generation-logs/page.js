@@ -204,23 +204,10 @@ export default function GenerationLogsPage() {
     }
   }, [getDetail, copyText]);
 
-  // ── หาแหล่งภาพประกอบ — AI วิเคราะห์บริบทข่าว ค้นลิงก์ทุกช่องทาง ──
-  const scoutImg = useCallback(async (caseId) => {
-    setImgScouting(prev => ({ ...prev, [caseId]: true }));
-    showToast('📸 กำลังหาแหล่งภาพ (~1 นาที)...');
-    try {
-      const res = await fetch('/api/news-desk/image-scout', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ caseId }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      setImgScout(prev => ({ ...prev, [caseId]: data.imageSources }));
-      showToast(`📸 เจอแหล่งภาพ ${data.imageSources.totalLinks} ลิงก์`);
-    } catch (e) {
-      showToast(`⚠️ ${e.message}`);
-    }
-    setImgScouting(prev => ({ ...prev, [caseId]: false }));
+  // ── หาแหล่งภาพประกอบ — ★ 6 ส.ค. 69: ถอดออก (ท่อหลังบ้านอยู่ในระบบโต๊ะข่าวที่ถูกลบทั้งชุด)
+  //    คงฟังก์ชันไว้เป็นตัวแจ้งเตือนสุภาพ แทนการยิงไปที่ endpoint ที่ไม่มีอยู่แล้ว (เดิมเด้ง error ดิบ)
+  const scoutImg = useCallback(async () => {
+    showToast('ℹ️ ฟีเจอร์หาแหล่งภาพถูกยุบพร้อมระบบโต๊ะข่าว — ใช้หน้า "ค้นรูปภาพ" แทนได้');
   }, []);
 
   // ── อัปเดตสถานะ (✅ ผ่าน / ❌ ไม่ผ่าน / 📌 ใช้แล้ว) ──
@@ -311,7 +298,7 @@ export default function GenerationLogsPage() {
         <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>📋 คลังผลงานเขียน</h1>
         <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Generation Log</span>
         <div style={{ flex: 1 }} />
-        <a href="/news-desk" style={{ ...btnStyle, textDecoration: 'none' }}>🗞️ ไปโต๊ะข่าว</a>
+        {/* ⛔ 6 ส.ค. 69: ถอดปุ่มไปโต๊ะข่าว — ระบบถูกลบทั้งชุด */}
         <button onClick={() => setAutoRefresh(v => !v)} style={{ ...btnStyle, color: autoRefresh ? 'var(--desk-green)' : 'var(--text-muted)' }}>
           {autoRefresh ? '🟢 Auto Refresh' : '⏸ หยุดรีเฟรช'}
         </button>

@@ -20,7 +20,7 @@ import { megaPipelineOff, isCoverJobKind, megaOffPayload } from '@/lib/megaPipel
 // 🛑 31 ก.ค. 69 (คำสั่งที่สอง): สวิตช์ปิดโต๊ะข่าวกลางชั่วคราว — กรองเฉพาะงาน desk_* (ล่าข่าว/ค้นเอง/บก.ใหญ่ = เผาโทเคน)
 import { deskPipelineOff, isDeskJobKind, deskOffPayload } from '@/lib/deskPipelineGate';
 // ★ 27 ก.ค. 69: 3 ชนิดงานโต๊ะข่าว (desk_harvest/desk_search/desk_chief) — ยืม whitelist mode จาก taxonomy เดียวกับ /api/m/desk
-import { HARVEST_MODE_KEYS, HARVEST_MODES } from '@/lib/services/newsDesk/taxonomy';
+import { HARVEST_MODE_KEYS, HARVEST_MODES } from '@/lib/services/newsDeskShared/taxonomy';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300; // คลาวรัน compose sync ได้ถึง ~5 นาที (ต้อง Vercel Pro) · เครื่องทีมคืนทันที

@@ -199,9 +199,9 @@ export default function RadarPage() {
           <div style={{ fontSize: 40, marginBottom: 12 }}>📡</div>
           <div style={{ fontSize: 19, fontWeight: 900, marginBottom: 10 }}>เรดาร์หากระแส — ปิดใช้งานแล้ว</div>
           <div style={{ fontSize: 14, lineHeight: 1.7, color: '#9aa', marginBottom: 22 }}>
-            ระบบนี้เลิกใช้แล้ว ใช้ <b style={{ color: '#818cf8' }}>โต๊ะข่าวกลาง</b> หากระแส/ข่าวแทน — ปิดเพื่อไม่ให้เปิดทิ้งไว้แล้วกินโทเคนฟรีๆ
+            ระบบนี้เลิกใช้แล้ว — ใช้หน้า <b style={{ color: '#818cf8' }}>สร้างคอนเทนต์ใหม่</b> เขียนข่าวได้โดยตรง
           </div>
-          <a href="/news-desk" style={{ display: 'inline-block', padding: '11px 22px', borderRadius: 10, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', color: '#fff', fontWeight: 800, fontSize: 14, textDecoration: 'none' }}>ไปโต๊ะข่าวกลาง →</a>
+          <a href="/content/new" style={{ display: 'inline-block', padding: '11px 22px', borderRadius: 10, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', color: '#fff', fontWeight: 800, fontSize: 14, textDecoration: 'none' }}>ไปสร้างคอนเทนต์ →</a>
         </div>
       </div>
     );

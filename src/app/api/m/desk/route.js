@@ -30,7 +30,7 @@ export const maxDuration = 30; // ★ 27 ก.ค. 69: harvest/chief ย้าย
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { getSession } from '@/lib/auth';
-import { HARVEST_MODE_KEYS } from '@/lib/services/newsDesk/taxonomy'; // ★ sol-review: whitelist mode จากคีย์จริง (มี 'all' รวมอยู่แล้ว) ไม่ hardcode ซ้ำ
+import { HARVEST_MODE_KEYS } from '@/lib/services/newsDeskShared/taxonomy'; // ★ sol-review: whitelist mode จากคีย์จริง (มี 'all' รวมอยู่แล้ว) ไม่ hardcode ซ้ำ
 // ★ 27 ก.ค. 69: fetchThumbs อ่าน/เขียน item เดียวกับที่ /api/news-desk/route.js ใช้ (store 'news-desk') — import lib ตรง ไม่แตะ route เดิม
 import { createStore } from '@/lib/persistStore';
 
@@ -174,7 +174,22 @@ async function extractOgImage(pageUrl) {
   } catch { return null; }
 }
 
+// ★ 6 ส.ค. 69: ระบบโต๊ะข่าวถูกลบทั้งชุด (เจ้าของสั่ง) — ประตูนี้ไม่มีปลายทางให้ส่งต่อแล้ว
+//   ตอบข้อความไทยชัดๆ แทนการยิงไป 404 (เดิมแอพขึ้นจอว่างเงียบ / ปุ่มเด้ง error ดิบให้ผู้ใช้เห็น)
+//   ⛔ ห้ามลบไฟล์นี้ทิ้ง: แอพมือถือรุ่นที่ผู้ใช้เปิดค้างไว้ยังยิงเข้ามา ต้องมีคนตอบให้จบสวยๆ
+const deskRemoved = () => NextResponse.json(
+  {
+    success: false,
+    error: 'โต๊ะข่าวถูกยุบถาวรแล้ว — ใช้แท็บอื่นในแอพ หรือหน้าสร้างคอนเทนต์บนเว็บแทน',
+    errorType: 'DESK_REMOVED',
+    items: [], jobs: [],
+  },
+  { status: 410 }
+);
+
 export async function GET(request) {
+  return deskRemoved();
+  // eslint-disable-next-line no-unreachable
   try {
     const s = await sess();
     if (!s) return unauthorized(); // ★ 27 ก.ค. 69: เปิดให้ทุกคนที่ล็อกอินใช้ได้ — ตัดด่าน role!=='admin' ออกแล้ว
@@ -215,6 +230,8 @@ export async function POST(request) {
   try {
     const s = await sess();
     if (!s) return unauthorized(); // ★ 27 ก.ค. 69: เปิดให้ทุกคนที่ล็อกอินใช้ได้ — ตัดด่าน role!=='admin' ออกแล้ว
+    return deskRemoved(); // ★ 6 ส.ค. 69: โต๊ะข่าวถูกยุบ — ทุก action ไม่มีปลายทางแล้ว
+    // eslint-disable-next-line no-unreachable
     const body = await request.json().catch(() => ({}));
     const action = String(body.action || '');
     if (!POST_ACTIONS.has(action)) {
