@@ -1,6 +1,6 @@
 /**
  * =====================================================
- * Viral Few-shot — เรียนสำนวนจากหอสมุดไวรัลจริง 170+ โพสต์
+ * Viral Few-shot — เรียนสำนวนจากหอสมุดไวรัลจริง 200+ โพสต์ (8 ส.ค. 69: 202 ใบ/14 หมวด — ทุกใบถูกเรียกได้จริง)
  * =====================================================
  * (11 มิ.ย. — ผู้ใช้เลือก: Few-shot ตามหมวด + สำนวนเพจไวรัลเต็มตัว)
  * ดึงโพสต์ไวรัลจริง "หมวดเดียวกับข่าว" 2 ตัวอย่างใส่พรอมต์ writer
@@ -105,7 +105,7 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
           .select('title, content, writing_notes, category, engagement_likes')
           .eq('category', libCat)
           .order('engagement_likes', { ascending: false })
-          .limit(_rotateOn() ? 12 : 6); // ★ 7 ส.ค. 69: เปิดโผกว้างขึ้นเป็น 12 (โหมดเดิม 6)
+          .limit(_rotateOn() ? 100 : 6); // ★ 8 ส.ค. 69 เจ้าของสั่ง "200+ ใบต้องถูกเรียกได้จริงทุกใบ": เปิดโผทั้งหมวด (ใหญ่สุดจริง 64 ใบ · เพดาน 100 กันโหลดบวม) — โหมดเดิม 6
         rows = (data || []).filter(r => (r.content || '').length > 200);
         _cache.set(libCat, { rows, at: Date.now() });
         if (_cache.size > 30) _cache = new Map([..._cache].slice(-15));
