@@ -10,11 +10,22 @@ export const RAWSTORY_PROMPT_REV_QUOTES = 'rawstory-v7-woven-0805';
 
 // สวิตช์ต้องเป็น '1' เป๊ะ (กติกาเดิมของสายถอดคลิป — ค่า truthy อื่นถือว่าปิด) · อ่านตอนเรียก ไม่ใช่ตอนโหลดโมดูล
 const swOn = (name) => process.env[name] === '1';
-const currentPromptRev = () => (
-  swOn('CLIP_V2_QUOTES') ? RAWSTORY_PROMPT_REV_QUOTES
+
+// ★ 8 ส.ค. 69 — การทดลอง "ตัดคำเปรยพิธีการ" 3 แบบ (เจ้าของสั่งเทสในเครื่องเทียบก่อนเลือก)
+//   CLIP_V2_STYLE=a|b|c เท่านั้น · ไม่ตั้ง/ค่าอื่น = v7 เดิมเป๊ะทุกตัวอักษร (ย้อนกลับ = ลบ env)
+//   a=แบนหมวดคำเปรย · b=เล่าเหตุการณ์ไม่เล่ารายการ · c=รอบขัดเกลาแยก (พรอมต์ถอดเดิม + text-pass)
+const styleMode = () => {
+  // ★ ผู้ตรวจ B9: trim + ปอกเครื่องหมายคำพูด (บทเรียน vercel env add ติด quote) — ค่าเพี้ยนต้องไม่ทำสวิตช์เงียบ
+  const v = String(process.env.CLIP_V2_STYLE || '').trim().replace(/^["']+|["']+$/g, '').toLowerCase();
+  return v === 'a' || v === 'b' || v === 'c' || v === 'ac' ? v : ''; // ac = ควบ A(พรอมต์)+C(ขัดเกลา)
+};
+const currentPromptRev = () => {
+  const base = swOn('CLIP_V2_QUOTES') ? RAWSTORY_PROMPT_REV_QUOTES
     : swOn('CLIP_PROMPT_0804') ? RAWSTORY_PROMPT_REV_0804
-      : RAWSTORY_PROMPT_REV
-);
+      : RAWSTORY_PROMPT_REV;
+  const st = styleMode();
+  return st ? `${base}-style${st.toUpperCase()}` : base;
+};
 
 const RAWSTORY_PROMPT = `คุณคือ "คนดูคลิปแล้วเล่าให้คนเขียนข่าวฟัง" ดูคลิปนี้ตั้งแต่ต้นจนจบทั้งภาพและเสียง แล้วเขียนเนื้อดิบที่คนเขียนข่าวนำไปใช้ต่อได้ทันที
 
@@ -112,6 +123,22 @@ const RULES_V2_QUOTES = `★★ วางแผนก่อนเขียน (�
 
 ก่อนส่ง ตรวจ rawStory และทุก topic แยกกันอีกครั้ง: ก้อนที่เข้าเงื่อนไขต้องมีคำพูดจริงอยู่ถูกจังหวะ ไม่มีสิ่งที่ไม่ใช่คำพูดในเครื่องหมายคำพูด และไม่มีเหตุการณ์ถูกตัดทิ้ง`;
 
+// ★ 8 ส.ค. 69 — แบบ A: แบนหมวดคำเปรยพิธีการ (ผ่าตัดเฉพาะจุด บนฐาน v7)
+const STYLE_A_RULES = `★★ ภาษาเล่าตรง ไม่มีคำเปรยพิธีการ
+- คำเปรยพิธีการทุกชนิดไม่ใช่เนื้อเรื่อง ห้ามใช้ในเสียงผู้เล่า: เปิดใจ เผยว่า เปิดเผยว่า กล่าวว่า ออกมาเผย ออกมาโพสต์ รวมถึงสำนวนแนะนำเวทีอย่าง เล่าในรายการ...ว่า กล่าวในรายการ ระหว่างการสัมภาษณ์
+- ระบุคำพูดด้วยคำเล่าตรงสั้นที่สุด: เล่าว่า บอกว่า ถามว่า ตอบว่า ยอมรับว่า — ติดชื่อคนแล้วเข้าเนื้อทันที เช่นเขียนว่า บี้เล่าว่า ไม่ใช่ บี้ เปิดใจเล่าในรายการว่า
+- ชื่อรายการหรือบริบทการสัมภาษณ์เอ่ยได้มากที่สุดหนึ่งครั้งในประโยคแรกแบบสั้น หลังจากนั้นห้ามพูดถึงรายการ พิธีกร หรือการสัมภาษณ์อีก เว้นแต่คำถามของพิธีกรเป็นสาระของเหตุการณ์เอง
+- คำเหล่านี้ที่อยู่ในคำพูดจริงในเครื่องหมายคำพูด เก็บตามจริง ห้ามแก้`;
+
+// ★ 8 ส.ค. 69 — แบบ B: เปลี่ยนกรอบการเล่า — รายการเป็นแค่แหล่งข้อมูล ไม่ใช่ฉากของเรื่อง
+const STYLE_B_RULES = `★★ เล่าเหตุการณ์ ไม่เล่ารายการ
+- รายการ การสัมภาษณ์ หรือคลิป เป็นเพียงแหล่งของข้อมูล ไม่ใช่ฉากของเนื้อเรื่อง — เนื้อดิบต้องเล่าเรื่องที่เกิดขึ้นกับบุคคลตามลำดับเหตุการณ์ของเรื่องนั้น ไม่ใช่ลำดับการนั่งคุยในรายการ
+- แหล่งที่มาเอ่ยได้หนึ่งครั้งในประโยคแรกแบบสั้นที่สุด หลังจากนั้นเล่าเหตุการณ์ตรงทั้งหมด ใครทำอะไร เกิดอะไร ใครพูดอะไรในเหตุการณ์นั้น พร้อมคำพูดจริงถักตามจังหวะของเหตุการณ์
+- เหตุการณ์ที่เจ้าตัวเล่าย้อนถึงอดีต ให้เขียนเป็นฉากอดีตตรงๆ เหมือนผู้เขียนเห็นเหตุการณ์นั้นเอง ไม่ใช่รายงานว่าเขากำลังนั่งเล่าอยู่
+- ห้ามเล่าภาพบรรยากาศการสัมภาษณ์ ห้ามเล่าบทบาทพิธีกร และห้ามคำเปรยพิธีการอย่าง เปิดใจ เผยว่า กล่าวว่า เล่าในรายการว่า — ระบุคำพูดด้วยคำเล่าตรง เล่าว่า บอกว่า ถามว่า ตอบว่า
+- คำถามของพิธีกรเก็บเฉพาะเมื่อคำถามเป็นสาระของเรื่อง เขียนสั้นว่า เมื่อถูกถามว่า แล้วเข้าคำตอบทันที
+- คำเปรยที่อยู่ในคำพูดจริงในเครื่องหมายคำพูด เก็บตามจริง ห้ามแก้`;
+
 // ★ 4 ส.ค. 69 (งาน A4) — ใช้ตอน route สั่งถอดซ้ำเพราะด่านคำพูดไม่ผ่าน (ไม่ใช่ค่าเริ่มต้น)
 const EMPHASIZE_QUOTES_LINE = `คลิปนี้ตรวจพบว่ามีคนพูด: เนื้อดิบต้องถักคำพูดจริง (verbatim) ในเครื่องหมายคำพูดแทรกในเนื้อตามที่ได้ยินจริง ห้ามเปลี่ยนเป็นคำเล่าทางอ้อมทั้งหมด`;
 
@@ -190,6 +217,8 @@ function buildRawStoryPrompt(topicHints, identity, opts = {}) {
   const context = [
     swOn('CLIP_PROMPT_0804') ? RULES_0804 : '',
     swOn('CLIP_V2_QUOTES') ? RULES_V2_QUOTES : '',
+    (styleMode() === 'a' || styleMode() === 'ac') ? STYLE_A_RULES : '',
+    styleMode() === 'b' ? STYLE_B_RULES : '',
     buildSourceMetaBlock(opts?.sourceMeta),
     buildTopicHintsBlock(topicHints),
     buildIdentityBlock(identity),
@@ -263,7 +292,90 @@ async function runRawStory(callModel) {
   }
   const out = normalizeRawStory(result);
   if (qcOn && !String(out.rawStory || '').trim() && !out.topics.length) throw new Error('GEMINI_EMPTY');
+  // ★ 8 ส.ค. 69 — แบบ C: รอบขัดเกลาแยก (ตัดคำเปรยด้วย text-pass ราคาถูก + ด่านกลไกคุม) · ล้ม/ไม่ผ่านด่าน = ใช้ต้นฉบับ
+  if (styleMode() === 'c') return await _polishStyleC(out);
+  // ★ 8 ส.ค. 69 (เจ้าของสั่ง) — โหมด ac = ถอดรอบเดียว ได้ 2 เวอร์ชันในเคสเดียว:
+  //   เวอร์ชันหลัก (rawStory/topics) = แบบ A ต้นฉบับเป๊ะ · เวอร์ชันขัดเกลา = แนบที่ altPolished {rawStory, topics}
+  //   ขัดเกลาล้ม/ไม่ผ่านด่าน = ไม่แนบ (เคสยังสมบูรณ์ด้วยเวอร์ชันหลัก) — ห้ามทำเวอร์ชันหลักพัง
+  if (styleMode() === 'ac') {
+    const polished = await _polishStyleC(out);
+    // ★ ผู้ตรวจ B4 (บังคับ): แนบเฉพาะก้อนที่ "ขัดเกลาจริง" — ก้อนที่เท่าต้นฉบับห้ามแนบซ้ำใต้ป้าย (ขัดเกลา) หลอกคนเทียบ
+    // ★ ผู้ตรวจ B5: เพดานขนาดเท่าเวอร์ชันหลัก (หลัก 12000 · ประเด็น 4000) กันเรคคอร์ดบวมเกินมาตรการเดิม
+    const mainChanged = polished.rawStory !== out.rawStory;
+    const changedTopics = (polished.topics || [])
+      .filter((t, i) => t.rawStory !== (out.topics[i] || {}).rawStory)
+      .map(t => ({ no: t.no, title: t.title, timeRange: t.timeRange, rawStory: truncateAtBoundary(t.rawStory, 4000) }));
+    if (mainChanged || changedTopics.length) {
+      return {
+        ...out,
+        altPolished: {
+          ...(mainChanged ? { rawStory: truncateAtBoundary(polished.rawStory, 12000) } : {}),
+          ...(changedTopics.length ? { topics: changedTopics } : {}),
+        },
+      };
+    }
+    return out; // ขัดเกลาไม่เปลี่ยนอะไร/ไม่ผ่านด่าน = เวอร์ชันเดียวพอ ไม่แนบซ้ำ
+  }
   return out;
+}
+
+// ── แบบ C: ขัดเกลาคำเปรยหลังถอด ─────────────────────────────────────────────
+//   หลักนิรภัย 3 ชั้น: (1) คำพูดในเครื่องหมายคำพูดทุกช่วงต้องรอดครบทุกตัวอักษร (2) ความยาวต่อก้อน 85-110% ของเดิม
+//   (3) พังตรงไหน = ใช้ต้นฉบับก้อนนั้น · ทั้งฟังก์ชันห้าม throw (ล้มทั้งก้อน = คืนต้นฉบับทั้งชุด)
+const _POLISH_PROMPT_HEAD = `คุณคือบรรณาธิการภาษา แก้ "คำเปรยพิธีการ" ในเนื้อดิบข่าวโดยไม่แตะสาระ:
+- แทนคำเปรยพิธีการด้วยคำเล่าตรง: เปิดใจเล่าในรายการ...ว่า / เปิดใจว่า / เผยว่า / เปิดเผยว่า / กล่าวว่า / กล่าวในรายการ → เล่าว่า หรือ บอกว่า · ระหว่างการสัมภาษณ์ ตัดทิ้งหรือย่อ
+- การเอ่ยถึงรายการ พิธีกร หรือการสัมภาษณ์ เก็บได้เฉพาะครั้งแรกครั้งเดียวแบบสั้น ที่เหลือตัดหรือเรียบเรียงให้เล่าเหตุการณ์ตรง
+- ⛔ ห้ามแก้ เพิ่ม หรือตัดข้อความในเครื่องหมายคำพูด "..." แม้แต่ตัวอักษรเดียว · ห้ามเพิ่ม/ตัด/เปลี่ยนข้อเท็จจริง ชื่อ ตัวเลข ลำดับเหตุการณ์ · ห้ามเติมสำนวนใหม่ของตัวเอง
+- แก้เฉพาะที่จำเป็น ประโยคที่ไม่มีคำเปรยให้คงเดิมทุกตัวอักษร
+ตอบ JSON เท่านั้น โครงเดียวกับที่รับ: {"rawStory":"...","topics":[{"no":1,"rawStory":"..."}]}`;
+
+// เพดานของ "รอบขัดเกลา text" (คนละสายกับเพดานวิดีโอ 32000 ที่เทสปักหมุดคุม 2 จุด)
+const POLISH_TEXT_MAX_TOKENS = 24000;
+
+function _quoteSpans(s) { return String(s || '').match(/[“"][^”"]+[”"]/g) || []; }
+/** ★ export ให้เทสปักหมุดพฤติกรรมเรียกตรง (tests/clip-style-modes.test.mjs) — โปรดักชันใช้ภายในเท่านั้น */
+export function _polishBlockOk(orig, polished) {
+  if (!polished || typeof polished !== 'string') return false;
+  const o = orig.length, p = polished.length;
+  if (p < o * 0.85 || p > o * 1.1) return false;
+  // ★ ผู้ตรวจ B1 (บังคับ): คำพูดต้อง "ชุดเดิมเป๊ะสองทิศทาง" — ของเดิมรอดครบ + ห้ามมีคำพูดใหม่โผล่แม้แต่ช่วงเดียว
+  //   (เดิมเช็คขาเดียว: คำพูดปลอมที่ถูกเติมใหม่ลอดด่านได้ — พิสูจน์ด้วยเทสจริงของผู้ตรวจ)
+  const origSpans = _quoteSpans(orig);
+  const polSpans = _quoteSpans(polished);
+  if (polSpans.length !== origSpans.length) return false;
+  for (const q of origSpans) if (!polished.includes(q)) return false;
+  for (const q of polSpans) if (!origSpans.includes(q)) return false;
+  return true;
+}
+async function _polishStyleC(out) {
+  try {
+    // ★ บทเรียน 8 ส.ค.: callGemini(text) มีเพดานเวลา 15 วิ hardcode — งานก้อนยาวไม่ทัน จึงใช้ luna ผ่าน callAI แทน
+    //   (หมายเหตุผู้ตรวจ: sanitizeOutput วิ่งทั้งสองเส้นเหมือนกัน — เหตุผลจริงคือเพดานเวลาอย่างเดียว)
+    //   ★ ผู้ตรวจ B6: ใส่เพดานเวลาของตัวเอง 90 วิ — callAI ไม่มี timeout ในตัว ปล่อยไว้ = ยึดสล็อตคิววิดีโอค้าง
+    const { callAI } = await import('@/lib/ai/openai');
+    const payload = { rawStory: out.rawStory, topics: (out.topics || []).map(t => ({ no: t.no, rawStory: t.rawStory })) };
+    const raw = await callAI({ systemPrompt: _POLISH_PROMPT_HEAD, prompt: JSON.stringify(payload), model: 'gpt-5.6-luna', temperature: 0.1, maxTokens: POLISH_TEXT_MAX_TOKENS, signal: AbortSignal.timeout(90_000) });
+    let p = raw;
+    if (typeof p === 'string') p = JSON.parse(p.replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/, '').trim());
+    p = _unwrapModelJson(p);
+    const polishedMain = _polishBlockOk(out.rawStory, p?.rawStory) ? p.rawStory : out.rawStory;
+    // ★ ผู้ตรวจ B3 (บังคับ): โมเดลคืน no เป็นสตริง ("1") จับคู่กับเลขไม่เจอ = ประเด็นถอยต้นฉบับเงียบทั้งชุด
+    //   → คีย์ด้วย Number ทั้งสองฝั่ง + จับคู่ไม่ได้ต้องเห็นใน log ไม่ใช่เงียบ
+    const byNo = new Map((Array.isArray(p?.topics) ? p.topics : []).map(t => [Number(t?.no), String(t?.rawStory || '')]));
+    let missed = 0;
+    const topics = (out.topics || []).map(t => {
+      const cand = byNo.get(Number(t.no));
+      if (cand === undefined) { missed++; return t; }
+      return _polishBlockOk(t.rawStory, cand) ? { ...t, rawStory: cand } : t;
+    });
+    if (missed > 0 && (out.topics || []).length > 0) console.warn(`[RawStoryV2] ขัดเกลา: จับคู่ประเด็นไม่เจอ ${missed}/${out.topics.length} (ใช้ต้นฉบับก้อนนั้น)`);
+    const changed = polishedMain !== out.rawStory || topics.some((t, i) => t.rawStory !== (out.topics[i] || {}).rawStory);
+    if (!changed) console.log('[RawStoryV2] แบบ C: ไม่มีก้อนใดผ่านด่านขัดเกลา — ใช้ต้นฉบับทั้งชุด');
+    return { ...out, rawStory: polishedMain, topics };
+  } catch (e) {
+    console.warn('[RawStoryV2] แบบ C ขัดเกลาล้ม (ใช้ต้นฉบับ):', String(e?.message || e).slice(0, 70));
+    return out;
+  }
 }
 
 /** @param {{url: string, topicHints?: any, identity?: any, sourceMeta?: object|null, emphasizeQuotes?: boolean}} args */

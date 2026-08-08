@@ -842,6 +842,33 @@ export default function ClipTranscriptPage() {
               </div>
             )}
 
+            {/* ★ 8 ส.ค. (เจ้าของสั่ง): ถอดรอบเดียวได้ 2 เวอร์ชัน — ฉบับขัดเกลา (ตัดคำเปรย) แนบคู่ฉบับหลัก ให้ทีมเลือกใช้ */}
+            {insight.rawStoryV2?.altPolished && (
+              <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed rgba(167,139,250,0.4)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: '#a78bfa' }}>🧽 เนื้อดิบ v2 — ฉบับขัดเกลา (ตัดคำเปรย)</div>
+                  {insight.rawStoryV2.altPolished.rawStory && <button onClick={() => copy(insight.rawStoryV2.altPolished.rawStory, 'rsv2p')} style={{ padding: '3px 10px', borderRadius: 7, border: '1px solid rgba(167,139,250,0.45)', background: 'transparent', color: '#a78bfa', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>{copied === 'rsv2p' ? '✅' : '📋 คัดลอกก้อนรวม'}</button>}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted,#888)', marginBottom: 12 }}>ตัดคำเปรยโดยคุมชุดคำพูดจริงให้ตรงต้นฉบับ · โชว์เฉพาะก้อนที่ขัดเกลาจริง — ตรวจก่อนใช้เช่นเดียวกับฉบับหลัก</div>
+                {insight.rawStoryV2.altPolished.rawStory && (
+                  <div style={{ marginBottom: 12, fontSize: 13.5, lineHeight: 1.85, whiteSpace: 'pre-wrap', background: 'rgba(167,139,250,0.06)', border: '1px solid rgba(167,139,250,0.2)', borderRadius: 10, padding: 14, maxHeight: 400, overflowY: 'auto' }}>{insight.rawStoryV2.altPolished.rawStory}</div>
+                )}
+                {insight.rawStoryV2.altPolished.topics?.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {insight.rawStoryV2.altPolished.topics.map((t, i) => (
+                      <div key={i} style={{ border: '1px solid rgba(167,139,250,0.3)', borderRadius: 10, padding: 12, background: 'rgba(167,139,250,0.04)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+                          <div style={{ fontSize: 13, fontWeight: 800 }}><span style={{ color: '#a78bfa' }}>ประเด็น {t.no || i + 1} (ขัดเกลา):</span> {t.title}{t.timeRange && <span style={{ fontSize: 11, color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600, marginLeft: 6 }}>⏱️ {t.timeRange}</span>}</div>
+                          <button onClick={() => copy(`${t.title || ''}${t.timeRange ? ` (${t.timeRange})` : ''}\n\n${t.rawStory}`, 'rsv2p-t-' + i)} style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid rgba(167,139,250,0.45)', background: 'transparent', color: '#a78bfa', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>{copied === 'rsv2p-t-' + i ? '✅' : '📋 คัดลอก'}</button>
+                        </div>
+                        <div style={{ fontSize: 13, lineHeight: 1.8, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 11 }}>{t.rawStory}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* ★ 4 ส.ค.: v2 ล้ม → แถบเตือนแทนตำแหน่งการ์ด v2 · ชิปกำกับ (ต้นทาง/ธงคุณภาพ)
                 ฟิลด์ใหม่ optional ทั้งหมด — เคสเก่าไม่มี = ไม่โชว์อะไร · ไม่เข้าปุ่มคัดลอกเนื้อ */}
             {renderV2ErrorBar(insight)}
@@ -1042,6 +1069,32 @@ export default function ClipTranscriptPage() {
                                   </div>
                                 ))}
                               </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* ★ 8 ส.ค.: คลังโชว์ "ฉบับขัดเกลา" เท่าผลสด (เคสเก่าไม่มี = ไม่โชว์) */}
+                      {ins.rawStoryV2?.altPolished && (
+                        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px dashed rgba(167,139,250,0.4)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                            <div style={{ fontSize: 12.5, fontWeight: 800, color: '#a78bfa' }}>🧽 เนื้อดิบ v2 — ฉบับขัดเกลา (ตัดคำเปรย)</div>
+                            {ins.rawStoryV2.altPolished.rawStory && <button onClick={() => copy(ins.rawStoryV2.altPolished.rawStory, 'ic-rsv2p-' + c.id)} style={{ padding: '3px 9px', borderRadius: 7, border: '1px solid rgba(167,139,250,0.45)', background: 'transparent', color: '#a78bfa', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>{copied === 'ic-rsv2p-' + c.id ? '✅' : '📋 คัดลอกก้อนรวม'}</button>}
+                          </div>
+                          {ins.rawStoryV2.altPolished.rawStory && (
+                            <div style={{ marginBottom: 8, fontSize: 12.5, lineHeight: 1.8, whiteSpace: 'pre-wrap', background: 'rgba(167,139,250,0.06)', border: '1px solid rgba(167,139,250,0.2)', borderRadius: 8, padding: 11, maxHeight: 320, overflowY: 'auto' }}>{ins.rawStoryV2.altPolished.rawStory}</div>
+                          )}
+                          {ins.rawStoryV2.altPolished.topics?.length > 0 && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                              {ins.rawStoryV2.altPolished.topics.map((t, i) => (
+                                <div key={i} style={{ border: '1px solid rgba(167,139,250,0.3)', borderRadius: 9, padding: 11, background: 'rgba(167,139,250,0.04)' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 800 }}><span style={{ color: '#a78bfa' }}>ประเด็น {t.no || i + 1} (ขัดเกลา):</span> {t.title}{t.timeRange && <span style={{ fontSize: 10.5, color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600, marginLeft: 6 }}>⏱️ {t.timeRange}</span>}</div>
+                                    <button onClick={() => copy(`${t.title || ''}${t.timeRange ? ` (${t.timeRange})` : ''}\n\n${t.rawStory}`, 'ic-rsv2p-t-' + c.id + '-' + i)} style={{ padding: '3px 9px', borderRadius: 7, border: '1px solid rgba(167,139,250,0.45)', background: 'transparent', color: '#a78bfa', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>{copied === 'ic-rsv2p-t-' + c.id + '-' + i ? '✅' : '📋'}</button>
+                                  </div>
+                                  <div style={{ fontSize: 12.5, lineHeight: 1.75, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 10 }}>{t.rawStory}</div>
+                                </div>
+                              ))}
                             </div>
                           )}
                         </div>
