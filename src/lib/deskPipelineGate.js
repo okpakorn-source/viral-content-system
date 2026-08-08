@@ -31,8 +31,9 @@ export function isDeskJobKind(kind) {
   return DESK_JOB_KINDS.includes(String(kind || '').trim());
 }
 
+// 🗑️ 8 ส.ค. 69: เจ้าของสั่งลบระบบโต๊ะข่าวทั้งชุด — route ปลายทางถูกลบแล้ว สวิตช์ DESK_PIPELINE เปิดคืนไม่ได้อีก (ข้อความต้องตรงความจริง)
 export const DESK_OFF_MESSAGE =
-  'โต๊ะข่าวกลางปิดชั่วคราว (เจ้าของสั่งพักไม่ให้กินโทเคน) — เปิดคืนได้ด้วย DESK_PIPELINE=1';
+  'โต๊ะข่าวถูกยุบถาวรแล้ว (เจ้าของสั่งลบทั้งระบบ 8 ส.ค. 69) — งานโต๊ะข่าวไม่ทำงานอีกต่อไป';
 
 export function deskOffPayload() {
   return {

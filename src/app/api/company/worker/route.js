@@ -1,19 +1,15 @@
 /**
  * ============================================================
- * 🤖 /api/company/worker — ผู้ช่วยอัตโนมัติ ดึงคำสั่งจากคิวมารันเอง (แก้ "สั่งแล้วไม่ไปทำ")
+ * 🤖 /api/company/worker — ผู้ช่วยอัตโนมัติของคิวงานบริษัท
  * ============================================================
  * เรียกโดย: Vercel cron (ทุกนาที) + จอออฟฟิศ (ทุก ~25 วิ ตอนเปิดอยู่)
- * ทำ: อ่าน company_tasks → เจอคำสั่ง "หาข่าว/รันรอบ" ที่ยัง pending → รัน /api/company/newsdesk-run จริง → อัปเดตสถานะ done/failed
- *
- * 🔴 กันเงินรั่ว (สำคัญมาก):
- *   - เคลม task เป็น 'running' ก่อนรันเสมอ (ถ้ารันล้มก็เป็น failed ไม่ใช่ pending) → cron ไม่รันซ้ำ = ไม่เผาเงินซ้ำ
- *   - รันได้ทีละ 1 งาน/ครั้ง + ถ้ามีงาน running อยู่ (ไม่เกิน 6 นาที) ข้าม
- *   - เฉพาะคำสั่ง "หาข่าว" เท่านั้น (งานถูก ~฿0.44) — ประชุม/ส่งข่าว/แก้โค้ด ไม่แตะ (ปล่อยผู้จัดการ)
- *   - ปิดทั้งหมดได้ด้วย ENV COMPANY_WORKER_ENABLED='0'
+ * 🗑️ 8 ส.ค. 69 โต๊ะข่าวถูกยุบถาวร (route /api/company/newsdesk-run ถูกลบ):
+ *   เหลือหน้าที่เดียว — เจองาน "หาข่าว" ค้างคิว → ปิดด้วยคำตอบ "โต๊ะข่าวถูกยุบ" ตรงๆ (กันงานล้มเงียบด้วย 404)
+ *   งานบริษัทอื่น (ประชุม/ส่งข่าว/แก้โค้ด) ไม่แตะเหมือนเดิม (ปล่อยผู้จัดการ)
+ *   ปิดทั้งหมดได้ด้วย ENV COMPANY_WORKER_ENABLED='0'
  */
 import { NextResponse } from 'next/server';
 import { getSupabase } from '@/lib/supabase';
-import { writeFeed } from '@/lib/company/companyFeed';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -35,7 +31,6 @@ async function handle(request) {
     }
     const sb = getSupabase();
     if (!sb) return NextResponse.json({ success: true, idle: true, reason: 'ไม่มี Supabase' });
-    const base = new URL(request.url).origin;
     const now = Date.now();
 
     const q = await sb.from('store_items').select('id,data').eq('store_name', STORE)
@@ -60,38 +55,12 @@ async function handle(request) {
     const task = pending[0];
     if (!task) return NextResponse.json({ success: true, idle: true, reason: 'ไม่มีคำสั่งหาข่าวรอรัน' });
 
-    // เคลม (optimistic): running + token แล้วอ่านซ้ำยืนยันเป็นของเรา
-    const token = 'w_' + now + '_' + Math.random().toString(36).slice(2, 8);
-    const claimed = { ...task.d, status: 'running', claimedAt: now, worker: token };
-    const up = await updateTask(sb, task.id, claimed);
-    if (up.error) return NextResponse.json({ success: true, idle: true, reason: 'เคลมงานไม่สำเร็จ' });
-    const rc = await sb.from('store_items').select('data').eq('id', task.id).single();
-    if (!rc.data || !rc.data.data || rc.data.data.worker !== token) {
-      return NextResponse.json({ success: true, idle: true, reason: 'งานถูกเคลมโดยตัวอื่น' });
-    }
-
-    // รันรอบหาข่าวจริง
-    await writeFeed({ scope: 'newsdesk', kind: 'worklog', agent: 'mod',
-      text: '🤖 ผู้ช่วยอัตโนมัติรับคำสั่ง: "' + String(task.d.command || '').slice(0, 60) + '" → เริ่มรันรอบหาข่าว' });
-
-    let ok = false, resultText = '';
-    try {
-      const rr = await fetch(base + '/api/company/newsdesk-run', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topClusters: 2, queriesPerCluster: 3 }),
-      });
-      const result = await rr.json().catch(() => ({}));
-      ok = !!(result && result.success);
-      resultText = ok
-        ? ('เก็บ ' + (result.saved || 0) + ' ลีด · ฿' + (Number(result.costTHB) || 0).toFixed(2) + ' · เจอ ' + (result.found || 0))
-        : ('ติดปัญหา: ' + (result.error || 'ไม่ทราบสาเหตุ'));
-    } catch (e) {
-      resultText = 'ติดปัญหา: ' + (e && e.message ? e.message : 'เชื่อมต่อล้มเหลว');
-    }
-
-    await updateTask(sb, task.id, { ...claimed, status: ok ? 'done' : 'failed', result: resultText, doneAt: Date.now() });
-
-    return NextResponse.json({ success: true, ran: true, taskId: task.id, ok, result: resultText, tookMs: Date.now() - t0 });
+    // 🗑️ 8 ส.ค. 69: ปลายทางถูกลบแล้ว — ปิดงานค้างด้วยคำตอบตรงๆ (ครั้งละ 1 งาน cron รอบถัดไปเก็บใบต่อไปเอง)
+    await updateTask(sb, task.id, {
+      ...task.d, status: 'failed',
+      result: 'โต๊ะข่าวถูกยุบถาวรแล้ว (8 ส.ค. 69) — คำสั่งหาข่าวไม่ทำงานอีกต่อไป', doneAt: now,
+    });
+    return NextResponse.json({ success: true, ran: false, taskId: task.id, note: 'ปิดงานค้าง: โต๊ะข่าวถูกยุบถาวรแล้ว', tookMs: Date.now() - t0 });
   } catch (error) {
     return NextResponse.json({ success: false, error: error && error.message ? error.message : 'worker ล้มเหลว', errorType: 'WORKER_ERROR' }, { status: 500 });
   }

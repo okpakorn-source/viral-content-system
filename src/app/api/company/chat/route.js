@@ -146,6 +146,10 @@ export async function POST(request) {
     }
     // ---- โหมดสั่งงานจริง: เข้าคิว Supabase ให้ผู้จัดการ (Claude Code) รันจริง แล้วผลกลับมาที่แชท ----
     if (body.action === 'task') {
+      // 🗑️ 8 ส.ค. 69: โต๊ะข่าวถูกยุบถาวร — คำสั่งจากห้องข่าวต้องได้คำตอบตรงๆ ไม่ใช่เข้าคิวไปล้มเงียบ
+      if (scope === 'newsdesk') {
+        return NextResponse.json({ success: true, note: '🗑️ โต๊ะข่าวถูกยุบถาวรแล้ว (8 ส.ค. 69) — คำสั่งนี้ไม่ถูกเข้าคิว' });
+      }
       const sb = getSupabase();
       if (!sb) return NextResponse.json({ success: false, error: 'คิวงานยังไม่พร้อม (Supabase)', errorType: 'NO_DB' }, { status: 503 });
       const id = 'task_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
@@ -226,7 +230,7 @@ export async function POST(request) {
       // คำสั่งให้ลงมือ → เข้าคิวงานอัตโนมัติ (ไม่ต้องกดปุ่มแยก) ผู้จัดการจะรันให้
       const isCmd = !!(rr && rr.isCommand);
       let queued = false;
-      if (isCmd) {
+      if (isCmd && scope !== 'newsdesk') { // 🗑️ 8 ส.ค. 69: ห้องข่าวยุบแล้ว — คำสั่งไม่เข้าคิว (ปลายทาง newsdesk-run ถูกลบ)
         const sbq = getSupabase();
         if (sbq) {
           const tid = 'task_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
@@ -236,7 +240,7 @@ export async function POST(request) {
       }
       if (queued) { await writeFeed({ scope: scope || 'main', kind: 'worklog', agent: (picked[0] || ''), text: '⚡ รับคำสั่งเข้าคิว: ' + msg }); }
       const results = await Promise.all(picked.map(replyAs));
-      return NextResponse.json({ success: true, roundtable: results.filter(x => x && x.reply), queued: queued, queuedNote: queued ? 'รับคำสั่งเข้าคิวแล้ว ✅ ผู้จัดการกำลังรันงานให้ — ดูผลที่ ＋ → 📋 งานที่สั่ง' : '' });
+      return NextResponse.json({ success: true, roundtable: results.filter(x => x && x.reply), queued: queued, queuedNote: queued ? 'รับคำสั่งเข้าคิวแล้ว ✅ ผู้จัดการกำลังรันงานให้ — ดูผลที่ ＋ → 📋 งานที่สั่ง' : (isCmd && scope === 'newsdesk' ? '🗑️ โต๊ะข่าวถูกยุบถาวรแล้ว (8 ส.ค. 69) — คำสั่งหาข่าวไม่ทำงานอีกต่อไป' : '') });
     }
     // เจาะจงคน → คนนั้นตอบด้วยสมองตัวเอง
     const one = await replyAs(h);
