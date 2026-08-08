@@ -29,6 +29,7 @@ export async function viralPolish(versions, newsData, breakdownData) {
       category: breakdownData?.primaryCategory || '',
       emotionalTags: breakdownData?.emotionalTags || [],
       archetype: breakdownData?.narrativeArchetype || '',
+      noHistory: true, // 📒 สายขัดเงาห้ามจดสมุดประวัติ — กันสถิตินับเฟ้อ (ข่าวเดียวโดนจด 2 รอบ) ถ้าวันหน้าถูกต่อกลับ
     });
   } catch { /* ไม่มีตัวอย่าง = เกลาด้วยกฎอย่างเดียว */ }
 

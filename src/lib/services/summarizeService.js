@@ -1355,6 +1355,7 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
         category: newsAnalysis?.primaryCategory || actualBreakdown?.primaryCategory || smartPrompt?.category || '',
         emotionalTags: newsAnalysis?.emotionalTags || newsAnalysis?.emotionalThemes || actualBreakdown?.emotionalTags || [],
         archetype: newsAnalysis?.narrativeArchetype || actualBreakdown?.narrativeArchetype || '',
+        newsTitle: actualNewsTitle || '', // 📒 ผูกประวัติการหยิบเข้ากับข่าว (สมุดประวัติ 8 ส.ค. 69)
       });
     } catch (e) { console.log('[ViralFewshot] skip:', e.message?.slice(0, 40)); }
 

@@ -9,6 +9,40 @@ const store = createStore('viral-library');
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
+
+    // 📒 8 ส.ค. 69: สมุดประวัติการหยิบตัวอย่าง (เจ้าของสั่ง "เก็บประวัติแม่นยำ ตัวไหนถูกเรียก")
+    //   ?action=pick-history = รายการหยิบดิบล่าสุด · ?action=pick-stats = นับต่อใบ ใครถูกใช้กี่ครั้ง
+    const action = searchParams.get('action');
+    if (action === 'pick-history' || action === 'pick-stats') {
+      const { getSupabase } = await import('@/lib/supabase');
+      const sb = getSupabase();
+      if (!sb) return NextResponse.json({ success: false, error: 'คลังประวัติยังไม่พร้อม (Supabase)', errorType: 'NO_DB' }, { status: 503 });
+      const limit = Math.min(1000, Math.max(1, parseInt(searchParams.get('limit') || '300', 10) || 300));
+      const q = await sb.from('store_items').select('data').eq('store_name', 'viral_pick_history')
+        .order('created_at', { ascending: false }).limit(limit);
+      if (q.error) return NextResponse.json({ success: false, error: q.error.message, errorType: 'HISTORY_READ' }, { status: 500 });
+      const rows = (q.data || []).map((r) => r.data).filter(Boolean);
+      // ★ ผู้ตรวจแนะ: บอกขอบเขตหน้าต่างชัดๆ — สถิตินับจากแถวล่าสุดที่กวาดมา ไม่ใช่ตลอดกาล (กันอ่านผิด)
+      const truncated = (q.data || []).length === limit;
+      if (action === 'pick-history') return NextResponse.json({ success: true, count: rows.length, truncated, history: rows });
+      const stat = {};
+      for (const h of rows) for (const p of (h.picks || [])) {
+        const k = String(p.id ?? p.title);
+        stat[k] = stat[k] || { id: p.id ?? null, title: p.title, lib: h.lib, used: 0, lastUsed: '' };
+        stat[k].used++;
+        if (String(h.ts || '') > stat[k].lastUsed) stat[k].lastUsed = h.ts;
+      }
+      const list = Object.values(stat).sort((a, b) => b.used - a.used);
+      return NextResponse.json({
+        success: true,
+        examplesUsed: list.length,
+        totalPicks: rows.reduce((s, h) => s + ((h.picks || []).length), 0),
+        rowsScanned: rows.length,
+        truncated, // true = ประวัติมีมากกว่าหน้าต่างที่กวาด — ยอด used เป็นยอดช่วงล่าสุด ไม่ใช่ตลอดกาล
+        stats: list,
+      });
+    }
+
     const category = searchParams.get('category');
     const status = searchParams.get('status');
     let items = await store.getAll();

@@ -52,6 +52,35 @@ const CACHE_MS = 10 * 60 * 1000;
 const _rotateOn = () => process.env.VIRAL_ROTATE !== '0';
 
 /**
+ * 📒 สมุดประวัติการหยิบ (8 ส.ค. 69 เจ้าของสั่ง "เก็บประวัติแม่นยำ ตัวไหนถูกเรียก")
+ * จดลง Supabase store_items/viral_pick_history: ใบไหน (id+ชื่อ) · หมวด · ขนาดโผ · หัวข่าว · เวลา
+ * อ่านผ่าน GET /api/viral-library?action=pick-history หรือ ?action=pick-stats
+ * fail-safe แท้: จดไม่สำเร็จ = log แล้วเดินต่อ ห้ามล้มท่อข่าวเด็ดขาด
+ */
+async function _recordPickHistory(libCat, picks, meta = {}) {
+  try {
+    const sb = getSupabase();
+    if (!sb || !picks.length || meta.noHistory) return;
+    const nowIso = new Date().toISOString();
+    const id = 'vpick_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    // ★ ผู้ตรวจจับได้ (บทเรียนซ้ำรอย "ตำราว่างเงียบๆ" 2 ส.ค.): supabase-js ไม่ throw เมื่อ insert ล้ม —
+    //   มันคืน { error } เงียบๆ ต้องเช็คเองไม่งั้นสมุดว่างโดยไม่มีใครรู้ (catch ข้างล่างเป็นตาข่ายชั้นสองเท่านั้น)
+    const { error: insErr } = await sb.from('store_items').insert({
+      id, store_name: 'viral_pick_history',
+      data: {
+        ts: nowIso, lib: libCat, poolSize: Number(meta.poolSize) || 0,
+        newsTitle: String(meta.newsTitle || '').slice(0, 140),
+        picks: picks.map((p) => ({ id: p.id ?? null, title: String(p.title || '').slice(0, 120) })),
+      },
+      created_at: nowIso, updated_at: nowIso,
+    });
+    if (insErr) console.log('[ViralFewshot] 📒 จดประวัติไม่สำเร็จ (ไม่กระทบข่าว):', String(insErr.message || insErr.code || '').slice(0, 60));
+  } catch (e) {
+    console.log('[ViralFewshot] 📒 จดประวัติไม่สำเร็จ (ไม่กระทบข่าว):', e.message?.slice(0, 40));
+  }
+}
+
+/**
  * สุ่มถ่วงน้ำหนักตามยอดไลก์ ไม่คืนซ้ำ — "คุณภาพนำ ทุกใบมีสิทธิ์"
  * แยก rand ออกเป็นพารามิเตอร์เพื่อให้ข้อสอบคุมผลได้ (ฟังก์ชันล้วน เทสได้ 100%)
  */
@@ -87,7 +116,7 @@ export function pickLibraryCategory({ category = '', emotionalTags = [], archety
 /**
  * @returns {Promise<string>} บล็อกพร้อมแปะเข้าพรอมต์ writer (Style Pack + ตัวอย่างจริง 2 โพสต์)
  */
-export async function getViralFewshotBlock({ category = '', emotionalTags = [], archetype = '' } = {}) {
+export async function getViralFewshotBlock({ category = '', emotionalTags = [], archetype = '', newsTitle = '', noHistory = false } = {}) {
   const libCat = pickLibraryCategory({ category, emotionalTags, archetype });
 
   let examplesBlock = '';
@@ -102,7 +131,7 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
       if (sb) {
         const { data } = await sb
           .from('viral_examples')
-          .select('title, content, writing_notes, category, engagement_likes')
+          .select('id, title, content, writing_notes, category, engagement_likes')
           .eq('category', libCat)
           .order('engagement_likes', { ascending: false })
           .limit(_rotateOn() ? 100 : 6); // ★ 8 ส.ค. 69 เจ้าของสั่ง "200+ ใบต้องถูกเรียกได้จริงทุกใบ": เปิดโผทั้งหมวด (ใหญ่สุดจริง 64 ใบ · เพดาน 100 กันโหลดบวม) — โหมดเดิม 6
@@ -123,6 +152,8 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
         ).join('\n') +
         `=== จบตัวอย่างไวรัลจริง ===\n\n`;
       console.log(`[ViralFewshot] ✅ ${picks.length} ตัวอย่างหมวด "${libCat}"${_rotateOn() ? ` (หมุนเวียนจากโผ ${(rows || []).length} ใบ)` : ''} (จาก ${category || '?'} / ${emotionalTags.slice(0, 2).join(',')})`);
+      // 📒 8 ส.ค. 69 เจ้าของสั่ง: จดสมุดประวัติถาวร — ข่าวไหนได้ตัวอย่างใบไหน (พังเงียบได้ ห้ามล้มท่อข่าว)
+      await _recordPickHistory(libCat, picks, { poolSize: (rows || []).length, newsTitle, noHistory });
     } else {
       console.log(`[ViralFewshot] ⚠️ หมวด "${libCat}" ไม่มีตัวอย่างพอ — ใช้ Style Pack อย่างเดียว`);
     }
