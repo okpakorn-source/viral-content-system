@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 // ★ 25 มิ.ย.: อ่าน response แบบปลอดภัย — กัน "Unexpected token 'A'..." เมื่อเซิร์ฟเวอร์
 //   timeout แล้ว Vercel คืน error page เป็น text (ไม่ใช่ JSON) → แปลงเป็นข้อความที่อ่านออก
@@ -31,6 +31,9 @@ export default function ClipTranscriptPage() {
   // ★ 22 มิ.ย.: คลัง "ถอดประเด็นข่าว" แยก (เก็บทุกครั้งที่ถอดสำเร็จ หยิบกลับมาใช้ได้)
   const [insightCases, setInsightCases] = useState([]);
   const [insightCasesOpen, setInsightCasesOpen] = useState(true);
+  const [insightPage, setInsightPage] = useState(1);   // ★ 9 ส.ค.: หน้าคลัง (20 เคส/หน้า สูงสุด 100)
+  const [insightTotal, setInsightTotal] = useState(0);        // เพดานที่ดูได้ (สูงสุด 100)
+  const [insightGrandTotal, setInsightGrandTotal] = useState(0); // ยอดจริงทั้งคลัง (ผู้ตรวจ #10)
   const [insightExpanded, setInsightExpanded] = useState(null);
   // ★ 24 มิ.ย.: ส่งเข้าคิว "เครื่องทีม" (พนักงานทำงานที่บ้านส่งผ่านเว็บ → เครื่องทีมถอด FB/IG ให้)
   const [queueJob, setQueueJob] = useState(null); // { jobId, status, position, platform, result, error }
@@ -54,9 +57,32 @@ export default function ClipTranscriptPage() {
   const loadCases = async () => {
     try { const r = await fetch('/api/clip-transcript/cases?limit=40', { cache: 'no-store' }); const d = await r.json(); if (d.success) setCases(d.cases || []); } catch {}
   };
-  const loadInsightCases = async () => {
-    try { const r = await fetch('/api/clip-transcript/cases?kind=insight&limit=40', { cache: 'no-store' }); const d = await r.json(); if (d.success) setInsightCases(d.cases || []); } catch {}
+  // ★ 9 ส.ค. 69 (เจ้าของสั่ง): คลังดูได้ 100 เคสล่าสุด แบ่งหน้า หน้าละ 20
+  const INSIGHT_PAGE_SIZE = 20;
+  const INSIGHT_MAX_VIEW = 100;
+  const insightReqSeq = useRef(0);
+  const loadInsightCases = async (page = insightPage) => {
+    try {
+      // ★ ผู้ตรวจรอบ 3 ข้อ 2: กันคำตอบมาสลับลำดับ (กดพลิกหน้ารัวตอนเน็ตช้า) — รับเฉพาะคำขอล่าสุด
+      const seq = ++insightReqSeq.current;
+      const offset = (page - 1) * INSIGHT_PAGE_SIZE;
+      const r = await fetch(`/api/clip-transcript/cases?kind=insight&limit=${INSIGHT_PAGE_SIZE}&offset=${offset}`, { cache: 'no-store' });
+      const d = await r.json();
+      if (seq !== insightReqSeq.current) return;
+      if (d.success) {
+        const grand = Number(d.total) || 0;
+        const viewTotal = Math.min(grand, INSIGHT_MAX_VIEW);
+        setInsightGrandTotal(grand);
+        setInsightTotal(viewTotal);
+        // ★ ผู้ตรวจ #1: ลบจนหน้าปัจจุบันเกินขอบ → เด้งกลับหน้าสุดท้ายที่มีจริง (กันติดหน้าว่างไม่มีปุ่มออก)
+        const maxPage = Math.max(1, Math.ceil(viewTotal / INSIGHT_PAGE_SIZE));
+        if (page > maxPage) { setInsightPage(maxPage); return; }
+        setInsightCases(d.cases || []);
+      }
+    } catch {}
   };
+  // ★ ผู้ตรวจ #2: ถอดเสร็จ/มีเคสใหม่ → กลับหน้า 1 เสมอ (เคสใหม่อยู่หัวคลัง ไม่งั้นมองไม่เห็น)
+  const refreshInsightToFirst = () => { setInsightPage(1); loadInsightCases(1); }; // ผู้ตรวจ D: ไม่อ่าน state เก่าใน closure ยาว
   // ★ 8 ก.ค.: คลังค้นประเด็นยูสเซอร์
   const loadHuntCases = async () => {
     try { const r = await fetch('/api/clip-transcript/cases?kind=hunt&limit=40', { cache: 'no-store' }); const d = await r.json(); if (d.success) setHuntCases(d.cases || []); } catch {}
@@ -73,7 +99,9 @@ export default function ClipTranscriptPage() {
     } catch {}
     loadQueueList(); // รีเฟรชให้คลิปหายจากคิวทันที
   };
-  useEffect(() => { loadCases(); loadInsightCases(); loadHuntCases(); loadQueueList(); }, []);
+  useEffect(() => { loadCases(); loadHuntCases(); loadQueueList(); }, []);
+  // ★ 9 ส.ค.: โหลดคลังตามหน้า (ครอบตอน mount ด้วย — หน้าเริ่มที่ 1)
+  useEffect(() => { loadInsightCases(insightPage); }, [insightPage]); // eslint-disable-line react-hooks/exhaustive-deps
   // ★ 26 มิ.ย.: รีเฟรชแผงคิวทุก 10 วิ — เห็นคิวเดินสด แม้ไม่ได้ส่งงานเอง (คนอื่นในทีมส่งก็เห็น)
   useEffect(() => { const t = setInterval(loadQueueList, 10000); return () => clearInterval(t); }, []);
   // ★ 26 มิ.ย.: เช็กสถานะ Gemini เรียลไทม์ — โหลดหน้า + ทุก 45 วิ (server cache 30 วิ กันยิงถี่)
@@ -120,7 +148,7 @@ export default function ClipTranscriptPage() {
       const me = (typeof window !== 'undefined' && localStorage.getItem('clip_user')) || '';
       const r = await fetch('/api/clip-transcript/insight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), force: !!force, user: me }) });
       const d = await safeJson(r);
-      if (d.success) { setInsight(d.data); loadInsightCases(); }   // ★ รีเฟรชคลังประเด็นทันทีที่ถอดสำเร็จ
+      if (d.success) { setInsight(d.data); refreshInsightToFirst(); }   // ★ รีเฟรชคลังประเด็นทันทีที่ถอดสำเร็จ
       // ★ 26 มิ.ย.: กดถอด "ทันที" แล้ว Gemini แน่น → ชวนไปกด "ส่งเข้าคิว" (ระบบรอ+รันเองจน Gemini ว่าง)
       //   ปุ่มถอดตรง = ลองเดี๋ยวนี้ (ไม่วนเงียบ) · ปุ่มคิว = หย่อนทิ้งไว้ ระบบจัดการให้ → แยกชัด ไม่งง
       else if (/Gemini มีคนใช้งานหนัก|แน่นชั่วคราว|503|overload/i.test(String(d.error || ''))) {
@@ -162,14 +190,14 @@ export default function ClipTranscriptPage() {
           tries++;
           try {
             const q = await (await fetch(`/api/clip-transcript/job-status?id=${d2.jobId}`, { cache: 'no-store' })).json();
-            if (q.status === 'done') { clearInterval(poll); setHunt(q.result || null); setHuntPhase(0); setHunting(false); loadHuntCases(); loadInsightCases(); }
+            if (q.status === 'done') { clearInterval(poll); setHunt(q.result || null); setHuntPhase(0); setHunting(false); loadHuntCases(); refreshInsightToFirst(); }
             else if (q.status === 'error') { clearInterval(poll); setErr(q.error || 'ถอด+ค้นไม่สำเร็จ'); setHuntPhase(0); setHunting(false); }
             else if (tries > 80) { clearInterval(poll); setErr('⏱️ งานยังทำต่อเบื้องหลัง — เสร็จแล้วผลจะโผล่ใน "🧭 คลังค้นประเด็นยูสเซอร์" ด้านล่างเอง'); setHuntPhase(0); setHunting(false); }
           } catch {}
         }, 15000);
         return;
       }
-      if (d2.success) { setHunt(d2.data); loadHuntCases(); loadInsightCases(); }
+      if (d2.success) { setHunt(d2.data); loadHuntCases(); refreshInsightToFirst(); }
       else setErr(d2.error || 'ค้นข่าวคล้ายไม่สำเร็จ');
     } catch (e) { setErr(e.message); }
     setHuntPhase(0); setHunting(false);
@@ -231,7 +259,7 @@ export default function ClipTranscriptPage() {
         st = d.status;
         // ★ 26 มิ.ย.: เก็บ statusNote/attempts/nextRetryAt → โชว์ตอน retry_wait (Gemini แน่น รอลองใหม่อัตโนมัติ + นับถอยหลัง)
         setQueueJob({ jobId, status: d.status, position: d.position, platform: d.platform, result: d.result, error: d.error, statusNote: d.statusNote, attempts: d.attempts, nextRetryAt: d.nextRetryAt });
-        if (d.status === 'done') { setInsight(d.result); loadInsightCases(); return; }
+        if (d.status === 'done') { setInsight(d.result); refreshInsightToFirst(); return; }
         if (d.status === 'error') return;
         // 'pending' | 'processing' | 'retry_wait' → poll ต่อ (retry_wait = Gemini แน่น ระบบลองใหม่เองทุก ~3 นาที)
       } catch { /* เน็ตสะดุด — รอบหน้าลองใหม่ */ }
@@ -905,10 +933,20 @@ export default function ClipTranscriptPage() {
 
         {/* ★ 22 มิ.ย.: คลังถอดประเด็นข่าว (ข้อมูลดิบ) — เก็บทุกครั้งที่ถอดสำเร็จ */}
         <button onClick={() => setInsightCasesOpen(!insightCasesOpen)} style={{ marginTop: 16, padding: '10px 18px', borderRadius: 10, border: '1px solid rgba(37,99,235,0.3)', background: insightCasesOpen ? 'rgba(37,99,235,0.12)' : 'var(--bg-card, #1a1a2e)', color: insightCasesOpen ? '#60a5fa' : 'inherit', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-          🎯 คลังถอดประเด็นข่าว ({insightCases.length}) {insightCasesOpen ? '▲' : '▼'}
+          🎯 คลังถอดประเด็นข่าว ({insightGrandTotal > insightTotal ? `ดู ${insightTotal} จาก ${insightGrandTotal}` : (insightTotal || insightCases.length)}) {insightCasesOpen ? '▲' : '▼'}
         </button>
         {insightCasesOpen && (
           <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* ★ 9 ส.ค.: แถบแบ่งหน้า — 20 เคส/หน้า ดูย้อนได้สูงสุด 100 เคสล่าสุด */}
+            {insightTotal > INSIGHT_PAGE_SIZE && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '4px 0' }}>
+                <button onClick={() => setInsightPage(p => Math.max(1, p - 1))} disabled={insightPage <= 1}
+                  style={{ padding: '5px 14px', borderRadius: 8, border: '1px solid rgba(37,99,235,0.35)', background: 'transparent', color: insightPage <= 1 ? 'var(--text-muted,#666)' : '#60a5fa', fontSize: 12.5, fontWeight: 700, cursor: insightPage <= 1 ? 'default' : 'pointer', fontFamily: 'inherit', opacity: insightPage <= 1 ? 0.5 : 1 }}>◀ ก่อนหน้า</button>
+                <span style={{ fontSize: 12.5, color: 'var(--text-muted,#888)', fontWeight: 700 }}>หน้า {insightPage} / {Math.max(1, Math.ceil(insightTotal / INSIGHT_PAGE_SIZE))}</span>
+                <button onClick={() => setInsightPage(p => Math.min(Math.ceil(insightTotal / INSIGHT_PAGE_SIZE), p + 1))} disabled={insightPage >= Math.ceil(insightTotal / INSIGHT_PAGE_SIZE)}
+                  style={{ padding: '5px 14px', borderRadius: 8, border: '1px solid rgba(37,99,235,0.35)', background: 'transparent', color: insightPage >= Math.ceil(insightTotal / INSIGHT_PAGE_SIZE) ? 'var(--text-muted,#666)' : '#60a5fa', fontSize: 12.5, fontWeight: 700, cursor: insightPage >= Math.ceil(insightTotal / INSIGHT_PAGE_SIZE) ? 'default' : 'pointer', fontFamily: 'inherit', opacity: insightPage >= Math.ceil(insightTotal / INSIGHT_PAGE_SIZE) ? 0.5 : 1 }}>ถัดไป ▶</button>
+              </div>
+            )}
             {insightCases.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted, #888)', fontSize: 13 }}>ยังไม่มีประเด็นข่าว — กด &ldquo;ถอดประเด็นข่าว&rdquo; สักครั้งแล้วจะเก็บที่นี่อัตโนมัติ</div>}
             {insightCases.map((c) => {
               const ins = c.insight || {};

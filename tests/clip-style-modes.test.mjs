@@ -56,10 +56,13 @@ test('CLIP_V2_STYLE ค่าแปลก (x/A ตัวใหญ่ไม่ใ
 test('เปิด CLIP_V2_STYLE=ac / CLIP_STYLE_DIRECT=1: ป้ายรุ่นต่อท้ายถูกฝั่ง', () => {
   for (const k of SW) delete process.env[k];
   process.env.CLIP_V2_STYLE = 'ac';
-  assert.equal(raw.normalizeRawStory({ rawStory: 'x' }).promptRev, 'rawstory-v2-0803-styleAC');
+  assert.equal(raw.normalizeRawStory({ rawStory: 'x' }).promptRev, 'rawstory-v2-0803-styleAC2');
+  // ★ ผู้ตรวจรอบ 3: ปักหมุดโหมด b ต้อง "ไม่" bump (สาย b ไม่ถูกแตะในชุดกฎใหม่ — รีแฟกเตอร์เผลอ bump ต้องจับได้)
+  process.env.CLIP_V2_STYLE = 'b';
+  assert.equal(raw.normalizeRawStory({ rawStory: 'x' }).promptRev, 'rawstory-v2-0803-styleB');
   delete process.env.CLIP_V2_STYLE;
   process.env.CLIP_STYLE_DIRECT = '1';
-  assert.equal(ins.currentInsightPromptRev(), 'raw-depth2legs-0801-direct');
+  assert.equal(ins.currentInsightPromptRev(), 'raw-depth2legs-0801-direct2');
   delete process.env.CLIP_STYLE_DIRECT;
 });
 
@@ -118,7 +121,15 @@ test('กติกากรอบเทาเงียบ + ตัวอย่�
     'กติกาความดิบนี้ไม่ลดคำพูดจริง',
     'ตัวอย่างคลิปไม่มีเสียงพูด',               // ตัวอย่างโครงสร้าง = ตัวปลดล็อกรอบ 4
     'ชูภาพอัลตราซาวด์ประกาศข่าวตั้งครรภ์',
+    'ดำเนินรายการโดย',                        // ★ 9 ส.ค.: แบนคำเปรยรายการ
+    'subStories ทุกก้อนห้ามเอ่ยชื่อรายการ',     // กันตัวคูณเอ่ยรายการรายก้อน
+    'เมื่อถูกถามว่า',                          // ทางแทนชื่อพิธีกร (ยกเว้นเมื่อพิธีกรเป็นสาระ=ระบุชื่อได้)
   ]) assert.ok(INS_SRC.includes(mark), `กติกา "${mark}" หายจากกรอบเทา`);
+  for (const mark of [
+    'ดำเนินรายการโดย',
+    'ประเด็นย่อยทุกก้อนห้ามเอ่ยชื่อรายการ',
+    'เมื่อถูกถามว่า',
+  ]) assert.ok(RAW_SRC.includes(mark), `กติกา "${mark}" หายจากกรอบเขียว (STYLE_A)`);
   assert.match(INS_SRC, /swOn\('CLIP_STYLE_DIRECT'\)\s*\?\s*GRAY_DIRECT_RULES\s*:\s*''/,
     'GRAY_DIRECT_RULES ต้องอยู่หลังประตูเท่านั้น');
 });
