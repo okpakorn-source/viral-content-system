@@ -62,7 +62,7 @@ test('เปิด CLIP_V2_STYLE=ac / CLIP_STYLE_DIRECT=1: ป้ายรุ่
   assert.equal(raw.normalizeRawStory({ rawStory: 'x' }).promptRev, 'rawstory-v2-0803-styleB');
   delete process.env.CLIP_V2_STYLE;
   process.env.CLIP_STYLE_DIRECT = '1';
-  assert.equal(ins.currentInsightPromptRev(), 'raw-depth2legs-0801-direct2');
+  assert.equal(ins.currentInsightPromptRev(), 'raw-depth2legs-0801-direct3'); // ★ direct3: headline ตัวข่าวขึ้นต้น
   delete process.env.CLIP_STYLE_DIRECT;
 });
 
@@ -124,6 +124,7 @@ test('กติกากรอบเทาเงียบ + ตัวอย่�
     'ดำเนินรายการโดย',                        // ★ 9 ส.ค.: แบนคำเปรยรายการ
     'subStories ทุกก้อนห้ามเอ่ยชื่อรายการ',     // กันตัวคูณเอ่ยรายการรายก้อน
     'เมื่อถูกถามว่า',                          // ทางแทนชื่อพิธีกร (ยกเว้นเมื่อพิธีกรเป็นสาระ=ระบุชื่อได้)
+    'headline ต้องขึ้นต้นด้วยตัวข่าว',          // ★ 9 ส.ค. เจ้าของเคาะ: พิธีกรถอยท้ายพาดหัว (เคสกรรชัย/ป้าแห้ง)
   ]) assert.ok(INS_SRC.includes(mark), `กติกา "${mark}" หายจากกรอบเทา`);
   for (const mark of [
     'ดำเนินรายการโดย',
