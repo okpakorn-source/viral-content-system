@@ -17,6 +17,10 @@
 const CONNECTORS = ['โดย', 'ซึ่ง', 'จึง', 'ส่งผลให้', 'ทำให้', 'เนื่องจาก', 'อย่างไรก็ตาม'];
 
 /** รูปเปิดเรื่องแบบ "กรอบการสนทนา" ที่ทำให้เข้าเรื่องช้า (เจ้าของยกมาเอง) */
+/** ★ 11 ส.ค. (เจ้าของทัก): ประโยคแรกที่ขึ้นด้วย 'ชื่อคน + เล่า/บอก/ระบุ...ว่า' อ่านไม่สวยเท่าเข้าเหตุการณ์ตรงๆ
+ *  รอบที่สวยกับไม่สวยใช้ค่าตั้งเดียวกัน = โมเดลไม่นิ่ง จึงต้องมีตัววัดจับไว้ให้เห็น */
+const TELL_OPEN = /(เล่า|บอก|ระบุ|เผย|กล่าว)[^\n]{0,22}ว่า/;
+
 const FRAME_OPENERS = [
   'ร่วมสนทนากับ', 'ร่วมพูดคุยกับ', 'พูดคุยกับ', 'ให้สัมภาษณ์', 'ในรายการ', 'ผู้ร่วมรายการ',
 ];
@@ -64,6 +68,7 @@ export function measureFlow(text) {
     maxParagraph: paraLens.length ? Math.max(...paraLens) : 0,
     connPer100: chars ? Math.round((connCount / chars) * 1000) / 10 : 0,
     opensWithFrame: FRAME_OPENERS.some((f) => head.includes(f)),
+    opensWithTelling: TELL_OPEN.test(t.slice(0, 60)),
   };
 }
 
@@ -104,6 +109,9 @@ export function inspectField(field, text, clipDurationSec) {
   }
   if (m.connPer100 > th.maxConnPer100) {
     issues.push({ field, type: 'connector', detail: `คำเชื่อมหนาแน่น ${m.connPer100} ต่อ 100 ตัวอักษร` });
+  }
+  if (m.opensWithTelling) {
+    issues.push({ field, type: 'tell_open', detail: 'ประโยคแรกขึ้นต้นด้วยคำเล่า ควรเข้าเหตุการณ์ทันที' });
   }
   if (m.opensWithFrame) {
     issues.push({ field, type: 'frame_open', detail: 'เปิดเรื่องด้วยกรอบการสนทนาแทนเหตุการณ์' });
