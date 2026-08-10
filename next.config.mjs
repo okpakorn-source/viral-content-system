@@ -18,9 +18,11 @@ const nextConfig = {
     '/api/cover-ref-test': ['./public/ref-covers/**', './data/ref-cover-library.json', './src/assets/fonts/**'],
     // ★ 1 ส.ค. 69 (Opus P1 — กับดักเดิมรอบ 3): ป้ายสาระสารบัญการ์ดอ่านด้วย fs.readFileSync (path runtime)
     //   ไม่ trace = บน Vercel ไฟล์หาย → สารบัญเหลือชื่อการ์ดล้วนแบบเงียบๆ (คนละตัวกับที่ผ่านการประเมิน blind)
-    '/api/auto': ['./data/card-essences.json'],
-    '/api/auto/process': ['./data/card-essences.json'],
-    '/api/queue/worker': ['./data/card-essences.json'],
+    // ★ 8 ส.ค. 69 (กับดักเดิมรอบ 4 — ผู้ตรวจจับก่อนพัง): บัตรลักษณะคลังไวรัล viral-essences.json ก็อ่านด้วย fs
+    //   ไม่ trace = โหมดจับคู่ (VIRAL_MATCH_MODE) บน Vercel ตาบอดเงียบๆ — ต้องแนบทุก route ที่เข้าท่อเขียน
+    '/api/auto': ['./data/card-essences.json', './data/viral-essences.json'],
+    '/api/auto/process': ['./data/card-essences.json', './data/viral-essences.json'],
+    '/api/queue/worker': ['./data/card-essences.json', './data/viral-essences.json'],
   },
 };
 

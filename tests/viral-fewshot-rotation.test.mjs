@@ -1,6 +1,6 @@
 // 🎯 ข้อสอบระบบหมุนเวียนตัวอย่างไวรัล — import โค้ดจริงตรงๆ (ห้ามก๊อปฟังก์ชันมาเทส)
 // รัน: node tests/viral-fewshot-rotation.test.mjs — ต้องผ่านครบทุกเคสก่อนถือว่าเสร็จ
-import { weightedSample, pickLibraryCategory } from '../src/lib/services/viralFewshot.js';
+import { weightedSample, pickLibraryCategory, scoreMatchExamples } from '../src/lib/services/viralFewshot.js';
 
 let pass = 0, fail = 0;
 const t = (name, cond) => { if (cond) { pass++; console.log('✅ ' + name); } else { fail++; console.log('❌ ' + name); } };
@@ -77,5 +77,27 @@ t('14 "ดราม่าสังคม" → moral conflict (คีย์ยา
 t('16 ใบไลก์ต่ำสุดของโผใหญ่ก็ถูกเลือกได้ (rand ชี้ท้ายโผ)',
   weightedSample(mkRows(64), 1, () => 0.999999)[0].title === 'P63');
 
-console.log(`\n${pass}/16 ผ่าน${fail ? ' — ❌ ตก ' + fail + ' เคส ห้ามไปต่อ' : ' — ✅ ด่านข้อสอบผ่าน'}`);
+// ── ⑧ 8 ส.ค. — โหมดจับคู่ "ห้ามสุ่ม" (VIRAL_MATCH_MODE=score): ผลนิ่ง + แมชถูกตัว + มีเหตุผลรองรับ ──
+const ROWS = [
+  { id: 'a1', category: 'ความรักสัตว์', title: 'ช้างเศร้าอาลัยควาญ', content: 'x'.repeat(300) },
+  { id: 'b2', category: 'ข่าวบันเทิง', title: 'ดาราเปิดตัวแฟน', content: 'x'.repeat(300) },
+  { id: 'c3', category: 'ข่าวเศร้า', title: 'อาลัยครูใหญ่', content: 'x'.repeat(300) },
+];
+const ESS = {
+  a1: { emotion: ['เศร้า', 'ผูกพัน'], themes: ['ช้าง', 'สูญเสีย', 'สัตว์'], tone: 'เศร้า' },
+  b2: { emotion: ['ตื่นเต้น'], themes: ['ความรัก', 'ดารา'], tone: 'สดใส' },
+  c3: { emotion: ['เศร้า'], themes: ['สูญเสีย', 'ครู'], tone: 'เศร้า' },
+};
+const BRIEF = { title: 'ช้างพลายยืนเฝ้าโลงควาญ', emotionalTags: ['เศร้า', 'ผูกพัน'], archetype: '', libCat: 'ความรักสัตว์', coreStory: 'ช้างอาลัยการสูญเสียควาญที่เลี้ยงมา', excerpt: 'ช้างพลายไม่ยอมกินอาหารหลังควาญเสียชีวิต' };
+{
+  const m1 = scoreMatchExamples(BRIEF, ROWS, ESS);
+  const m2 = scoreMatchExamples(BRIEF, ROWS, ESS);
+  t('17 ผลนิ่ง 100% (เรียกซ้ำได้ตัวเดิมเป๊ะ = ไม่มีสุ่ม)', JSON.stringify(m1.map(x => x.row.id)) === JSON.stringify(m2.map(x => x.row.id)));
+  t('18 แมชถูกตัว: ข่าวช้างเศร้า → ใบช้าง (a1) ชนะใบดารา', m1[0]?.row.id === 'a1' && !m1.some(x => x.row.id === 'b2'));
+  t('19 มีเหตุผลรองรับแจกแจงจริง', /อารมณ์ตรง|ธีมตรง/.test(m1[0]?.reason || ''));
+}
+t('20 ไม่มีอะไรแมชเลย → คืนว่าง (ให้ระบบถอย fallback ไม่ฝืนเลือกมั่ว)',
+  scoreMatchExamples({ title: 'zzz', emotionalTags: [], libCat: '', excerpt: 'zzz' }, ROWS, ESS).length === 0);
+
+console.log(`\n${pass}/20 ผ่าน${fail ? ' — ❌ ตก ' + fail + ' เคส ห้ามไปต่อ' : ' — ✅ ด่านข้อสอบผ่าน'}`);
 process.exit(fail ? 1 : 0);

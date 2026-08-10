@@ -1390,6 +1390,8 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
         emotionalTags: newsAnalysis?.emotionalTags || newsAnalysis?.emotionalThemes || actualBreakdown?.emotionalTags || [],
         archetype: newsAnalysis?.narrativeArchetype || actualBreakdown?.narrativeArchetype || '',
         newsTitle: actualNewsTitle || '', // 📒 ผูกประวัติการหยิบเข้ากับข่าว (สมุดประวัติ 8 ส.ค. 69)
+        // 🎯 โหมดจับคู่ (VIRAL_MATCH_MODE): ส่ง "เนื้อดิบจริง + แก่นเรื่อง" ให้ตัวเลือกใช้แมชตามคำสั่งเจ้าของ
+        newsBrief: { coreStory: actualBreakdown?.core_story || actualBreakdown?.coreStory || '', excerpt: String(actualNewsBody || '').slice(0, 900) }, // ★ สคีมาจริงใช้ core_story (ผู้ตรวจจับได้)
       });
     } catch (e) { console.log('[ViralFewshot] skip:', e.message?.slice(0, 40)); }
 

@@ -9,6 +9,8 @@
  */
 
 import { getSupabase } from '../supabase.js';
+import fs from 'node:fs';
+import path from 'node:path';
 
 // สูตรสกัดจากโพสต์ top engagement ของหอสมุด — always-on
 const VIRAL_STYLE_PACK =
@@ -70,6 +72,7 @@ async function _recordPickHistory(libCat, picks, meta = {}) {
       data: {
         ts: nowIso, lib: libCat, poolSize: Number(meta.poolSize) || 0,
         newsTitle: String(meta.newsTitle || '').slice(0, 140),
+        mode: String(meta.pickMode || ''), reason: String(meta.pickReason || '').slice(0, 240),
         picks: picks.map((p) => ({ id: p.id ?? null, title: String(p.title || '').slice(0, 120) })),
       },
       created_at: nowIso, updated_at: nowIso,
@@ -113,47 +116,156 @@ export function pickLibraryCategory({ category = '', emotionalTags = [], archety
   return best || 'ดราม่าครอบครัว'; // หมวดใหญ่สุดของหอสมุดเป็น default
 }
 
+// ═══ 🎯 8 ส.ค. 69 เจ้าของสั่ง "ห้ามสุ่ม — ต้องแมชโครงเรื่อง/อารมณ์/แนวทางจริง มีเหตุผลรองรับ" ═══
+// สวิตช์: VIRAL_MATCH_MODE = '' (แบบเดิม) | 'ai' (วิธี 1 บรรณารักษ์ luna อ่านเนื้อดิบ+สารบัญ เลือกพร้อมเหตุผล)
+//                            | 'score' (วิธี 2 โค้ดให้คะแนนแมชจากบัตรลักษณะ — นิ่ง อธิบายได้ ไม่ใช้ AI)
+// ล้มทุกทาง → ถอยพฤติกรรมเดิมอัตโนมัติ (fail-safe) · บัตรลักษณะ: data/viral-essences.json (สกัดครั้งเดียวด้วย luna)
+// ★ ผู้ตรวจจับได้: ค่าขยะ (พิมพ์ผิด 'AI'/'on') ต้องเท่ากับปิด ไม่ใช่หลุดไปสุ่มข้ามหมวดเงียบๆ
+const _matchMode = () => {
+  const v = String(process.env.VIRAL_MATCH_MODE || '').trim().toLowerCase();
+  return (v === 'ai' || v === 'score') ? v : '';
+};
+
+let _essCache = null;
+function _loadEssences() {
+  if (_essCache) return _essCache;
+  try {
+    _essCache = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'data', 'viral-essences.json'), 'utf8'));
+  } catch { _essCache = {}; }
+  return _essCache;
+}
+
+/**
+ * วิธี 2 (โค้ดล้วน ห้ามสุ่ม): ให้คะแนนความแมชข่าว↔ตัวอย่างจากบัตรลักษณะ — ผลนิ่ง 100% พร้อมเหตุผลแจกแจง
+ * อารมณ์ตรง ×3 · ธีมตรง ×2 · หมวดตรง +2 · โทนตรง +1 — เสมอกันตัดสินด้วย id (ไม่มีสุ่มเด็ดขาด)
+ */
+export function scoreMatchExamples(brief = {}, rows = [], essences = {}) {
+  const hay = [brief.title, brief.category, (brief.emotionalTags || []).join(' '), brief.archetype, brief.coreStory, brief.excerpt]
+    .join(' ').toLowerCase();
+  const scored = rows.map((r) => {
+    const e = essences[r.id] || {};
+    const hitsEmo = (e.emotion || []).filter((w) => w && hay.includes(String(w).toLowerCase()));
+    const hitsTheme = (e.themes || []).filter((w) => w && String(w).length >= 2 && hay.includes(String(w).toLowerCase()));
+    const toneHit = !!(e.tone && hay.includes(String(e.tone).toLowerCase()));
+    const catHit = !!(brief.libCat && r.category === brief.libCat);
+    const score = hitsEmo.length * 3 + hitsTheme.length * 2 + (toneHit ? 1 : 0) + (catHit ? 2 : 0);
+    return { r, score, hitsEmo, hitsTheme, toneHit, catHit };
+  }).sort((a, b) => b.score - a.score || String(a.r.id).localeCompare(String(b.r.id)));
+  return scored.slice(0, 2).filter((x) => x.score > 0).map((x) => ({
+    row: x.r, score: x.score,
+    reason: `คะแนน ${x.score}: ` + [
+      x.hitsEmo.length ? `อารมณ์ตรง(${x.hitsEmo.join(',')})` : '',
+      x.hitsTheme.length ? `ธีมตรง(${x.hitsTheme.join(',')})` : '',
+      x.toneHit ? 'โทนตรง' : '', x.catHit ? 'หมวดตรง' : '',
+    ].filter(Boolean).join(' · '),
+  }));
+}
+
+/**
+ * วิธี 1 (บรรณารักษ์ AI): luna อ่าน "เนื้อดิบจริง + แก่นเรื่อง + อารมณ์" เทียบสารบัญทั้งคลัง 202 ใบ
+ * เลือก 2 ใบที่เหมาะเป็นครูสอนวิธีเล่า พร้อมเหตุผล — ข้ามพรมแดนหมวดได้ (แก้เคสจับหมวดเพี้ยนไปในตัว)
+ */
+async function aiMatchExamples(brief, rows, essences) {
+  if (!rows?.length) return null; // ★ ผู้ตรวจจับได้: คลังว่าง = ห้ามเสียเงินยิง AI กับสารบัญเปล่า
+  const catalog = rows.map((r) => {
+    const e = essences[r.id] || {};
+    return `${r.id} | ${r.category} | ${String(r.title).slice(0, 55)} | อารมณ์:${(e.emotion || []).join(',')} | โทน:${e.tone || '?'} | ธีม:${(e.themes || []).slice(0, 4).join(',')}`;
+  }).join('\n');
+  const { callAI } = await import('../ai/openai.js');
+  const res = await callAI({
+    // ★ ผู้ตรวจจับได้ (บทเรียนเดียวกับสมองเลือกการ์ด 201 ใบ): luna เป็น reasoning model —
+    //   สารบัญใหญ่ + เพดานต่ำ = ตอบว่างเปล่า ต้องให้เพดาน 8000 (2500 ยังเคยว่าง)
+    model: 'gpt-5.6-luna', temperature: 0.1, maxTokens: 8000,
+    prompt: 'คุณคือบรรณารักษ์คลังโพสต์ไวรัล เลือกตัวอย่าง 2 ใบที่ "เหมาะเป็นครูสอนวิธีเล่า" ให้ข่าวนี้ที่สุด\n' +
+      'เกณฑ์เรียงสำคัญ: อารมณ์ตรง > โครงเรื่อง/สถานการณ์คล้าย > ธีมตรง — ห้ามเลือกแบบไม่มีเหตุผล\n' +
+      `=== ข่าวที่จะเขียน ===\nหัว: ${brief.title}\nอารมณ์: ${(brief.emotionalTags || []).join(', ')} | แนว: ${brief.archetype || '-'}\n` +
+      `แก่นเรื่อง: ${String(brief.coreStory || '').slice(0, 250)}\nเนื้อดิบ: ${String(brief.excerpt || '').slice(0, 900)}\n` +
+      `=== สารบัญคลัง (id | หมวด | ชื่อ | อารมณ์ | โทน | ธีม) ===\n${catalog}\n=== จบ ===\n` +
+      'ตอบ JSON เท่านั้น: {"picks":["id1","id2"],"reason":"เหตุผลสั้น 1-2 ประโยคว่าทำไมสองใบนี้เหมาะกับข่าวนี้"}',
+  });
+  const ids = [...new Set(Array.isArray(res?.picks) ? res.picks.map(String) : [])]; // dedupe — luna คืน id ซ้ำได้
+  const chosen = ids.map((id) => rows.find((r) => String(r.id) === id)).filter(Boolean).slice(0, 2);
+  if (!chosen.length) return null;
+  return { picks: chosen, reason: String(res?.reason || '').slice(0, 220) };
+}
+
 /**
  * @returns {Promise<string>} บล็อกพร้อมแปะเข้าพรอมต์ writer (Style Pack + ตัวอย่างจริง 2 โพสต์)
  */
-export async function getViralFewshotBlock({ category = '', emotionalTags = [], archetype = '', newsTitle = '', noHistory = false } = {}) {
+export async function getViralFewshotBlock({ category = '', emotionalTags = [], archetype = '', newsTitle = '', newsBrief = null, noHistory = false } = {}) {
   const libCat = pickLibraryCategory({ category, emotionalTags, archetype });
 
   let examplesBlock = '';
   try {
-    // ── ขั้น 1: เอารายการ top-N ของหมวด (แคช 10 นาที — ของเดิมแคชพังเงียบ ซ่อมแล้ว) ──
+    // ── ขั้น 1: เอารายการโพสต์ (แคช 10 นาที) — โหมดจับคู่ต้องเห็น "ทั้งคลัง" (ข้ามหมวดได้) · โหมดเดิมเห็นแค่หมวด ──
+    const mode = _matchMode();
+    const cacheKey = mode ? '__all__' : libCat;
     let rows = null;
-    const cached = _cache.get(libCat);
+    const cached = _cache.get(cacheKey);
     if (cached && cached.rows && Date.now() - cached.at < CACHE_MS) {
       rows = cached.rows;
     } else {
       const sb = getSupabase();
       if (sb) {
-        const { data } = await sb
-          .from('viral_examples')
+        let q = sb.from('viral_examples')
           .select('id, title, content, writing_notes, category, engagement_likes')
-          .eq('category', libCat)
-          .order('engagement_likes', { ascending: false })
-          .limit(_rotateOn() ? 100 : 6); // ★ 8 ส.ค. 69 เจ้าของสั่ง "200+ ใบต้องถูกเรียกได้จริงทุกใบ": เปิดโผทั้งหมวด (ใหญ่สุดจริง 64 ใบ · เพดาน 100 กันโหลดบวม) — โหมดเดิม 6
+          .order('engagement_likes', { ascending: false });
+        q = mode ? q.limit(300) : q.eq('category', libCat).limit(_rotateOn() ? 100 : 6); // ★ 8 ส.ค. 69: โหมดจับคู่=ทั้งคลัง · โหมดเดิม=ทั้งหมวด (ใหญ่สุดจริง 64 ใบ)
+        const { data } = await q;
         rows = (data || []).filter(r => (r.content || '').length > 200);
-        _cache.set(libCat, { rows, at: Date.now() });
+        _cache.set(cacheKey, { rows, at: Date.now() });
         if (_cache.size > 30) _cache = new Map([..._cache].slice(-15));
       }
     }
 
-    // ── ขั้น 2: เลือก 2 ใบ — หมุนเวียนถ่วงน้ำหนักไลก์ (VIRAL_ROTATE=0 = top-2 ตายตัวแบบเดิม) ──
-    const picks = _rotateOn() ? weightedSample(rows || [], 2) : (rows || []).slice(0, 2);
+    // ── ขั้น 2: เลือก 2 ใบ ──
+    //   โหมดจับคู่ (เจ้าของสั่ง 8 ส.ค. "ห้ามสุ่ม"): ai → บรรณารักษ์เลือกพร้อมเหตุผล · score → คะแนนแมชนิ่งๆ
+    //   ล้มทุกชั้น → ถอยหมุนเวียนแบบเดิม (fail-safe — ดีกว่าไม่มีตัวอย่างเลย และถูกจดใน history ว่า fallback)
+    let picks = [];
+    let pickMode = _rotateOn() ? 'rotate' : 'top2';
+    let pickReason = '';
+    if (mode === 'ai' || mode === 'score') {
+      const brief = { title: newsTitle, category, emotionalTags, archetype, libCat,
+        coreStory: newsBrief?.coreStory || '', excerpt: newsBrief?.excerpt || '' };
+      const ess = _loadEssences();
+      if (mode === 'ai') {
+        try {
+          const m = await aiMatchExamples(brief, rows || [], ess);
+          if (m) { picks = m.picks; pickReason = m.reason; pickMode = 'ai'; }
+        } catch (e) { console.log('[ViralFewshot] 🎯 ai-match ล้ม (จะถอยชั้นถัดไป):', e.message?.slice(0, 40)); }
+      }
+      if (!picks.length) {
+        const m2 = scoreMatchExamples(brief, rows || [], ess);
+        if (m2.length) {
+          picks = m2.map((x) => x.row);
+          pickReason = m2.map((x, i) => `ใบ${i + 1} ${x.reason}`).join(' | ');
+          pickMode = mode === 'ai' ? 'score-fallback' : 'score';
+        }
+      }
+    }
+    if (!picks.length) {
+      // ★ ผู้ตรวจจับได้: fallback ในโหมดจับคู่ต้องสุ่มเฉพาะ "หมวดเดียวกับข่าว" (โผ __all__ ข้ามหมวด —
+      //   สุ่มทั้งคลังอาจได้ตัวอย่างบันเทิงให้ข่าวเศร้า) · หมวดว่างจริงค่อยยอมทั้งคลัง
+      const pool = mode ? (rows || []).filter((r) => r.category === libCat) : (rows || []);
+      const usable = pool.length ? pool : (rows || []);
+      picks = _rotateOn() ? weightedSample(usable, 2) : usable.slice(0, 2);
+      if (mode) pickMode = 'rotate-fallback';
+    }
     if (picks.length > 0) {
+      // ★ ผู้ตรวจจับได้: โหมดจับคู่เลือกข้ามหมวดได้ — หัวบล็อกห้ามประกาศหมวดผิดๆ ให้นักเขียน
+      const blockTitle = (pickMode === 'ai' || pickMode === 'score' || pickMode === 'score-fallback')
+        ? 'โพสต์ไวรัลจริงที่จับคู่กับข่าวนี้ (โครงเรื่อง/อารมณ์ใกล้เคียง)'
+        : `โพสต์ไวรัลจริงหมวด "${libCat}" จากเพจ`;
       examplesBlock =
-        `=== 📚 โพสต์ไวรัลจริงหมวด "${libCat}" จากเพจ (เลียนแบบ "จังหวะ-โครง-น้ำเสียง" เท่านั้น — ห้ามลอกเนื้อหา/ชื่อ/เหตุการณ์) ===\n` +
+        `=== 📚 ${blockTitle} (เลียนแบบ "จังหวะ-โครง-น้ำเสียง" เท่านั้น — ห้ามลอกเนื้อหา/ชื่อ/เหตุการณ์) ===\n` +
         picks.map((r, i) =>
           `--- ตัวอย่าง ${i + 1} ---\n${String(r.content).slice(0, 700)}\n` +
           (r.writing_notes ? `(จุดที่ทำให้ไวรัล: ${String(r.writing_notes).replace(/🔥 ทำไมถึง viral:\s*/, '').slice(0, 180)})\n` : '')
         ).join('\n') +
         `=== จบตัวอย่างไวรัลจริง ===\n\n`;
-      console.log(`[ViralFewshot] ✅ ${picks.length} ตัวอย่างหมวด "${libCat}"${_rotateOn() ? ` (หมุนเวียนจากโผ ${(rows || []).length} ใบ)` : ''} (จาก ${category || '?'} / ${emotionalTags.slice(0, 2).join(',')})`);
-      // 📒 8 ส.ค. 69 เจ้าของสั่ง: จดสมุดประวัติถาวร — ข่าวไหนได้ตัวอย่างใบไหน (พังเงียบได้ ห้ามล้มท่อข่าว)
-      await _recordPickHistory(libCat, picks, { poolSize: (rows || []).length, newsTitle, noHistory });
+      console.log(`[ViralFewshot] ✅ ${picks.length} ตัวอย่าง [${pickMode}] จากโผ ${(rows || []).length} ใบ${pickReason ? ` | เหตุผล: ${pickReason.slice(0, 90)}` : ''} (ข่าว: ${String(newsTitle || category || '?').slice(0, 40)})`);
+      // 📒 8 ส.ค. 69 เจ้าของสั่ง: จดสมุดประวัติถาวร — ข่าวไหนได้ตัวอย่างใบไหน + วิธีเลือก + เหตุผล
+      await _recordPickHistory(libCat, picks, { poolSize: (rows || []).length, newsTitle, noHistory, pickMode, pickReason });
     } else {
       console.log(`[ViralFewshot] ⚠️ หมวด "${libCat}" ไม่มีตัวอย่างพอ — ใช้ Style Pack อย่างเดียว`);
     }
