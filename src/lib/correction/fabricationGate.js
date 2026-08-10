@@ -75,7 +75,7 @@ export async function fabricationGate(content, newsBody) {
     if (survived.length === 0) return { content, debug };
 
     // === ขั้น 3: luna ทวนซ้ำ (ยืนยันชั้นสอง) ===
-    let confirmed = survived;
+    let confirmed;
     try {
       const reRes = await callAI({
         model: MODEL_FAST_CHEAP,
@@ -87,9 +87,16 @@ export async function fabricationGate(content, newsBody) {
           `=== ต้นฉบับ ===\n${source.slice(0, 6000)}\n=== รายการ ===\n${survived.map((f, i) => `${i + 1}. ${f}`).join('\n')}\n` +
           'ตอบ JSON: {"confirmed":["..."]}',
       });
-      if (Array.isArray(reRes?.confirmed)) confirmed = reRes.confirmed.filter((x) => typeof x === 'string' && x.trim());
+      if (!Array.isArray(reRes?.confirmed)) {
+        debug.fixSkipped = 'confirmation-invalid-response';
+        console.warn('  [FabGate] ทวนซ้ำตอบรูปแบบไม่ถูกต้อง — ปล่อยเนื้อเดิมผ่าน (fail-open)');
+        return { content, debug };
+      }
+      confirmed = reRes.confirmed.filter((x) => typeof x === 'string' && x.trim());
     } catch (reErr) {
-      console.warn(`  [FabGate] ทวนซ้ำล้ม (${reErr.message}) — ใช้ผลขั้น 2 ต่อ`);
+      debug.fixSkipped = 'confirmation-failed';
+      console.warn(`  [FabGate] ทวนซ้ำล้ม (${String(reErr?.message || reErr).slice(0, 200)}) — ปล่อยเนื้อเดิมผ่าน (fail-open)`);
+      return { content, debug };
     }
     confirmed = confirmed.slice(0, 10); // เพดานกันด่านเพี้ยนไล่ตัดทั้งเรื่อง
     debug.confirmed = confirmed.length;

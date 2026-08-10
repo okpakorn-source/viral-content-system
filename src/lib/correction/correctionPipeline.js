@@ -112,9 +112,24 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
         const _cleanGuard = guardCoreNews(version.content, polishedContent);
         if (!_cleanGuard.ok) console.warn(`  ⛔ เกราะแก่นข่าว (clean path): ${_cleanGuard.reason} — ใช้ต้นฉบับ`);
         bbStep(_bb, 'เกราะแก่นข่าว(clean)', polishedContent, _cleanGuard.ok ? polishedContent : version.content, { verdict: _cleanGuard.ok ? 'ผ่าน' : `ย้อนต้นฉบับ:${_cleanGuard.reason}` });
+
+        // ตรวจฉบับที่จะคืนจริงหลัง L4.6 + L5 + core guard แล้ว (เดิม clean path ไม่เคยตรวจ)
+        const _cleanCandidate = _cleanGuard.ok ? polishedContent : version.content;
+        const _cleanCandidateFactCheck = checkFactPreservation(version.content, _cleanCandidate, newsData || {});
+        const _cleanFactRolledBack = _cleanCandidateFactCheck.action === 'rollback';
+        let _cleanFinalContent = _cleanCandidate;
+        let _cleanFinalFactCheck = _cleanCandidateFactCheck;
+        if (_cleanFactRolledBack) {
+          console.warn(`  ⛔ L4 FactCheck (clean final): พบ drift ${_cleanCandidateFactCheck.drifts.length} จุด — ใช้ต้นฉบับ`);
+          _cleanFinalContent = version.content;
+          // ธง factPreserved ต้องมาจากฉบับที่คืนจริง ไม่ใช่ฉบับที่เพิ่งถูกปฏิเสธ
+          _cleanFinalFactCheck = checkFactPreservation(version.content, _cleanFinalContent, newsData || {});
+        }
+        bbStep(_bb, 'L4-เช็คข้อเท็จจริง(final clean)', _cleanCandidate, _cleanFinalContent,
+          { candidateAction: _cleanCandidateFactCheck.action, candidateDrifts: _cleanCandidateFactCheck.drifts.length, outputPreserved: _cleanFinalFactCheck.preserved });
         return {
           ...version,
-          content: _cleanGuard.ok ? polishedContent : version.content,
+          content: _cleanFinalContent,
           _blackbox: _bb,
           _correctionApplied: changes.length > 0 || cleanSemanticDebug.fixed,
           _correctionDebug: {
@@ -123,11 +138,13 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
             auditScore: audit.auditScore,
             issuesFound: 0,
             correctionsMade: 0,
-            factPreserved: true,
-            rolledBack: false,
+            factPreserved: _cleanFinalFactCheck.preserved,
+            factDrifts: _cleanFinalFactCheck.drifts.length,
+            rejectedFactDrifts: _cleanFactRolledBack ? _cleanCandidateFactCheck.drifts.length : 0,
+            rolledBack: _cleanFactRolledBack,
             semanticCheck: cleanSemanticDebug,
             polishChanges: changes.length,
-            path: 'clean',
+            path: _cleanFactRolledBack ? 'rollback' : 'clean',
           },
         };
       }
@@ -139,26 +156,21 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
       console.log(`  L3 Correct: ${actualCorrections.length} applied`);
       bbStep(_bb, 'L3-แก้คำ', version.content, correctedContent, { corrections: actualCorrections.slice(0, 5).map(c => ({ type: c.type, text: String(c.text || '').slice(0, 60) })) });
 
-      // === Layer 4: Fact Preservation ===
+      // === Layer 4: Fact Preservation ของผลแก้ L3 ===
+      // คงลำดับเดิม: เลือก safeContent → scrub rollback → L4.5/L4.6/L5
+      // แล้วค่อยตรวจฉบับท้ายอีกครั้งด้านล่าง
       const factCheck = checkFactPreservation(version.content, correctedContent, newsData || {});
-      console.log(`  L4 FactCheck: preserved=${factCheck.preserved} drifts=${factCheck.drifts.length} action=${factCheck.action}`);
+      const _initialFactRolledBack = factCheck.action === 'rollback';
 
-      // เลือก content ตาม fact check
-      let safeContent = factCheck.action === 'rollback' ? rollbackContent : correctedContent;
-      bbStep(_bb, 'L4-เช็คข้อเท็จจริง', correctedContent, safeContent, { action: factCheck.action, drifts: factCheck.drifts.length });
+      let safeContent = _initialFactRolledBack ? rollbackContent : correctedContent;
+      bbStep(_bb, 'L4-เช็คข้อเท็จจริง', correctedContent, safeContent,
+        { action: factCheck.action, drifts: factCheck.drifts.length });
 
-      // ★ 16 ก.ค. 69 (B3): rollback = ย้อนกลับไปใช้เนื้อ "ก่อนแก้" ที่ L2 บอกไว้แล้วว่ามีคำต้องห้ามฝังอยู่
-      //   เดิมส่งต่อทั้งดิบโดยไม่ล้างซ้ำ → คำเสี่ยง Facebook หลุดออกไปพร้อมป้าย "แก้แล้ว"
-      //   แก้: re-audit เนื้อ rollback แล้ว direct-replace เฉพาะ forbidden_word (คำต่อคำ ไม่ใช้ AI —
-      //   กัน fact เพี้ยนซ้ำซึ่งเป็นเหตุที่ทำให้ rollback ตั้งแต่แรก)
+      // rollback คืนเนื้อก่อน L3 ซึ่งอาจมีคำต้องห้าม: ล้างแบบแทนตรงก่อนเข้าด่านถัดไป
       let _rollbackScrub = null;
-      if (factCheck.action === 'rollback') {
+      if (_initialFactRolledBack) {
         try {
           const reAudit = await auditOutput({ ...version, content: safeContent });
-          // ★ guard (review จับได้): แทนเฉพาะ suggestion ที่เป็น "คำแทนจริง" สั้นๆ — บาง rule ใส่ประโยคแนะนำ
-          //   ("สำนวนเลี่ยงตามบริบท เช่น ...") ถ้า split/join ตรงๆ จะฉีดประโยคแนะนำเข้าเนื้อข่าวจริง
-          // ★ recheck fix: ใช้ typeof — suggestion ว่าง ('') = เจตนา "ลบคำทิ้ง" (ด่วน/แชร์ด่วน/ดูก่อนโดนลบ/xxx/AV)
-          //   ของเดิมเช็ค truthy ทำคำ clickbait/ผู้ใหญ่หลุดบนเส้น rollback
           const _forbidden = (reAudit.issues || []).filter(x => x.type === 'forbidden_word' && x.text
             && typeof x.suggestion === 'string'
             && x.suggestion.length <= 25 && !/เช่น|สำนวน|บริบท|\//.test(x.suggestion));
@@ -231,16 +243,41 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
       console.log(`  L5 Polish: ${changes.length} changes`);
       bbStep(_bb, 'L5-ขัดเกลา', semanticContent, polishedContent, { changes: changes.length });
 
-      // ★ 1 ส.ค. 69 (เกราะแก่นข่าวชั้นนอกสุด — เจ้าของสั่ง "แก่นข่าวต้องไม่เสีย"):
-      //   L4.6 ลบท่อนพังทิ้ง "หลัง" ด่านเช็คข้อเท็จจริง L4 โดยไม่มีใครตรวจซ้ำ (เคสจริง: "ออกจากโรงพยาบาลแล้ว...8 เดือน" หายทั้งใบ)
-      //   → ด่านสุดท้ายก่อนแทนต้นฉบับ: เลขเด่นครบ + เนื้อไม่หดเกินเพดาน ไม่ผ่านข้อเดียว = ใช้ต้นฉบับทั้งใบ
+      // ★ เกราะเร็วชั้นนอก: เลขเด่นครบ + เนื้อไม่หดเกินเพดาน ไม่ผ่านข้อเดียว = ใช้ต้นฉบับทั้งใบ
+      //   ด่านข้อเท็จจริงเต็มด้านล่างตรวจฉบับหลัง L4.6/L5 ต่ออีกชั้นก่อนคืนจริง
       const _coreGuard = guardCoreNews(version.content, polishedContent);
       if (!_coreGuard.ok) console.warn(`  ⛔ เกราะแก่นข่าว (ชั้นท่อ): ${_coreGuard.reason} — ใช้ต้นฉบับ`);
       bbStep(_bb, 'เกราะแก่นข่าว', polishedContent, _coreGuard.ok ? polishedContent : version.content, { verdict: _coreGuard.ok ? 'ผ่าน' : `ย้อนต้นฉบับ:${_coreGuard.reason}` });
 
+      // === Final Fact Preservation: ตรวจหลังทุกชั้นที่แก้เนื้อ ===
+      const _candidateContent = _coreGuard.ok ? polishedContent : version.content;
+      const _candidateFactCheck = checkFactPreservation(version.content, _candidateContent, newsData || {});
+      const _lateFactRolledBack = _candidateFactCheck.action === 'rollback';
+      let finalContent = _candidateContent;
+      let finalFactCheck = _candidateFactCheck;
+
+      if (_lateFactRolledBack) {
+        console.warn(`  ⛔ L4 FactCheck (final): พบ drift ${_candidateFactCheck.drifts.length} จุด — ใช้ฉบับปลอดภัยก่อน L4.5/L4.6/L5`);
+        // ห้ามย้อนถึง rollbackContent ทันที: จะทำให้การแก้ L3 ที่ผ่านแล้วหายไป
+        finalContent = safeContent;
+        finalFactCheck = checkFactPreservation(version.content, finalContent, newsData || {});
+        if (finalFactCheck.action === 'rollback') {
+          console.warn(`  ⛔ L4 FactCheck (safe fallback): ยังพบ drift ${finalFactCheck.drifts.length} จุด — ใช้ต้นฉบับไม่แก้`);
+          finalContent = rollbackContent;
+          finalFactCheck = checkFactPreservation(version.content, finalContent, newsData || {});
+        }
+      }
+
+      const _factRolledBack = _initialFactRolledBack || _lateFactRolledBack;
+      const _rejectedFactDrifts = (_initialFactRolledBack ? factCheck.drifts.length : 0)
+        + (_lateFactRolledBack ? _candidateFactCheck.drifts.length : 0);
+
+      bbStep(_bb, 'L4-เช็คข้อเท็จจริง(final)', _candidateContent, finalContent,
+        { initialAction: factCheck.action, candidateAction: _candidateFactCheck.action, candidateDrifts: _candidateFactCheck.drifts.length, outputPreserved: finalFactCheck.preserved });
+
       return {
         ...version,
-        content: _coreGuard.ok ? polishedContent : version.content,
+        content: finalContent,
         _blackbox: _bb,
         _correctionApplied: true,
         _correctionDebug: {
@@ -251,13 +288,14 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
           issueTypes: [...new Set(audit.issues.map(i => i.type))],
           correctionsMade: actualCorrections.length,
           corrections: actualCorrections.slice(0, 5),
-          factPreserved: factCheck.preserved,
-          factDrifts: factCheck.drifts.length,
-          rolledBack: factCheck.action === 'rollback',
+          factPreserved: finalFactCheck.preserved,
+          factDrifts: finalFactCheck.drifts.length,
+          rejectedFactDrifts: _rejectedFactDrifts,
+          rolledBack: _factRolledBack,
           rollbackScrub: _rollbackScrub,
           semanticCheck: semanticDebug,
           polishChanges: changes.length,
-          path: factCheck.action === 'rollback' ? 'rollback' : 'corrected',
+          path: _factRolledBack ? 'rollback' : 'corrected',
         },
       };
 

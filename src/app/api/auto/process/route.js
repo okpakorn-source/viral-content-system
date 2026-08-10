@@ -42,24 +42,28 @@ const rlog = createLogger('AUTO-PROCESS');
 /**
  * Server-side auto-save to news archive.
  * Called after successful processing so Discord/queue content also gets archived.
- * Fire-and-forget — does not block the response.
+ * Returns true only when the archive already exists or the write completed.
  */
-async function saveToArchiveServerSide({ newsData, breakdownData, sourceType, sourceUrl, workflowId, archivedBy, coverImage }) {
+async function saveToArchiveServerSide({ newsData, breakdownData, sourceType, sourceUrl, workflowId, archivedBy, coverImage, classifyTimeoutMs = 20_000 }) {
   try {
-    if (!newsData?.newsTitle && !newsData?.newsBody) return;
+    if (!newsData?.newsTitle && !newsData?.newsBody) {
+      console.warn(`[Archive-Server] Save skipped (workflow=${workflowId || 'unknown'}): missing news title/body`);
+      return false;
+    }
 
-    // ★ Dedup guard: title เดียวกันภายใน 10 นาที → ไม่บันทึกซ้ำ
+    // ★ Dedup guard: title + body เดียวกันภายใน 10 นาที → ไม่บันทึกซ้ำ
     try {
       const dedupStore = createStore('news-archive');
       const existing = await dedupStore.getAll();
       const cutoff = Date.now() - 10 * 60 * 1000;
       const dupe = existing.find(it =>
         it.title && newsData.newsTitle && it.title === newsData.newsTitle &&
+        String(it.body || '') === String(newsData.newsBody || '') &&
         new Date(it.archived_at || it.createdAt || 0).getTime() > cutoff
       );
       if (dupe) {
         console.log(`[Archive-Server] ⏭️ Duplicate within 10min — skip: "${newsData.newsTitle.slice(0, 50)}"`);
-        return;
+        return true;
       }
     } catch (dedupErr) {
       console.warn('[Archive-Server] Dedup check failed (continuing):', dedupErr.message);
@@ -74,6 +78,8 @@ async function saveToArchiveServerSide({ newsData, breakdownData, sourceType, so
         model: MODEL_FAST,
         temperature: 0.1,
         maxTokens: 400,
+        // เมื่อ caller รอผล save จริง งานจำแนกที่ไม่ critical ห้ามกินงบ maxDuration
+        signal: AbortSignal.timeout(classifyTimeoutMs),
         prompt: `วิเคราะห์ข่าวนี้แล้วตอบเป็น JSON\nหัวข้อ: ${newsData.newsTitle || ''}\nเนื้อหา: ${(newsData.newsBody || '').slice(0, 1500)}\nตอบ JSON:\n{\n  "category": "หมวดหมู่ข่าว (เลือก 1: การเมือง|สังคม|อาชญากรรม|อุบัติเหตุ|บันเทิง|กีฬา|เศรษฐกิจ|สุขภาพ|ต่างประเทศ|เทคโนโลยี|สิ่งแวดล้อม|ศาสนา|ทั่วไป)",\n  "summary": "สรุปข่าว 1-2 ประโยค",\n  "tags": ["tag1", "tag2", "tag3"]\n}`,
       });
       if (aiResult?.category) category = aiResult.category;
@@ -118,8 +124,10 @@ async function saveToArchiveServerSide({ newsData, breakdownData, sourceType, so
     const store = createStore('news-archive');
     await store.add(item);
     console.log(`[Archive-Server] ✅ Saved: "${item.title.slice(0, 50)}" [${category}]`);
+    return true;
   } catch (err) {
-    console.warn('[Archive-Server] Save failed (non-critical):', err.message);
+    console.warn(`[Archive-Server] Save failed (workflow=${workflowId || 'unknown'}, non-critical):`, err.message);
+    return false;
   }
 }
 
@@ -257,8 +265,9 @@ export async function POST(request) {
         } catch { /* ถอดไม่ได้ก็ส่งของเต็ม ไม่พัง */ }
 
         // 🗄️ Auto-save to news archive — server-side ที่เดียว (web/Discord ผ่าน queue ทั้งคู่)
+        let archiveSaved = false;
         if (isFromQueue) {
-          saveToArchiveServerSide({
+          archiveSaved = await saveToArchiveServerSide({
             newsData: legacyData.newsData,
             breakdownData: legacyData.breakdownData,
             sourceType: detection.inputType,
@@ -266,12 +275,13 @@ export async function POST(request) {
             workflowId: _wfId,
             archivedBy: body.userId || 'auto-server',
             coverImage: delegateRes.autoCoverResult?.success ? delegateRes.autoCoverResult.base64 : null,
-          }).catch(() => {});
+          });
+          if (!archiveSaved) addLog('Archive', '⚠️ Server-side save failed — archiveSaved=false (client fallback remains available)');
         }
 
         return NextResponse.json({
           success:       true,
-          archiveSaved:  isFromQueue, // ★ client เห็น flag นี้แล้วไม่ต้อง save ซ้ำ
+          archiveSaved, // true เฉพาะเมื่อคลังมีข่าวนี้แล้วหรือบันทึกสำเร็จจริง
           data:          { ...legacyData, versions, analysisResult },
           newsData:      legacyData.newsData,
           breakdownData: legacyData.breakdownData,
@@ -587,8 +597,9 @@ export async function POST(request) {
     await logPipeline({ workflowId: _wfId, step: 'unified-auto', status: 'success', duration: Date.now() - startTime, detail: newsData.newsTitle?.slice(0, 60) }).catch(() => {});
 
     // 🗄️ Auto-save to news archive — server-side ที่เดียว (เดิม pipeline ท้องถิ่นไม่ archive เลย → ข่าวจาก Discord รูป/text หายจากคลัง)
+    let archiveSaved = false;
     if (isFromQueue) {
-      saveToArchiveServerSide({
+      archiveSaved = await saveToArchiveServerSide({
         newsData,
         breakdownData,
         sourceType: detection.inputType,
@@ -596,7 +607,8 @@ export async function POST(request) {
         workflowId: _wfId,
         archivedBy: body.userId || 'auto-server',
         coverImage: null,
-      }).catch(() => {});
+      });
+      if (!archiveSaved) addLog('Archive', '⚠️ Server-side save failed — archiveSaved=false (client fallback remains available)');
     }
 
     // === GENERATION LOG: บันทึกเคสเข้าระบบ ===
@@ -631,7 +643,7 @@ export async function POST(request) {
 
     return NextResponse.json({
       success:        true,
-      archiveSaved:   isFromQueue, // ★ client เห็น flag นี้แล้วไม่ต้อง save ซ้ำ
+      archiveSaved, // true เฉพาะเมื่อคลังมีข่าวนี้แล้วหรือบันทึกสำเร็จจริง
       data:           { ...genData, versions, analysisResult },
       newsData,
       breakdownData,
