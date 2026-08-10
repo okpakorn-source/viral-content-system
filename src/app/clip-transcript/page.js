@@ -385,6 +385,26 @@ export default function ClipTranscriptPage() {
     );
   };
 
+  // ★ 10 ส.ค. 69: ธง "สองรอบเห็นไม่ตรงกัน" — รอบสองดูคลิปแล้วยืนยันค่าที่ต่างจากรอบแรก
+  //   ตัวเลขถูกแก้ให้ตรงกันอัตโนมัติแล้ว · ใจความที่แก้เองไม่ได้ ต้องให้คนตัดสิน จึงต้องเห็นเสมอ ห้ามกลบเงียบ
+  const renderFactConflicts = (ins, small = false) => {
+    const list = Array.isArray(ins?.factConflicts) ? ins.factConflicts : [];
+    if (!list.length) return null;
+    return (
+      <div style={{ marginTop: small ? 10 : 14, fontSize: small ? 11.5 : 12.5, lineHeight: 1.7, padding: '10px 12px', borderRadius: 9, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.45)', color: '#fca5a5' }}>
+        <div style={{ fontWeight: 800, marginBottom: 4 }}>🔍 ดูคลิป 2 รอบได้ข้อมูลไม่ตรงกัน {list.length} จุด — เปิดคลิปเช็คเองก่อนใช้</div>
+        {list.map((c, i) => (
+          <div key={i} style={{ marginTop: 3 }}>
+            • รอบแรกได้ <b>{String(c.round1 || '').slice(0, 90)}</b>{' '}
+            {c.verified
+              ? <>· รอบสองได้ <b>{String(c.verified).slice(0, 90)}</b> — ระบบไม่แก้ให้เอง เพราะยังไม่รู้ว่าอันไหนถูก</>
+              : <>· รอบสองดูแล้ว<b>ไม่พบเรื่องนี้ในคลิป</b></>}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   // ★ 8 ก.ค. rev.2: จัดหมวดผล — dna(คนละคน แยกระดับ ใกล้/กลาง/กว้าง) vs same(คนเดิม)
   //   รองรับเคสเก่า: tag 'follow'→คนเดิม · 'theme'→แนวเดียวกันกว้าง
   const resultKind = (r) => {
@@ -900,6 +920,7 @@ export default function ClipTranscriptPage() {
             {/* ★ 4 ส.ค.: v2 ล้ม → แถบเตือนแทนตำแหน่งการ์ด v2 · ชิปกำกับ (ต้นทาง/ธงคุณภาพ)
                 ฟิลด์ใหม่ optional ทั้งหมด — เคสเก่าไม่มี = ไม่โชว์อะไร · ไม่เข้าปุ่มคัดลอกเนื้อ */}
             {renderV2ErrorBar(insight)}
+            {renderFactConflicts(insight)}
             {renderQualityChips(insight)}
           </div>
         )}
@@ -1141,6 +1162,7 @@ export default function ClipTranscriptPage() {
                       {/* ★ 4 ส.ค.: คลังต้องเห็นเท่าผลสด — แถบเตือน v2 ล้ม + ชิปกำกับ (ต้นทาง/ธงคุณภาพ)
                           บทเรียนเก่า 24 ก.ค.: ลืมการ์ดคลัง แล้วผู้ใช้นึกว่าฟีเจอร์หาย */}
                       {renderV2ErrorBar(ins, true)}
+                      {renderFactConflicts(ins, true)}
                       {renderQualityChips(ins, true)}
                     </div>
                   )}

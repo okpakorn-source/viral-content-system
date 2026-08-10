@@ -484,12 +484,13 @@ export async function POST(request) {
     // ★ 4 ส.ค. 69: แยก "หนึ่งรอบ v2" ออกเป็นฟังก์ชัน เพื่อยิงซ้ำได้โดยไม่ก๊อปโค้ด และไม่แตะหลักการเดิม
     //   หลักการเดิมที่ยังอยู่ครบทุกข้อ: save-first (บล็อกนี้อยู่หลัง store.add) · งบขั้นต่ำ 300s · Promise.race + clearTimeout · ข้าม buffer >200MB
     //   งบเวลาคิดใหม่ทุกครั้งที่ยิง (รอบสองเหลือน้อยลงเสมอ) — ประตูปิด = ยิงรอบเดียวเหมือนเดิมเป๊ะ
+    let factsToVerify = []; // ★ 10 ส.ค.: ใบข้อเท็จจริงที่ส่งไปให้รอบสองตรวจ (ใช้ตอนแปลผลกลับ)
     const runRawStoryV2 = async (extraOpts = null) => {
       let v2Timer;
       const budgetMs = ENRICH_MAXDUR_MS - (Date.now() - startedAt) - ENRICH_SAVE_MARGIN_MS;
       try {
         const { extractRawStoryV2, extractRawStoryV2FromVideoBuffer } = await import('@/lib/services/clipRawStoryService');
-        const { buildIdentityFromInsight } = await import('@/lib/services/clipInsightService');
+        const { buildIdentityFromInsight, buildFactsToVerify } = await import('@/lib/services/clipInsightService');
         // โครงประเด็นจากรอบแรก (หัวข้อ+ช่วงเวลาเท่านั้น ไม่ส่งเนื้อความ — กันสำนวนรอบแรกไหลปน) + บัญชีชื่อที่ยืนยันแล้ว
         const v2Hints = (insight?.subStories?.length ? insight.subStories : (insight?.topics || []))
           .map(t => ({
@@ -500,7 +501,13 @@ export async function POST(request) {
         const v2Identity = buildIdentityFromInsight(insight, ctx.caption || null);
         // ★ 4 ส.ค.: ตัวเลือกเสริม — sourceMeta (ประตู CLIP_SOURCE_META) + emphasizeQuotes (ประตู CLIP_QC_GATES รอบยิงซ้ำ)
         //   ไม่มีตัวเลือกเลย = ส่ง undefined/ไม่มีคีย์ → รูปแบบการเรียกเท่าเดิมทุกตัวอักษร
-        const v2Opts = { ...(ctx.sourceMeta ? { sourceMeta: ctx.sourceMeta } : {}), ...(extraOpts || {}) };
+        // ★ 10 ส.ค. (ประตู CLIP_FACT_LOCK): ใบข้อเท็จจริงรอบแรกให้รอบสองตรวจแล้วรายงานกลับ — ปิดสวิตช์ = คืน [] = ไม่มีคีย์นี้
+        factsToVerify = buildFactsToVerify(insight);
+        const v2Opts = {
+          ...(ctx.sourceMeta ? { sourceMeta: ctx.sourceMeta } : {}),
+          ...(factsToVerify.length ? { factsToVerify } : {}),
+          ...(extraOpts || {}),
+        };
         const hasOpts = Object.keys(v2Opts).length > 0;
         return await Promise.race([
           getClipVideoQueue().run(
@@ -593,6 +600,23 @@ export async function POST(request) {
             console.log(`[ClipInsight] ⏭️ ไม่ยิงซ้ำแบบย้ำคำพูด: งบเวลาเหลือ ${Math.round(quoteBudgetMs / 1000)}s ไม่พอ`);
             qualityFlags.push({ area: 'v2', type: 'quote_missing' });
           }
+        }
+      }
+
+      // ★ 10 ส.ค. (ประตู CLIP_FACT_LOCK) — แปลผลแบบตรวจข้อเท็จจริง
+      //   🔴 ต้องอยู่ "หลัง" รอบยิงซ้ำเสมอ: บั๊กจากรันจริงคือใช้ผลตรวจของ v2 นัดแรก แต่เนื้อที่เก็บเป็นของนัดสอง
+      //      → กรอบเทาได้ค่าจากนัดหนึ่ง กรอบเขียวอีกนัดหนึ่ง กลายเป็นสร้างความไม่ตรงกันเสียเอง
+      if (rs?.factChecks?.length && factsToVerify.length) {
+        try {
+          const { applyFactChecks } = await import('@/lib/services/clipInsightService');
+          const applied = applyFactChecks(insight, factsToVerify, rs.factChecks);
+          if (applied.conflicts.length) {
+            insight = applied.insight;
+            await store.update(caseId, (r) => ({ ...r, insight })).catch(() => {});
+            console.warn(`[ClipInsight] 🔍 สองรอบเห็นไม่ตรงกัน ${applied.conflicts.length} จุด — ติดธงให้คนเปิดคลิปเช็ค (ไม่แก้เนื้อเอง)`);
+          }
+        } catch (e) {
+          console.warn('[ClipInsight] แปลผลตรวจข้อเท็จจริงล้ม (ข้ามไป ไม่กระทบเคส):', String(e?.message || e).slice(0, 70));
         }
       }
     } else if (rawStoryV2Enabled && bufTooBig) {

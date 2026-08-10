@@ -446,17 +446,107 @@ function truncateAtBoundary(str, maxLen) {
 //   ★ v2 — แก้รูรีวิว A7: ใช้ point อย่างเดียว (ตัด detail ออก กันสำนวนรอบแรกปนเยอะเกิน) + ตัดที่ขอบคำ
 function buildFactAnchors({ headline, keyPoints } = {}) {
   const anchors = [];
+  // ★ 10 ส.ค. (ด่านล็อกข้อเท็จจริง): เปิด CLIP_FACT_LOCK = ปิดตัวเลขในบล็อกนี้ด้วย
+  //   ไม่งั้นค่าที่รอบแรกบันทึกรั่วผ่านพาดหัว/ประเด็นสำคัญ แล้วคำถามแบบปิดคำตอบไร้ผล (เจอจากรันจริง)
+  const blind = (t) => (swOn('CLIP_FACT_LOCK')
+    ? String(t).replace(/(\d[\d,\.]*)\s*(บาท|ล้าน|แสน|หมื่น|พัน|ปี|ขวบ|คน|วัน|เดือน|ชั่วโมง|นาที|กิโล|เมตร|ครั้ง)/g, (_m, _v, unit) => `... ${unit}`)
+    : String(t));
   const h = String(headline || '').trim();
-  if (h) anchors.push(truncateAtBoundary(h, 160));
+  if (h) anchors.push(truncateAtBoundary(blind(h), 160));
   if (Array.isArray(keyPoints)) {
     for (const k of keyPoints) {
       if (anchors.length >= 10) break;
       const point = String(k?.point || k || '').trim();
       if (!point) continue;
-      anchors.push(truncateAtBoundary(point, 160));
+      anchors.push(truncateAtBoundary(blind(point), 160));
     }
   }
   return anchors.slice(0, 10);
+}
+
+/** ★ 10 ส.ค. 69 — ใบข้อเท็จจริงให้รอบสองตรวจ (เจ้าของสั่งแก้เคสลุงสามล้อ 5,000 vs 1,000 · ช่างตัดผมฟรีเลย vs ฟรีครั้งหน้า)
+ *  เก็บเฉพาะ "ข้อเท็จจริงชิ้นเล็ก" ไม่ใช่ประโยคเนื้อเรื่อง — กันสำนวนรอบแรกไหลปนตามหลักการเดิมของ v2
+ *  ชนิด n = ตัวเลข+หน่วย (แก้อัตโนมัติได้เพราะเทียบตรงตัว) · ชนิด k = ใจความแกน (แก้เองไม่ได้ ใช้ติดธงให้คนตรวจ)
+ *  🔴 ปิดสวิตช์ CLIP_FACT_LOCK = คืน [] → route ไม่ส่งอะไรเพิ่ม พฤติกรรมเดิมเป๊ะ
+ */
+export function buildFactsToVerify(insight) {
+  if (!swOn('CLIP_FACT_LOCK') || !insight) return [];
+  const out = [];
+  const seen = new Set();
+  const body = [
+    String(insight.rawData || ''),
+    ...(Array.isArray(insight.subStories) ? insight.subStories.map(s => (typeof s === 'string' ? s : String(s?.story || s?.rawData || ''))) : []),
+  ].join('\n');
+  // ตัวเลข+หน่วย พร้อมบริบทสั้นข้างหน้าให้รู้ว่าเลขของอะไร (ไม่ใช่ประโยคเต็ม)
+  const NUM = /(\d[\d,\.]*)\s*(บาท|ล้าน|แสน|หมื่น|พัน|ปี|ขวบ|คน|วัน|เดือน|ชั่วโมง|นาที|กิโล|เมตร|ครั้ง)/g;
+  let m;
+  while ((m = NUM.exec(body)) !== null && out.length < 8) {
+    const key = `${m[1].replace(/,/g, '')}${m[2]}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    // 🔴 ถามแบบปิดคำตอบ (blind): ส่งแต่ "บริบทว่าเลขของอะไร" ห้ามส่งตัวเลขไปด้วย
+    //    บทเรียนรันจริง 10 ส.ค.: ครั้งแรกส่งเลขไปให้ดู รอบสองเปลี่ยนใจตามรอบแรก (1,000 → 5,000)
+    //    = เออออตาม ไม่ใช่ฟังเอง ทำให้ด่านนี้ไร้ความหมาย · ปิดคำตอบแล้วค่อยเอามาเทียบเองด้วยโค้ด
+    const lead = body.slice(Math.max(0, m.index - 60), m.index).split(/[\n]/).pop().trim();
+    if (!lead) continue;
+    out.push({ id: `n${out.length + 1}`, kind: 'n', value: `${m[1]} ${m[2]}`.replace(/\s+/g, ' ').trim(), ask: `${lead} ... (${m[2]})`.trim(), text: `${lead}${m[0]}`.trim() });
+  }
+  // ใจความแกนจากรอบแรก (พาดหัว + ประเด็นสำคัญ) — ตัวที่แก้อัตโนมัติไม่ได้ แต่ต้องรู้ว่าสองรอบเห็นตรงกันไหม
+  //   🔴 ปิดตัวเลขในใจความแกนด้วย ไม่งั้นค่าที่รอบแรกบันทึกรั่วไปทางพาดหัว/ประเด็นสำคัญ แล้วการปิดคำตอบไร้ผล
+  const blindNums = (t) => String(t).replace(new RegExp(NUM.source, 'g'), (_m, _v, unit) => `... ${unit}`);
+  const anchors = [String(insight.headline || '').trim(), ...(Array.isArray(insight.keyPoints) ? insight.keyPoints.map(k => String(k?.point || k || '').trim()) : [])].filter(Boolean);
+  for (const a of anchors) {
+    if (out.length >= 12) break;
+    out.push({ id: `k${out.filter(f => f.kind === 'k').length + 1}`, kind: 'k', text: truncateAtBoundary(blindNums(a), 160) });
+  }
+  return out;
+}
+
+/** ★ 10 ส.ค. 69 — เอาผลตรวจจากรอบสองมาใช้จริง
+ *  ตัวเลขที่รอบสองบอกว่าไม่ตรง = แก้ค่าในกรอบเทาให้ตรงกับที่ยืนยันกับคลิปแล้ว (แทนที่ตรงตัวเฉพาะเลขนั้น)
+ *  ใจความที่ไม่ตรง = ไม่แตะเนื้อ (เขียนทับประโยคเองอันตราย) แต่ติดธงให้คนตรวจเห็นทั้งสองฝั่ง
+ *  @returns {{insight: object, conflicts: Array}} — ไม่มีอะไรขัดกัน = คืน insight เดิมทั้งก้อน ไม่ใส่คีย์ใหม่
+ */
+export function applyFactChecks(insight, factsToVerify, factChecks) {
+  if (!swOn('CLIP_FACT_LOCK') || !insight || !Array.isArray(factsToVerify) || !Array.isArray(factChecks) || !factChecks.length) {
+    return { insight, conflicts: [] };
+  }
+  // ★ บั๊กจากรันจริง 10 ส.ค.: โมเดลคืนรหัสติดวงเล็บมาด้วย ("[n1]") → จับคู่ไม่ติด ผลตรวจหายเงียบ
+  //   จับคู่ด้วยรหัสที่ปอกอักขระประกอบออกแล้วเสมอ (ทั้งสองฝั่ง)
+  const idKey = (v) => String(v ?? '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+  const byId = new Map(factsToVerify.map(f => [idKey(f.id), f]));
+  const conflicts = [];
+  let next = insight;
+  for (const chk of factChecks) {
+    const fact = byId.get(idKey(chk?.id));
+    if (!fact) continue;
+    const heard = String(chk?.heard || '').trim();
+    const blindNum = fact.kind === 'n' && !!fact.ask; // ข้อปิดคำตอบ: ต้องเทียบค่าทุกครั้ง ไม่ว่าโมเดลจะติ๊ก ok อะไรมา
+    if (!blindNum && chk?.ok !== false) continue;
+    if (!heard) {
+      // ไม่มีค่าที่ยืนยัน = ห้ามเดาแก้ · ok=true แต่ไม่ตอบค่ามา ถือว่าตอบไม่ครบ ไม่ใช่ข้อขัดแย้ง
+      if (chk?.ok === false) conflicts.push({ kind: fact.kind, round1: fact.text, verified: '', fixed: false, note: 'รอบสองดูคลิปแล้วไม่พบเรื่องนี้' });
+      continue;
+    }
+    if (fact.kind === 'n') {
+      const oldNum = String(fact.value || '').match(/(\d[\d,\.]*)/);
+      const heardRaw = [...heard.matchAll(/(\d[\d,\.]*)/g)].map(m => m[1]);
+      const heardNums = heardRaw.map(v => v.replace(/,/g, ''));
+      const oldPlain = oldNum ? oldNum[1].replace(/,/g, '') : null;
+      // ★ บั๊กจากรันจริง 10 ส.ค.: โมเดลตอบ ok=false ทั้งที่ตัวเลขตรงกัน (หมายถึง "ข้อความไม่ครบ" ไม่ใช่ "เลขผิด")
+      //   เลขเดิมอยู่ในคำตอบ = สองรอบตรงกัน = เชื่อถือได้ ห้ามติดธงหลอกให้คนตรวจเสียเวลา
+      if (oldPlain && heardNums.includes(oldPlain)) continue;
+      if (!heardRaw.length) continue; // ตอบมาแต่ไม่มีตัวเลขเลย = ไม่ได้คำตอบ ไม่ใช่ข้อขัดแย้ง
+      // 🔴 บทเรียนรันจริง 10 ส.ค. (คลิปลุงสามล้อ): ถอดคลิปเดิม 3 รอบได้ 5,000 / 5,000 / 1,000 / 1,500
+      //    = หูของโมเดลเองไม่นิ่งกับตัวเลขในคลิปนี้ → การเอาค่ารอบสองไปเขียนทับรอบแรก ไม่ใช่ความแม่น แต่คือทอยเหรียญ
+      //    ดังนั้นตัวเลขที่สองรอบไม่ตรงกัน = ห้ามแก้เอง ต้องส่งให้คนเปิดคลิปเช็ค (เห็นทั้งสองค่าเสมอ)
+      conflicts.push({ kind: 'n', round1: fact.text, round1Value: oldNum ? `${oldNum[1]}` : '', verified: heard, fixed: false });
+      continue;
+    }
+    conflicts.push({ kind: fact.kind, round1: fact.text, verified: heard, fixed: false });
+  }
+  if (!conflicts.length) return { insight: next, conflicts: [] };
+  return { insight: { ...next, factConflicts: conflicts.slice(0, 12) }, conflicts };
 }
 
 /** ★ 27 ก.ค.: ประกอบ "identity" (บัญชีชื่อ+แคปชั่น+ข้อเท็จจริงแกน) จาก insight รอบแรก
