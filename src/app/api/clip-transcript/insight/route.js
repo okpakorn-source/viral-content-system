@@ -628,6 +628,20 @@ export async function POST(request) {
     // ★ B4 4 ส.ค. 69 (ประตู CLIP_QC_GATES) — ด่านตรวจ "กลไก" ล้วน: ไม่เรียก AI ไม่ยิงเน็ต ไม่แก้เนื้อ
     //   หน้าที่เดียวคือ "ติดธงให้เห็น" ว่าเนื้อที่ได้มีอาการต้องห้าม (ชวนติดตาม/สรุปสอนใจ/ป้ายตัวตน/เล่ากระบวนการ)
     //   หรือคลิปยาวแต่ประเด็นย่อยไม่ครอบคลุมทั้งคลิป — คนตรวจงานเห็นแล้วตัดสินใจเองว่าจะถอดใหม่ไหม
+    // ★ 10 ส.ค. 69 เฟส C (ประตู CLIP_FLOW) — ตัววัด "ความลื่น/การจัดย่อหน้า" แบบวัดล้วน
+    //   🔴 ยังไม่แตะเนื้อ ไม่เรียก AI ตามลำดับที่ผู้ตรวจ Sol วางให้ — หน้าที่เดียวคือติดธงให้คนเห็น
+    //   ใช้ระบบ qualityFlags เดิม (Sol ข้อ 6: ห้ามสร้างกลไกธงซ้ำ) · ล้มแล้วต้องไม่กระทบเคส
+    if (process.env.CLIP_FLOW === '1') {
+      try {
+        const { flowVerdict } = await import('@/lib/services/clipFlowCheck');
+        const verdict = flowVerdict(insight, ctx.clipDurationSec);
+        for (const i of verdict.issues.slice(0, 6)) qualityFlags.push({ area: 'flow', type: i.type, field: i.field, detail: i.detail });
+        if (!verdict.pass) console.warn(`[ClipInsight] 🚩 เนื้อยังไม่ผ่านเกณฑ์การจัดรูป ${verdict.issues.length} จุด: ${verdict.issues.map((i) => i.type).join(', ')}`);
+      } catch (e) {
+        console.warn('[ClipInsight] ตัววัดความลื่นล้ม (ข้าม ไม่กระทบผลงาน):', String(e?.message || e).slice(0, 70));
+      }
+    }
+
     if (QC_GATES_ON()) {
       try {
         const { lintLanguage, lintTopicCoverage } = await import('@/lib/services/clipQualityLint');
