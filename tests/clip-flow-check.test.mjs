@@ -44,8 +44,12 @@ test('คลิปยาวเนื้อเยอะแต่ย่อหน�
 });
 
 test('เกณฑ์ต่างกันตามความยาวคลิป (ยาว/กลาง/สั้น)', () => {
-  assert.ok(thresholdsFor(300).minParagraphs >= thresholdsFor(30).minParagraphs);
-  assert.ok(thresholdsFor(30).maxParagraph >= thresholdsFor(300).maxParagraph, 'คลิปสั้นผ่อนปรนกว่า');
+  // ★ Sol: เดิมใช้ >= ทำให้ผ่านได้แม้ทุกช่วงเท่ากัน — ต้อง assert ค่าจริงและครบทั้งสามช่วง
+  assert.equal(thresholdsFor(300).minParagraphs, 2, 'คลิปยาวต้องบังคับอย่างน้อย 2 ย่อหน้า');
+  assert.equal(thresholdsFor(120).minParagraphs, 1, 'คลิปกลาง');
+  assert.equal(thresholdsFor(30).minParagraphs, 1, 'คลิปสั้น');
+  assert.ok(thresholdsFor(30).maxParagraph > thresholdsFor(300).maxParagraph, 'คลิปสั้นต้องผ่อนปรนกว่าจริง ไม่ใช่เท่ากัน');
+  assert.ok(thresholdsFor(30).minCharsToSplit > thresholdsFor(300).minCharsToSplit, 'คลิปสั้นต้องเริ่มบังคับแบ่งช้ากว่า');
   assert.equal(thresholdsFor(undefined).minParagraphs, 1, 'ไม่รู้ความยาว = ใช้เกณฑ์ผ่อนปรนสุด');
 });
 
@@ -75,8 +79,10 @@ test('เนื้อที่จัดรูปดีแล้วต้อง�
 
 test('extractAnchors: เก็บตัวเลข+หน่วยไว้เทียบว่าของหายไหม (ของเฟสถัดไป)', () => {
   const a = extractAnchors('มีหนี้ 18 ล้านบาท และเก็บเงินได้ 180,000 บาท ใช้เวลา 2 ปี');
-  assert.ok(a.some((x) => x.startsWith('18')), 'ต้องเก็บ 18 ล้าน');
-  assert.ok(a.some((x) => x.startsWith('180000')), 'ต้องปอกคอมมาเพื่อเทียบได้');
+  // ★ Sol: startsWith('18') ผ่านได้จาก 180000 แม้ 18ล้าน หาย — ต้องเทียบค่าเต็ม
+  assert.ok(a.includes('18ล้าน'), 'ต้องเก็บ 18ล้าน แบบเต็มค่า');
+  assert.ok(a.includes('180000บาท'), 'ต้องปอกคอมมาแล้วเก็บเป็น 180000บาท');
+  assert.ok(a.includes('2ปี'), 'ต้องเก็บหน่วยปีด้วย');
 });
 
 // ── เฟส B: กฎพรอมต์ (ต้องอยู่หลังประตู และไม่ชนกฎเดิม) ─────────────────────

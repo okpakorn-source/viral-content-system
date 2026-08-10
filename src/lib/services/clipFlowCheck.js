@@ -2,7 +2,8 @@
  * ★ 10 ส.ค. 69 — ตัววัด "ความลื่นของเนื้อดิบ" (เฟส A: วัดล้วน ไม่แตะเนื้อ ไม่เรียก AI)
  *
  * ที่มา: เจ้าของทัก "พาดหัวเขียนดี แต่เนื้อดิบเล่าห้วน/ไม่ลื่น เอาไปเจนข่าวแล้วไม่สวย"
- * วัดจากคลังจริง 60 เคส: ประโยคยาวเฉลี่ย 620 ตัวอักษร (คลิปยาว) / 500 (กลาง) / 370 (สั้น)
+ * วัดจากคลังจริง 60 เคส: ช่วงข้อความเฉลี่ยจริงแค่ 23-31 ตัวอักษร (ภาษาไทยมีช่องว่างคั่นอยู่แล้ว)
+ *   อาการจริงคือ "ย่อหน้ากำแพง" — ย่อหน้าเดียวยาวสุดที่เจอ 2,238 ตัวอักษร · คลิปยาวผ่านเกณฑ์แค่ 22%
  *
  * 🔴 หลักการที่ผู้ตรวจ Sol ย้ำ และโมดูลนี้ยึด:
  *   - ตัวตัดประโยคภาษาไทยด้วย heuristic "ห้ามเป็นตัวตัดสินเด็ดขาด" → ที่นี่จึงวัดหลายมุมและคืนเป็น
@@ -19,6 +20,9 @@ const CONNECTORS = ['โดย', 'ซึ่ง', 'จึง', 'ส่งผล�
 const FRAME_OPENERS = [
   'ร่วมสนทนากับ', 'ร่วมพูดคุยกับ', 'พูดคุยกับ', 'ให้สัมภาษณ์', 'ในรายการ', 'ผู้ร่วมรายการ',
 ];
+
+// เลขเกณฑ์ทั้งหมดอยู่ที่นี่ที่เดียว (Sol: ห้ามกระจายเลขเดียวกันหลายจุด)
+const LIMITS = { longRunChars: 220, wallCharsLong: 700, wallCharsShort: 800, splitFromChars: 900, splitFromCharsShort: 1200 };
 
 const clean = (t) => String(t ?? '').replace(/\r/g, '');
 
@@ -53,8 +57,7 @@ export function measureFlow(text) {
     runs: runs.length,
     avgRun: runs.length ? Math.round(chars / runs.length) : 0,
     maxRun: lens.length ? Math.max(...lens) : 0,
-    longRuns: lens.filter((l) => l > 220).length,      // ช่วงที่ยาวจนอ่านรวดเดียวไม่ไหว
-    tinyRuns: lens.filter((l) => l > 0 && l < 12).length, // เศษคำกระท่อนกระแท่น
+    longRuns: lens.filter((l) => l > LIMITS.longRunChars).length,      // ช่วงที่ยาวจนอ่านรวดเดียวไม่ไหว
     paragraphs: paragraphs.length,
     // 🔑 คาลิเบรตกับคลังจริง 60 เคส: อาการจริงคือ "กำแพงตัวอักษร" ไม่ใช่ประโยคยาว
     //    (longRuns = 0 ทุกเคส แต่ย่อหน้าเดียวยาวเป็นพันตัวอักษร)
@@ -71,9 +74,9 @@ export function measureFlow(text) {
 export function thresholdsFor(clipDurationSec) {
   const d = Number(clipDurationSec) || 0;
   // maxParagraph = ตัวชี้วัดหลัก (กำแพงตัวอักษร) · minParagraphs ใช้เฉพาะคลิปที่เนื้อยาวพอจะแบ่งได้จริง
-  if (d >= 180) return { minParagraphs: 2, maxParagraph: 700, minCharsToSplit: 900, maxLongRuns: 0, maxAvgRun: 200, maxConnPer100: 1.2 };
-  if (d >= 60) return { minParagraphs: 1, maxParagraph: 700, minCharsToSplit: 900, maxLongRuns: 0, maxAvgRun: 220, maxConnPer100: 1.4 };
-  return { minParagraphs: 1, maxParagraph: 800, minCharsToSplit: 1200, maxLongRuns: 1, maxAvgRun: 260, maxConnPer100: 1.8 };
+  if (d >= 180) return { minParagraphs: 2, maxParagraph: LIMITS.wallCharsLong, minCharsToSplit: LIMITS.splitFromChars, maxLongRuns: 0, maxAvgRun: 200, maxConnPer100: 1.2 };
+  if (d >= 60) return { minParagraphs: 1, maxParagraph: LIMITS.wallCharsLong, minCharsToSplit: LIMITS.splitFromChars, maxLongRuns: 0, maxAvgRun: 220, maxConnPer100: 1.4 };
+  return { minParagraphs: 1, maxParagraph: LIMITS.wallCharsShort, minCharsToSplit: LIMITS.splitFromCharsShort, maxLongRuns: 1, maxAvgRun: 260, maxConnPer100: 1.8 };
 }
 
 /**
@@ -86,7 +89,7 @@ export function inspectField(field, text, clipDurationSec) {
   const issues = [];
   if (!m.chars) return issues;
   if (m.longRuns > th.maxLongRuns) {
-    issues.push({ field, type: 'long_run', detail: `มีช่วงยาวเกิน 220 ตัวอักษร ${m.longRuns} จุด (ยาวสุด ${m.maxRun})` });
+    issues.push({ field, type: 'long_run', detail: `มีช่วงยาวเกิน ${LIMITS.longRunChars} ตัวอักษร ${m.longRuns} จุด (ยาวสุด ${m.maxRun})` });
   }
   if (m.avgRun > th.maxAvgRun) {
     issues.push({ field, type: 'dense', detail: `ช่วงเฉลี่ยยาว ${m.avgRun} ตัวอักษร (เกณฑ์ ${th.maxAvgRun})` });

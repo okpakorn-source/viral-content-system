@@ -210,7 +210,7 @@ const GRAY_ALIVE_REWRITES = [
 const applyGrayAlive = (prompt) => (swOn('CLIP_GRAY_ALIVE')
   ? _applyRewrites('GRAY_ALIVE', GRAY_ALIVE_REWRITES, prompt)
   : prompt);
-export const _applyGrayAliveForTest = (p) => applyGrayAlive(p);
+// (ถอด _applyGrayAliveForTest ออก 10 ส.ค. — ไม่มีใครเรียกแล้ว เพราะเทสย้ายไปยิงกับพรอมต์จริงใน clip-prompt-wiring)
 
 // ★ 10 ส.ค. 69 เฟส B (เจ้าของ: "อยากได้เนื้อดิบเล่าสวยแบบพาดหัว เอาไปเจนข่าวแล้วออกมาสวย")
 //   🔑 คาลิเบรตกับคลังจริง 60 เคสก่อนเขียนกฎ (ไม่ได้เดา): อาการจริงไม่ใช่ประโยคยาว — ภาษาไทยมีช่องว่างคั่นอยู่แล้ว

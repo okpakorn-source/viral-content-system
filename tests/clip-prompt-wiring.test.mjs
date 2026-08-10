@@ -96,6 +96,10 @@ test('ตัวแก้ถ้อยคำต้องยิงโดนเป�
   try { ins._buildVideoInsightPromptForTest({}); } finally { console.warn = orig; }
   const missed = warns.filter(w => w.includes('หาจุดแก้ไม่เจอ'));
   assert.equal(missed.length, 0, 'มีคู่ที่ยิงไม่โดนเป้า:\n' + missed.join('\n'));
+  // ★ Sol: "ไม่มี warning" อย่างเดียวไม่พอ (คู่ optional พลาดแล้วยังเงียบ) — ต้องเห็นผลของการแทนที่จริง
+  const p = ins._buildVideoInsightPromptForTest({});
+  assert.ok(p.includes('ให้เล่าใจความของสิ่งที่เขาพูดด้วยภาษาตรง'), 'ต้องเห็นข้อความใหม่ของคู่ที่แทนที่แล้ว');
+  assert.ok(p.includes('ลำดับของฉากจัดตามน้ำหนักข่าว'), 'ต้องเห็นข้อความใหม่ฝั่งจัดเรียง');
   clear();
 });
 

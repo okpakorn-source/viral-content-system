@@ -1,4 +1,4 @@
-// ★ 10 ส.ค. 69 — เทสยาม "ประโยคเปิดเป็นใจความข่าว" (CLIP_SMART_ORDER)
+// ★ 10 ส.ค. 69 — เทสยาม "จัดเรียงเนื้อดิบเอง" (CLIP_SMART_ORDER)
 //   เจ้าของสั่งจากเคสเอิร์นไดเม่: เนื้อออกมาเป็นแนวเล่าตั้งแต่วัยเด็ก ไม่เอาเนื้อสำคัญขึ้นก่อน
 //   คุมสิ่งที่เสี่ยงที่สุด: (1) ปิดสวิตช์ = เดิมเป๊ะ (2) กฎใหม่ต้องไม่ "ชนเงียบ" กับกฎเดิมที่ห้ามอารัมภบท/ห้ามยุบ
 //   (3) ลำดับการวางบล็อกต้องอยู่ท้ายกฎที่มันยกเว้น (4) ตัวขัดเกลาห้ามรื้อประโยคเปิดทิ้ง
@@ -23,7 +23,7 @@ export async function resolve(specifier, context, nextResolve) {
 }`;
 register(mod(hook));
 
-const SW = ['CLIP_SMART_ORDER', 'CLIP_STYLE_DIRECT', 'CLIP_V2_STYLE', 'CLIP_V2_QUOTES', 'CLIP_PROMPT_0804'];
+const SW = ['CLIP_SMART_ORDER', 'CLIP_STYLE_DIRECT', 'CLIP_V2_STYLE', 'CLIP_V2_QUOTES', 'CLIP_PROMPT_0804', 'CLIP_GRAY_ALIVE', 'CLIP_FLOW'];
 const saved = {};
 for (const k of SW) { saved[k] = process.env[k]; delete process.env[k]; }
 process.on('exit', () => { for (const k of SW) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
@@ -55,7 +55,7 @@ test('ปิดสวิตช์: พรอมต์ทั้งสองฝั
   clear();
 });
 
-test('เปิดสวิตช์: ป้ายรุ่นต่อท้าย lead1 ทั้งสองฝั่ง (ตรวจย้อนแยกออก)', () => {
+test('เปิดสวิตช์: ป้ายรุ่นต่อท้าย order1 ทั้งสองฝั่ง (ตรวจย้อนแยกออก)', () => {
   clear();
   process.env.CLIP_SMART_ORDER = '1';
   assert.equal(ins.currentInsightPromptRev(), 'raw-depth2legs-0801-order1');
@@ -174,5 +174,17 @@ test('สวิตช์ค่าแปลก (0/true/ว่าง) ต้อง
     assert.equal(ins.currentInsightPromptRev(), 'raw-depth2legs-0801', `ค่า "${v}" ต้องถือว่าปิด`);
     assert.equal(raw.normalizeRawStory({ rawStory: 'x' }).promptRev, 'rawstory-v2-0803', `ค่า "${v}" ต้องถือว่าปิด`);
   }
+  clear();
+});
+
+test('🧹 กรอบเขียว: ตัวแก้ถ้อยคำต้องยิงโดนเป้าจริง (ปิด=ไม่แตะ · เปิด=ไม่เหลือคำสั่งเรียงเวลา)', () => {
+  clear();
+  const P = '3. เรียงฉากทั้งหมดตามลำดับจริง แล้วเขียน rawStory ให้ครบก่อนพิจารณา topics และ note';
+  assert.equal(raw._applySmartOrderV2ForTest(P), P, 'ปิดสวิตช์ = ห้ามแตะพรอมต์');
+  process.env.CLIP_SMART_ORDER = '1';
+  const out = raw._applySmartOrderV2ForTest(P);
+  assert.ok(!out.includes('เรียงฉากทั้งหมดตามลำดับจริง'), 'เปิดแล้วต้องแทนที่คำสั่งเรียงเวลา');
+  assert.ok(out.includes('น้ำหนักข่าว'), 'ต้องแทนด้วยเกณฑ์น้ำหนักข่าว');
+  assert.ok(out.includes('rawStory ให้ครบ'), 'ส่วนที่ไม่เกี่ยวกับลำดับต้องคงเดิม');
   clear();
 });

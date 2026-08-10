@@ -14,6 +14,7 @@ import { randomUUID } from 'crypto';
 const SOURCE_META_ON = () => process.env.CLIP_SOURCE_META === '1';
 const PROMPT_0804_ON = () => process.env.CLIP_PROMPT_0804 === '1';
 const QC_GATES_ON = () => process.env.CLIP_QC_GATES === '1';
+const FLOW_ON = () => process.env.CLIP_FLOW === '1'; // ★ 10 ส.ค.: ใช้รูปแบบเดียวกับสวิตช์อื่นในไฟล์นี้
 
 // ★ 4 ส.ค.: โมดูลใหม่ 2 ตัวโหลดแบบ lazy "ในบล็อกที่ประตูเปิดเท่านั้น" (สไตล์เดียวกับ clipRawStoryService ในไฟล์นี้)
 //   เหตุผล: ประตูปิด = ไม่แตะโมดูลใหม่เลย → เส้นทางเดิม/เทสปักหมุดเดิมไม่มีทางกระทบ แม้โมดูลยังไม่ถูกวาง
@@ -631,10 +632,10 @@ export async function POST(request) {
     // ★ 10 ส.ค. 69 เฟส C (ประตู CLIP_FLOW) — ตัววัด "ความลื่น/การจัดย่อหน้า" แบบวัดล้วน
     //   🔴 ยังไม่แตะเนื้อ ไม่เรียก AI ตามลำดับที่ผู้ตรวจ Sol วางให้ — หน้าที่เดียวคือติดธงให้คนเห็น
     //   ใช้ระบบ qualityFlags เดิม (Sol ข้อ 6: ห้ามสร้างกลไกธงซ้ำ) · ล้มแล้วต้องไม่กระทบเคส
-    if (process.env.CLIP_FLOW === '1') {
+    if (FLOW_ON()) {
       try {
         const { flowVerdict } = await import('@/lib/services/clipFlowCheck');
-        const verdict = flowVerdict(insight, ctx.clipDurationSec);
+        const verdict = flowVerdict(insight, insight?.clipDurationSec);
         for (const i of verdict.issues.slice(0, 6)) qualityFlags.push({ area: 'flow', type: i.type, field: i.field, detail: i.detail });
         if (!verdict.pass) console.warn(`[ClipInsight] 🚩 เนื้อยังไม่ผ่านเกณฑ์การจัดรูป ${verdict.issues.length} จุด: ${verdict.issues.map((i) => i.type).join(', ')}`);
       } catch (e) {
@@ -662,13 +663,17 @@ export async function POST(request) {
       } catch (e) {
         console.warn('[ClipInsight] ด่านตรวจคุณภาพล้ม (ข้าม ไม่กระทบผลงาน):', String(e?.message || e).slice(0, 70));
       }
-      // เขียนคลังครั้งเดียวรวบทุกธง + สาเหตุที่ v2 ไม่สำเร็จ (ประหยัด write · fire-and-forget เหมือนจุดอื่นในไฟล์นี้)
-      if (qualityFlags.length || insight?.rawStoryV2Error) {
-        if (qualityFlags.length) insight = { ...insight, qualityFlags: qualityFlags.slice(0, 40) };
-        await store.update(caseId, (r) => ({ ...r, insight })).catch(() => {}); // await กันแข่งกับนัดก่อนหน้า (ผู้ตรวจ #8)
-        if (qualityFlags.length) {
-          console.warn(`[ClipInsight] 🚩 ธงคุณภาพ ${qualityFlags.length} ใบ: ${qualityFlags.slice(0, 8).map(f => `${f.area}/${f.type}`).join(' · ')}`);
-        }
+    }
+
+    // ★ ผู้ตรวจ Sol 10 ส.ค. ข้อ 1: บล็อกนี้เคยอยู่ "ใน" ประตู CLIP_QC_GATES → ถ้าเปิดเฉพาะ CLIP_FLOW
+    //   ธงถูกสร้างแต่ไม่ถูกบันทึกลงคลังเลย · ย้ายออกมานอกประตูให้ครอบทุกที่มาของธง (QC lint + ตัววัดการจัดรูป)
+    //   เขียนคลังครั้งเดียวรวบทุกธง · await กันแข่งกับนัดเขียนก่อนหน้า · ล้มแล้วต้องส่งเสียง ไม่กลืนเงียบ
+    if (qualityFlags.length || insight?.rawStoryV2Error) {
+      if (qualityFlags.length) insight = { ...insight, qualityFlags: qualityFlags.slice(0, 40) };
+      await store.update(caseId, (rec) => ({ ...rec, insight }))
+        .catch((e) => console.warn('[ClipInsight] บันทึกธงคุณภาพไม่สำเร็จ:', String(e?.message || e).slice(0, 70)));
+      if (qualityFlags.length) {
+        console.warn(`[ClipInsight] 🚩 ธงคุณภาพ ${qualityFlags.length} ใบ: ${qualityFlags.slice(0, 8).map(f => `${f.area}/${f.type}`).join(' · ')}`);
       }
     }
 

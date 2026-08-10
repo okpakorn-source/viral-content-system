@@ -24,7 +24,7 @@ export async function resolve(specifier, context, nextResolve) {
 }`;
 register(mod(hook));
 
-const SW = ['CLIP_GRAY_ALIVE', 'CLIP_SMART_ORDER', 'CLIP_STYLE_DIRECT', 'CLIP_PROMPT_0804'];
+const SW = ['CLIP_GRAY_ALIVE', 'CLIP_SMART_ORDER', 'CLIP_STYLE_DIRECT', 'CLIP_PROMPT_0804', 'CLIP_FLOW'];
 const saved = {};
 for (const k of SW) { saved[k] = process.env[k]; delete process.env[k]; }
 process.on('exit', () => { for (const k of SW) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
