@@ -1,6 +1,6 @@
 // 🎯 ข้อสอบระบบหมุนเวียนตัวอย่างไวรัล — import โค้ดจริงตรงๆ (ห้ามก๊อปฟังก์ชันมาเทส)
 // รัน: node tests/viral-fewshot-rotation.test.mjs — ต้องผ่านครบทุกเคสก่อนถือว่าเสร็จ
-import { weightedSample, pickLibraryCategory, scoreMatchExamples } from '../src/lib/services/viralFewshot.js';
+import { weightedSample, pickLibraryCategory, scoreMatchExamples, matchModeName } from '../src/lib/services/viralFewshot.js';
 
 let pass = 0, fail = 0;
 const t = (name, cond) => { if (cond) { pass++; console.log('✅ ' + name); } else { fail++; console.log('❌ ' + name); } };
@@ -99,5 +99,11 @@ const BRIEF = { title: 'ช้างพลายยืนเฝ้าโลง�
 t('20 ไม่มีอะไรแมชเลย → คืนว่าง (ให้ระบบถอย fallback ไม่ฝืนเลือกมั่ว)',
   scoreMatchExamples({ title: 'zzz', emotionalTags: [], libCat: '', excerpt: 'zzz' }, ROWS, ESS).length === 0);
 
-console.log(`\n${pass}/20 ผ่าน${fail ? ' — ❌ ตก ' + fail + ' เคส ห้ามไปต่อ' : ' — ✅ ด่านข้อสอบผ่าน'}`);
+// ── ⑨ 8 ส.ค. ดึก — เจ้าของเคาะ "วิธี 1 เป็นตัวจริง": default=ai · ปิดต้องตั้งใจปิดชัดๆ ──
+t('21 ไม่ตั้งค่า/ค่าว่าง = ai (วิธีหลักที่เจ้าของเคาะ)', matchModeName(undefined) === 'ai' && matchModeName('') === 'ai');
+t('22 ปิดต้องตั้งใจ: off/0/none = ปิด (พฤติกรรมสุ่มเดิม)', matchModeName('off') === '' && matchModeName('0') === '' && matchModeName('none') === '');
+t('23 score เลือกได้ · ค่าพิมพ์เพี้ยน (AI/Score/on) = ai ไม่หลุดไปสุ่มเงียบ',
+  matchModeName('score') === 'score' && matchModeName('AI') === 'ai' && matchModeName('Score') === 'score' && matchModeName('on') === 'ai');
+
+console.log(`\n${pass}/23 ผ่าน${fail ? ' — ❌ ตก ' + fail + ' เคส ห้ามไปต่อ' : ' — ✅ ด่านข้อสอบผ่าน'}`);
 process.exit(fail ? 1 : 0);

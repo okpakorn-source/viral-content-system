@@ -117,14 +117,21 @@ export function pickLibraryCategory({ category = '', emotionalTags = [], archety
 }
 
 // ═══ 🎯 8 ส.ค. 69 เจ้าของสั่ง "ห้ามสุ่ม — ต้องแมชโครงเรื่อง/อารมณ์/แนวทางจริง มีเหตุผลรองรับ" ═══
-// สวิตช์: VIRAL_MATCH_MODE = '' (แบบเดิม) | 'ai' (วิธี 1 บรรณารักษ์ luna อ่านเนื้อดิบ+สารบัญ เลือกพร้อมเหตุผล)
-//                            | 'score' (วิธี 2 โค้ดให้คะแนนแมชจากบัตรลักษณะ — นิ่ง อธิบายได้ ไม่ใช้ AI)
-// ล้มทุกทาง → ถอยพฤติกรรมเดิมอัตโนมัติ (fail-safe) · บัตรลักษณะ: data/viral-essences.json (สกัดครั้งเดียวด้วย luna)
-// ★ ผู้ตรวจจับได้: ค่าขยะ (พิมพ์ผิด 'AI'/'on') ต้องเท่ากับปิด ไม่ใช่หลุดไปสุ่มข้ามหมวดเงียบๆ
-const _matchMode = () => {
-  const v = String(process.env.VIRAL_MATCH_MODE || '').trim().toLowerCase();
-  return (v === 'ai' || v === 'score') ? v : '';
-};
+// วิธี 1 (ai): บรรณารักษ์ luna อ่านเนื้อดิบ+สารบัญ 202 เลือกพร้อมเหตุผล — กรรมการ 5 คนเคาะชนะ (แมช 9-5-4 ทั้ง 2 ข่าวเทส)
+// วิธี 2 (score): โค้ดให้คะแนนแมชจากบัตรลักษณะ — ตาข่ายถอยอัตโนมัติของวิธี 1
+// ★ 8 ส.ค. 69 ดึก เจ้าของเคาะ "ลงมือทำวิธีที่ 1": default = 'ai' — ปิดคืน VIRAL_MATCH_MODE=off (ถอยพฤติกรรมสุ่มเดิมทันที)
+// ล้มทุกชั้น → ai → score → สุ่มหมวดเดิม (fail-safe ห้ามล้มท่อข่าว) · บัตรลักษณะ: data/viral-essences.json
+export function matchModeName(raw) {
+  const v = String(raw ?? 'ai').trim().toLowerCase();
+  if (v === 'off' || v === '0' || v === 'none') return '';
+  if (v === 'score') return 'score';
+  return 'ai'; // ค่าอื่นทุกแบบ (รวมว่าง/พิมพ์เพี้ยน) = วิธีหลักที่เจ้าของเคาะ — มีโซ่ถอยในตัวอยู่แล้ว
+}
+const _matchMode = () => matchModeName(process.env.VIRAL_MATCH_MODE);
+
+// แคชผลจับคู่ต่อข่าว 10 นาที — ทุกเวอร์ชันของข่าวเดียวกันได้ "ครูคู่เดียวกัน" (คู่ที่แมชสุด) + จ่าย AI ครั้งเดียว/ข่าว
+let _matchCache = new Map(); // newsTitle|libCat → { picks, reason, mode, at }
+const MATCH_CACHE_MS = 10 * 60 * 1000;
 
 let _essCache = null;
 function _loadEssences() {
@@ -225,23 +232,41 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
     let pickMode = _rotateOn() ? 'rotate' : 'top2';
     let pickReason = '';
     if (mode === 'ai' || mode === 'score') {
-      const brief = { title: newsTitle, category, emotionalTags, archetype, libCat,
-        coreStory: newsBrief?.coreStory || '', excerpt: newsBrief?.excerpt || '' };
-      const ess = _loadEssences();
-      if (mode === 'ai') {
-        try {
-          const m = await aiMatchExamples(brief, rows || [], ess);
-          if (m) { picks = m.picks; pickReason = m.reason; pickMode = 'ai'; }
-        } catch (e) { console.log('[ViralFewshot] 🎯 ai-match ล้ม (จะถอยชั้นถัดไป):', e.message?.slice(0, 40)); }
-      }
-      if (!picks.length) {
-        const m2 = scoreMatchExamples(brief, rows || [], ess);
-        if (m2.length) {
-          picks = m2.map((x) => x.row);
-          pickReason = m2.map((x, i) => `ใบ${i + 1} ${x.reason}`).join(' | ');
-          pickMode = mode === 'ai' ? 'score-fallback' : 'score';
+      // แคชต่อข่าวแบบ "แชร์สัญญา": ทุกเวอร์ชันของข่าวเดียวกัน (รวมที่วิ่งขนานพร้อมกัน) รอผลบรรณารักษ์ก้อนเดียว
+      // = จ่าย AI ครั้งเดียว/ข่าว + ได้ครูคู่เดียวกันทุกเวอร์ชัน (จับตอนเทสจริง: 2 เวอร์ชันขนานเคยเบิก 2 รอบ)
+      const mKey = newsTitle ? `${String(newsTitle).slice(0, 80)}|${libCat}|${mode}` : '';
+      let mEntry = mKey ? _matchCache.get(mKey) : null;
+      if (!(mEntry && Date.now() - mEntry.at < MATCH_CACHE_MS)) {
+        const brief = { title: newsTitle, category, emotionalTags, archetype, libCat,
+          coreStory: newsBrief?.coreStory || '', excerpt: newsBrief?.excerpt || '' };
+        mEntry = {
+          at: Date.now(),
+          promise: (async () => {
+            const ess = _loadEssences();
+            if (mode === 'ai') {
+              try {
+                const m = await aiMatchExamples(brief, rows || [], ess);
+                if (m) return { picks: m.picks, reason: m.reason, mode: 'ai' };
+              } catch (e) { console.log('[ViralFewshot] 🎯 ai-match ล้ม (จะถอยชั้นถัดไป):', e.message?.slice(0, 40)); }
+            }
+            const m2 = scoreMatchExamples(brief, rows || [], ess);
+            if (m2.length) {
+              return {
+                picks: m2.map((x) => x.row),
+                reason: m2.map((x, i) => `ใบ${i + 1} ${x.reason}`).join(' | '),
+                mode: mode === 'ai' ? 'score-fallback' : 'score',
+              };
+            }
+            return null;
+          })(),
+        };
+        if (mKey) {
+          _matchCache.set(mKey, mEntry);
+          if (_matchCache.size > 40) _matchCache = new Map([..._matchCache].slice(-20));
         }
       }
+      const mRes = await mEntry.promise.catch(() => null);
+      if (mRes) { picks = mRes.picks; pickReason = mRes.reason; pickMode = mRes.mode; }
     }
     if (!picks.length) {
       // ★ ผู้ตรวจจับได้: fallback ในโหมดจับคู่ต้องสุ่มเฉพาะ "หมวดเดียวกับข่าว" (โผ __all__ ข้ามหมวด —
