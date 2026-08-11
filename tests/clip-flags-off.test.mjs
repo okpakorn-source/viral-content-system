@@ -64,7 +64,8 @@ test('สวิตช์ปิด: promptRev ของสมองรอบแ�
   //   ยามจึงเฝ้า 2 ชั้น: (ก) ค่า runtime ตอนสวิตช์ปิดต้องเป็นค่าเดิมเป๊ะ (ข) route ต้องเรียกฟังก์ชันนี้จริง ไม่เขียนค่าเอง
   assert.equal(insightService.currentInsightPromptRev(), 'raw-depth2legs-0801',
     'ขาปิดของ currentInsightPromptRev ต้องเป็นค่าเดิมเป๊ะ');
-  assert.match(ROUTE_SRC, /promptRev:\s*currentInsightPromptRev\(\)/,
+  // ★ 11 ส.ค.: ฟังก์ชันรับ arg "แบบการเล่า" ได้แล้ว — ยามตรวจว่า "เรียกฟังก์ชันนี้" ไม่ใช่ตรวจว่าวงเล็บต้องว่าง
+  assert.match(ROUTE_SRC, /promptRev:\s*currentInsightPromptRev\([^)]*\)/,
     'route ต้องใช้ currentInsightPromptRev() — ห้ามกลับไป hardcode (ความจริง 2 แหล่งทำป้ายผิดเงียบ)');
   // 🔴 กันเคสที่กลัวจริง: ใครใส่รุ่นใหม่แบบตายตัว (ไม่มีประตู) → ผู้ใช้โดนทุกคนโดยไม่ได้สั่ง
   assert.doesNotMatch(ROUTE_SRC, /promptRev:\s*'[^']*0804[^']*'/,

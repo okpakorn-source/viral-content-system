@@ -67,7 +67,9 @@ test('normalize: อินพุตพัง (null / string / ไม่มีฟ
 test('สวิตช์ v2: ต้องเปิดด้วยค่า "1" เท่านั้น และปิดได้รายคำขอด้วย skipRawStoryV2', () => {
   assert.match(ROUTE_SRC, /process\.env\.CLIP_RAWSTORY_V2 === '1' && !skipRawStoryV2/,
     'ประตูต้องเช็คทั้ง env และ skipRawStoryV2 (กันระบบอื่นที่ยิงเข้ามาโดนรอบสองด้วย)');
-  assert.match(ROUTE_SRC, /skipRawStoryV2 = false \} = await request\.json\(\)/,
+  // ★ 11 ส.ค.: เดิมล็อกว่า skipRawStoryV2 ต้องเป็นตัวสุดท้ายในวงเล็บ ทำให้เพิ่มพารามิเตอร์ใหม่ไม่ได้เลย
+  //   เจตนาจริงคือ "route ต้องอ่านค่านี้จาก body" — ตรวจที่เจตนาแทนตำแหน่งตัวอักษร
+  assert.match(ROUTE_SRC, /skipRawStoryV2 = false[,\s}][^\n]*= await request\.json\(\)/,
     'route ต้องรับพารามิเตอร์ skipRawStoryV2 จาก body');
 });
 

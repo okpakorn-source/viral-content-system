@@ -14,8 +14,23 @@ async function safeJson(r) {
   }
 }
 
+// ★ 11 ส.ค. 69 (เจ้าของสั่ง): "แบบการเล่า" ให้พนักงานเลือกเองก่อนวางลิงก์ เพราะคลิปแต่ละแนวถอดออกมาดีคนละแบบ
+//   ค่าที่ส่งไปต้องตรงกับฝั่งเซิร์ฟเวอร์ (resolveSmoothStyle ใน clipInsightService) — ค่าอื่น = เซิร์ฟเวอร์ใช้แบบมาตรฐานแทน
+//   🔴 ปุ่มมาตรฐานส่งค่า 'std' ไม่ใช่ค่าว่าง — ค่าว่างแปลว่า "ไม่ได้เลือก" ซึ่งเซิร์ฟเวอร์จะไปหยิบค่าตั้งต้นของระบบมาใช้แทน
+//      (ผู้ตรวจ Sol จับได้: ถ้าระบบตั้งค่าเริ่มต้นเป็น A ไว้ กดปุ่มมาตรฐานเดิมจะได้ A ไม่ใช่มาตรฐาน)
+const STYLE_CHOICES = [
+  { value: 'a', label: 'แบบ A — ไม่ย้ำผู้เล่า', hint: 'บอกครั้งเดียวว่าใครเล่า แล้วเดินเรื่องต่อเลย · เหมาะกับคลิปที่คนเดียวเล่าทั้งเรื่อง คลิปสั้น คลิปไฮไลท์' },
+  { value: 'c', label: 'แบบ C — แยกหลักฐาน/คำบอกเล่า', hint: 'สิ่งที่เห็นในคลิปเล่าตรงได้ ส่วนเรื่องที่มาจากปากคน (ความทรงจำ ข้อกล่าวหา ตัวเลขที่พูดถึง) คงคนพูดกำกับไว้เสมอ · เหมาะกับคลิปสัมภาษณ์หลายคน คลิปมีคู่กรณี คลิปข่าวคดี' },
+  { value: 'std', label: 'มาตรฐานเดิม', hint: 'พรอมต์เดิมของระบบ ไม่ใช้กติกาความลื่นเพิ่ม · ใช้เทียบผลว่าสองแบบใหม่ดีขึ้นจริงไหม' },
+];
+const styleLabel = (v) => (v === 'a' ? 'แบบ A' : v === 'c' ? 'แบบ C' : 'มาตรฐานเดิม');
+
 export default function ClipTranscriptPage() {
   const [url, setUrl] = useState('');
+  // ★ 11 ส.ค.: จำแบบที่พนักงานเลือกไว้ในเครื่อง (ค่าเริ่มต้น = A ตัวที่ทำคะแนนดีสุดในรอบทดสอบ)
+  const [smoothStyle, setSmoothStyle] = useState('a');
+  // แบบที่ "ผลบนจอตอนนี้" ถอดมาจริงๆ — อ่านจากคำตอบของเซิร์ฟเวอร์ ไม่ใช่จากปุ่ม (ปุ่มอาจถูกเปลี่ยนทีหลัง)
+  const [resultStyle, setResultStyle] = useState('');
   const [tidy, setTidy] = useState(true);
   const [loading, setLoading] = useState(false);
   const [out, setOut] = useState(null);
@@ -61,6 +76,9 @@ export default function ClipTranscriptPage() {
   const INSIGHT_PAGE_SIZE = 20;
   const INSIGHT_MAX_VIEW = 100;
   const insightReqSeq = useRef(0);
+  // ★ 11 ส.ค. (ผู้ตรวจ Sol ข้อ 6): จำ "หน้าที่กำลังดูอยู่จริง" ไว้ให้งานเบื้องหลังอ่านตอนทำเสร็จ
+  const insightPageRef = useRef(1);
+  useEffect(() => { insightPageRef.current = insightPage; }, [insightPage]);
   const loadInsightCases = async (page = insightPage) => {
     try {
       // ★ ผู้ตรวจรอบ 3 ข้อ 2: กันคำตอบมาสลับลำดับ (กดพลิกหน้ารัวตอนเน็ตช้า) — รับเฉพาะคำขอล่าสุด
@@ -100,6 +118,19 @@ export default function ClipTranscriptPage() {
     loadQueueList(); // รีเฟรชให้คลิปหายจากคิวทันที
   };
   useEffect(() => { loadCases(); loadHuntCases(); loadQueueList(); }, []);
+
+  // ★ 11 ส.ค.: จำแบบการเล่าที่เลือกไว้ข้ามการรีเฟรช — อ่านหลัง mount เท่านั้น (กันหน้าเซิร์ฟเวอร์กับหน้าจอไม่ตรงกัน)
+  //   ค่าที่จำไว้ต้องอยู่ในรายการจริง ไม่งั้นถือว่าเสียแล้วใช้ค่าเริ่มต้นแทน
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('clip_smooth_style');
+      if (saved !== null && STYLE_CHOICES.some(s => s.value === saved)) setSmoothStyle(saved);
+    } catch { /* เบราว์เซอร์ปิด localStorage = ใช้ค่าเริ่มต้น ไม่ใช่เรื่องคอขาดบาดตาย */ }
+  }, []);
+  const pickStyle = (v) => {
+    setSmoothStyle(v);
+    try { localStorage.setItem('clip_smooth_style', v); } catch { /* ไม่จำได้ก็ยังใช้งานได้ปกติ */ }
+  };
   // ★ 9 ส.ค.: โหลดคลังตามหน้า (ครอบตอน mount ด้วย — หน้าเริ่มที่ 1)
   useEffect(() => { loadInsightCases(insightPage); }, [insightPage]); // eslint-disable-line react-hooks/exhaustive-deps
   // ★ 26 มิ.ย.: รีเฟรชแผงคิวทุก 10 วิ — เห็นคิวเดินสด แม้ไม่ได้ส่งงานเอง (คนอื่นในทีมส่งก็เห็น)
@@ -143,12 +174,13 @@ export default function ClipTranscriptPage() {
   //   ★ 8 ก.ค.: force=true (ปุ่ม "ถอดใหม่") ข้ามผลจากคลัง ถอดสดเสมอ + ส่ง user เก็บ metadata คลัง
   const extractInsight = async (force = false) => {
     if (!url.trim()) { setErr('วางลิงก์คลิปก่อน'); return; }
-    setInsightLoading(true); setErr(''); setInsight(null); setQueueJob(null);
+    setInsightLoading(true); setErr(''); setInsight(null); setResultStyle(''); setQueueJob(null);
     try {
       const me = (typeof window !== 'undefined' && localStorage.getItem('clip_user')) || '';
-      const r = await fetch('/api/clip-transcript/insight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), force: !!force, user: me }) });
+      const r = await fetch('/api/clip-transcript/insight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), force: !!force, user: me, smooth: smoothStyle }) });
       const d = await safeJson(r);
-      if (d.success) { setInsight(d.data); refreshInsightToFirst(); }   // ★ รีเฟรชคลังประเด็นทันทีที่ถอดสำเร็จ
+      // ★ 11 ส.ค.: ยึด smoothStyle ที่เซิร์ฟเวอร์ตอบกลับเป็นความจริง (ผลใบนี้ถอดด้วยแบบไหนจริง)
+      if (d.success) { setInsight(d.data); setResultStyle(d.data?.smoothStyle || 'std'); refreshInsightToFirst(); }   // ★ รีเฟรชคลังประเด็นทันทีที่ถอดสำเร็จ
       // ★ 26 มิ.ย.: กดถอด "ทันที" แล้ว Gemini แน่น → ชวนไปกด "ส่งเข้าคิว" (ระบบรอ+รันเองจน Gemini ว่าง)
       //   ปุ่มถอดตรง = ลองเดี๋ยวนี้ (ไม่วนเงียบ) · ปุ่มคิว = หย่อนทิ้งไว้ ระบบจัดการให้ → แยกชัด ไม่งง
       else if (/Gemini มีคนใช้งานหนัก|แน่นชั่วคราว|503|overload/i.test(String(d.error || ''))) {
@@ -170,7 +202,9 @@ export default function ClipTranscriptPage() {
     try {
       // ขั้น 1 (เฉพาะ YouTube/TikTok — เห็นจังหวะจริง): ถอดเนื้อดิบก่อน · FB/IG ข้ามไปให้ server จัดคิวเอง
       if (!isMetaUrl(url.trim())) {
-        const r1 = await fetch('/api/clip-transcript/insight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), user: me }) });
+        // ★ 11 ส.ค. (ผู้ตรวจ Sol ข้อ 3): ต้องส่ง cacheAnyStyle เหมือนฝั่ง server — งานล่าประเด็นใช้เนื้อไปตั้งคีย์เวิร์ด
+        //   แบบการเล่าไม่มีผล ถ้าไม่ส่งธงนี้ คลิปที่เคยถอดด้วยแบบ A/C จะพลาดแคชแล้วถอดใหม่ (เสียเงิน + ถ้า Gemini แน่นงานหยุดทันที)
+        const r1 = await fetch('/api/clip-transcript/insight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), user: me, cacheAnyStyle: true }) });
         const d1 = await safeJson(r1);
         if (!d1.success) {
           setErr(/แน่น|503|overload|ใช้งานหนัก/i.test(String(d1.error || ''))
@@ -240,7 +274,7 @@ export default function ClipTranscriptPage() {
     setSubmitting(true); setErr(''); setQueueJob(null);
     try {
       const me = (typeof window !== 'undefined' && localStorage.getItem('clip_user')) || '';
-      const r = await fetch('/api/clip-transcript/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), kind: 'insight', tidy, user: me }) });
+      const r = await fetch('/api/clip-transcript/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), kind: 'insight', tidy, user: me, smooth: smoothStyle }) });
       const d = await safeJson(r);
       if (!d.success) { setErr(d.error || 'ส่งเข้าคิวไม่สำเร็จ'); setSubmitting(false); return; }
       setQueueJob({ jobId: d.jobId, status: d.status || 'pending', position: d.position, platform: d.platform });
@@ -259,7 +293,8 @@ export default function ClipTranscriptPage() {
         st = d.status;
         // ★ 26 มิ.ย.: เก็บ statusNote/attempts/nextRetryAt → โชว์ตอน retry_wait (Gemini แน่น รอลองใหม่อัตโนมัติ + นับถอยหลัง)
         setQueueJob({ jobId, status: d.status, position: d.position, platform: d.platform, result: d.result, error: d.error, statusNote: d.statusNote, attempts: d.attempts, nextRetryAt: d.nextRetryAt });
-        if (d.status === 'done') { setInsight(d.result); refreshInsightToFirst(); return; }
+        // ★ 11 ส.ค.: งานที่กลับจากคิวก็ต้องติดป้ายว่าถอดด้วยแบบไหน (อ่านจากผลจริง ไม่ใช่จากปุ่มที่อาจถูกเปลี่ยนไปแล้ว)
+        if (d.status === 'done') { setInsight(d.result); setResultStyle(d.result?.smoothStyle || 'std'); refreshInsightToFirst(); return; }
         if (d.status === 'error') return;
         // 'pending' | 'processing' | 'retry_wait' → poll ต่อ (retry_wait = Gemini แน่น ระบบลองใหม่เองทุก ~3 นาที)
       } catch { /* เน็ตสะดุด — รอบหน้าลองใหม่ */ }
@@ -271,6 +306,26 @@ export default function ClipTranscriptPage() {
 
   const copy = (text, key) => { navigator.clipboard?.writeText(text); setCopied(key); setTimeout(() => setCopied(''), 2000); };
   const deleteCase = async (id) => { await fetch('/api/clip-transcript/cases?id=' + id, { method: 'DELETE' }); loadCases(); };
+  // ★ 11 ส.ค. 69 (เจ้าของสั่ง): ปักหมุด "ใช้ใบนี้" — คลิปเดียวถอดหลายรอบได้ผลไม่เท่ากัน ต้องให้คนเก็บรอบที่ถูกใจไว้
+  //   ปักแล้ว: กดถอดซ้ำจะได้ใบนี้คืนทันที ไม่เสียค่าถอดใหม่ · และใบนี้จะไม่ถูกลบตอนคลังเต็ม
+  const [pinning, setPinning] = useState('');
+  const pinCase = async (id, chosen) => {
+    setPinning(id);
+    try {
+      const r = await fetch('/api/clip-transcript/cases?kind=insight', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, chosen }),
+      });
+      const d = await safeJson(r);
+      if (!d.success) setErr(d.error || 'ปักหมุดไม่สำเร็จ');
+      else {
+        if (d.warning) setErr(d.warning);
+        // ★ (ผู้ตรวจ Sol ข้อ 6) โหลดหน้าที่ "กำลังดูอยู่ตอนนี้" ไม่ใช่หน้าที่กดตอนแรก —
+        //   ถ้าคนเปลี่ยนหน้าระหว่างรอ ผลเก่าจะมาทับแล้วรายการไม่ตรงกับเลขหน้า
+        loadInsightCases(insightPageRef.current);
+      }
+    } catch (e) { setErr(e.message); }
+    setPinning('');
+  };
   const deleteInsightCase = async (id) => { await fetch('/api/clip-transcript/cases?kind=insight&id=' + id, { method: 'DELETE' }); loadInsightCases(); };
 
   // ข้อความคัดลอกของ "1 ประเด็น" (ใช้ทั้งคลิปยาวรายประเด็น)
@@ -535,6 +590,27 @@ export default function ClipTranscriptPage() {
 
         {/* Input */}
         <div className="card" style={{ background: 'var(--bg-card, #1a1a2e)', border: '1px solid var(--border, #2a2a3e)', borderRadius: 14, padding: 18, marginBottom: 18 }}>
+          {/* ★ 11 ส.ค. 69 (เจ้าของสั่ง): เลือก "แบบการเล่า" ก่อนวางลิงก์ — คลิปแต่ละแนวถอดออกมาดีคนละแบบ */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+            <span style={{ fontSize: 12.5, fontWeight: 800, opacity: 0.9 }}>✍️ แบบการเล่า:</span>
+            {STYLE_CHOICES.map(s => {
+              const on = smoothStyle === s.value;
+              // 🔴 ล็อกปุ่มระหว่างกำลังถอด (ผู้ตรวจ Sol): เดิมกดเปลี่ยนกลางคันได้ พอผลกลับมาปุ่มโชว์อีกแบบ
+              //   ทำให้ข้อมูลทดลองติดป้ายผิดโดยไม่มีใครรู้
+              return (
+                <button key={s.value} onClick={() => pickStyle(s.value)} title={insightLoading ? 'กำลังถอดอยู่ — เปลี่ยนแบบได้เมื่อถอดเสร็จ' : s.hint} disabled={insightLoading}
+                  style={{ padding: '7px 13px', borderRadius: 9, fontSize: 12.5, fontWeight: on ? 800 : 600, fontFamily: 'inherit',
+                    cursor: insightLoading ? 'not-allowed' : 'pointer', opacity: insightLoading && !on ? 0.45 : 1,
+                    border: '1px solid ' + (on ? '#22c55e' : 'var(--border, #2a2a3e)'),
+                    background: on ? 'rgba(34,197,94,0.16)' : 'rgba(0,0,0,0.2)', color: on ? '#4ade80' : 'inherit' }}>
+                  {on ? '✅ ' : ''}{s.label}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 11.5, lineHeight: 1.6, opacity: 0.75, marginBottom: 12 }}>
+            {STYLE_CHOICES.find(s => s.value === smoothStyle)?.hint}
+          </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <input value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && !insightLoading && extractInsight()}
               placeholder="วางลิงก์คลิป (TikTok / YouTube / Facebook)"
@@ -680,6 +756,8 @@ export default function ClipTranscriptPage() {
                 <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontWeight: 700 }}>{insight.emoji} {insight.clipTypeLabel}</span>
                 {insight.category && <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(245,158,11,0.16)', color: '#f59e0b', fontWeight: 800 }}>📂 {insight.category}</span>}
                 {insight.multiTopic && <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(245,158,11,0.18)', color: '#fbbf24', fontWeight: 800 }}>📚 คลิปยาว · {insight.totalTopics || insight.topics?.length || 0} ประเด็น</span>}
+                {/* ★ 11 ส.ค. (ผู้ตรวจ Sol): ป้ายนี้อ่านจากคำตอบเซิร์ฟเวอร์ ไม่ใช่จากปุ่ม — ผลใบนี้ถอดด้วยแบบไหน "จริงๆ" */}
+                {resultStyle && <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(34,197,94,0.16)', color: '#4ade80', fontWeight: 800 }}>✍️ {styleLabel(resultStyle === 'std' ? '' : resultStyle)}</span>}
                 <span style={{ fontSize: 10, color: 'var(--text-muted,#888)' }}>{String(insight.engine || '').includes('gemini-video') ? '👁️ Gemini ดูคลิป' : '📝 จากบทถอดเสียง'}</span>
                 <button onClick={() => copy(insightCaseText(insight), 'insight-raw')} style={{ padding: '4px 11px', borderRadius: 8, border: 'none', background: copied === 'insight-raw' ? 'rgba(34,197,94,0.2)' : 'rgba(59,130,246,0.15)', color: copied === 'insight-raw' ? '#22c55e' : '#3b82f6', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'insight-raw' ? '✅ คัดลอกแล้ว' : '📋 คัดลอกทั้งหมด'}</button>
               </div>
@@ -987,13 +1065,34 @@ export default function ClipTranscriptPage() {
                         {ins.clipTypeLabel && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontWeight: 700 }}>{ins.emoji || '🎬'} {ins.clipTypeLabel}</span>}
                         {(c.category || ins.category) && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(245,158,11,0.16)', color: '#f59e0b', fontWeight: 800 }}>📂 {c.category || ins.category}</span>}
                         <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(37,99,235,0.15)', color: '#60a5fa', fontWeight: 700 }}>{String(ins.engine || '').includes('gemini-video') ? '👁️ ดูคลิป' : '📝 บทถอด'}</span>
+                        {/* ★ 11 ส.ค.: ป้ายบอกแบบการเล่าที่ใช้ถอดใบนี้ — ติดทุกใบรวมถึงแบบมาตรฐาน (เจ้าของสั่ง) */}
+                        {(c.styleLabel || c.smoothStyle) && <span title={STYLE_CHOICES.find(s => s.value === (c.smoothStyle || 'std'))?.hint || ''} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: c.smoothStyle ? 'rgba(34,197,94,0.16)' : 'rgba(148,163,184,0.16)', color: c.smoothStyle ? '#4ade80' : '#94a3b8', fontWeight: 800 }}>✍️ {c.styleLabel || `แบบ ${String(c.smoothStyle).toUpperCase()}`}</span>}
+                        {/* ★ 11 ส.ค.: ใบที่ถูกเลือกไว้ใช้ — กดถอดซ้ำจะได้ใบนี้คืน และจะไม่ถูกลบตอนคลังเต็ม */}
+                        {c.chosen && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(250,204,21,0.18)', color: '#fbbf24', fontWeight: 800 }}>📌 ใช้ใบนี้</span>}
+                        {/* ★ 11 ส.ค.: บอกว่าคลิปนี้ถอดไว้กี่รอบแล้ว ใบนี้เป็นรอบที่เท่าไร (นับจากที่โหลดมาในหน้านี้) */}
+                        {/* ★ (ผู้ตรวจ Sol ข้อ 7) นับได้เฉพาะใบที่โหลดมาในหน้านี้ — เลี่ยงการเขียนเลขที่ทำให้เข้าใจผิดว่าเป็นยอดรวมทั้งคลัง */}
+                        {(() => {
+                          const sameClip = insightCases.filter(x => x.url === c.url);
+                          if (sameClip.length < 2) return null;
+                          return <span title="คลิปนี้ถอดไว้หลายรอบ — เทียบแล้วกด 'ใช้ใบนี้' กับใบที่ถูกใจได้ (อาจมีเวอร์ชันอื่นอยู่หน้าอื่น)" style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(59,130,246,0.16)', color: '#60a5fa', fontWeight: 800 }}>🗂️ {sameClip.length} เวอร์ชันในหน้านี้</span>;
+                        })()}
                         {/* ★ 8 ก.ค.: ธงคุณภาพ — เคสที่ไม่ผ่านด่านตรวจ (ลองซ้ำแล้ว) เห็นชัด ไม่ปนกับเคสดี */}
                         {c.lowQuality && <span title={c.qualityNote || ''} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(239,68,68,0.14)', color: '#f87171', fontWeight: 800 }}>⚠️ ไม่สมบูรณ์</span>}
                       </div>
                       <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{platformIcon(c.platform)} {ins.headline || c.title || c.url}</div>
                       <div style={{ fontSize: 10, color: 'var(--text-muted, #888)', marginTop: 3 }}>{c.platform} · {ins.multiTopic ? `📚 ${ins.topics?.length || 0} ประเด็น (คลิปยาว)` : `${ins.keyPoints?.length || 0} ประเด็น${ins.subStories?.length ? ` · 🧩 ${ins.subStories.length} เนื้อดิบแยก` : ''}`}{c.user ? ` · 👤 ${c.user}` : ''} · {new Date(c.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
                     </div>
-                    <button onClick={(e) => { e.stopPropagation(); deleteInsightCase(c.id); }} style={{ marginLeft: 10, padding: '4px 10px', borderRadius: 6, border: 'none', background: 'rgba(239,68,68,0.1)', color: '#ef4444', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>ลบ</button>
+                    <div style={{ display: 'flex', gap: 6, marginLeft: 10, flexShrink: 0 }}>
+                      {/* ★ 11 ส.ค. (เจ้าของสั่ง): เลือกเก็บเวอร์ชันที่ถูกใจ — ถอดซ้ำจะได้ใบนี้คืน ไม่ต้องลุ้นใหม่ */}
+                      <button onClick={(e) => { e.stopPropagation(); pinCase(c.id, !c.chosen); }} disabled={pinning === c.id}
+                        title={c.chosen ? 'เลิกใช้ใบนี้' : 'เลือกใช้ใบนี้ — กดถอดซ้ำครั้งหน้าจะได้ใบนี้คืนทันที และใบนี้จะไม่ถูกลบตอนคลังเต็ม'}
+                        style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, cursor: pinning === c.id ? 'wait' : 'pointer', fontFamily: 'inherit', fontWeight: 700,
+                          border: '1px solid ' + (c.chosen ? '#fbbf24' : 'transparent'),
+                          background: c.chosen ? 'rgba(250,204,21,0.16)' : 'rgba(148,163,184,0.12)', color: c.chosen ? '#fbbf24' : '#94a3b8' }}>
+                        {pinning === c.id ? '…' : (c.chosen ? '📌 ใช้อยู่' : '📌 ใช้ใบนี้')}
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); deleteInsightCase(c.id); }} style={{ padding: '4px 10px', borderRadius: 6, border: 'none', background: 'rgba(239,68,68,0.1)', color: '#ef4444', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>ลบ</button>
+                    </div>
                   </div>
                   {insightExpanded === c.id && (
                     <div style={{ padding: 14, borderTop: '1px solid rgba(37,99,235,0.2)' }}>

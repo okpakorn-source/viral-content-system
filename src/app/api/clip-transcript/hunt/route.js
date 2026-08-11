@@ -53,7 +53,10 @@ export async function POST(request) {
     const insRes = await fetch(`${request.nextUrl.origin}/api/clip-transcript/insight`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       // ★ 3 ส.ค.: ปิดรอบ "เนื้อดิบ v2" สำหรับเส้นนี้ — hunt ต้องแบ่งงบ 800s ให้ค้น+คัดต่อ ถ้าปล่อยให้ดูคลิปรอบสองจะโดนตัดกลางทาง
-      body: JSON.stringify({ url, user, skipRawStoryV2: true }),
+      // ★ 11 ส.ค. (ผู้ตรวจ Fable5): cacheAnyStyle — เส้นนี้เอาเนื้อดิบไปตั้งคีย์เวิร์ดค้นข่าวเท่านั้น
+      //   "แบบการเล่า" ไม่มีผลกับงานค้น จึงหยิบเคสที่เคยถอดไว้แบบไหนก็ได้ · ถ้าไม่ใส่ธงนี้ คลิปที่พนักงาน
+      //   เพิ่งถอดด้วยแบบ A จะไม่ถูกนับเป็นของในคลัง แล้วกดล่าประเด็นทีไรก็จ่ายค่าดูคลิปใหม่เต็มราคาทุกครั้ง
+      body: JSON.stringify({ url, user, skipRawStoryV2: true, cacheAnyStyle: true }),
     });
     const insData = await insRes.json().catch(() => ({}));
     if (!insData.success) {

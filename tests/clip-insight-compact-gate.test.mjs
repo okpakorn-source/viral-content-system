@@ -19,9 +19,24 @@ const STUB_CLIP_SERVICE = mod(`
 const state = () => globalThis.__clipRouteState;
 // ★ 4 ส.ค. 69: route ใช้ currentInsightPromptRev() จาก service (ความจริงแหล่งเดียว) — สตับต้องมี export นี้
 //   ค่าตรงกับ service จริง: ปิด CLIP_PROMPT_0804 = 'raw-depth2legs-0801' เป๊ะ (เทสข้าง Baseline ยังยึดค่านี้)
-export function currentInsightPromptRev() { return process.env.CLIP_PROMPT_0804 === '1' ? 'raw-depth2legs-0801-m0804' : 'raw-depth2legs-0801'; }
+// ★ 11 ส.ค. 69: รับ arg "แบบการเล่า" ได้เหมือนของจริง — ไม่เลือกแบบ = ค่าเดิมเป๊ะ (เทส Baseline ยังยึดค่านี้)
+export function currentInsightPromptRev(smooth) {
+  const base = process.env.CLIP_PROMPT_0804 === '1' ? 'raw-depth2legs-0801-m0804' : 'raw-depth2legs-0801';
+  const s = resolveSmoothStyle(smooth);
+  return s ? base + '-smooth' + s.toUpperCase() + '1' : base;
+}
+// ★ 11 ส.ค.: route import ตัวนี้ด้วย — สตับต้องมีให้ครบ ไม่งั้น import ล้มทั้งไฟล์
+//   🔴 ผู้ตรวจ Fable5: สตับต้องรู้จัก 'std' เหมือนของจริง ไม่งั้นเทส route จะวิ่งบนกติกาเก่าแบบเงียบๆ
+export function parseSmoothStyle(raw) { const v = String(raw ?? '').trim().toLowerCase(); return (v === 'a' || v === 'c' || v === 'std') ? v : ''; }
+export function resolveSmoothStyle(raw) {
+  const asked = parseSmoothStyle(raw);
+  if (asked === 'std') return '';
+  const fb = parseSmoothStyle(process.env.CLIP_SMOOTH);
+  return asked || (fb === 'std' ? '' : fb);
+}
 export async function extractClipInsight(args) { return state().firstPass(args); }
-export async function extractInsightFromVideoBuffer(buffer, mimeType) { return state().firstPass({ buffer, mimeType }); }
+// 🔴 ผู้ตรวจ Fable5: ต้องรับ arg ตัวที่ 3 ด้วย ไม่งั้นถ้าเส้นไฟล์วิดีโอทำ smooth หล่น เทสจะยังผ่าน
+export async function extractInsightFromVideoBuffer(buffer, mimeType, opts) { return state().firstPass({ buffer, mimeType, ...(opts || {}) }); }
 export async function extractMultiTopicInsight(args) { return state().firstPass(args); }
 export async function extractMultiTopicFromVideoBuffer(buffer, mimeType) { return state().firstPass({ buffer, mimeType }); }
 export async function extractTranscriptQuotes(args) { return state().enrich(args); }
@@ -106,9 +121,10 @@ test('first-pass prompt restores compact Thai rule and removes all minimum-lengt
   assert.doesNotMatch(captured.prompt, /เท่า rawData รวม/, 'สมอผูกความยาวแบบเก่าต้องไม่กลับมา');
 });
 
-async function runInsightRoute(enrichedValue, slug) {
+async function runInsightRoute(enrichedValue, slug, extraBody = {}) {
   const records = [];
   const calls = { firstPass: 0, enrich: 0, fetch: 0 };
+  const firstPassArgs = []; // ★ 11 ส.ค.: เก็บ arg ที่ชั้นในได้รับจริง — ยามของ "แบบการเล่าหล่นระหว่างทาง"
   const store = {
     getAll: async () => records,
     add: async (record) => { records.push(record); return record; },
@@ -124,8 +140,9 @@ async function runInsightRoute(enrichedValue, slug) {
   };
   globalThis.__clipRouteState = {
     store: () => store,
-    firstPass: async () => {
+    firstPass: async (args) => {
       calls.firstPass++;
+      firstPassArgs.push(args || {});
       return {
         engine: 'gemini-video',
         headline: `หัวข้อ ${slug}`,
@@ -157,10 +174,10 @@ async function runInsightRoute(enrichedValue, slug) {
   else process.env.CLIP_INSIGHT_ENRICHED = enrichedValue;
   try {
     const response = await POST({
-      json: async () => ({ url: `https://www.tiktok.com/@unit/video/${slug}`, force: true, user: 'unit' }),
+      json: async () => ({ url: `https://www.tiktok.com/@unit/video/${slug}`, force: true, user: 'unit', ...extraBody }),
     });
     await new Promise((resolve) => setImmediate(resolve));
-    return { response, calls, records };
+    return { response, calls, records, firstPassArgs };
   } finally {
     if (previous === undefined) delete process.env.CLIP_INSIGHT_ENRICHED;
     else process.env.CLIP_INSIGHT_ENRICHED = previous;
@@ -203,3 +220,35 @@ for (const [i, v] of [['3', 'true'], ['4', '0'], ['5', '']].entries()) {
     assert.equal(response._body.data.transcriptQuotes, undefined);
   });
 }
+
+// ── ★ 11 ส.ค. 69 (ผู้ตรวจ Fable5): ยิงตาม "สายจริงของ route" ไม่ใช่ยิงตรงเข้า service ──
+//   บั๊กที่ชุดนี้จับ: route แปลงค่าปุ่มเป็นค่าว่างแล้วส่งลงชั้นใน → ชั้นในตีความว่า "ไม่ได้เลือก"
+//   แล้วไปหยิบ CLIP_SMOOTH มาใช้แทน · เทสที่ยิงตรงเข้า service จับไม่ได้เพราะชั้นนั้นทำงานถูกอยู่แล้ว
+
+test('🔴 กดปุ่ม "มาตรฐานเดิม" ผ่าน route ต้องส่ง std ลงชั้นใน (ไม่ใช่ค่าว่างที่ถูกตีความใหม่)', async () => {
+  const prev = process.env.CLIP_SMOOTH;
+  process.env.CLIP_SMOOTH = 'a'; // ตั้งค่าตั้งต้นระบบเป็น A = เงื่อนไขที่ทำให้บั๊กเดิมโผล่
+  try {
+    const { response, records, firstPassArgs } = await runInsightRoute(undefined, '7000000000000000101', { smooth: 'std' });
+    assert.equal(response._body.success, true);
+    assert.equal(firstPassArgs[0]?.smooth, 'std', 'ชั้นในต้องได้คำว่า std ตรงๆ ห้ามได้ค่าว่าง');
+    assert.equal(records[0]?.smoothStyle, undefined, 'เคสมาตรฐานต้องไม่ติดฟิลด์แบบการเล่า');
+    assert.ok(!/smooth/i.test(records[0]?.promptRev || ''), 'ป้ายรุ่นของเคสมาตรฐานต้องไม่มีคำว่า smooth');
+    assert.equal(response._body.data.smoothStyle, undefined, 'คำตอบที่ส่งกลับต้องบอกว่าเป็นมาตรฐาน');
+  } finally { if (prev === undefined) delete process.env.CLIP_SMOOTH; else process.env.CLIP_SMOOTH = prev; }
+});
+
+test('🔴 เลือกแบบ C ผ่าน route: ค่าต้องไปถึงชั้นใน + ติดคลัง + ติดป้ายรุ่นครบ', async () => {
+  const { response, records, firstPassArgs } = await runInsightRoute(undefined, '7000000000000000102', { smooth: 'c' });
+  assert.equal(response._body.success, true);
+  assert.equal(firstPassArgs[0]?.smooth, 'c', '🔴 เส้นไฟล์วิดีโอ (TikTok) ต้องได้แบบการเล่าด้วย — ยามของบรรทัด _metaArg');
+  assert.equal(records[0]?.smoothStyle, 'c', 'เคสต้องจำได้ว่าถอดด้วยแบบ C');
+  assert.match(records[0]?.promptRev || '', /-smoothC\d+$/, 'ป้ายรุ่นต้องบอกแบบ C พร้อมเลขรุ่น');
+  assert.equal(response._body.data.smoothStyle, 'c', 'คำตอบต้องยืนยันแบบที่ใช้จริงกลับไปให้หน้าเว็บ');
+});
+
+test('ค่าปุ่มเพี้ยนผ่าน route ต้องไม่ล้ม และไม่ติดป้ายแบบไหนเลย', async () => {
+  const { response, records } = await runInsightRoute(undefined, '7000000000000000103', { smooth: 'b' });
+  assert.equal(response._body.success, true, 'ค่าที่ถอดทิ้งแล้วต้องไม่ทำให้คำขอล้ม');
+  assert.equal(records[0]?.smoothStyle, undefined, 'ค่าเพี้ยน = ไม่ติดป้ายแบบ');
+});

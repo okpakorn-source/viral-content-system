@@ -28,6 +28,55 @@ export async function GET(request) {
   }
 }
 
+/**
+ * ★ 11 ส.ค. 69 (เจ้าของสั่ง) — PATCH: ปักหมุด "ใช้ใบนี้" ให้เวอร์ชันที่ถูกใจ
+ *   ที่มา: คลิปเดียวถอดหลายครั้งได้ผลไม่เหมือนกัน บางรอบดีบางรอบไม่ดี → ต้องให้คนเลือกเก็บรอบที่ดีไว้
+ *   ปักหมุดแล้ว: กดถอดซ้ำจะได้ใบนี้คืนทันที (ไม่จ่ายค่าถอดใหม่) และใบนี้จะไม่ถูกลบตอนเก็บกวาดคลัง
+ *   Body: { id, chosen: true|false }  · ปักหมุดใบใหม่ = ปลดหมุดใบเก่าของคลิปเดียวกันให้อัตโนมัติ
+ */
+export async function PATCH(request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    // body พัง = ความผิดของผู้เรียก ต้องตอบ 400 พร้อมข้อความที่อ่านรู้เรื่อง ไม่ใช่ 500 พร้อม error ดิบของระบบ
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ success: false, error: 'ข้อมูลที่ส่งมาไม่ถูกรูปแบบ', errorType: 'BAD_REQUEST' }, { status: 400 });
+    }
+    const { id } = body;
+    // ★ 11 ส.ค. (ผู้ตรวจ Fable5 ข้อ 4): ต้องอ่านค่าแบบเข้มงวด — เดิมใช้ !! ทำให้ส่ง chosen:"false" มาแล้วกลายเป็น "ปัก"
+    //   endpoint นี้เปิดรับจากภายนอกได้ ไม่ใช่แค่ปุ่มบนหน้าเว็บที่ส่ง boolean มาถูกเสมอ
+    const raw = body.chosen;
+    const chosen = raw === undefined ? true
+      : (raw === true || raw === 1 || String(raw).trim().toLowerCase() === 'true' || String(raw).trim() === '1');
+    if (!id) return NextResponse.json({ success: false, error: 'ต้องระบุ id', errorType: 'CASES_ERROR' }, { status: 400 });
+    const store = createStore(storeName(searchParams.get('kind')));
+    const all = await store.getAll();
+    const target = all.find(c => c.id === id);
+    if (!target) return NextResponse.json({ success: false, error: 'ไม่พบเคสนี้ในคลัง', errorType: 'CASE_NOT_FOUND' }, { status: 404 });
+    // ★ 11 ส.ค. (ผู้ตรวจ Sol ข้อ 1): ปักใบใหม่ก่อน แล้วค่อยปลดใบเก่า
+    //   ลำดับนี้สำคัญ: ถ้าปลดก่อนแล้วปักล้ม จะไม่เหลือใบที่เลือกไว้เลย (แย่กว่ามีสองใบ)
+    //   และการปลดใบเก่าห้ามกลืน error เงียบ — ถ้าปลดไม่ครบต้องบอกให้คนรู้ว่าต้องกดซ้ำ
+    await store.update(id, (r) => ({ ...r, chosen, chosenAt: chosen ? new Date().toISOString() : null }));
+    const failed = [];
+    if (chosen) {
+      for (const c of all) {
+        if (c.url === target.url && c.id !== id && c.chosen) {
+          try { await store.update(c.id, (r) => ({ ...r, chosen: false })); }
+          catch (e) { failed.push(c.id); console.warn('[ClipCases] ปลดหมุดใบเก่าไม่สำเร็จ:', c.id, String(e?.message || e).slice(0, 60)); }
+        }
+      }
+    }
+    if (failed.length) {
+      return NextResponse.json({
+        success: true, id, chosen, warning: `ปักหมุดใบนี้แล้ว แต่ปลดหมุดใบเก่าไม่สำเร็จ ${failed.length} ใบ — กดปักหมุดซ้ำอีกครั้งเพื่อให้เหลือใบเดียว`,
+      });
+    }
+    return NextResponse.json({ success: true, id, chosen });
+  } catch (error) {
+    return NextResponse.json({ success: false, error: error.message || 'ปักหมุดไม่สำเร็จ', errorType: 'CASES_ERROR' }, { status: 500 });
+  }
+}
+
 export async function DELETE(request) {
   try {
     const { searchParams } = new URL(request.url);
