@@ -115,6 +115,8 @@ export function currentInsightPromptRev(smoothRequested) {
   const withFlow = swOn('CLIP_NAME_SOURCE') ? `${withFlowOnly}-names1` : withFlowOnly; // ★ 11 ส.ค.: ชื่อต้องมีที่มา
   // ★ 11 ส.ค.: ป้ายมีเลขรุ่นกำกับ (ผู้ตรวจ Sol) — แก้ถ้อยคำกฎเมื่อไหร่ต้องขยับเลข ไม่งั้นข้อมูลทดลองคนละพรอมต์จะปนรุ่นเดียวกัน
   const style = resolveSmoothStyle(smoothRequested);
+  // ★ 13 ส.ค.: สกัดดิบ+ตัดเฟ้อ — ป้ายแยกจากสาย smooth ชัดๆ (r2 พรอมต์รอบดูคลิปเป็นมาตรฐาน แต่เคสต้องแยกรุ่นได้)
+  if (style === 'r2') return `${withFlow}-rawterse2v${RAW_TERSE_VER}`;
   return style ? `${withFlow}-smooth${style.toUpperCase()}${SMOOTH_RULE_VER}` : withFlow;
 }
 
@@ -300,8 +302,21 @@ const smoothRewritePairs = () => [
 ];
 /** @param {string} prompt @param {string} style ผลจาก resolveSmoothStyle เท่านั้น (ว่าง = ไม่แตะ) */
 const applySmooth = (prompt, style) => (style ? _applyRewrites('SMOOTH', smoothRewritePairs(), prompt) : prompt);
-/** ก้อนกฎของแบบที่เลือก — style ว่าง = '' (ไม่มีก้อนเสริม) */
+// ════════════════════════════════════════════════════════════════════════════
+// ★ 13 ส.ค. 69 — "สกัดดิบ+ตัดเฟ้อ" (r2) — เจ้าของเคาะหลังเทียบ 2 เวอร์ชันบนคลิปเดียวกัน 2 คลิป ("ข้อมูลดีกว่า")
+//   โจทย์: ถอดออกมา → อ่านซ้ำอีกรอบ → เกลาคำเฟ้อ/คำไร้ความหมายออก → ข้อเท็จจริงครบ → เล่าดิบๆ ห้วนๆ
+//   วิธี: รอบแรกถอดด้วยพรอมต์มาตรฐานเป๊ะ (ครบสุด) → รอบสอง "บรรณาธิการตัดเฟ้อ" อ่านข้อความซ้ำ (ไม่ดูคลิปใหม่ = ถูก)
+//        + ด่านกลไก: ตัวเลขห้ามหาย/ห้ามงอก + ความยาวรายช่องต้องสมเหตุผล — ไม่ผ่าน = ใช้รอบแรก + ติดธง
+//   (เวอร์ชัน r1 "เกลาในรอบเดียว" ถูกถอดทิ้ง — เทสจริง 2 คลิปพบฉากหาย/เปิดเรื่องด้วยพิธีกร ห้ามฟื้นโดยไม่มีคำสั่ง)
+// ════════════════════════════════════════════════════════════════════════════
+/** เลขรุ่นถ้อยคำกฎสกัดดิบ (พรอมต์บรรณาธิการใน editTerseInsight) — แก้ข้อความเมื่อไหร่ต้องขยับ */
+const RAW_TERSE_VER = '1';
+
+/** ก้อนกฎของแบบที่เลือก — style ว่าง = '' (ไม่มีก้อนเสริม)
+ *  🔴 r2 คืน '' โดยตั้งใจ: รอบดูคลิปของ r2 ต้องเป็นพรอมต์มาตรฐานเป๊ะ (การเกลาเกิดที่รอบบรรณาธิการใน route) */
 const smoothRulesFor = (style) => (style === 'a' ? SMOOTH_RULES_A : (style === 'c' ? SMOOTH_RULES_C : ''));
+/** แบบที่มีผลกับ "พรอมต์รอบดูคลิป" — r2 ใช้พรอมต์มาตรฐาน จึงต้องไม่ไปกระตุ้นการแก้ถ้อยคำใดๆ ด้วย */
+const promptStyleOf = (style) => (style === 'r2' ? '' : style);
 
 // ════════════════════════════════════════════════════════════════════════════
 // ★ 11 ส.ค. 69 — "ชื่อต้องมีที่มา" (เจ้าของสั่งหลังเห็นคลิปเดียวได้ชื่อคู่กรณี 3 แบบ: เดช / นายเดท / เอกเดช)
@@ -449,7 +464,8 @@ ${INSIGHT_SCHEMA}`;
  *  ใช้ฟังก์ชันใน replace (ไม่ใช่สตริง) — กัน $& / $' ที่อาจติดมากับแคปชั่นต้นทางทำพรอมต์เพี้ยนแบบมองไม่เห็น */
 function buildVideoInsightPrompt(opts = {}) {
   // ★ 11 ส.ค.: แปลงค่าปุ่ม "แบบการเล่า" ครั้งเดียวต่อการประกอบพรอมต์ แล้วส่งค่าที่แปลงแล้วต่อ (ผู้ตรวจ Sol: ห้ามอ่านซ้ำหลายจุด)
-  const smoothStyle = resolveSmoothStyle(opts?.smooth);
+  // ★ 13 ส.ค.: promptStyleOf — r2 ต้องได้พรอมต์มาตรฐานเป๊ะ (บรรณาธิการเกลาทีหลังใน route)
+  const smoothStyle = promptStyleOf(resolveSmoothStyle(opts?.smooth));
   const addons = buildInsightAddons({ ...opts, smoothStyle });
   // 🔴 ผู้ตรวจ 10 ส.ค. ข้อ 2: ต้องแก้ถ้อยคำ "หลังประกอบก้อนเสริมแล้ว" — ไม่งั้นกฎที่อยู่ในก้อนเสริม
   //   (GRAY_DIRECT_RULES) ไม่เคยถูกแตะ ทำให้เส้นวิดีโอซึ่งเป็นเส้นหลักได้พรอมต์ที่ยังมีคำสั่งขัดกัน
@@ -465,6 +481,91 @@ function buildVideoInsightPrompt(opts = {}) {
 export const _buildVideoInsightPromptForTest = (o) => buildVideoInsightPrompt(o);
 /** ★ 11 ส.ค.: export ให้เทสยามคุมขั้นกรองข้อมูล — ช่องใหม่ที่ไม่ได้เพิ่มที่นี่จะถูกทิ้งเงียบ (บทเรียนบัญชีชื่อ) */
 export const _normalizeInsightForTest = (p, engine) => normalizeInsight(p, engine);
+
+// ════════════════════════════════════════════════════════════════════════════
+// ★ 13 ส.ค. 69 — บรรณาธิการ "ตัดเฟ้อ" รอบสอง (เฉพาะโหมด r2 · เจ้าของสั่ง: อ่านซ้ำอีกรอบแล้วเกลาจริง)
+//   อ่าน "ข้อความ" ที่ถอดเสร็จแล้ว ไม่ดูคลิปใหม่ (ถูกกว่ามาก) · แก้เฉพาะช่องเนื้อ ไม่แตะพาดหัว/คำพูด/ประเด็น
+//   🔴 ด่านกลไกก่อนรับผล: ตัวเลขทุกตัวจากรอบแรกต้องอยู่ครบ + ความยาวต้องไม่หดจนน่าสงสัย
+//      ไม่ผ่าน = ปัดตกทั้งฉบับ ใช้รอบแรกแทน (หลักบ้าน: ระบบห้ามเดา ให้บอกว่าเชื่อไม่ได้)
+// ════════════════════════════════════════════════════════════════════════════
+/** นับจำนวนครั้งของตัวเลขแต่ละตัว (รองรับเลขไทย ๐-๙ · ตัดคอมมา) — ผู้ตรวจ Sol 13 ส.ค.:
+ *  ใช้ Set เฉยๆ ไม่พอ เพราะเลขเดิมโผล่สองเหตุการณ์แล้วบรรณาธิการลบทิ้งหนึ่ง จะรอดด่านทั้งที่ข้อมูลหาย */
+const _normDigits = (t) => String(t || '').replace(/[๐-๙]/g, (d) => String('๐๑๒๓๔๕๖๗๘๙'.indexOf(d)));
+const _numCounts = (t) => {
+  const m = new Map();
+  for (const g of _normDigits(t).matchAll(/\d[\d,.]*/g)) { const n = g[0].replace(/,/g, ''); m.set(n, (m.get(n) || 0) + 1); }
+  return m;
+};
+
+export async function editTerseInsight(insight) {
+  const subs = Array.isArray(insight?.subStories) ? insight.subStories : [];
+  const before = { rawData: String(insight?.rawData || ''), subs: subs.map(s => ({ no: s.no, rawData: String(s?.rawData || '') })) };
+  const prompt = `คุณเป็นบรรณาธิการ "ตัดเฟ้อ" อ่านเนื้อข่าวดิบด้านล่างซ้ำอีกรอบ แล้วเกลาให้ห้วน ตรง แน่นด้วยข้อเท็จจริง
+
+กติกาเหล็ก:
+- ตัดเฉพาะคำที่ลบทิ้งแล้วความหมายไม่เปลี่ยน: คำเชื่อมพิธีการยืดประโยค (ทั้งนี้ อย่างไรก็ตาม ในส่วนของ) · คำขยายไร้ข้อมูล (อย่างมาก เป็นอย่างยิ่ง) · วลีเปล่า (ได้มีการ ทำการ เป็นผู้ที่) · คำสรุปความรู้สึกแทนคนอ่าน — ตัดเป็นหมวด ไม่ใช่เฉพาะคำที่ยกตัวอย่าง
+- ประโยคสั้น หนึ่งประโยคหนึ่งใจความ แตกประโยคยาวที่พ่วงหลายใจความออกเป็นประโยคสั้นได้
+- ⛔ ห้ามตัดข้อเท็จจริง ตัวเลข ชื่อ วันเวลา จำนวนเงิน ลำดับเหตุการณ์ หรือฉากใด — ครบเท่าเดิม สั้นลงที่คำเท่านั้น
+- ⛔ ห้ามเพิ่มคำที่เพิ่มความหมายใหม่ ห้ามเปลี่ยนลำดับ ห้ามเปลี่ยนเจ้าของคำพูด
+- คำเล่า (เล่าว่า บอกว่า) คงไว้เฉพาะที่จำเป็นต่อการรู้ว่าใครเป็นเจ้าของข้อมูล
+- คงการแบ่งย่อหน้าเดิม (\\n\\n)
+
+ตอบ JSON เท่านั้น: {"rawData": "เนื้อรวมฉบับเกลาแล้ว", "subStories": [{"no": เลขก้อนเดิม, "rawData": "เนื้อก้อนนั้นฉบับเกลาแล้ว"}]}
+
+=== เนื้อรวม ===
+${before.rawData}
+${before.subs.map(s => `\n=== ประเด็นย่อยก้อนที่ ${s.no} ===\n${s.rawData}`).join('\n')}`;
+
+  // ★ ผู้ตรวจ Sol ข้อ 4: ต้องมีเพดานเวลา — OpenAI ช้า/แน่นแล้วห้ามลาก route ค้าง (รอบแรกเซฟไปแล้ว ปล่อยได้)
+  let timer;
+  let r;
+  try {
+    r = await Promise.race([
+      callAI({ prompt, model: MODEL_NEWS_ANALYSIS, temperature: 0.1, maxTokens: 12000 }),
+      new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('TERSE_EDIT_TIMEOUT')), 120_000); }),
+    ]);
+  } finally { clearTimeout(timer); }
+  const p = _unwrapModelJson(typeof r === 'object' ? r : JSON.parse(String(r).match(/\{[\s\S]*\}/)?.[0] || '{}'));
+  const afterRaw = String(p?.rawData || '');
+  const afterSubs = Array.isArray(p?.subStories) ? p.subStories : [];
+  if (!afterRaw.trim()) return { ok: false, reason: 'edit_empty' };
+
+  // ประกอบกลับก่อน แล้วค่อยตรวจ: แทนเฉพาะช่องเนื้อ ก้อนไหนบรรณาธิการไม่ส่งกลับ = คงของเดิม (ห้ามหายทั้งก้อน)
+  // 🔴 ด่านกลไกต้องตรวจ "ผลที่จะเก็บจริง" (ฉบับประกอบแล้ว) ไม่ใช่คำตอบดิบของโมเดล — ไม่งั้นก้อนที่คงของเดิมไว้
+  //    จะถูกนับว่าตัวเลขหายทั้งที่ไม่หาย (บั๊กที่เทสจับได้ก่อนใช้จริง)
+  const editedSubs = subs.map(s => {
+    const hit = afterSubs.find(x => Number(x?.no) === Number(s.no));
+    return hit && String(hit.rawData || '').trim() ? { ...s, rawData: String(hit.rawData) } : s;
+  });
+  const joinAll = (raw, list) => raw + '\n' + list.map(s => String(s?.rawData || '')).join('\n');
+
+  // ด่านกลไก 1 — ตัวเลขห้ามหายและห้ามงอก (ผู้ตรวจ Sol: นับจำนวนครั้งต่อตัวเลข ไม่ใช่แค่มี/ไม่มี)
+  //   หาย = ข้อมูลถูกตัด · งอก = บรรณาธิการแต่งเลขใหม่ — ทั้งสองทางปัดตกทั้งฉบับ ใช้รอบแรกแทน
+  const bc = _numCounts(joinAll(before.rawData, before.subs));
+  const ac = _numCounts(joinAll(afterRaw, editedSubs));
+  const lost = [...bc].filter(([n, c]) => (ac.get(n) || 0) < c).map(([n]) => n);
+  if (lost.length) return { ok: false, reason: 'numbers_lost', detail: lost.slice(0, 5).join(',') };
+  const added = [...ac].filter(([n]) => !bc.has(n)).map(([n]) => n);
+  if (added.length) return { ok: false, reason: 'numbers_added', detail: added.slice(0, 5).join(',') };
+
+  // ด่านกลไก 2 — ความยาว "รายช่อง" (ผู้ตรวจ Sol: เช็คยอดรวมไม่พอ — เนื้อรวมถูกย่อยับแต่ก้อนย่อยคงเดิม ยอดรวมยังผ่านได้)
+  //   หดต่ำกว่า 45% = น่าจะตัดเนื้อ ไม่ใช่ตัดคำ · ยาวขึ้น = ไม่ได้เกลา
+  const ratioBad = (a, b) => b > 0 && (a < b * 0.45 || a > b * 1.05);
+  // ★ ผู้ตรวจ Fable รอบ 2: เนื้อรวมหลังเกลาห้ามต่ำกว่า 300 ตัวอักษร (เกณฑ์ RAWDATA_MIN_CHARS ของคลัง)
+  //   ไม่งั้นใบ r2 ที่สำเร็จจะสั้นจนหลุดด่านคลังกันซ้ำ → กดซ้ำ = จ่ายค่าดูคลิปใหม่ทุกครั้งแบบเงียบๆ
+  //   เนื้อเดิม >= 300 → พื้น = อย่างน้อย 300 · เนื้อเดิมสั้นกว่านั้น → ใช้สัดส่วน 45% ตามปกติ (บังคับ 300 ไม่ได้)
+  const floorRaw = before.rawData.length >= 300 ? Math.max(before.rawData.length * 0.45, 300) : before.rawData.length * 0.45;
+  if (afterRaw.length < floorRaw) return { ok: false, reason: 'too_short' };
+  if (afterRaw.length > before.rawData.length * 1.05) return { ok: false, reason: 'grew_longer' };
+  for (const s of before.subs) {
+    const hit = afterSubs.find(x => Number(x?.no) === Number(s.no));
+    if (hit && String(hit.rawData || '').trim() && ratioBad(String(hit.rawData).length, s.rawData.length)) {
+      return { ok: false, reason: String(hit.rawData).length < s.rawData.length * 0.45 ? 'too_short' : 'grew_longer', detail: `ก้อนที่ ${s.no}` };
+    }
+  }
+
+  return { ok: true, rawData: afterRaw, subStories: editedSubs };
+}
 
 // ★ 1 ส.ค. 69 (ราก "เคสว่างคลิปใหญ่" — พิสูจน์ด้วยโพรบคำตอบดิบ): gemini-3.6 กับคลิปใหญ่ (>100k โทเคน)
 //   บางครั้งห่อคำตอบเป็นอาเรย์ [{...}] แทน {...} (finishReason=STOP เนื้อครบสมบูรณ์ 13k ตัวอักษร!)
@@ -542,7 +643,7 @@ export async function extractClipInsight({ url, platform, rawText = '', sourceMe
   // TikTok/FB หรือ fallback → ใช้บทถอดเสียง + LLM
   const text = String(rawText || '').trim();
   if (text.length < 40) throw new Error('ไม่มีบทถอดให้วิเคราะห์ (คลิปอาจไม่มีเสียง/ถอดไม่ได้)');
-  const smoothStyle = resolveSmoothStyle(smooth); // ★ 11 ส.ค.: เส้นบทถอดเสียงต้องได้แบบการเล่าเดียวกับเส้นดูคลิป
+  const smoothStyle = promptStyleOf(resolveSmoothStyle(smooth)); // ★ 11 ส.ค.: เส้นบทถอดเสียงต้องได้แบบเดียวกับเส้นดูคลิป · ★ 13 ส.ค.: r2 = พรอมต์มาตรฐาน
   const prompt = applySmooth(applyNameSource(applyGrayAlive(applySmartOrder(`คุณเป็นบรรณาธิการข่าว อ่าน "บทถอดเสียงจากคลิป" ด้านล่าง แล้วถอดประเด็นข่าวออกมาเป็น "ข้อมูลดิบ"
 
 หน้าที่: จับใจความว่าคลิปนี้สื่อสารข่าวเรื่องอะไร เก็บเนื้อหา–คำพูด–บริบท สรุปเป็นข้อมูลดิบให้คนอ่านเข้าใจว่าข่าวนี้คืออะไร

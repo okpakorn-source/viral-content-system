@@ -12,7 +12,7 @@ import { register } from 'node:module';
 const SRC_ROOT = new URL('../src/', import.meta.url).href;
 const mod = (source) => `data:text/javascript,${encodeURIComponent(source)}`;
 // callAI ตัวปลอม: เก็บพรอมต์ที่ได้รับไว้ให้เทสตรวจ แล้วคืน JSON ว่างที่ผ่าน normalize ได้
-const STUB = mod(`export async function callAI(args){ globalThis.__lastPrompt = args?.prompt || ''; return { headline:'x', rawData:'y' }; }
+const STUB = mod(`export async function callAI(args){ globalThis.__lastPrompt = args?.prompt || ''; return globalThis.__nextAI !== undefined ? globalThis.__nextAI : { headline:'x', rawData:'y' }; }
 export async function callGeminiVideo(){return {};}
 export async function callGeminiVideoFile(){return {};}
 export const MODEL_FAST='t'; export const MODEL_NEWS_ANALYSIS='t';`);
@@ -372,4 +372,104 @@ test('เครื่องทีมรุ่นเก่าทำแบบห�
   const src = await readFile(new URL('../src/app/api/clip-transcript/worker/route.js', import.meta.url), 'utf8');
   assert.match(src, /styleMismatch/, 'ต้องติดธงไว้บนใบงานเมื่อแบบที่ได้ไม่ตรงกับที่เลือก');
   assert.match(src, /want !== got/, 'ต้องเทียบแบบที่เลือกกับแบบที่ได้จริง');
+});
+
+// ── ★ 13 ส.ค. 69 · ชุด "สกัดดิบ+ตัดเฟ้อ" (r1/r2) — เจ้าของสั่ง: เพิ่มใหม่ ห้ามแตะของเดิม ──
+
+test('🔴 r2 เป็นค่าที่รับได้ · r1 ถูกถอดทิ้งต้องตกเป็นมาตรฐาน · ของเดิมไม่เปลี่ยนสักตัวอักษร', () => {
+  prodSwitches();
+  assert.equal(ins.parseSmoothStyle('r2'), 'r2');
+  assert.equal(ins.parseSmoothStyle('r1'), '', 'r1 ถูกถอดทิ้งตามคำตัดสินเจ้าของ 13 ส.ค. — ต้องไม่รับ');
+  const base = ins._buildVideoInsightPromptForTest({});
+  assert.ok(!base.includes('สกัดดิบ'), 'ไม่เลือกแบบ ต้องไม่มีกฎสกัดดิบ');
+  const a = ins._buildVideoInsightPromptForTest({ smooth: 'a' });
+  assert.ok(a.includes(MARK_A) && !a.includes('สกัดดิบ'), 'แบบ A ต้องไม่ปนกฎสกัดดิบ');
+  clear();
+});
+
+test('🔴 r2: พรอมต์รอบดูคลิปต้องเป็นมาตรฐานเป๊ะทุกตัวอักษร (การเกลาเกิดรอบบรรณาธิการ)', () => {
+  prodSwitches();
+  const base = ins._buildVideoInsightPromptForTest({});
+  const r2 = ins._buildVideoInsightPromptForTest({ smooth: 'r2' });
+  assert.equal(r2, base, 'r2 ห้ามแตะพรอมต์รอบแรกเลย');
+  assert.match(ins.currentInsightPromptRev('r2'), /-rawterse2v\d+$/, 'แต่ป้ายรุ่นต้องแยกได้ว่าเป็นเคส r2');
+  clear();
+});
+
+test('บรรณาธิการตัดเฟ้อ: งานดีผ่าน + ก้อนที่ไม่ส่งกลับต้องคงของเดิม', async () => {
+  const src = { rawData: 'ทั้งนี้ นายเอได้มีการมอบเงิน 5,000 บาทให้ผู้เสียหายเป็นอย่างมาก', subStories: [{ no: 1, topic: 'ท', rawData: 'อย่างไรก็ตาม เขาบริจาค 200 บาท', quotes: ['ก'] }, { no: 2, topic: 'ข', rawData: 'เนื้อก้อนสอง 33 ปี' }] };
+  globalThis.__nextAI = { rawData: 'นายเอมอบเงิน 5,000 บาทให้ผู้เสียหาย', subStories: [{ no: 1, rawData: 'เขาบริจาค 200 บาท' }] };
+  const ed = await ins.editTerseInsight(src);
+  delete globalThis.__nextAI;
+  assert.equal(ed.ok, true, 'งานดีต้องผ่าน: ' + (ed.reason || ''));
+  assert.ok(ed.rawData.startsWith('นายเอมอบเงิน'), 'เนื้อรวมต้องเป็นฉบับเกลา');
+  assert.equal(ed.subStories[0].quotes[0], 'ก', 'ช่องอื่นของก้อน (quotes/topic) ต้องไม่หาย');
+  assert.equal(ed.subStories[1].rawData, 'เนื้อก้อนสอง 33 ปี', 'ก้อนที่บรรณาธิการไม่ส่งกลับ = คงของเดิม');
+});
+
+test('🔴 ด่านกลไก: ตัวเลขหาย = ปัดตกทั้งฉบับ · หดเกิน = ปัดตก · ยาวขึ้น = ปัดตก', async () => {
+  const src = { rawData: 'มอบเงิน 5,000 บาท และ 200 บาท ให้สองคน', subStories: [] };
+  globalThis.__nextAI = { rawData: 'มอบเงิน 5,000 บาทให้สองคน', subStories: [] };
+  let ed = await ins.editTerseInsight(src);
+  assert.equal(ed.ok, false); assert.equal(ed.reason, 'numbers_lost', '200 หาย ต้องจับได้');
+  globalThis.__nextAI = { rawData: '5,000 200', subStories: [] };
+  ed = await ins.editTerseInsight(src);
+  assert.equal(ed.reason, 'too_short', 'หดเหลือไม่ถึงครึ่ง = น่าจะตัดเนื้อ ไม่ใช่ตัดคำ');
+  globalThis.__nextAI = { rawData: 'มอบเงิน 5,000 บาท และ 200 บาท ให้สองคน พร้อมคำขยายที่งอกมาเกินของเดิมยาวมาก', subStories: [] };
+  ed = await ins.editTerseInsight(src);
+  assert.equal(ed.reason, 'grew_longer', 'ยาวขึ้น = ไม่ได้เกลา');
+  globalThis.__nextAI = { rawData: '', subStories: [] };
+  ed = await ins.editTerseInsight(src);
+  assert.equal(ed.reason, 'edit_empty', 'ตอบว่าง = ปัดตก');
+  delete globalThis.__nextAI;
+});
+
+test('route: r2 ต้องมีบล็อกบรรณาธิการหลัง save-first + ปัดตกต้องติดธง + ป้ายชื่อครบ', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const src = await readFile(new URL('../src/app/api/clip-transcript/insight/route.js', import.meta.url), 'utf8');
+  const saveAt = src.indexOf('await store.add(baseRecord)');
+  const r2At = src.indexOf('editTerseInsight'); // จุดเรียกบรรณาธิการ (ชื่อป้าย r2 โผล่ก่อนหน้าใน styleLabel ใช้ชี้ตำแหน่งไม่ได้)
+  assert.ok(saveAt > 0 && r2At > saveAt, 'บล็อก r2 ต้องอยู่หลังการเซฟรอบแรกเสมอ (save-first)');
+  assert.match(src, /edit_rejected_/, 'ปัดตกต้องติดธงพร้อมเหตุผล');
+  assert.match(src, /'สกัดดิบ'/, 'ป้ายชื่อสกัดดิบต้องมี (ติดตอนบรรณาธิการสำเร็จ)');
+});
+
+// ── ★ 13 ส.ค. · ยามจากรอบผู้ตรวจ Sol (r1/r2) — 3 ช่องที่ด่านเดิมรอดทั้งที่ข้อมูลเสียหาย ──
+
+test('🔴 Sol ข้อ 1: เลขซ้ำหายหนึ่งครั้ง / เลขไทย / เลขงอกใหม่ ต้องถูกจับทั้งหมด', async () => {
+  const src = { rawData: 'มอบ 10 กล่องช่วงเช้า และอีก 10 กล่องช่วงเย็น รวมงบ ๕๐๐ บาท', subStories: [] };
+  globalThis.__nextAI = { rawData: 'มอบ 10 กล่องช่วงเช้า รวมงบ 500 บาท', subStories: [] };
+  let ed = await ins.editTerseInsight(src);
+  assert.equal(ed.reason, 'numbers_lost', 'เลข 10 โผล่สองเหตุการณ์ หายไปหนึ่ง ต้องจับได้ (นับจำนวนครั้ง)');
+  globalThis.__nextAI = { rawData: 'มอบ 10 กล่องช่วงเช้า และอีก 10 กล่องช่วงเย็น รวมงบ 500 บาท', subStories: [] };
+  ed = await ins.editTerseInsight(src);
+  assert.equal(ed.ok, true, 'เลขไทย ๕๐๐ กับ 500 ต้องนับเป็นตัวเดียวกัน: ' + (ed.reason || ''));
+  globalThis.__nextAI = { rawData: 'มอบ 10 กล่องช่วงเช้า และอีก 10 กล่องช่วงเย็น รวมงบ ๕๐๐ บาทให้ 7 คน', subStories: [] };
+  ed = await ins.editTerseInsight(src);
+  assert.equal(ed.reason, 'numbers_added', 'เลข 7 ที่บรรณาธิการแต่งเพิ่ม ต้องถูกปัดตก');
+  delete globalThis.__nextAI;
+});
+
+test('🔴 Sol ข้อ 2: เนื้อรวมถูกย่อยับแต่ก้อนย่อยคงเดิม ต้องไม่รอดด่านความยาว (ตรวจรายช่อง)', async () => {
+  const long = 'เนื้อก้อนย่อยยาวมากๆ '.repeat(30);
+  const src = { rawData: 'เนื้อรวมยาวพอสมควรเลย มีรายละเอียดหลายจุดที่สำคัญต่อเรื่อง', subStories: [{ no: 1, topic: 'ท', rawData: long }] };
+  globalThis.__nextAI = { rawData: 'สั้น', subStories: [] }; // ยับเนื้อรวม ไม่ส่งก้อนย่อย (ยอดรวมยังสูงเพราะก้อนย่อยเดิมถูกคงไว้)
+  const ed = await ins.editTerseInsight(src);
+  assert.equal(ed.reason, 'too_short', 'ต้องจับจากอัตราส่วนรายช่อง ไม่ใช่ยอดรวม');
+  delete globalThis.__nextAI;
+});
+
+test('🔴 Sol ข้อ 3: ใบ r2 ในคลังต้องเริ่มเป็นมาตรฐาน และติดป้าย r2 เฉพาะเมื่อเกลาสำเร็จ', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const src = await readFile(new URL('../src/app/api/clip-transcript/insight/route.js', import.meta.url), 'utf8');
+  assert.match(src, /smoothStyle && smoothStyle !== 'r2' \? \{ smoothStyle \}/, 'ใบเริ่มต้นห้ามติดป้าย r2');
+  assert.match(src, /smoothStyle === 'r2' \? 'std' : smoothArg/, 'ป้ายรุ่นใบเริ่มต้นของ r2 ต้องเป็นมาตรฐาน');
+  assert.match(src, /smoothStyle: 'r2', styleLabel: 'สกัดดิบ', promptRev: currentInsightPromptRev\('r2'\)/, 'ติดป้ายครบชุดตอนสำเร็จเท่านั้น');
+  assert.match(src, /r2Applied \? 'r2' : ''/, 'คำตอบต้องบอกตามจริงเมื่อบรรณาธิการล้ม');
+});
+
+test('Sol ข้อ 4: บรรณาธิการต้องมีเพดานเวลา', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const src = await readFile(new URL('../src/lib/services/clipInsightService.js', import.meta.url), 'utf8');
+  assert.match(src, /TERSE_EDIT_TIMEOUT/, 'ต้องมี timeout กันค้าง');
 });

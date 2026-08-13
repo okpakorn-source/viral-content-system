@@ -93,14 +93,19 @@ export async function POST(request) {
       const want = String(ex.smooth || '');
       const got = String(result?.smoothStyle || '');
       const mismatch = status === 'done' && want && want !== 'std' && want !== got;
+      // ★ ผู้ตรวจ Fable รอบ 2 ข้อ 4: r2 ที่บรรณาธิการปัดตกโดยชอบ (ตัวเลขหาย/หดเกิน) ก็ทำให้แบบไม่ตรงได้
+      //   — เหตุนั้นไม่ใช่โค้ดรุ่นเก่า ต้องเขียนธงให้ตรงเหตุ ไม่งั้นคนไล่ปัญหาผิดทาง
+      const editRejected = mismatch && (result?.qualityFlags || []).some(f => String(f?.type || '').startsWith('edit_rejected') || f?.type === 'edit_error' || f?.type === 'save_failed');
       if (mismatch) {
-        console.warn(`[ClipWorker] ⚠️ ใบงาน ${String(id).slice(0, 8)} เลือกแบบ "${want}" แต่ผลที่ได้เป็น "${got || 'มาตรฐาน'}" — เครื่องทีมอาจยังเป็นโค้ดรุ่นเก่า (ต้องซิงก์)`);
+        console.warn(`[ClipWorker] ⚠️ ใบงาน ${String(id).slice(0, 8)} เลือกแบบ "${want}" แต่ผลเป็น "${got || 'มาตรฐาน'}" — ${editRejected ? 'บรรณาธิการตัดเฟ้อถูกปัดตก ใช้ฉบับเต็มแทน (ดูธงในใบ)' : 'เครื่องทีมอาจยังเป็นโค้ดรุ่นเก่า (ต้องซิงก์)'}`);
       }
       return {
         ...ex, status,
         result: status === 'done' ? result : null,
         error: status === 'error' ? String(error).slice(0, 300) : '',
-        ...(mismatch ? { styleMismatch: `เลือกแบบ ${want.toUpperCase()} แต่ได้ ${got ? got.toUpperCase() : 'มาตรฐาน'} — เครื่องทีมอาจยังเป็นโค้ดรุ่นเก่า` } : {}),
+        ...(mismatch ? { styleMismatch: editRejected
+          ? `เลือกแบบ ${want.toUpperCase()} แต่การเกลาถูกปัดตกเพื่อรักษาข้อมูลครบ — ได้ฉบับเต็มแทน (ปกติ ไม่ใช่ระบบพัง)`
+          : `เลือกแบบ ${want.toUpperCase()} แต่ได้ ${got ? got.toUpperCase() : 'มาตรฐาน'} — เครื่องทีมอาจยังเป็นโค้ดรุ่นเก่า` } : {}),
         statusNote: '', doneAt: new Date().toISOString(),
       };
     });

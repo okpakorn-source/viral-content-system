@@ -450,15 +450,51 @@ export async function POST(request) {
       //    พื้น=ครบเชิงเนื้อหาทุกช่วงคลิป (ไม่ใช่โควตาตัวอักษรแบบ 8 ก.ค.) · เพดาน=กฎภาษาเนื้อดิบเดิม (กันน้ำ/คำอวย)
       //   ★ 4 ส.ค. 69 (ประตู CLIP_PROMPT_0804): เปิด = ต่อท้าย '-m0804' · ปิด = ค่าเดิมเป๊ะ (เทสปักหมุดยึดค่านี้อยู่)
       //    ผู้ตรวจไขว้ (#6): ใช้ฟังก์ชันจาก service เป็นความจริงแหล่งเดียว — ห้าม hardcode ซ้ำตรงนี้
-      promptRev: currentInsightPromptRev(smoothArg),
+      // ★ 13 ส.ค. (ผู้ตรวจ Sol ข้อ 3): เคส r2 ใบในคลังต้องเริ่มเป็น "มาตรฐาน" ก่อน — เพราะเนื้อที่มีอยู่ตอนนี้
+      //   คือผลพรอมต์มาตรฐานจริงๆ · จะเปลี่ยนป้ายเป็น r2 เฉพาะเมื่อบรรณาธิการเกลาสำเร็จ (บล็อกถัดไป)
+      //   กัน 2 บั๊ก: บรรณาธิการล้มแล้วใบมาตรฐานถูกแคชเป็น r2 ถาวร + คำขอซ้อนคว้าใบไประหว่างกำลังเกลา
+      promptRev: currentInsightPromptRev(smoothStyle === 'r2' ? 'std' : smoothArg),
       // ★ 11 ส.ค. 69: แบบการเล่าที่ใช้กับเคสนี้จริง ('a'|'c'|'') — คลังกันซ้ำและหน้ารายการอ่านฟิลด์นี้
-      ...(smoothStyle ? { smoothStyle } : {}),
+      ...(smoothStyle && smoothStyle !== 'r2' ? { smoothStyle } : {}),
       // ★ 11 ส.ค. 69 (เจ้าของสั่ง): ติดป้ายไว้ "ทุกใบ" ไม่ว่าถอดด้วยแบบไหน รวมถึงแบบมาตรฐาน
       //   เพื่อให้คนเปิดคลังแล้วรู้ทันทีว่าใบไหนมาจากแบบอะไร แล้วเลือกใช้เองได้
-      styleLabel: smoothStyle === 'a' ? 'แบบ A' : smoothStyle === 'c' ? 'แบบ C' : 'มาตรฐานเดิม',
+      styleLabel: smoothStyle === 'a' ? 'แบบ A' : smoothStyle === 'c' ? 'แบบ C'
+        : 'มาตรฐานเดิม', // ★ 13 ส.ค.: r2 เริ่มเป็นมาตรฐาน — ติดป้าย 'สกัดดิบ' เมื่อบรรณาธิการเกลาสำเร็จเท่านั้น (ผู้ตรวจ Sol)
       createdAt: new Date().toISOString(),
     };
     try { await store.add(baseRecord); } catch (e) { console.warn('[ClipInsight] เซฟคลัง (ก่อน enriched) ล้ม:', e.message?.slice(0, 50)); }
+
+    // ★ 13 ส.ค. 69 (เจ้าของสั่ง) — โหมด "สกัดดิบ 2" (r2): บรรณาธิการอ่านซ้ำแล้วเกลาเฟ้อจริง
+    //   อยู่หลัง save-first เสมอ: รอบแรกเซฟแล้ว บรรณาธิการล้ม/ถูกปัดตก = ใช้รอบแรก + ติดธง ไม่มีทางเสียงาน
+    //   ด่านกลไกอยู่ใน editTerseInsight (ตัวเลขห้ามหาย + ความยาวต้องสมเหตุผล) — ไม่ผ่าน = ไม่รับทั้งฉบับ
+    let r2Applied = false; // ป้าย r2 ของคำตอบ — จริงเฉพาะเมื่อบรรณาธิการสำเร็จ (ห้ามอ้างว่าเป็น r2 ทั้งที่ได้มาตรฐาน)
+    if (smoothStyle === 'r2') {
+      try {
+        const { editTerseInsight } = await import('@/lib/services/clipInsightService');
+        const ed = await editTerseInsight(insight);
+        if (ed.ok) {
+          // ★ ผู้ตรวจ Fable รอบ 2 ข้อ 3: ติดป้ายสำเร็จเฉพาะเมื่อ "เซฟลงคลังได้จริง" — เซฟล้ม = ถอยกลับฉบับเต็ม
+          //   ไม่งั้นหน้าเว็บโชว์ฉบับเกลา แต่คลัง (ของจริงที่ทีมใช้) เป็นคนละฉบับ
+          const preEdit = insight;
+          insight = { ...insight, rawData: ed.rawData, subStories: ed.subStories, terseEdited: true };
+          try {
+            await store.update(caseId, (r) => ({ ...r, insight, smoothStyle: 'r2', styleLabel: 'สกัดดิบ', promptRev: currentInsightPromptRev('r2') }));
+            r2Applied = true;
+            console.log(`[ClipInsight] ✂️ ตัดเฟ้อสำเร็จ: ${String(baseRecord.insight?.rawData || '').length} → ${ed.rawData.length} ตัวอักษร`);
+          } catch (e2) {
+            insight = preEdit;
+            qualityFlags.push({ area: 'r2', type: 'save_failed', detail: 'เกลาสำเร็จแต่เซฟคลังไม่ได้ — ใช้ฉบับเต็มเพื่อให้หน้าจอตรงกับคลัง' });
+            console.warn('[ClipInsight] เซฟฉบับเกลาไม่สำเร็จ (ถอยกลับฉบับเต็ม):', String(e2?.message || e2).slice(0, 60));
+          }
+        } else {
+          qualityFlags.push({ area: 'r2', type: `edit_rejected_${ed.reason}`, detail: 'บรรณาธิการรอบสองถูกปัดตก ใช้ฉบับรอบแรกแทน' + (ed.detail ? ` (${ed.detail})` : '') });
+          console.warn(`[ClipInsight] ⚠️ ตัดเฟ้อถูกปัดตก (${ed.reason}) — ใช้ฉบับรอบแรก`);
+        }
+      } catch (e) {
+        qualityFlags.push({ area: 'r2', type: 'edit_error' });
+        console.warn('[ClipInsight] รอบตัดเฟ้อล้ม (ใช้ฉบับรอบแรก):', String(e?.message || e).slice(0, 70));
+      }
+    }
 
     // ★ 23 ก.ค. (ผู้ใช้สั่ง) — รอบ 2 "เนื้อดิบมีมิติ": Gemini ถอดคำพูดจริง (ไม่เอาเพลง) → ถักทอเข้าประเด็น (enrichedRaw)
     //   🔴 อิสระจาก insight เดิม 100%: ล้ม/แน่น/หมดเวลา = ข้าม (insight เซฟไปแล้วข้างบน = ปลอดภัย) · ใช้ buffer/URL ซ้ำจาก ctx
@@ -739,12 +775,19 @@ export async function POST(request) {
       try {
         const { appendFile } = await import('fs/promises');
         const { join } = await import('path');
-        await appendFile(join(process.cwd(), 'data', 'clip-insights-archive.ndjson'), JSON.stringify({ ...baseRecord, insight }) + '\n', 'utf8');
+        // ★ ผู้ตรวจ Fable รอบ 2 ข้อ 1: ใบ r2 สำเร็จ สำเนาถาวรต้องติดป้าย r2 เหมือนคลังหลัก — baseRecord เป็นป้ายมาตรฐาน
+        //   (ไม่งั้นไฟล์วิจัยมีเนื้อฉบับเกลาใต้ป้ายมาตรฐาน = ข้อมูลคนละพรอมต์ปนรุ่นกัน)
+        await appendFile(join(process.cwd(), 'data', 'clip-insights-archive.ndjson'), JSON.stringify({
+          ...baseRecord, insight,
+          ...(r2Applied ? { smoothStyle: 'r2', styleLabel: 'สกัดดิบ', promptRev: currentInsightPromptRev('r2') } : {}),
+        }) + '\n', 'utf8');
       } catch { /* Vercel filesystem อ่านอย่างเดียว — ข้าม */ }
     })();
 
     // ★ 11 ส.ค.: ส่ง smoothStyle กลับไปด้วย เพื่อให้หน้าเว็บยืนยันได้ว่าผลใบนี้ถอดด้วยแบบไหนจริง (ไม่ใช่แค่เชื่อปุ่มที่กด)
-    return NextResponse.json({ success: true, data: { id: caseId, platform: type, ...insight, ...(smoothStyle ? { smoothStyle } : {}), ...(lowQuality ? { lowQuality: true, qualityNote } : {}) } });
+    // ★ 13 ส.ค.: r2 ที่บรรณาธิการไม่สำเร็จ = ตอบตามจริงว่าได้ฉบับมาตรฐาน (ไม่ติดป้าย r2 หลอก — ธงบอกเหตุอยู่ใน qualityFlags แล้ว)
+    const responseStyle = smoothStyle === 'r2' ? (r2Applied ? 'r2' : '') : smoothStyle;
+    return NextResponse.json({ success: true, data: { id: caseId, platform: type, ...insight, ...(responseStyle ? { smoothStyle: responseStyle } : {}), ...(lowQuality ? { lowQuality: true, qualityNote } : {}) } });
   } catch (error) {
     console.error('[ClipInsight]', error.message);
     return NextResponse.json({ success: false, error: humanizeErr(error.message), errorType: 'INSIGHT_ERROR' }, { status: 500 });
