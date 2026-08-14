@@ -19,6 +19,12 @@ on:
       platforms:
         description: "จำกัดแพลตฟอร์ม (คลาวด์ทำได้เฉพาะ youtube,tiktok — เว้นว่าง = ทุกแพลตฟอร์ม)"
         default: "youtube,tiktok"
+      models:
+        description: "ศึกสองโมเดล: คั่นจุลภาค เช่น gemini-3.6-flash,gemini-3.7-flash (เว้นว่าง = โหมดก่อน/หลังปกติ)"
+        default: ""
+      pin_url:
+        description: "ปักคลิปเจาะจง (เว้นว่าง = สุ่มจากคลัง)"
+        default: ""
 
 jobs:
   run:
@@ -47,6 +53,8 @@ jobs:
           CLIP_BA_COUNT: ${{ inputs.count }}
           CLIP_BA_USER: ${{ inputs.user }}
           CLIP_BA_PLATFORMS: ${{ inputs.platforms }}
+          CLIP_BA_MODELS: ${{ inputs.models }}
+          CLIP_BA_URL: ${{ inputs.pin_url }}
         run: node scripts/clip-before-after.mjs
 
       - name: อัปโหลดรายงานเป็น artifact

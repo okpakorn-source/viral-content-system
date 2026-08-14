@@ -23,6 +23,12 @@ import { join } from 'path';
 const BASE = process.env.CLIP_BA_BASE || 'http://localhost:3000';
 const COUNT = Math.max(1, Number(process.env.CLIP_BA_COUNT) || 3);
 const PLATFORMS = String(process.env.CLIP_BA_PLATFORMS || '').split(',').map(s => s.trim()).filter(Boolean);
+// ★ 14 ส.ค. 69 (เจ้าของสั่ง "ศึกสองโมเดล"): CLIP_BA_MODELS=gemini-3.6-flash,gemini-3.7-flash
+//   → คลิปเดียวกันถอดทีละโมเดล แล้วรายงาน "เนื้อเต็มทุกตัวอักษร" vs กัน (ให้เอเจนท์/คนโหวตได้จริง)
+//   CLIP_BA_URL = ปักคลิปเจาะจง (ไม่ตั้ง = สุ่มจากคลัง) · ต้องรัน production ที่รองรับ model override แล้ว
+const MODELS = String(process.env.CLIP_BA_MODELS || '').split(',').map(s => s.trim()).filter(Boolean);
+const PIN_URL = String(process.env.CLIP_BA_URL || '').trim();
+const USER = process.env.CLIP_BA_USER || 'before-after-test';
 
 // ถอดคลิปยาวกินเวลาหลายนาที — ตั้ง timeout ยาวแบบเดียวกับ clip-worker (กัน fetch failed ที่ 5 นาที)
 let dispatcher = null;
@@ -92,6 +98,71 @@ const pool = cases.filter(c => {
 if (pool.length < COUNT) { console.error(`❌ คลังมีเคสที่ใช้ได้แค่ ${pool.length} (ต้องการ ${COUNT}) — ลองปรับ CLIP_BA_PLATFORMS`); process.exit(1); }
 const picked = pool.sort(() => Math.random() - 0.5).slice(0, COUNT);
 picked.forEach((c, i) => log(`  ${i + 1}. [${c.platform}] ${cut(c.title, 60)}\n     ${c.url}`));
+
+// ── ★ 14 ส.ค.: โหมดศึกสองโมเดล — คลิปเดียว × ทุกโมเดลใน CLIP_BA_MODELS → เนื้อเต็ม vs กัน แล้วจบ ──
+if (MODELS.length) {
+  const one = (PIN_URL && (pool.find((c) => c.url === PIN_URL)
+    || { url: PIN_URL, platform: /tiktok/.test(PIN_URL) ? 'tiktok' : /youtu/.test(PIN_URL) ? 'youtube' : 'meta', title: PIN_URL, insight: {} }))
+    || picked[0];
+  log(`\n🥊 ศึกโมเดลบนคลิปเดียวกัน: [${one.platform}] ${cut(one.title, 60)}\n   ${one.url}\n   คู่ชิง: ${MODELS.join('  vs  ')}`);
+  const bouts = [];
+  for (const m of MODELS) {
+    log(`\n⏳ ถอดด้วย ${m} …`);
+    const t0 = Date.now();
+    try {
+      const d = await getJson(`${BASE}/api/clip-transcript/insight`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: one.url, force: true, user: `${USER}-${m.replace('gemini-', '')}`.slice(0, 40), model: m }),
+      });
+      const got = String(d.data?.modelUsed || '');
+      if (got !== m) log(`   ⚠️ ปลายทางไม่ยืนยันโมเดล (ได้ "${got || 'ไม่ระบุ'}") — production อาจยังไม่รองรับ model override`);
+      log(`   ✅ เสร็จใน ${((Date.now() - t0) / 60000).toFixed(1)} นาที · เนื้อดิบ ${String(d.data?.rawData || '').length} ตัวอักษร`);
+      bouts.push({ model: m, insight: d.data, ms: Date.now() - t0, confirmed: got === m });
+    } catch (e) {
+      log(`   ❌ ล้ม: ${String(e.message).slice(0, 300)}`);
+      bouts.push({ model: m, error: String(e.message).slice(0, 300) });
+    }
+  }
+  // เนื้อเต็มทุกตัวอักษร — กรรมการต้องเห็นของจริงถึงโหวตได้ (ห้ามตัด)
+  const full = (ins) => [
+    `**พาดหัว:** ${ins.headline || '-'}`,
+    `**ภาพรวม:** ${ins.overview || '-'}`,
+    `\n**เนื้อดิบเต็ม (${String(ins.rawData || '').length} ตัวอักษร):**\n\n${ins.rawData || '-'}`,
+    ...(ins.subStories || []).map((s, i) => `\n**🧩 ประเด็นย่อย ${i + 1}: ${s.topic || ''}** (${s.timeRange || '-'})\n\n${s.rawData || ''}`),
+    `\n**💬 คำพูด (${(ins.quotes || []).length}):**\n${(ins.quotes || []).map((q) => `- ${q}`).join('\n') || '-'}`,
+  ].join('\n');
+  const vsParts = [
+    `# 🥊 ศึกโมเดลบนคลิปเดียวกัน — ${MODELS.join(' vs ')}`,
+    `คลิป: [${one.platform}] ${one.title}\n${one.url}\nพรอมต์: ยุคนิ่ง (มาตรฐานเดียวกันทั้งคู่) · ใบผลมาร์คในคลังตามชื่อโมเดล`,
+  ];
+  const ok = bouts.filter((b) => !b.error);
+  if (ok.length >= 2) {
+    const m0 = metrics(ok[0].insight); const m1 = metrics(ok[1].insight);
+    vsParts.push([
+      `| ตัววัด | ${ok[0].model} | ${ok[1].model} |`, '|---|---|---|',
+      `| ความยาวเนื้อดิบ | ${m0.rawLen} ตัวอักษร | ${m1.rawLen} ตัวอักษร |`,
+      `| ย่อหน้า | ${m0.paragraphs} | ${m1.paragraphs} |`,
+      `| ประเด็นย่อย | ${m0.subStories} | ${m1.subStories} |`,
+      `| คำพูด (quotes) | ${m0.quotes} | ${m1.quotes} |`,
+      `| keyPoints | ${m0.keyPoints} | ${m1.keyPoints} |`,
+      `| เวลาถอด | ${(ok[0].ms / 60000).toFixed(1)} นาที | ${(ok[1].ms / 60000).toFixed(1)} นาที |`,
+    ].join('\n'));
+  }
+  for (const b of bouts) {
+    vsParts.push(b.error
+      ? `## ❌ ${b.model}\n\nถอดไม่สำเร็จ: ${b.error}`
+      : `## 🤖 ${b.model} (${(b.ms / 60000).toFixed(1)} นาที${b.confirmed ? '' : ' · ⚠️ ไม่ยืนยันโมเดล'})\n\n${full(b.insight)}`);
+  }
+  const vsMd = vsParts.join('\n\n---\n\n');
+  const vsStamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16);
+  await mkdir(join(process.cwd(), 'scratch'), { recursive: true }).catch(() => {});
+  const vsPath = join(process.cwd(), 'scratch', `clip-model-vs-${vsStamp}.md`);
+  await writeFile(vsPath, vsMd, 'utf8');
+  await writeFile(vsPath.replace(/\.md$/, '.json'), JSON.stringify(bouts, null, 2), 'utf8');
+  log(`\n${'═'.repeat(60)}\n${vsMd}\n${'═'.repeat(60)}`);
+  log(`\n💾 รายงานศึกโมเดล: ${vsPath} (+ .json) — ส่งให้กรรมการโหวตได้เลย\n`);
+  process.exit(0);
+}
 
 // 2) ถอดใหม่ทีละคลิป (force ข้ามคลัง — ได้ผลจากพรอมต์/โมเดลปัจจุบันแน่ๆ) แล้วเทียบ
 const results = [];
