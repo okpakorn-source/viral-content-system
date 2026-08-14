@@ -65,3 +65,12 @@
 - โมเดล: `src/lib/ai/geminiClient.js` (`VIDEO_MODEL`)
 - เทส/ปฏิบัติการ: `scripts/clip-before-after.mjs` · `scripts/clip-worker.mjs` · `scripts/clip-sync-restart.cmd`
 - Workflow (รันจาก GitHub Actions ได้): `.github/workflows/clip-ai-test.yml` · `clip-model-probe.yml`
+
+---
+
+## 6. ✅ ปิดงาน (เซสชันเครื่องทีม 14 ส.ค. ค่ำ)
+
+- ภารกิจ ①-⑤ ครบ: เครื่องทีมย้ายมา npd + ศึกยิงผ่านคิวสำเร็จทั้ง 3.6/3.7 + รายงาน `scratch/clip-model-vs-queue-2026-08-14-14-40.md` ส่งเจ้าของแล้ว
+- **🏆 ผลตัดสินเจ้าของ: เลือก `gemini-3.7-flash`** — ค่าหลักในโค้ดเป็น 3.7 อยู่แล้ว ไม่มี env กดกลับ · `VIDEO_FALLBACK_MODELS=[]` = ไม่มีถอยเงียบไปรุ่นอื่น แน่นก็รอคิว retry
+- ปม 403 ที่บันทึกในข้อ 2: ตัวจริงคือ **Google ตัดสิทธิ์ generateContent แบบอ้างไฟล์ (fileData) ทุกคีย์** (พิสูจน์แยกเดี่ยว: อัปโหลดผ่าน·อ้างไฟล์ 403·inline ผ่าน) → แก้แล้ว `21f7dfa` คลิป ≤19MB แนบ inline · เสริม: npd ต้องมี `GEMINI_VIDEO_API_KEY` ใน `.env.local` (เติมแล้วบนเครื่องทีม — เครื่องอื่น/สภาพแวดล้อมใหม่ต้องเติมเอง)
+- กันโค้ดเก่าคืนชีพ: `clip-worker-forever.cmd` ชี้ npd แล้ว (`1e5f055`) + autostart เครื่องทีม (`viralflow-team-autostart.cmd`) แก้ให้ server :3000 + clip-worker เปิดจาก npd ตอนบูต (สำรอง `.bak-14aug`)
