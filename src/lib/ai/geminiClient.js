@@ -49,11 +49,12 @@ function getGeminiVideoClient() {
 const VIDEO_FALLBACK_MODELS = [];
 // ★ 22 ก.ค. 69 (ผู้ใช้สั่ง): โมเดลดูคลิป gemini-3.5-flash → gemini-3.6-flash
 //   เทสจริงผ่าน: ดูคลิป YouTube ยาว (input 208k tokens) จบใน 20.5 วิ ภาพ+เสียงถูกต้อง ขณะที่ 3.5-flash วันนั้นแน่น/timeout
-// ★ 14 ส.ค. 69 (เจ้าของสั่ง คู่กับการย้อนพรอมต์กลับยุคนิ่ง 16 ก.ค.): gemini-3.6-flash → gemini-3.7-flash-high
-//   ถอยกลับได้ทันทีด้วย env GEMINI_VIDEO_MODEL=gemini-3.6-flash (ไม่ต้องแก้โค้ด) · ถ้าชื่อรุ่นไม่ตรงกับฝั่ง Google
-//   (เรียกแล้ว 404/not found) ให้แก้ด้วย env ตัวเดียวกันชี้ชื่อที่ถูก — ไฟ gemini-health จะฟ้องทันที
+// ★ 14 ส.ค. 69 (เจ้าของสั่ง คู่กับการย้อนพรอมต์กลับยุคนิ่ง 16 ก.ค.): gemini-3.6-flash → รุ่น 3.7 flash
+//   🔴 ชื่อจริงฝั่ง API คือ 'gemini-3.7-flash' — พิสูจน์ด้วย ListModels จากคีย์ production (14 ส.ค.):
+//   'gemini-3.7-flash-high' ไม่มีอยู่จริง (คำว่า high เป็นป้ายหน้าจอ ไม่ใช่ชื่อรุ่น) เคยตั้งแล้วถอดล้มทั้งระบบ
+//   เช็ครายชื่อรุ่นได้เอง: GET /api/clip-transcript/gemini-health?list=3.7 · ถอยกลับ: env GEMINI_VIDEO_MODEL=gemini-3.6-flash
 //   ใช้เฉพาะสายวิดีโอ ไม่แตะ callGemini(text) ของระบบข่าว
-const VIDEO_MODEL = process.env.GEMINI_VIDEO_MODEL || 'gemini-3.7-flash-high';
+const VIDEO_MODEL = process.env.GEMINI_VIDEO_MODEL || 'gemini-3.7-flash';
 // อาการ "แน่น/ชั่วคราว" (ควรสลับโมเดล/ลองใหม่) — แยกจาก "ดูคลิปไม่ได้/parse พัง" (ไม่สลับ)
 const _isOverload = (e) => {
   const status = Number(e?.status) || 0;
