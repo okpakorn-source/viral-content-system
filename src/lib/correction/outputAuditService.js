@@ -51,7 +51,9 @@ const FORBIDDEN_WORDS = [
   { pattern: /สยอง/g, type: 'forbidden_word', severity: 'medium', suggestion: 'น่าตกใจ' },
   { pattern: /โหด(?!ร้อน)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'รุนแรง' },
   // ★ 10 ก.ค. 69: เพิ่ม lookbehind (?<!เส้น) — "เส้นเลือด/เส้นเลือดในสมอง" คือศัพท์การแพทย์ ห้ามจับ (เคยถูกแทนเป็น "เส้นร่องรอยเหตุการณ์ในสมองแตก")
-  { pattern: /(?<!เส้น)เลือด(?!ดี|ข้น|ฝาด|จาง|ผสม|กำเดา)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'ร่องรอยเหตุการณ์' },
+  // ★ 14 ส.ค. 69 (เจ้าของอนุมัติ + Sol รับรอง 9.1/10): ขยายศัพท์แพทย์ หลอด|ลิ่ม|เม็ด|ฟอก|ดัน|บริจาค —
+  //   บั๊กพิสูจน์ 2 รอบ (ข่าวพระ): "โรคหลอดเลือดสมอง" ถูกแทนเป็น "หลอดร่องรอยเหตุการณ์" → semantic scrub ตัดวลี → กริยาหาย
+  { pattern: /(?<!เส้น|หลอด|ลิ่ม|เม็ด|ฟอก|ดัน|บริจาค)เลือด(?!ดี|ข้น|ฝาด|จาง|ผสม|กำเดา)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'ร่องรอยเหตุการณ์' },
   { pattern: /ทุบตี/g, type: 'forbidden_word', severity: 'medium', suggestion: 'ใช้ความรุนแรง' },
   { pattern: /ทำร้าย(?!ตัวเอง)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'ใช้ความรุนแรง' },
   { pattern: /เลือดสาด/g, type: 'forbidden_word', severity: 'high', suggestion: 'เหตุรุนแรง' },
