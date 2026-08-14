@@ -59,6 +59,10 @@ const FORBIDDEN_WORDS = [
   { pattern: /ทุบตี/g, type: 'forbidden_word', severity: 'medium', suggestion: 'ใช้ความรุนแรง' },
   { pattern: /ทำร้าย(?!ตัวเอง)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'ใช้ความรุนแรง' },
   { pattern: /เลือดสาด/g, type: 'forbidden_word', severity: 'high', suggestion: 'เหตุรุนแรง' },
+  // ★ 14 ส.ค. 69 ดึก (Sol backlog ข้อ 3 ขั้น 3 — ปิดความเสี่ยงคงเหลือที่จดไว้ตอนทำ whitelist):
+  //   คำแพทย์+ภาคต่อรุนแรง = ฉากกราฟิกจริง ("กระแสเลือดทะลักออกจากแผล") — whitelist ทำให้หลุดด่านคำเดี่ยว
+  //   severity high → เข้าเส้น AI เกลาทั้งประโยค (L3B ที่เพิ่งซ่อมสัญญา) ไม่แทนคำดิบ
+  { pattern: /(?:เส้น|หลอด|สาย|เกล็ด|กระแส|ถ่าย|ปั๊ม|เติม|ห้าม|บริจาค)เลือด(?:ที่)?(?:ออกมา)?(?:ไหลนอง|ทะลัก|สาด|พุ่งออก|เป็นกอง)/gu, type: 'forbidden_word', severity: 'high', suggestion: 'เหตุการณ์รุนแรง' },
   { pattern: /บาดแผล(?!ทางใจ)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'อาการบาดเจ็บ' },
 
   // === ★ การพนัน / ยาเสพติด / แอลกอฮอล์ (Meta restricted — เพิ่ม 12 มิ.ย. 69) ===

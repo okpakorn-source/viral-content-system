@@ -122,6 +122,7 @@ export async function safeCorrect(content, issues) {
     // ★ 12 มิ.ย. 69: กลุ่มการเสียชีวิต + พนัน/ยา/เหล้า ต้องเกลาตามบริบท — แทนคำตรงๆ จะได้สำนวนซ้ำจำเจ/ความหมายเพี้ยน
     // ★ 16 ก.ค. 69 (B2): เพิ่ม 'เลือด'/'เลือดสาด' — เดิมตกไป direct-replace ได้ "พบร่องรอยเหตุการณ์ไหลออกมา"
     //   ประโยคเพี้ยนแบบเดียวกับเคส "เส้นร่องรอยเหตุการณ์ในสมองแตก" (10 ก.ค.) ต้องให้ AI เกลาตามบริบท
+    const L3B_DIRECT_REPLACE_MAX = 12; // ★ ผู้ตรวจ F#3: คำใหม่ในลิสต์ห้ามยาวเกินนี้ (มีข้อสอบคุม)
     const needsAIRewrite = [
       'สะเก็ดระเบิด', 'ระเบิด', 'สนามรบ', 'บาดแผล',
       'เสียชีวิต', 'ตาย', 'ดับ', 'สิ้นใจ', 'ผูกคอ', 'จบชีวิต',
@@ -195,7 +196,7 @@ export async function safeCorrect(content, issues) {
         const result = await callAI({
           model: MODEL_FAST,
           temperature: 0.1,
-          maxTokens: 2000,
+          maxTokens: 8000, // ★ ผู้ตรวจ F#1: L3B คืนทั้งบทความใน JSON — 2000 ตันกับข่าวจริง
           prompt: `อ่านเนื้อหาด้านล่างแล้ว rewrite เฉพาะคำเสี่ยงที่ระบุ ให้ปลอดภัยสำหรับ Facebook
 ห้ามเปลี่ยนเนื้อหา ห้ามเพิ่มข้อมูล ห้ามลดข้อมูล ห้ามเปลี่ยนโทน ห้ามยาวขึ้น
 แค่เปลี่ยนคำเสี่ยงให้ปลอดภัย โดยรักษาความหมายและอ่านลื่นเหมือนเดิม
@@ -212,11 +213,14 @@ ${riskyWords}
 ${correctedContent}
 === จบ ===
 
-ตอบเฉพาะเนื้อหาที่แก้แล้ว ไม่ต้องอธิบาย ไม่ต้องใส่ prefix`,
+ตอบเป็น JSON เท่านั้น: {"content": "เนื้อหาที่แก้แล้วทั้งหมด"} ห้ามอธิบาย ห้ามใส่ข้อความอื่นนอก JSON`,
         });
 
-        if (typeof result === 'string' && result.length > correctedContent.length * 0.7 && result.length < correctedContent.length * 1.3) {
-          correctedContent = result.trim();
+        // ★ 14 ส.ค. 69 (Sol backlog ข้อ 3 ขั้น 2 — แก้สัญญา L3B): callAI คืน JSON object เสมอ
+        //   เดิมเช็ค typeof string = ไม่มีวันผ่าน → ตกไป direct replace ทุกครั้ง (ต้นตอ "Fallback direct replace" เคสจริง)
+        const _rewritten = typeof result === 'string' ? result : (result?.content ?? null);
+        if (typeof _rewritten === 'string' && _rewritten.length > correctedContent.length * 0.7 && _rewritten.length < correctedContent.length * 1.3) {
+          correctedContent = _rewritten.trim();
           corrections.push({
             type: 'ai_context_rewrite',
             original: aiRewriteIssues.map(i => i.text).join(', '),
@@ -225,27 +229,32 @@ ${correctedContent}
           });
           console.log(`[SafeCorrection] L3B AI Rewrite: ${aiRewriteIssues.length} context-sensitive words fixed`);
         } else {
-          // AI ตอบผิดรูปแบบ → fallback ใช้ direct replace
-          console.warn(`[SafeCorrection] L3B AI Rewrite: response invalid, fallback to direct replace`);
+          // ★ 14 ส.ค. 69 (Sol: AI ล้มต้อง fail-closed กับท่อนยาว): direct replace ได้เฉพาะคำสั้น ≤12 ตัว —
+          //   ท่อนยาวแทนดิบๆ = ประโยคพัง (เคส "หลอดร่องรอยเหตุการณ์") ให้คงเนื้อเดิม + จดธงไว้ให้คนตรวจ
+          console.warn(`[SafeCorrection] L3B AI Rewrite: response invalid, short-word replace + flag long spans`);
           for (const issue of aiRewriteIssues) {
-            if (issue.suggestion) {
+            if (issue.suggestion && issue.text.length <= L3B_DIRECT_REPLACE_MAX) {
               const before = correctedContent;
               correctedContent = correctedContent.replace(issue.text, issue.suggestion);
               if (correctedContent !== before) {
                 corrections.push({ type: 'regex_replace', original: issue.text, fixed: issue.suggestion, reason: 'Fallback direct replace' });
               }
+            } else {
+              corrections.push({ type: 'needs_review', original: issue.text.slice(0, 80), fixed: null, reason: 'AI เกลาล้ม + ท่อนยาวเกินจะแทนดิบ — คงเนื้อเดิมไว้ให้คนตรวจ' });
             }
           }
         }
       } catch (aiErr) {
-        console.warn(`[SafeCorrection] L3B AI Rewrite failed: ${aiErr.message}, using direct replace`);
+        console.warn(`[SafeCorrection] L3B AI Rewrite failed: ${aiErr.message} — short-word replace + flag long spans`);
         for (const issue of aiRewriteIssues) {
-          if (issue.suggestion) {
+          if (issue.suggestion && issue.text.length <= L3B_DIRECT_REPLACE_MAX) {
             const before = correctedContent;
             correctedContent = correctedContent.replace(issue.text, issue.suggestion);
             if (correctedContent !== before) {
               corrections.push({ type: 'regex_replace', original: issue.text, fixed: issue.suggestion, reason: 'Fallback direct replace' });
             }
+          } else {
+            corrections.push({ type: 'needs_review', original: issue.text.slice(0, 80), fixed: null, reason: 'AI เกลาล้ม + ท่อนยาวเกินจะแทนดิบ — คงเนื้อเดิมไว้ให้คนตรวจ' });
           }
         }
       }

@@ -290,7 +290,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData, r
           auditScore: audit.auditScore,
           issuesFound: audit.issues.length,
           issueTypes: [...new Set(audit.issues.map(i => i.type))],
-          correctionsMade: actualCorrections.length,
+          correctionsMade: actualCorrections.filter(c => c.type !== 'needs_review').length, // ★ ผู้ตรวจ F#4: ธงรอคนตรวจไม่ใช่การแก้
           corrections: actualCorrections.slice(0, 5),
           factPreserved: finalFactCheck.preserved,
           factDrifts: finalFactCheck.drifts.length,
