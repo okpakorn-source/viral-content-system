@@ -271,23 +271,36 @@ export async function callGeminiVideoFile({ prompt, videoBuffer, mimeType = 'vid
 
   const fileManager = new GoogleAIFileManager(apiKey);
   const tmpPath = join(tmpdir(), `gv_${Date.now()}.mp4`);
-  await writeFile(tmpPath, videoBuffer);
-  console.log(`[GeminiVideoFile] upload ${(videoBuffer.length / 1e6).toFixed(1)}MB, model=${model}`);
+
+  // ★ 14 ส.ค. 69: Google ตัดสิทธิ์เส้นทาง "อ้างไฟล์ที่อัปโหลด" (fileData) — generateContent ตอบ 403 ทุกคีย์
+  //   แม้คลิปทดสอบ 1 วินาที (อัปโหลด Files API ยังผ่าน · แนบวิดีโอตรง inline ยังผ่าน — พิสูจน์แยกเดี่ยว 14 ส.ค.)
+  //   → ไฟล์ ≤19MB แนบตรง inline (เพดานคำขอรวม 20MB) · ใหญ่กว่านั้นเดินเส้น Files API เดิม (เผื่อ Google คืนสิทธิ์)
+  const INLINE_MAX = 19 * 1024 * 1024;
+  const useInline = videoBuffer.length <= INLINE_MAX;
 
   let uploadedName = null;
   try {
-    const up = await fileManager.uploadFile(tmpPath, { mimeType, displayName: 'clip' });
-    uploadedName = up.file.name;
+    let videoPart;
+    if (useInline) {
+      console.log(`[GeminiVideoFile] inline ${(videoBuffer.length / 1e6).toFixed(1)}MB, model=${model}`);
+      videoPart = { inlineData: { mimeType, data: videoBuffer.toString('base64') } };
+    } else {
+      await writeFile(tmpPath, videoBuffer);
+      console.log(`[GeminiVideoFile] upload ${(videoBuffer.length / 1e6).toFixed(1)}MB, model=${model}`);
+      const up = await fileManager.uploadFile(tmpPath, { mimeType, displayName: 'clip' });
+      uploadedName = up.file.name;
 
-    // รอ Gemini ประมวลผลวิดีโอจน ACTIVE (สูงสุด ~2 นาที)
-    let file = await fileManager.getFile(uploadedName);
-    let tries = 0;
-    while (file.state === FileState.PROCESSING && tries < 60) {
-      await new Promise(r => setTimeout(r, 2000));
-      file = await fileManager.getFile(uploadedName);
-      tries++;
+      // รอ Gemini ประมวลผลวิดีโอจน ACTIVE (สูงสุด ~2 นาที)
+      let file = await fileManager.getFile(uploadedName);
+      let tries = 0;
+      while (file.state === FileState.PROCESSING && tries < 60) {
+        await new Promise(r => setTimeout(r, 2000));
+        file = await fileManager.getFile(uploadedName);
+        tries++;
+      }
+      if (file.state !== FileState.ACTIVE) throw new Error(`Gemini ประมวลผลวิดีโอไม่สำเร็จ (state=${file.state})`);
+      videoPart = { fileData: { fileUri: file.uri, mimeType: file.mimeType } };
     }
-    if (file.state !== FileState.ACTIVE) throw new Error(`Gemini ประมวลผลวิดีโอไม่สำเร็จ (state=${file.state})`);
 
     const client = getGeminiVideoClient(); // ★ คีย์แยกสำหรับถอดคลิป
     // ★ 26 มิ.ย.: ไฟล์อัปแล้ว (ACTIVE ครั้งเดียว) — สลับโมเดลตอน 503 ได้โดยไม่อัปซ้ำ
@@ -303,7 +316,7 @@ export async function callGeminiVideoFile({ prompt, videoBuffer, mimeType = 'vid
         return await _withGeminiRetry(async () => {
           const result = await genModel.generateContent({
             contents: [{ role: 'user', parts: [
-              { fileData: { fileUri: file.uri, mimeType: file.mimeType } },
+              videoPart,
               { text: prompt },
             ] }],
           }, { requestOptions: { timeout: 280000 } });
