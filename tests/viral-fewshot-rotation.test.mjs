@@ -99,11 +99,11 @@ const BRIEF = { title: 'ช้างพลายยืนเฝ้าโลง�
 t('20 ไม่มีอะไรแมชเลย → คืนว่าง (ให้ระบบถอย fallback ไม่ฝืนเลือกมั่ว)',
   scoreMatchExamples({ title: 'zzz', emotionalTags: [], libCat: '', excerpt: 'zzz' }, ROWS, ESS).length === 0);
 
-// ── ⑨ 8 ส.ค. ดึก — เจ้าของเคาะ "วิธี 1 เป็นตัวจริง": default=ai · ปิดต้องตั้งใจปิดชัดๆ ──
-t('21 ไม่ตั้งค่า/ค่าว่าง = ai (วิธีหลักที่เจ้าของเคาะ)', matchModeName(undefined) === 'ai' && matchModeName('') === 'ai');
-t('22 ปิดต้องตั้งใจ: off/0/none = ปิด (พฤติกรรมสุ่มเดิม)', matchModeName('off') === '' && matchModeName('0') === '' && matchModeName('none') === '');
-t('23 score เลือกได้ · ค่าพิมพ์เพี้ยน (AI/Score/on) = ai ไม่หลุดไปสุ่มเงียบ',
-  matchModeName('score') === 'score' && matchModeName('AI') === 'ai' && matchModeName('Score') === 'score' && matchModeName('on') === 'ai');
+// ── ⑨ 14 ส.ค. — เจ้าของเคาะกลับ "สุ่มทั้งหมวด" เป็นค่าเริ่มต้น (บรรณารักษ์ = ต้องเปิดเองชัดๆ) ──
+t('21 ไม่ตั้งค่า/ค่าว่าง = สุ่มแบบเดิม (ค่าเริ่มต้นที่เจ้าของเคาะ 14 ส.ค.)', matchModeName(undefined) === '' && matchModeName('') === '');
+t('22 เปิดบรรณารักษ์ต้องตั้งใจ: ai/AI เท่านั้น', matchModeName('ai') === 'ai' && matchModeName('AI') === 'ai');
+t('23 score เลือกได้ · ค่าพิมพ์เพี้ยน (on/off/ขยะ) = สุ่มแบบเดิม ไม่หลุดไปเปิดบรรณารักษ์เงียบๆ',
+  matchModeName('score') === 'score' && matchModeName('Score') === 'score' && matchModeName('on') === '' && matchModeName('off') === '' && matchModeName('xyz') === '');
 
 console.log(`\n${pass}/23 ผ่าน${fail ? ' — ❌ ตก ' + fail + ' เคส ห้ามไปต่อ' : ' — ✅ ด่านข้อสอบผ่าน'}`);
 process.exit(fail ? 1 : 0);
