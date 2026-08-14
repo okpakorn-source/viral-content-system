@@ -5,23 +5,23 @@ name: clip-model-probe
 on:
   workflow_dispatch:
     inputs:
-      filter:
-        description: "คำกรองชื่อรุ่น เช่น 3.7 หรือ gemini-3 (เว้นว่าง = ทุกตัว)"
-        default: "3.7"
+      query:
+        description: "query ที่ยิงใส่ gemini-health เช่น list=3.7 หรือ probe=gemini-3.7-flash"
+        default: "list=3.7"
 
 jobs:
   probe:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-      - name: ถามรายชื่อรุ่นจาก production (รอ deploy โหมด list ขึ้นก่อนอัตโนมัติ)
+      - name: ยิง gemini-health ตาม query (รอ deploy โค้ดรุ่นใหม่ขึ้นก่อนอัตโนมัติ)
         run: |
           for i in $(seq 1 25); do
-            resp=$(curl -sS -m 25 "https://viral-content-system.vercel.app/api/clip-transcript/gemini-health?list=${{ inputs.filter }}" || true)
+            resp=$(curl -sS -m 35 "https://viral-content-system.vercel.app/api/clip-transcript/gemini-health?${{ inputs.query }}" || true)
             echo "รอบ $i: $resp"
-            if echo "$resp" | grep -q '"success":true'; then
-              echo "✅ ได้รายชื่อรุ่นแล้ว (ด้านบน)"; exit 0
+            if echo "$resp" | grep -qE '"models"|"model"'; then
+              echo "✅ ได้ผลจากโค้ดรุ่นใหม่แล้ว (ด้านบน)"; exit 0
             fi
-            echo "⏳ โหมด list ยังไม่ขึ้น production (รอ deploy) — รอ 20 วิ"; sleep 20
+            echo "⏳ ยังไม่เจอผลโหมดใหม่ (อาจรอ deploy) — รอ 20 วิ"; sleep 20
           done
-          echo "❌ รอ ~8 นาทีแล้วยังไม่ได้รายชื่อ — เช็ค deploy บน Vercel"; exit 1
+          echo "❌ รอ ~8 นาทีแล้วยังไม่ได้ผล — เช็ค deploy บน Vercel"; exit 1

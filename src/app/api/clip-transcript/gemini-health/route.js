@@ -17,7 +17,39 @@ export async function GET(request) {
   // ★ 14 ส.ค. 69 — โหมดตรวจรายชื่อรุ่น: ?list=3.7 → ถามรายชื่อโมเดลที่คีย์นี้ใช้ได้จริงจาก Google
   //   ที่มา: ตั้งชื่อรุ่นวิดีโอผิด (gemini-3.7-flash-high) แล้วถอดล้มทั้งระบบ — ต่อไปเช็คชื่อจริงได้เอง ไม่ต้องเดา
   //   ใช้คีย์ฝั่งเซิร์ฟเวอร์ตามปกติ ไม่คืนคีย์ · คืนเฉพาะชื่อรุ่น (metadata สาธารณะ) · ไม่แตะแคช/ไฟสถานะเดิม
-  const listQ = new URL(request.url).searchParams.get('list');
+  const _sp = new URL(request.url).searchParams;
+  // ★ 14 ส.ค. 69 (รอบสอง) — โหมดยิงทดสอบรุ่นตรงตัว: ?probe=<ชื่อรุ่น> → generateContent จริง (config เดียวกับสายวิดีโอ:
+  //   JSON mode) แล้วคืน error "เต็ม ไม่ตัด" — ที่มา: ถอดด้วย gemini-3.7-flash ล้มแต่ข้อความ error โดนตัด 120 ตัว
+  //   จนไม่เห็นสาเหตุจริง (ชื่อรุ่นมีใน ListModels แต่เรียกไม่ผ่าน) · ใช้วินิจฉัยเท่านั้น ไม่แตะไฟสถานะ/แคชเดิม
+  const probeQ = _sp.get('probe');
+  if (probeQ) {
+    try {
+      const apiKey = process.env.GEMINI_VIDEO_API_KEY || process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return NextResponse.json({ success: false, error: 'ยังไม่ได้ตั้งค่าคีย์ Gemini', errorType: 'NO_API_KEY' }, { status: 503 });
+      }
+      const { GoogleGenerativeAI } = await import('@google/generative-ai');
+      // &max=32000 → ทดสอบเพดาน output เท่าสายวิดีโอจริง (วินิจฉัยเคสรุ่นใหม่รับ maxOutputTokens ไม่เท่ารุ่นเก่า)
+      const probeMax = Math.max(1, Math.min(65536, Number(_sp.get('max')) || 200));
+      const probeModel = new GoogleGenerativeAI(apiKey).getGenerativeModel({
+        model: String(probeQ).slice(0, 60),
+        generationConfig: { maxOutputTokens: probeMax, temperature: 0, responseMimeType: 'application/json' },
+      });
+      const t0 = Date.now();
+      const res = await probeModel.generateContent(
+        { contents: [{ role: 'user', parts: [{ text: 'ตอบ JSON เท่านั้น: {"ok":true}' }] }] },
+        { requestOptions: { timeout: 20_000 } },
+      );
+      return NextResponse.json({ success: true, model: probeQ, ms: Date.now() - t0, text: String(res.response?.text() || '').slice(0, 120) });
+    } catch (e) {
+      return NextResponse.json({
+        success: false, model: probeQ, status: Number(e?.status) || 0,
+        error: String(e?.message || e).slice(0, 600), errorType: 'PROBE_FAILED',
+      }, { status: 502 });
+    }
+  }
+
+  const listQ = _sp.get('list');
   if (listQ !== null) {
     try {
       const apiKey = process.env.GEMINI_VIDEO_API_KEY || process.env.GEMINI_API_KEY;
