@@ -97,6 +97,41 @@ export async function logGeneration({
     const caseId = await getNextCaseNumber();
     const now = new Date().toISOString();
 
+    // ★ 14 ส.ค. 69 (เจ้าของอนุมัติ · สเปก Sol 8.8/10 — sol-backlog4-verdict ข้อ 2): ตัดสตริงด้วยเพดานไบต์ UTF-8 จริง
+    //   บทเรียนเคส #03997: log ไม่เก็บกล่องดำ → เคสจากดิสคอร์ดย้อนหาต้นเหตุไม่ได้ ต้องเจนซ้ำเอง
+    const _byteCap = (s, maxBytes) => {
+      let out = String(s ?? '');
+      if (Buffer.byteLength(out, 'utf8') <= maxBytes) return out;
+      out = out.slice(0, maxBytes); // ตัดหยาบก่อน (ไทย ~3 ไบต์/ตัว) แล้วค่อยลดจนพอดี
+      while (out.length > 0 && Buffer.byteLength(out, 'utf8') > maxBytes) out = out.slice(0, -8);
+      // ★ ผู้ตรวจ #1 (พิสูจน์รันจริง): ตัดกลางคู่ surrogate (อีโมจิ) → JSON เสีย → Postgres ปฏิเสธ → log ทั้งเคสหาย
+      if (/[\uD800-\uDBFF]$/.test(out)) out = out.slice(0, -1);
+      return out;
+    };
+    const _compactCorrection = (v) => {
+      try {
+        const dbg = v._correctionDebug || null;
+        if (!dbg && v._correctionApplied === undefined) return { status: 'unavailable' };
+        // ★ ผู้ตรวจ #2: ด่านพัง (_correctionError) หรือถูกปิด (_correctionSkipped) ห้ามรายงานเป็น 'clean'
+        const status = v._correctionError ? 'error'
+          : v._correctionSkipped ? 'skipped'
+          : dbg?.rolledBack ? 'rolled_back'
+          : (v._correctionApplied ? 'corrected' : 'clean');
+        return {
+          status,
+          issueTypes: Array.isArray(dbg?.issueTypes) ? dbg.issueTypes.slice(0, 6) : [],
+          corrections: (dbg?.corrections || []).slice(0, 5).map((c) => ({
+            type: _byteCap(c?.type, 48), original: _byteCap(c?.original, 180), fixed: _byteCap(c?.fixed, 180),
+          })),
+          semanticRemoved: (dbg?.semanticCheck?.issues || []).slice(0, 5).map((it) => ({
+            removed: _byteCap(it?.removed, 240), reason: _byteCap(it?.reason, 180),
+          })),
+          seamGuard: dbg?.semanticCheck?.error || null,
+          rawDraftHead: _byteCap(typeof v._rawModelDraft === 'string' ? v._rawModelDraft : '', 2400), // ~800 ตัวอักษรไทย
+        };
+      } catch { return { status: 'error' }; }
+    };
+
     // Compact versions for storage (keep essential data)
     const compactVersions = versions.map((v, i) => ({
       index: i,
@@ -110,6 +145,7 @@ export async function logGeneration({
       wordCount: (v.content || '').split(/\s+/).filter(w => w).length,
       charCount: (v.content || '').length,
       paraCount: (v.content || '').split('\n\n').filter(p => p.trim().length > 10).length,
+      correction: _compactCorrection(v), // ★ additive — ผู้อ่านเดิมไม่กระทบ (ไม่แตะ 11 ฟิลด์เดิม)
     }));
 
     const logEntry = {

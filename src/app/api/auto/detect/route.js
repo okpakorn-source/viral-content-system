@@ -113,7 +113,8 @@ export async function GET() {
     APIFY_API_TOKEN:   Boolean(process.env.APIFY_API_TOKEN),
     YOUTUBE_API_KEY:   Boolean(process.env.YOUTUBE_API_KEY),
     JINA_API_KEY:      Boolean(process.env.JINA_API_KEY),
-    ASSEMBLYAI_API_KEY:Boolean(process.env.ASSEMBLYAI_API_KEY),
+    // ★ 14 ส.ค. 69 (เจ้าของอนุมัติ · Sol DB-audit ข้อ 8 + backlog 4b): ถอด ASSEMBLYAI_API_KEY —
+    //   ไม่มีตัวใช้จริงทั้งระบบ (อยู่แค่รายการเช็คนี้) ทำ ready/total เพี้ยนหลอกว่าขาดของ
     SERPER_API_KEY:    Boolean(process.env.SERPER_API_KEY),
   };
 

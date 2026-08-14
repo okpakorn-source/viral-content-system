@@ -97,6 +97,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
             issuesFound: semResult.issuesFound?.length || 0,
             fixed: semResult.fixed || false,
             issues: (semResult.issuesFound || []).slice(0, 3),
+            error: semResult.error || null, // ★ 14 ส.ค. 69 (ผู้ตรวจ #3): พาธง Seam Guard (OPENING/UNSAFE_SEAM_GUARD) ถึงกล่องดำ
           };
           console.log(`  L4.6 Semantic (clean): ${cleanSemanticDebug.issuesFound} issues ${cleanSemanticDebug.fixed ? '(fixed)' : '(clean)'}`);
         } catch (semErr) {
@@ -229,6 +230,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
           issuesFound: semanticResult.issuesFound?.length || 0,
           fixed: semanticResult.fixed || false,
           issues: (semanticResult.issuesFound || []).slice(0, 3),
+          error: semanticResult.error || null, // ★ 14 ส.ค. 69 (ผู้ตรวจ #3): พาธง Seam Guard ถึงกล่องดำ
         };
         console.log(`  L4.6 Semantic: ${semanticDebug.issuesFound} issues ${semanticDebug.fixed ? '(fixed)' : '(clean)'}`);
       } catch (semErr) {

@@ -242,6 +242,10 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
   addLog('Parallel', '🚀 Blueprint + SmartResearch ทำงานพร้อมกัน...');
   
   // ★ ทำ 2 งานพร้อมกัน แทนที่จะรอทีละตัว (ประหยัด 30-60 วินาที!)
+  // ★ 14 ส.ค. 69 (Sol 9.5/10 — sol-backlog4 ข้อ 4a · parity กับสาย Text): จับเวลาจริงของแต่ละงานใน finally
+  const _taskElapsed = { blueprint: null, research: null };
+  const _bpT0 = Date.now();
+  const _srT0 = Date.now();
   const [bpSettled, srSettled] = await Promise.allSettled([
     // Task 1: Blueprint
     withTimeout(performSummarize({
@@ -251,14 +255,14 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
       breakdownData,
       workflowId: _autoWorkflowId,
       user: _user,
-    }), 120000, 'blueprint').catch(() => null), // ★ 120s (was 75s) — GPT-5.5 needs more time
-    
+    }), 120000, 'blueprint').catch(() => null).finally(() => { _taskElapsed.blueprint = Date.now() - _bpT0; }), // ★ 120s (was 75s) — GPT-5.5 needs more time
+
     // Task 2: Smart Research
     withTimeout(
       smartResearch(newsData, breakdownData),
       60000,  // ★ 60s (was 30s) — เพิ่มเป็น 2× เพราะ SmartResearch มี 2 AI calls + 7 Serper HTTP calls
       'smart_research'
-    ).catch(() => null),
+    ).catch(() => null).finally(() => { _taskElapsed.research = Date.now() - _srT0; }),
   ]);
 
   // Extract Blueprint result
@@ -556,8 +560,9 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
           scrape: ((step2Start - step1Start) / 1000).toFixed(1),
           extract: ((step3Start - step2Start) / 1000).toFixed(1),
           breakdown: ((stepParallelStart - step3Start) / 1000).toFixed(1),
-          blueprint: ((stepGenStart - stepParallelStart) / 1000).toFixed(1),
-          research: ((stepGenStart - stepParallelStart) / 1000).toFixed(1),
+          // ★ 14 ส.ค. 69 (Sol 4a): เวลาจริงรายงาน — เดิมสองตัวนี้ใช้ช่วงขนานรวม = เลขซ้ำทุกเคส
+          blueprint: _taskElapsed.blueprint != null ? (_taskElapsed.blueprint / 1000).toFixed(1) : null,
+          research: _taskElapsed.research != null ? (_taskElapsed.research / 1000).toFixed(1) : null,
           generate: ((Date.now() - stepGenStart) / 1000).toFixed(1),
         },
         desk: deskMeta || null, // ★ ป้ายโต๊ะข่าว {newsId, lane, category, editor, editorIcon}
@@ -609,8 +614,9 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
         scrape: ((step2Start - step1Start) / 1000).toFixed(1),
         extract: ((step3Start - step2Start) / 1000).toFixed(1),
         breakdown: ((stepParallelStart - step3Start) / 1000).toFixed(1),
-        blueprint: ((stepGenStart - stepParallelStart) / 1000).toFixed(1),
-        research: ((stepGenStart - stepParallelStart) / 1000).toFixed(1),
+        // ★ 14 ส.ค. 69 (Sol 4a): เวลาจริงรายงาน — logger กับ response ใช้ก้อนเดียวกัน
+        blueprint: _taskElapsed.blueprint != null ? (_taskElapsed.blueprint / 1000).toFixed(1) : null,
+        research: _taskElapsed.research != null ? (_taskElapsed.research / 1000).toFixed(1) : null,
         generate: ((Date.now() - stepGenStart) / 1000).toFixed(1),
       },
       log,
