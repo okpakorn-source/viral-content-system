@@ -530,7 +530,9 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
   // === POST-GENERATION CORRECTION PIPELINE ===
   let finalVersions = allVersions;
   try {
-    finalVersions = await runCorrectionPipeline(allVersions, newsData, breakdownData);
+    finalVersions = await runCorrectionPipeline(allVersions, newsData, breakdownData,
+      // ★ 14 ส.ค. 69: ส่งข้อเท็จจริงรีเสิร์ชให้ด่าน L1.8 — ของจริงจากรีเสิร์ชไม่ใช่ "ของเกิน"
+      (factPool?.facts || []).map((x) => (typeof x === 'string' ? x : (x?.text || x?.content || ''))).filter(Boolean).join('\n') || null);
     addLog('Correction', `🔧 Correction Pipeline: ${finalVersions.filter(v => v._correctionApplied).length}/${finalVersions.length} corrected`);
   } catch (corrErr) {
     console.error('[AutoFlow] Correction pipeline failed, using original:', corrErr.message);

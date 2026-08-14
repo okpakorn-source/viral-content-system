@@ -39,12 +39,17 @@ function codeVerifyInSource(source, claim) {
  * ตรวจ+ผ่าของเกินจากเนื้อ 1 เวอร์ชัน เทียบกับข่าวต้นฉบับ
  * @param {string} content - เนื้อจากตัวเขียน
  * @param {string} newsBody - ข่าวต้นฉบับ (ความจริงอ้างอิง)
+ * @param {string|null} researchFacts - ★ 14 ส.ค. 69: ข้อเท็จจริงรีเสิร์ชที่ยืนยันแล้ว (ฐานความจริงเสริม —
+ *   เดิมด่านเห็นแค่ต้นฉบับ ข้อมูลรีเสิร์ชถูกต้องเลยโดนตัดเป็น "ของเกิน" = ฆ่าการพัฒนาเรื่องแบบยุค 2 เดือน)
  * @returns {{ content: string, debug: object }} เนื้อหลังด่าน + บันทึกการตรวจ (fail-open เสมอ)
  */
-export async function fabricationGate(content, newsBody) {
+export async function fabricationGate(content, newsBody, researchFacts = null) {
   const debug = { checked: false, sus: 0, confirmed: 0, fixed: false };
   if (process.env.FAB_GATE === '0') return { content, debug: { ...debug, skipped: 'FAB_GATE=0' } };
-  const source = String(newsBody || '');
+  // ★ ผู้ตรวจ #2: แคปต้นฉบับก่อนต่อ facts — ไม่งั้น facts อยู่ท้ายแล้วถูก slice ของพรอมต์ตัดทิ้งเงียบๆ (no-op)
+  const source = String(newsBody || '').slice(0, 5000)
+    + (researchFacts ? '\n\n[ข้อเท็จจริงจากการรีเสิร์ชที่ยืนยันแล้ว — ถือเป็นความจริงอ้างอิงเช่นกัน]\n' + String(researchFacts).slice(0, 2500) : '');
+  debug.researchFactsLen = researchFacts ? String(researchFacts).length : 0; // ★ ผู้ตรวจ #3: ย้อนสอบได้
   // ต้นฉบับสั้นเกิน = ไม่มีความจริงพอให้เทียบ (เช่นเทสยิงตรงไม่มี body) — ข้ามอย่างเงียบ
   if (source.length < 80 || !content || String(content).length < 100) {
     return { content, debug: { ...debug, skipped: 'no-source-or-short' } };
@@ -62,7 +67,7 @@ export async function fabricationGate(content, newsBody) {
       prompt:
         'เทียบบทความกับต้นฉบับ ชี้ทุกข้อความที่เป็น "ของเกิน" — ข้อเท็จจริง/อาชีพ/แรงจูงใจ/ตัวเลข/เหตุการณ์ที่ต้นฉบับไม่มี\n' +
         'สำนวนแต่ง/ภาพเปรียบ/การเรียบเรียงใหม่จากข้อเท็จจริงเดิม ไม่นับเป็นของเกิน\n' +
-        `=== ต้นฉบับ ===\n${source.slice(0, 6000)}\n=== บทความ ===\n${content}\n=== จบ ===\n` +
+        `=== ต้นฉบับ ===\n${source.slice(0, 8000)}\n=== บทความ ===\n${content}\n=== จบ ===\n` +
         'ตอบ JSON: {"fabrications":["ข้อความของเกินที่พบ", ...]} — ไม่พบให้ตอบ {"fabrications":[]}',
     });
     debug.checked = true;
@@ -84,7 +89,7 @@ export async function fabricationGate(content, newsBody) {
         systemPrompt: GATE_CHECK_SYS,
         prompt:
           'ทวนอีกครั้งอย่างเข้มงวด: รายการต่อไปนี้ ข้อไหน "มีระบุในต้นฉบับจริง" (รวมการเขียนคนละสำนวนแต่ความหมายเดียวกัน) ให้ตัดออกจากรายการ เหลือเฉพาะของเกินแท้\n' +
-          `=== ต้นฉบับ ===\n${source.slice(0, 6000)}\n=== รายการ ===\n${survived.map((f, i) => `${i + 1}. ${f}`).join('\n')}\n` +
+          `=== ต้นฉบับ ===\n${source.slice(0, 8000)}\n=== รายการ ===\n${survived.map((f, i) => `${i + 1}. ${f}`).join('\n')}\n` +
           'ตอบ JSON: {"confirmed":["..."]}',
       });
       if (!Array.isArray(reRes?.confirmed)) {
@@ -114,7 +119,7 @@ export async function fabricationGate(content, newsBody) {
       prompt:
         'แก้บทความแบบศัลยกรรม: ลบ/แก้เฉพาะข้อความ "ของเกิน" ที่ยืนยันแล้วว่าต้นฉบับไม่มี ตามรายการนี้ — ห้ามแตะประโยคอื่น ห้ามลบสิ่งที่ต้นฉบับมีจริง และรักษาจำนวนย่อหน้าเดิม (คั่นด้วย \\n\\n)\n' +
         `ของเกิน:\n${confirmed.map((f, i) => `${i + 1}. ${f}`).join('\n')}\n` +
-        `=== ต้นฉบับ (ไว้ทวน) ===\n${source.slice(0, 6000)}\n=== บทความ ===\n${content}\n=== จบ ===\n` +
+        `=== ต้นฉบับ (ไว้ทวน) ===\n${source.slice(0, 8000)}\n=== บทความ ===\n${content}\n=== จบ ===\n` +
         'ตอบ JSON: {"content":"บทความฉบับแก้"}',
     });
     const fixedContent = typeof fixRes?.content === 'string' ? fixRes.content.trim() : '';

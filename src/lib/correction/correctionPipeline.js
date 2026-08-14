@@ -27,7 +27,9 @@ import { bbStep } from '@/lib/trace/blackbox'; // ★ 1 ส.ค. 69 กล่อ
  * @param {object} breakdownData - breakdown data (optional)
  * @returns {Array} corrected versions พร้อม _correctionDebug
  */
-export async function runCorrectionPipeline(versions, newsData, breakdownData) {
+// ★ 14 ส.ค. 69 (เจ้าของสั่ง "คืนการพัฒนาเรื่องแบบยุค 2 เดือน"): researchFacts = ข้อเท็จจริงรีเสิร์ชที่ยืนยันแล้ว
+//   ส่งให้ด่าน L1.8 ใช้เป็นฐานความจริงเพิ่ม — เดิมด่านเห็นแค่ต้นฉบับ ข้อมูลรีเสิร์ชถูกต้องเลยโดนตัดเป็น "ของเกิน"
+export async function runCorrectionPipeline(versions, newsData, breakdownData, researchFacts = null) {
   // === Bypass check ===
   if (process.env.SKIP_CORRECTION === 'true') {
     console.log('[CorrectionPipeline] ⏭️ SKIPPED (SKIP_CORRECTION=true)');
@@ -69,7 +71,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData) {
       //   ล้ม/ปิดสวิตช์ = ปล่อยเนื้อเดิมผ่าน (fail-open ภายใน fabricationGate เอง)
       let _fabDebug = null;
       try {
-        const _gate = await fabricationGate(version.content, newsData?.newsBody);
+        const _gate = await fabricationGate(version.content, newsData?.newsBody, researchFacts);
         bbStep(_bb, 'L1.8-ด่านของเกิน', version.content, _gate.content,
           { sus: _gate.debug.sus, confirmed: _gate.debug.confirmed, fixed: _gate.debug.fixed, skipped: _gate.debug.skipped });
         if (_gate.debug.fixed) version = { ...version, content: _gate.content };
