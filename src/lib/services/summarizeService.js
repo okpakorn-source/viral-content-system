@@ -9,7 +9,7 @@ import { logPipeline } from '@/lib/pipelineLogger';
 import { getSession } from '@/lib/auth';
 import { buildNarrativePayload, formatNarrativePayload, checkNarrativeSimilarity } from '@/lib/input-engine/narrativePayload';
 import { clusterMatch, findClusterScore, mapCategory, EMOTION_CLUSTERS, CONFLICT_CLUSTERS } from '@/lib/ai/semanticClusters';
-import { MODEL_PRIMARY, MODEL_FAST, MODEL_HEAVY_FALLBACK } from '@/lib/ai/modelConfig';
+import { MODEL_PRIMARY, MODEL_FAST, MODEL_HEAVY_FALLBACK , MODEL_BLUEPRINT } from '@/lib/ai/modelConfig';
 import { withTimeout } from '@/lib/utils/withTimeout';
 
 const MODEL_GEMINI_PRO = 'gemini-3.6-flash'; // ★ 1 ส.ค. 69 เจ้าของสั่ง 3.5→3.6 (ใหม่ ไว ไม่ล่ม)
@@ -1710,7 +1710,9 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
 }`;
 
       const blueprintResult = await callAI({
-        model: MODEL_FAST,
+        // ★ 15 ส.ค. 69 (เจ้าของเคาะหลังแข่ง 9 โมเดล · กรรมการปิดตา 7 เสียง): ขั้น 3 → gpt-5.6-sol
+        //   ของเดิม: model: MODEL_FAST (= gpt-5.6-luna) — ถอยกลับได้ทันทีด้วย env MODEL_BLUEPRINT=gpt-5.6-luna
+        model: MODEL_BLUEPRINT,
         prompt: blueprintPrompt,
         temperature: 0.3,
         // ★ 2 ส.ค. 69: 1200→8000 — ค่าเดิมจากยุคโมเดลเล็ก พอโล๊ะเป็น luna (reasoning คิดกินโควตา) เพดานไม่พอ

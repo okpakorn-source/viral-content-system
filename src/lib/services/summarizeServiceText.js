@@ -1,5 +1,5 @@
 import { callAI } from '@/lib/ai/openai';
-import { MODEL_NEWS_ANALYSIS, MODEL_BREAKDOWN, MODEL_FAST_CHEAP, MODEL_HEAVY_FALLBACK } from '@/lib/ai/modelConfig';
+import { MODEL_NEWS_ANALYSIS, MODEL_BREAKDOWN, MODEL_FAST_CHEAP, MODEL_HEAVY_FALLBACK , MODEL_BLUEPRINT } from '@/lib/ai/modelConfig';
 import { withTimeoutSignal } from '@/lib/utils/withTimeout'; // ★ 16 ก.ค. 69: withTimeout เดิมไม่ถูกใช้ในไฟล์นี้แล้ว (ทุกจุดย้ายไป withTimeoutSignal)
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStoreText';
 import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, buildFullContext, validateOutput } from '@/lib/workflow/workflowEngine';
@@ -1762,7 +1762,9 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
 }`;
 
       const blueprintResult = await callAI({
-        model: MODEL_FAST_CHEAP,
+        // ★ 15 ส.ค. 69 (เจ้าของเคาะหลังแข่ง 9 โมเดล · กรรมการปิดตา 7 เสียง): ขั้น 3 → gpt-5.6-sol
+        //   ของเดิม: model: MODEL_FAST_CHEAP (= gpt-5.6-luna) — ถอยกลับได้ทันทีด้วย env MODEL_BLUEPRINT=gpt-5.6-luna
+        model: MODEL_BLUEPRINT,
         prompt: blueprintPrompt,
         temperature: 0.3,
         // ★ 2 ส.ค. 69: 1200→8000 — ค่าเดิมจากยุคโมเดลเล็ก พอโล๊ะเป็น luna (reasoning คิดกินโควตา) เพดานไม่พอ
