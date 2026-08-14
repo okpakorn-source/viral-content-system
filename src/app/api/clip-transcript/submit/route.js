@@ -21,7 +21,11 @@ function detectClipType(url) {
 
 export async function POST(request) {
   try {
-    const { url, kind = 'insight', tidy = false, user = '' } = await request.json();
+    // ★ 14 ส.ค. 69 (เจ้าของสั่งเทียบสองโมเดลผ่านคิวเครื่องทีม): model (optional) — allowlist เดียวกับ /insight
+    //   ติดใบงานให้เครื่องทีมถอดด้วยรุ่นที่สั่ง · ค่านอกรายการ = ไม่เก็บ ใช้โมเดลหลักตามเดิม ไม่ล้มคำขอ
+    const { url, kind = 'insight', tidy = false, user = '', model = '' } = await request.json();
+    const MODEL_ALLOWED = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash'];
+    const jobModel = MODEL_ALLOWED.includes(String(model)) ? String(model) : '';
     if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
       return NextResponse.json({ success: false, error: 'กรุณาวางลิงก์คลิป (http/https)', errorType: 'MISSING_URL' }, { status: 400 });
     }
@@ -36,11 +40,13 @@ export async function POST(request) {
     //   งาน active มีเพดานอายุ ~4 ชม.อยู่แล้ว (พ้นนั้นเป็น error/done จึงหลุด filter นี้เอง) — ไม่ต้องมีกรอบเวลาซ้อน
     const all = await store.getAll();
     // ★ 11 ส.ค. 69 (ผู้ตรวจ Sol) — กันซ้ำเทียบ "ชนิดงาน" ด้วย ไม่ใช่แค่ลิงก์ (งาน hunt/transcript
-    //   ของลิงก์เดียวกันเคยบังงาน insight) · ★ 14 ส.ค.: ถอดเงื่อนไข smooth ออกตามการลบระบบแบบการเล่า
+    //   ของลิงก์เดียวกันเคยบังงาน insight) · ★ 14 ส.ค.: ถอด smooth ออก แล้วเทียบ "โมเดล" แทน
+    //   (ใบงานเทสสองโมเดลของคลิปเดียวกันต้องเข้าคิวได้ทั้งคู่ ไม่บังกันเอง — บทเรียนเดียวกับเคส smooth ของ Sol)
     const normKind = kind === 'transcript' ? 'transcript' : kind === 'hunt' ? 'hunt' : 'insight';
     const isActive = (j) => j.status === 'pending' || j.status === 'processing' || j.status === 'retry_wait';
     const recent = all.find(j => j.url === url && isActive(j)
-      && (j.kind || 'insight') === normKind);
+      && (j.kind || 'insight') === normKind
+      && String(j.model || '') === jobModel);
     if (recent) {
       return NextResponse.json({ success: true, jobId: recent.id, status: recent.status, dup: true, message: 'คลิปนี้อยู่ในคิวแล้ว (กำลังทำ/รอลองใหม่)' });
     }
@@ -49,6 +55,7 @@ export async function POST(request) {
     await store.add({
       id: jobId, url, platform, kind: normKind, tidy: !!tidy,
       user: String(user || 'ไม่ระบุชื่อ').slice(0, 40),
+      ...(jobModel ? { model: jobModel } : {}), // ★ 14 ส.ค.: ใบงานเทสโมเดล — ไม่ส่ง = ไม่มีฟิลด์ (ใบงานปกติเดิมเป๊ะ)
       status: 'pending', createdAt: new Date().toISOString(),
     });
     // เก็บกวาดงานเก่า > 50 ชิ้น (กันคิวบวม)

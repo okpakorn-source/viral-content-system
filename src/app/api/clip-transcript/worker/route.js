@@ -42,7 +42,8 @@ export async function GET() {
     await store.update(next.id, ex => ({ ...ex, status: 'processing', startedAt: new Date().toISOString() }));
     // ★ 8 ก.ค.: ส่ง user (ใครส่งงาน) ไปด้วย — worker ส่งต่อให้ insight API เก็บเป็น metadata คลัง
     //   (★ 14 ส.ค. 69: ถอดฟิลด์ smooth — ระบบแบบการเล่าถูกลบทั้งชุด กลับพรอมต์ยุคนิ่งตัวเดียว)
-    return NextResponse.json({ success: true, job: { id: next.id, url: next.url, kind: next.kind, tidy: next.tidy, platform: next.platform, user: next.user || '' } });
+    // ★ 14 ส.ค. 69: ส่ง model (ใบงานเทสสองโมเดล) ต่อให้เครื่องทีม — ใบงานปกติไม่มีฟิลด์นี้ = ''
+    return NextResponse.json({ success: true, job: { id: next.id, url: next.url, kind: next.kind, tidy: next.tidy, platform: next.platform, user: next.user || '', model: next.model || '' } });
   } catch (error) {
     console.error('[ClipWorker:GET]', error.message);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
