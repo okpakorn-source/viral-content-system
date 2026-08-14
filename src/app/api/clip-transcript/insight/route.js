@@ -45,6 +45,45 @@ async function downloadMetaBuffer(url, fmt) {
   } finally { await unlink(out).catch(() => {}); }
 }
 
+// ★ 14 ส.ค. 69: Google ตัดสิทธิ์เส้น Files API (generateContent อ้างไฟล์ = 403 ทุกคีย์) เหลือแนบ inline ≤19MB —
+//   คลิปใหญ่กว่านั้น (เจอจริง: FB 85MB) บีบอัดด้วย ffmpeg (แปลงไฟล์ธรรมดา ไม่ใช่ generative — ไม่ขัดกฎห้ามเจนภาพ)
+//   ให้พอดีเพดานก่อนส่ง: 360p + บิตเรตคำนวณจากความยาวคลิป · ไม่มี ffmpeg/บีบแล้วยังเกิน → คืนไฟล์เดิม (เส้น Files API เดิม)
+const INLINE_MAX_BYTES = 19 * 1024 * 1024;
+async function _fitForInline(buf, url) {
+  if (buf.length <= INLINE_MAX_BYTES) return buf;
+  try {
+    const { execFile } = await import('child_process');
+    const { promisify } = await import('util');
+    const { join } = await import('path');
+    const { tmpdir } = await import('os');
+    const { writeFile, readFile, unlink } = await import('fs/promises');
+    const execFileAsync = promisify(execFile);
+    await execFileAsync('ffmpeg', ['-version'], { timeout: 10_000 }); // เช็คว่าเครื่องมี ffmpeg (PATH)
+    const durSec = (await getClipDurationSec(url)) || 900; // หาความยาวไม่ได้ = เผื่อ 15 นาที
+    const audioK = 48;
+    const videoK = Math.max(60, Math.floor(((INLINE_MAX_BYTES * 8 * 0.93) / 1000) / durSec) - audioK);
+    const inP = join(tmpdir(), `fit_in_${Date.now()}.mp4`);
+    const outP = join(tmpdir(), `fit_out_${Date.now()}.mp4`);
+    await writeFile(inP, buf);
+    try {
+      await execFileAsync('ffmpeg', ['-y', '-i', inP, '-vf', 'scale=-2:360', '-c:v', 'libx264', '-preset', 'veryfast',
+        '-b:v', `${videoK}k`, '-maxrate', `${videoK}k`, '-bufsize', `${videoK * 2}k`,
+        '-c:a', 'aac', '-b:a', `${audioK}k`, '-ac', '1', '-movflags', '+faststart', outP],
+        { timeout: 600_000, maxBuffer: 1024 * 1024 * 20 });
+      const out = await readFile(outP);
+      if (out.length >= 10000 && out.length <= INLINE_MAX_BYTES) {
+        console.log(`[ClipInsight] 🗜️ บีบอัดคลิปใหญ่ ${(buf.length / 1e6).toFixed(1)}MB → ${(out.length / 1e6).toFixed(1)}MB (${videoK}k/360p ยาว ~${Math.round(durSec / 60)} นาที)`);
+        return out;
+      }
+      console.warn(`[ClipInsight] 🗜️ บีบแล้วยังเกินเพดาน (${(out.length / 1e6).toFixed(1)}MB) → ใช้ไฟล์เดิม`);
+      return buf;
+    } finally { await unlink(inP).catch(() => {}); await unlink(outP).catch(() => {}); }
+  } catch (e) {
+    console.warn(`[ClipInsight] 🗜️ บีบอัดไม่ได้ (${String(e.message).slice(0, 60)}) → ใช้ไฟล์เดิม`);
+    return buf;
+  }
+}
+
 // ★ 24 มิ.ย.: หาความยาวคลิป (วินาที) ด้วย yt-dlp — ใช้ตัดสินใจ "คลิปยาว→แยกทุกประเด็น"
 //   คืน 0 ถ้าหาไม่ได้ (ไม่มี yt-dlp/cloud) → ระบบจะใช้โหมด single (คลิปสั้น) เป็นค่าปลอดภัย ไม่ทำของเดิมพัง
 async function getClipDurationSec(url) {
@@ -167,7 +206,7 @@ async function buildInsight({ url, type, model = '' }) {
     //   - cloud (Vercel ไม่มี yt-dlp): ใช้ URL อย่างเดียว (ทางเลือกเดียว)
     const YT_FMT = 'best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best';
     const downloadAndExtract = async () => {
-      const buf = await downloadMetaBuffer(url, YT_FMT);
+      const buf = await _fitForInline(await downloadMetaBuffer(url, YT_FMT), url); // ★ 14 ส.ค.: >19MB บีบก่อนแนบ inline
       return await extractInsightFromVideoBuffer(buf, 'video/mp4', model);
     };
     if (process.platform === 'win32') {
@@ -186,7 +225,8 @@ async function buildInsight({ url, type, model = '' }) {
     return await extractClipInsight({ url, platform: 'youtube', ...(model ? { model } : {}) }); // cloud: URL passthrough เท่านั้น
   }
   // TikTok/FB/IG → โหลดไฟล์ให้ Gemini "ดูจริง" (เห็นภาพ+ตัวหนังสือบนจอ) — ไม่มี fallback ถอดเสียง
-  const buf = type === 'tiktok' ? await downloadTiktokBuffer(url) : await downloadMetaBuffer(url);
+  const raw = type === 'tiktok' ? await downloadTiktokBuffer(url) : await downloadMetaBuffer(url);
+  const buf = await _fitForInline(raw, url); // ★ 14 ส.ค.: >19MB บีบก่อนแนบ inline (เส้น Files API โดน Google ตัดสิทธิ์)
   return await extractInsightFromVideoBuffer(buf, 'video/mp4', model);
 }
 
