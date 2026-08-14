@@ -13,7 +13,33 @@ export const dynamic = 'force-dynamic';
 let _cache = { at: 0, result: null };
 const CACHE_MS = 30_000; // เช็กจริงทุก 30 วิ
 
-export async function GET() {
+export async function GET(request) {
+  // ★ 14 ส.ค. 69 — โหมดตรวจรายชื่อรุ่น: ?list=3.7 → ถามรายชื่อโมเดลที่คีย์นี้ใช้ได้จริงจาก Google
+  //   ที่มา: ตั้งชื่อรุ่นวิดีโอผิด (gemini-3.7-flash-high) แล้วถอดล้มทั้งระบบ — ต่อไปเช็คชื่อจริงได้เอง ไม่ต้องเดา
+  //   ใช้คีย์ฝั่งเซิร์ฟเวอร์ตามปกติ ไม่คืนคีย์ · คืนเฉพาะชื่อรุ่น (metadata สาธารณะ) · ไม่แตะแคช/ไฟสถานะเดิม
+  const listQ = new URL(request.url).searchParams.get('list');
+  if (listQ !== null) {
+    try {
+      const apiKey = process.env.GEMINI_VIDEO_API_KEY || process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return NextResponse.json({ success: false, error: 'ยังไม่ได้ตั้งค่าคีย์ Gemini', errorType: 'NO_API_KEY' }, { status: 503 });
+      }
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000&key=${apiKey}`, { signal: AbortSignal.timeout(15_000) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        return NextResponse.json({ success: false, error: `Google ตอบ ${r.status}: ${String(data?.error?.message || '').slice(0, 140)}`, errorType: 'LIST_FAILED' }, { status: 502 });
+      }
+      const q = String(listQ).toLowerCase();
+      const models = (data.models || [])
+        .map((m) => String(m.name || '').replace(/^models\//, ''))
+        .filter((n) => !q || n.toLowerCase().includes(q))
+        .sort();
+      return NextResponse.json({ success: true, filter: q, count: models.length, models });
+    } catch (e) {
+      return NextResponse.json({ success: false, error: String(e?.message || e).slice(0, 140), errorType: 'LIST_ERROR' }, { status: 500 });
+    }
+  }
+
   // ★ 26 มิ.ย.: บอกว่าใช้คีย์ตัวไหน (ไม่โชว์ค่า) — ยืนยันคีย์แยกถอดคลิปทำงานบน Vercel
   const keySource = process.env.GEMINI_VIDEO_API_KEY ? 'GEMINI_VIDEO_API_KEY (คีย์แยกถอดคลิป)' : 'GEMINI_API_KEY (fallback)';
   // ★ 26 มิ.ย.: สถานะ "endpoint วิดีโอ" จริง (ถอดประเด็นใช้ video ไม่ใช่ text — text/video โหลดคนละตัว!)
