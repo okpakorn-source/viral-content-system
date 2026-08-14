@@ -25,6 +25,12 @@ on:
       pin_url:
         description: "ปักคลิปเจาะจง (เว้นว่าง = สุ่มจากคลัง)"
         default: ""
+      via:
+        description: "direct = ถอดตรงบนคลาวด์ · queue = ส่งใบงานให้คิวเครื่องทีมถอด (อึดสุด)"
+        default: "direct"
+      collect_url:
+        description: "เก็บผลศึกจากคลังของลิงก์นี้ (ใบที่เครื่องทีมถอดเสร็จ) — ตั้งแล้วโหมดอื่นไม่ทำงาน"
+        default: ""
 
 jobs:
   run:
@@ -55,6 +61,8 @@ jobs:
           CLIP_BA_PLATFORMS: ${{ inputs.platforms }}
           CLIP_BA_MODELS: ${{ inputs.models }}
           CLIP_BA_URL: ${{ inputs.pin_url }}
+          CLIP_BA_VIA: ${{ inputs.via }}
+          CLIP_BA_COLLECT: ${{ inputs.collect_url }}
         run: node scripts/clip-before-after.mjs
 
       - name: อัปโหลดรายงานเป็น artifact

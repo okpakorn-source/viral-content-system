@@ -29,6 +29,11 @@ const PLATFORMS = String(process.env.CLIP_BA_PLATFORMS || '').split(',').map(s =
 const MODELS = String(process.env.CLIP_BA_MODELS || '').split(',').map(s => s.trim()).filter(Boolean);
 const PIN_URL = String(process.env.CLIP_BA_URL || '').trim();
 const USER = process.env.CLIP_BA_USER || 'before-after-test';
+// ★ 14 ส.ค. (เจ้าของสั่ง "ยิงผ่านเครื่องฉัน — คิวแทบไม่เคยล่ม"):
+//   CLIP_BA_VIA=queue   → ศึกสองโมเดลส่งเป็น "ใบงานคิว" ให้เครื่องทีมถอด (auto-retry ~4 ชม.) แล้วจบ ไม่รอ
+//   CLIP_BA_COLLECT=<url> → เก็บผลศึกจากคลัง (ใบที่เครื่องทีมถอดเสร็จ) มาประกอบรายงาน vs
+const VIA = String(process.env.CLIP_BA_VIA || 'direct').trim();
+const COLLECT = String(process.env.CLIP_BA_COLLECT || '').trim();
 
 // ถอดคลิปยาวกินเวลาหลายนาที — ตั้ง timeout ยาวแบบเดียวกับ clip-worker (กัน fetch failed ที่ 5 นาที)
 let dispatcher = null;
@@ -88,6 +93,49 @@ async function getJson(url, opts = {}) {
 // 1) ดึงคลัง → คัดเคสที่ใช้เทียบได้ (มีเนื้อจริง + ไม่ซ้ำลิงก์) → สุ่ม
 log(`\n🎬 Clip Before/After — base=${BASE} · สุ่ม ${COUNT} คลิป${PLATFORMS.length ? ` · เฉพาะ ${PLATFORMS.join('/')}` : ''}\n`);
 const cases = (await getJson(`${BASE}/api/clip-transcript/cases?kind=insight&limit=100`)).cases || [];
+
+// ── ★ 14 ส.ค.: โหมดเก็บผลศึกจากคลัง — ใบที่เครื่องทีมถอดเสร็จ (มาร์ค USER-รุ่น + modelUsed) ──
+if (COLLECT) {
+  const mine = cases.filter((c) => c.url === COLLECT && String(c.user || '').startsWith(USER) && c.modelUsed);
+  const byModel = new Map();
+  for (const c of mine.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))) {
+    if (!byModel.has(c.modelUsed)) byModel.set(c.modelUsed, c); // ใบล่าสุดของแต่ละรุ่น
+  }
+  log(`🗳️ เก็บผลศึกจากคลัง: ${COLLECT}\n   เจอใบเทส ${mine.length} ใบ · ครบ ${byModel.size} รุ่น: ${[...byModel.keys()].join(', ') || '—'}`);
+  if (byModel.size < 2) {
+    log(`⏳ ยังไม่ครบสองรุ่น — เครื่องทีมอาจกำลังถอด/รอ retry อยู่ (ดูคิวที่หน้าเว็บได้) · ลองเก็บใหม่ภายหลัง`);
+    process.exit(2);
+  }
+  const full2 = (ins) => [
+    `**พาดหัว:** ${ins.headline || '-'}`,
+    `**ภาพรวม:** ${ins.overview || '-'}`,
+    `\n**เนื้อดิบเต็ม (${String(ins.rawData || '').length} ตัวอักษร):**\n\n${ins.rawData || '-'}`,
+    ...(ins.subStories || []).map((s, i) => `\n**🧩 ประเด็นย่อย ${i + 1}: ${s.topic || ''}** (${s.timeRange || '-'})\n\n${s.rawData || ''}`),
+    `\n**💬 คำพูด (${(ins.quotes || []).length}):**\n${(ins.quotes || []).map((q) => `- ${q}`).join('\n') || '-'}`,
+  ].join('\n');
+  const entries = [...byModel.entries()];
+  const parts2 = [`# 🥊 ศึกโมเดลบนคลิปเดียวกัน (ถอดผ่านคิวเครื่องทีม) — ${entries.map(([m]) => m).join(' vs ')}`,
+    `คลิป: ${COLLECT}\nพรอมต์: ยุคนิ่ง (มาตรฐานเดียวกันทั้งคู่)`];
+  if (entries.length >= 2) {
+    const [mA, cA] = entries[0]; const [mB, cB] = entries[1];
+    const a = metrics(cA.insight); const b = metrics(cB.insight);
+    parts2.push([`| ตัววัด | ${mA} | ${mB} |`, '|---|---|---|',
+      `| ความยาวเนื้อดิบ | ${a.rawLen} ตัวอักษร | ${b.rawLen} ตัวอักษร |`,
+      `| ย่อหน้า | ${a.paragraphs} | ${b.paragraphs} |`,
+      `| ประเด็นย่อย | ${a.subStories} | ${b.subStories} |`,
+      `| คำพูด (quotes) | ${a.quotes} | ${b.quotes} |`,
+      `| keyPoints | ${a.keyPoints} | ${b.keyPoints} |`,
+      `| เวลาถอด | ${((cA.elapsedMs || 0) / 60000).toFixed(1)} นาที | ${((cB.elapsedMs || 0) / 60000).toFixed(1)} นาที |`].join('\n'));
+  }
+  for (const [m, c] of entries) parts2.push(`## 🤖 ${m} (ถอดเมื่อ ${c.createdAt})\n\n${full2(c.insight)}`);
+  const md2 = parts2.join('\n\n---\n\n');
+  const st2 = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16);
+  await mkdir(join(process.cwd(), 'scratch'), { recursive: true }).catch(() => {});
+  const p2 = join(process.cwd(), 'scratch', `clip-model-vs-queue-${st2}.md`);
+  await writeFile(p2, md2, 'utf8');
+  log(`\n${'═'.repeat(60)}\n${md2}\n${'═'.repeat(60)}\n\n💾 ${p2}\n`);
+  process.exit(0);
+}
 const seen = new Set();
 const pool = cases.filter(c => {
   const ok = String(c?.insight?.rawData || '').length >= 300 && c.url && !seen.has(c.url)
@@ -105,6 +153,25 @@ if (MODELS.length) {
     || { url: PIN_URL, platform: /tiktok/.test(PIN_URL) ? 'tiktok' : /youtu/.test(PIN_URL) ? 'youtube' : 'meta', title: PIN_URL, insight: {} }))
     || picked[0];
   log(`\n🥊 ศึกโมเดลบนคลิปเดียวกัน: [${one.platform}] ${cut(one.title, 60)}\n   ${one.url}\n   คู่ชิง: ${MODELS.join('  vs  ')}`);
+
+  // ── ★ 14 ส.ค.: via=queue — ส่งใบงานเข้าคิวเครื่องทีม (ระบบ retry อึดสุดของบ้านนี้) แล้วจบ ไม่รอผล ──
+  if (VIA === 'queue') {
+    let dupHit = false;
+    for (const m of MODELS) {
+      try {
+        const d = await getJson(`${BASE}/api/clip-transcript/submit`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: one.url, kind: 'insight', user: `${USER}-${m.replace('gemini-', '')}`.slice(0, 40), model: m }),
+        });
+        if (d.dup) { dupHit = true; log(`   ⚠️ ${m}: คิวคืนใบเดิม (dup) — production อาจยังไม่แยกใบงานตามโมเดล (รอ deploy แล้วส่งใหม่)`); }
+        else log(`   📮 ${m}: เข้าคิวแล้ว job=${String(d.jobId).slice(0, 8)} (คิวข้างหน้า ${d.position || '-'})`);
+      } catch (e) { log(`   ❌ ${m}: ส่งคิวไม่สำเร็จ — ${String(e.message).slice(0, 120)}`); dupHit = true; }
+    }
+    log(`\n📦 เครื่องทีมจะหยิบไปถอดเอง (auto-retry จน Gemini ว่าง) — ผลเข้าคลังอัตโนมัติ`);
+    log(`   เก็บรายงาน vs ภายหลัง: CLIP_BA_COLLECT="${one.url}" node scripts/clip-before-after.mjs`);
+    process.exit(dupHit ? 1 : 0);
+  }
+
   const bouts = [];
   for (const m of MODELS) {
     log(`\n⏳ ถอดด้วย ${m} …`);
