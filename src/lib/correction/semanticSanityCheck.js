@@ -47,6 +47,54 @@ const SANITY_CHECK_PROMPT = `คุณเป็นบรรณาธิการ
 
 ถ้าไม่พบปัญหา: { "hasIssues": false, "issues": [] }`;
 
+// ═══ ★ 14 ส.ค. 69 — Seam Guard (เจ้าของสั่ง "ทำเลย ระมัดระวังที่สุด" · สเปก Sol 9.1/10 ใน sol-seam-verdict.md) ═══
+// หลัก "ถ้าเย็บไม่ได้ อย่าผ่า": เดิมลบวลีพังแล้วทิ้งรอยต่อ (เคสจริง #03995 เครื่องหมายคำพูดกำพร้า / #03997 เปิดเรื่องด้วย "แต่...")
+// (1) วลีพังแตะประโยคเปิด → no-op ทั้งก้อน คืน input ไบต์ต่อไบต์ (ตรวจก่อน commit ทุก issue — กัน partial edit)
+// (2) การลบที่จะสร้างคำเชื่อมกำพร้าหัวย่อหน้า/ทำเครื่องหมายคำพูดเสียคู่ → ยกเลิกการลบ issue นั้น (ห้ามลบเพิ่มเพื่อซ่อม)
+
+// ลิสต์ "ตรวจแล้วไม่ commit" — กว้างได้เพราะ false positive = คงข้อความเดิม (Sol ห้ามใช้ replace เด็ดขาด)
+const UNSAFE_BLOCK_PREFIX_RE = /^[ \t]*(?:แต่|และ|ซึ่ง|จึง|ส่วน|ก็|แล้ว|เพราะ|โดย)/u;
+
+// ภาษาไทยไม่มีตัวจบประโยคที่เชื่อถือได้ทุกเคส: ใช้ ? ! … 。 หรือบรรทัดว่างเป็นขอบแข็ง · ไม่พบ = คุ้มครองทั้งบล็อกเปิด
+const OPENING_HARD_BOUNDARY_RE = /(?:[!?！？。…]+(?=\s|$)|\n[ \t]*\n)/u;
+
+function getOpeningRange(text) {
+  const start = text.search(/\S/u);
+  if (start < 0) return { start: 0, end: 0 };
+  const hit = OPENING_HARD_BOUNDARY_RE.exec(text.slice(start));
+  return { start, end: hit ? start + hit.index + hit[0].length : text.length };
+}
+
+function getParagraphStart(text, index) {
+  const head = text.slice(0, index);
+  let start = 0;
+  for (const hit of head.matchAll(/\n[ \t]*\n/g)) {
+    start = hit.index + hit[0].length;
+  }
+  return start;
+}
+
+function startsParagraph(text, index) {
+  return !/\S/u.test(text.slice(getParagraphStart(text, index), index));
+}
+
+// นับเฉพาะ " และ smart quotes — จงใจไม่นับ apostrophe เดี่ยว (ชนชื่อ/ภาษาอังกฤษง่าย)
+function quoteDebt(text) {
+  let straightDouble = 0;
+  let debt = 0;
+  const stack = [];
+  const closeFor = { '“': '”', '‘': '’' };
+  for (const ch of text) {
+    if (ch === '"') straightDouble += 1;
+    else if (ch === '“' || ch === '‘') stack.push(ch);
+    else if (ch === '”' || ch === '’') {
+      if (stack.length > 0 && closeFor[stack.at(-1)] === ch) stack.pop();
+      else debt += 1;
+    }
+  }
+  return debt + stack.length + (straightDouble % 2);
+}
+
 /**
  * ตรวจเนื้อหา 1 version ด้วย AI
  * @param {string} content - เนื้อหาที่จะตรวจ
@@ -73,19 +121,52 @@ export async function semanticSanityCheck(content) {
       return { sanitizedContent: content, issuesFound: [], fixed: false };
     }
 
-    // Apply fixes: ลบประโยคที่มีปัญหาออก
+    // ★ Seam Guard ขั้น 1 (atomic): ตรวจทุก issue ก่อน commit ใดๆ — เคส #03995 issue เปิดเรื่องมาเป็นลำดับสอง
+    //   ถ้าลบไปทีละอันจะ partial-edit ก่อนเจอด่าน · แตะประโยคเปิด = no-op ทั้งก้อน คืน input ไบต์ต่อไบต์
+    const applicableIssues = result.issues
+      .filter((issue) => typeof issue?.brokenText === 'string' && issue.brokenText.length >= 5)
+      .map((issue) => ({ issue, at: content.indexOf(issue.brokenText) }))
+      .filter(({ at }) => at >= 0);
+
+    const opening = getOpeningRange(content);
+    const touchesOpening = applicableIssues.some(({ issue, at }) =>
+      at < opening.end && at + issue.brokenText.length > opening.start);
+
+    if (touchesOpening) {
+      console.warn('  L4.6 Semantic Guard: opening deletion blocked — kept input');
+      return { sanitizedContent: content, issuesFound: [], fixed: false, error: 'OPENING_SEAM_GUARD' };
+    }
+
+    // Apply fixes: ลบประโยคที่มีปัญหาออก — ★ Seam Guard ขั้น 2: จำลองผลก่อนตัดทุกครั้ง เย็บไม่ได้=ไม่ตัด
     let fixedContent = content;
     const appliedFixes = [];
+    let guardedSeam = false;
 
     for (const issue of result.issues) {
-      if (!issue.brokenText || issue.brokenText.length < 5) continue;
+      if (typeof issue?.brokenText !== 'string' || issue.brokenText.length < 5) continue;
 
-      // ตรวจสอบว่า brokenText มีอยู่ในเนื้อหาจริง
-      if (!fixedContent.includes(issue.brokenText)) continue;
+      // เหมือน replace เดิม: ใช้ occurrence แรกที่ยังอยู่ในเนื้อปัจจุบัน
+      const seam = fixedContent.indexOf(issue.brokenText);
+      if (seam < 0) continue;
 
-      // ลบข้อความที่มีปัญหาออก (trim whitespace ที่เหลือ)
-      fixedContent = fixedContent.replace(issue.brokenText, '');
-      
+      const wasParagraphStart = startsParagraph(fixedContent, seam);
+      const candidate = fixedContent.slice(0, seam) + fixedContent.slice(seam + issue.brokenText.length);
+
+      // ลบแล้วเหลือคำเชื่อมกำพร้าขึ้นหัวย่อหน้า → ตัดสินทางภาษาไม่ได้ ไม่ commit (Sol ห้ามตัดคำเชื่อมเพิ่ม)
+      if (wasParagraphStart && UNSAFE_BLOCK_PREFIX_RE.test(candidate.slice(seam))) {
+        guardedSeam = true;
+        console.warn('  L4.6 Semantic Guard: orphan-prefix risk — deletion skipped');
+        continue;
+      }
+
+      // ลบแล้วเครื่องหมายคำพูดเสียคู่ → คง issue เดิมไว้ ไม่ลบเพิ่ม
+      if (quoteDebt(candidate) > quoteDebt(fixedContent)) {
+        guardedSeam = true;
+        console.warn('  L4.6 Semantic Guard: quote-pair risk — deletion skipped');
+        continue;
+      }
+
+      fixedContent = candidate;
       appliedFixes.push({
         removed: issue.brokenText,
         reason: issue.reason || 'ประโยคไร้ความหมาย',
@@ -95,7 +176,17 @@ export async function semanticSanityCheck(content) {
       console.log(`  L4.6 Semantic Fix: "${issue.brokenText.slice(0, 50)}..." → removed (${issue.reason})`);
     }
 
-    // Clean up: ลบช่องว่างซ้ำ, บรรทัดว่างซ้ำ
+    // ★ byte parity (Sol): ไม่มีการลบที่ commit จริง → คืน input เดิมเป๊ะ ห้ามให้ cleanup/trim เปลี่ยนไบต์
+    if (appliedFixes.length === 0) {
+      return {
+        sanitizedContent: content,
+        issuesFound: [],
+        fixed: false,
+        ...(guardedSeam ? { error: 'UNSAFE_SEAM_GUARD' } : {}),
+      };
+    }
+
+    // Clean up: ลบช่องว่างซ้ำ, บรรทัดว่างซ้ำ (คงพฤติกรรมเดิม — ห้าม refactor เพิ่มใน logical change นี้)
     fixedContent = fixedContent
       .replace(/\s{3,}/g, ' ')
       .replace(/\n{3,}/g, '\n\n')
@@ -104,7 +195,7 @@ export async function semanticSanityCheck(content) {
     return {
       sanitizedContent: fixedContent,
       issuesFound: appliedFixes,
-      fixed: appliedFixes.length > 0,
+      fixed: true,
     };
 
   } catch (err) {
