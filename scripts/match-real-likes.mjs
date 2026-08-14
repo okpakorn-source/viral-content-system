@@ -463,6 +463,11 @@ function runSelfTests() {
 function main() {
   const posts = validateFacebookPosts(readJson(INPUT_POSTS));
   const libraryRows = validateLibraryRows(readJson(INPUT_LIBRARY));
+  // ★ Sol DB-audit ข้อ 7 (14 ส.ค.): กันหยิบคลังผิดชุด — ไฟล์หน้าบ้าน 71 ใบ (id คนละชุดกับตาราง 202 ทั้งหมด)
+  //   คลังครูตัวจริง = viral_examples 202 ใบ → รัน scripts/export-viral-examples.mjs แล้วตั้ง MATCH_LIBRARY_FILE
+  if (!process.env.MATCH_LIBRARY_FILE && libraryRows.length < 100) {
+    throw new Error(`คลังอินพุตมีแค่ ${libraryRows.length} ใบ — นี่คือไฟล์หน้าบ้าน ไม่ใช่คลังครูจริง 202 ใบ · รัน scripts/export-viral-examples.mjs แล้วตั้ง MATCH_LIBRARY_FILE ชี้ไฟล์ส่งออกก่อน`);
+  }
   const result = matchRows(posts, libraryRows);
   const output = buildOutput(result.matches);
   writeJsonAtomically(OUTPUT_LIKES, output);

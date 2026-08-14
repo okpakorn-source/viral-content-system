@@ -105,18 +105,17 @@ t('22 เปิดบรรณารักษ์ต้องตั้งใจ: 
 t('23 score เลือกได้ · ค่าพิมพ์เพี้ยน (on/off/ขยะ) = สุ่มแบบเดิม ไม่หลุดไปเปิดบรรณารักษ์เงียบๆ',
   matchModeName('score') === 'score' && matchModeName('Score') === 'score' && matchModeName('on') === '' && matchModeName('off') === '' && matchModeName('xyz') === '');
 
-// ── ⑩ 14 ส.ค. — สวิตช์ทดลอง "สูตรแสนไลก์" (VIRAL_HITS_FORMULA): ปิด=แพ็คเดิมเป๊ะ · เปิด=แพ็ค v2
+// ── ⑩ 14 ส.ค. ค่ำ — "สูตรแสนไลก์" เป็นตัวจริง (เจ้าของเคาะ): ไม่ตั้ง=แพ็ค v2 · ถอยกลับ=VIRAL_HITS_FORMULA=0
 {
-  delete process.env.VIRAL_HITS_FORMULA;
   // ★ ผู้ตรวจ S3: noHistory บังคับ — กันข้อสอบ insert แถวขยะลงสมุดโปรดักชันถ้ารันบนเครื่องที่มี env Supabase
+  process.env.VIRAL_HITS_FORMULA = '0';
   const off = await getViralFewshotBlock({ category: 'ทดสอบ', noHistory: true });
-  t('24 สวิตช์ปิด = สไตล์แพ็คเดิม (ไม่มี v2 หลุดมา)', off.includes('VIRAL STYLE PACK —') && !off.includes('v2'));
-  process.env.VIRAL_HITS_FORMULA = '1';
+  t('24 สวิตช์ถอย (=0) = สไตล์แพ็คเดิมเป๊ะ (ทางหนีไฟยังใช้ได้)', off.includes('VIRAL STYLE PACK —') && !off.includes('v2'));
+  delete process.env.VIRAL_HITS_FORMULA;
   const on = await getViralFewshotBlock({ category: 'ทดสอบ', noHistory: true });
-  t('25 สวิตช์เปิด = แพ็ค v2 (สูตรจากไลก์จริง)', on.includes('VIRAL STYLE PACK v2'));
+  t('25 ไม่ตั้งค่า = แพ็ค v2 เป็นค่าเริ่มต้น (เจ้าของเคาะ 14 ส.ค. ค่ำ)', on.includes('VIRAL STYLE PACK v2'));
   t('26 กฎหลัก v2 ครบ: ห้ามเปิดคำพูด + แบนประโยคบอกความรู้สึก + จบประโยคนิยามภาพ',
     on.includes('ห้ามใช้เปิดโพสต์') && on.includes('ควรรู้สึกอะไร') && on.includes('ประโยคนิยามภาพ'));
-  delete process.env.VIRAL_HITS_FORMULA;
 }
 
 // ── ⑫ 14 ส.ค. — ตัวถ่วงไลก์จริง _applyRealLikes ยิงตรง (ผู้ตรวจ S3: โค้ดเสี่ยงสุดต้องมีข้อสอบ)
