@@ -1,0 +1,58 @@
+# ทดสอบถอดประเด็นบน production (14 ส.ค. 69 — เจ้าของสั่งดูผลจริงหลังย้อนยุคนิ่ง+โมเดลใหม่)
+# ─────────────────────────────────────────────────────────────────────────────
+# ทำไมรันบน GitHub Actions: sandbox พัฒนาไม่มีคีย์/ยิง production ไม่ได้ —
+# runner นี้ยิง API production ได้ตรง และไม่ต้องใช้ secret ใดๆ (คีย์ AI อยู่ฝั่ง Vercel แล้ว)
+# ทำอะไร: รอโค้ดใหม่ขึ้น production → สุ่มเคสจากคลังถอดประเด็น → ถอดใหม่ (force)
+#         → พิมพ์รายงานเทียบก่อน/หลังลง log + อัปโหลดเป็น artifact
+# ผลถอดเข้าคลังตามกลไกปกติของ route โดยติดชื่อผู้ส่ง (user) ตามที่กรอก เช่น "เอไอทดสอบ"
+name: clip-ai-test
+
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: "จำนวนคลิปที่สุ่ม"
+        default: "1"
+      user:
+        description: "ชื่อผู้ส่งที่มาร์คลงคลัง"
+        default: "เอไอทดสอบ"
+      platforms:
+        description: "จำกัดแพลตฟอร์ม (คลาวด์ทำได้เฉพาะ youtube,tiktok — เว้นว่าง = ทุกแพลตฟอร์ม)"
+        default: "youtube,tiktok"
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: รอโค้ดใหม่ขึ้น production (ปุ่มเลือกแบบต้องหายไป)
+        run: |
+          for i in $(seq 1 20); do
+            html=$(curl -sS -m 20 https://viral-content-system.vercel.app/clip-transcript || true)
+            if [ -n "$html" ] && ! echo "$html" | grep -q "ไม่ย้ำผู้เล่า"; then
+              echo "✅ production เป็นโค้ดยุคนิ่งแล้ว (รอบ $i)"; exit 0
+            fi
+            echo "⏳ ยังเป็นโค้ดเก่า/ยังโหลดไม่ได้ — รอ 30 วิ ($i/20)"; sleep 30
+          done
+          echo "❌ รอ 10 นาทีแล้ว production ยังเป็นโค้ดเก่า — เช็คสถานะ deploy บน Vercel"; exit 1
+
+      - name: ติดตั้ง undici (timeout ยาวสำหรับคลิปที่ถอดเกิน 5 นาที)
+        run: npm install undici --no-save --no-audit --no-fund
+
+      - name: สุ่มถอดจริง + รายงานก่อน/หลัง
+        env:
+          CLIP_BA_BASE: https://viral-content-system.vercel.app
+          CLIP_BA_COUNT: ${{ inputs.count }}
+          CLIP_BA_USER: ${{ inputs.user }}
+          CLIP_BA_PLATFORMS: ${{ inputs.platforms }}
+        run: node scripts/clip-before-after.mjs
+
+      - name: อัปโหลดรายงานเป็น artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-before-after-report
+          path: scratch/clip-before-after-*
+          if-no-files-found: ignore

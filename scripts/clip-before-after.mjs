@@ -101,7 +101,8 @@ for (const [i, c] of picked.entries()) {
   try {
     const d = await getJson(`${BASE}/api/clip-transcript/insight`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: c.url, force: true, user: 'before-after-test' }),
+      // CLIP_BA_USER = ชื่อผู้ส่งที่ติดลงคลัง (มาร์คใบทดสอบให้ทีมเห็น เช่น 'เอไอทดสอบ')
+      body: JSON.stringify({ url: c.url, force: true, user: process.env.CLIP_BA_USER || 'before-after-test' }),
     });
     const mins = ((Date.now() - t0) / 60000).toFixed(1);
     log(`   ✅ เสร็จใน ${mins} นาที`);
