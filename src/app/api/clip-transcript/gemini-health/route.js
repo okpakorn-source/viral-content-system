@@ -43,7 +43,8 @@ export async function GET() {
       const genAI = new GoogleGenerativeAI(apiKey);
       const model = genAI.getGenerativeModel({
         // ★ 22 ก.ค. 69: probe โมเดลเดียวกับที่ถอดคลิปใช้จริง (VIDEO_MODEL ใน geminiClient) — อัปเกรดเป็น 3.6-flash
-        model: process.env.GEMINI_VIDEO_MODEL || 'gemini-3.6-flash',
+        // ★ 14 ส.ค. 69 (เจ้าของสั่ง): ตามโมเดลถอดคลิปไป gemini-3.7-flash-high — ต้องตรงกับ VIDEO_MODEL ใน geminiClient เสมอ
+        model: process.env.GEMINI_VIDEO_MODEL || 'gemini-3.7-flash-high',
         generationConfig: { maxOutputTokens: 5, temperature: 0 },
       });
       const t0 = Date.now();
