@@ -41,9 +41,8 @@ export async function GET() {
     const next = claimable[0];
     await store.update(next.id, ex => ({ ...ex, status: 'processing', startedAt: new Date().toISOString() }));
     // ★ 8 ก.ค.: ส่ง user (ใครส่งงาน) ไปด้วย — worker ส่งต่อให้ insight API เก็บเป็น metadata คลัง
-    // ★ 11 ส.ค.: ส่ง smooth (แบบการเล่าที่พนักงานเลือกตอนกดส่งคิว) ต่อให้เครื่องทีมด้วย
-    //   ไม่งั้นงาน Facebook/IG ที่ทำได้เฉพาะผ่านคิว จะไม่ได้แบบที่พนักงานเลือกไว้เลย
-    return NextResponse.json({ success: true, job: { id: next.id, url: next.url, kind: next.kind, tidy: next.tidy, platform: next.platform, user: next.user || '', smooth: next.smooth || '' } });
+    //   (★ 14 ส.ค. 69: ถอดฟิลด์ smooth — ระบบแบบการเล่าถูกลบทั้งชุด กลับพรอมต์ยุคนิ่งตัวเดียว)
+    return NextResponse.json({ success: true, job: { id: next.id, url: next.url, kind: next.kind, tidy: next.tidy, platform: next.platform, user: next.user || '' } });
   } catch (error) {
     console.error('[ClipWorker:GET]', error.message);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
@@ -87,28 +86,13 @@ export async function POST(request) {
       return NextResponse.json({ success: true, retrying: true });
     }
 
-    // ★ 11 ส.ค. (ผู้ตรวจ Sol ข้อ 4): ถ้าเครื่องทีมยังรันสคริปต์รุ่นเก่า ค่า smooth จะหล่นระหว่างทางแบบเงียบ
-    //   งานจะขึ้นว่าสำเร็จ แต่ได้เนื้อคนละแบบกับที่พนักงานเลือก → เทียบผลจริงกับใบงานแล้วส่งเสียงเตือน
-    await store.update(id, ex => {
-      const want = String(ex.smooth || '');
-      const got = String(result?.smoothStyle || '');
-      const mismatch = status === 'done' && want && want !== 'std' && want !== got;
-      // ★ ผู้ตรวจ Fable รอบ 2 ข้อ 4: r2 ที่บรรณาธิการปัดตกโดยชอบ (ตัวเลขหาย/หดเกิน) ก็ทำให้แบบไม่ตรงได้
-      //   — เหตุนั้นไม่ใช่โค้ดรุ่นเก่า ต้องเขียนธงให้ตรงเหตุ ไม่งั้นคนไล่ปัญหาผิดทาง
-      const editRejected = mismatch && (result?.qualityFlags || []).some(f => String(f?.type || '').startsWith('edit_rejected') || f?.type === 'edit_error' || f?.type === 'save_failed');
-      if (mismatch) {
-        console.warn(`[ClipWorker] ⚠️ ใบงาน ${String(id).slice(0, 8)} เลือกแบบ "${want}" แต่ผลเป็น "${got || 'มาตรฐาน'}" — ${editRejected ? 'บรรณาธิการตัดเฟ้อถูกปัดตก ใช้ฉบับเต็มแทน (ดูธงในใบ)' : 'เครื่องทีมอาจยังเป็นโค้ดรุ่นเก่า (ต้องซิงก์)'}`);
-      }
-      return {
-        ...ex, status,
-        result: status === 'done' ? result : null,
-        error: status === 'error' ? String(error).slice(0, 300) : '',
-        ...(mismatch ? { styleMismatch: editRejected
-          ? `เลือกแบบ ${want.toUpperCase()} แต่การเกลาถูกปัดตกเพื่อรักษาข้อมูลครบ — ได้ฉบับเต็มแทน (ปกติ ไม่ใช่ระบบพัง)`
-          : `เลือกแบบ ${want.toUpperCase()} แต่ได้ ${got ? got.toUpperCase() : 'มาตรฐาน'} — เครื่องทีมอาจยังเป็นโค้ดรุ่นเก่า` } : {}),
-        statusNote: '', doneAt: new Date().toISOString(),
-      };
-    });
+    // (★ 14 ส.ค. 69: ถอดด่านเทียบ "แบบการเล่า" (styleMismatch) ออก — ระบบแบบถูกลบทั้งชุด ใบงานไม่มีฟิลด์ smooth แล้ว)
+    await store.update(id, ex => ({
+      ...ex, status,
+      result: status === 'done' ? result : null,
+      error: status === 'error' ? String(error).slice(0, 300) : '',
+      statusNote: '', doneAt: new Date().toISOString(),
+    }));
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('[ClipWorker:POST]', error.message);

@@ -40,9 +40,8 @@ async function processJob(job) {
     : '/api/clip-transcript/insight';
   const body = job.kind === 'transcript' ? { url: job.url, tidy: !!job.tidy }
     : job.kind === 'hunt' ? { url: job.url, user: job.user || '', _fromWorker: true }
-    // ★ 11 ส.ค.: ส่ง smooth (แบบการเล่าที่พนักงานเลือกตอนกดส่งคิว) ต่อให้ปลายทางถอดจริง
-    //   ใบงานเก่า/ไม่ได้เลือก = ไม่มีฟิลด์นี้ → ตัวคำขอเหมือนเดิมเป๊ะ
-    : { url: job.url, user: job.user || '', ...(job.smooth ? { smooth: job.smooth } : {}) };
+    // (★ 14 ส.ค. 69: ถอดการส่ง smooth — ระบบแบบการเล่าถูกลบทั้งชุด กลับพรอมต์ยุคนิ่งตัวเดียว)
+    : { url: job.url, user: job.user || '' };
   const r = await fetch(`${BASE}${endpoint}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     ...(longDispatcher ? { dispatcher: longDispatcher } : {}), // ★ timeout ยาว — กัน fetch failed ที่ 5 นาที
