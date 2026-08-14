@@ -1,6 +1,6 @@
 // 🎯 ข้อสอบระบบหมุนเวียนตัวอย่างไวรัล — import โค้ดจริงตรงๆ (ห้ามก๊อปฟังก์ชันมาเทส)
 // รัน: node tests/viral-fewshot-rotation.test.mjs — ต้องผ่านครบทุกเคสก่อนถือว่าเสร็จ
-import { weightedSample, pickLibraryCategory, scoreMatchExamples, matchModeName } from '../src/lib/services/viralFewshot.js';
+import { weightedSample, pickLibraryCategory, scoreMatchExamples, matchModeName, getViralFewshotBlock, _applyRealLikes } from '../src/lib/services/viralFewshot.js';
 
 let pass = 0, fail = 0;
 const t = (name, cond) => { if (cond) { pass++; console.log('✅ ' + name); } else { fail++; console.log('❌ ' + name); } };
@@ -105,5 +105,48 @@ t('22 เปิดบรรณารักษ์ต้องตั้งใจ: 
 t('23 score เลือกได้ · ค่าพิมพ์เพี้ยน (on/off/ขยะ) = สุ่มแบบเดิม ไม่หลุดไปเปิดบรรณารักษ์เงียบๆ',
   matchModeName('score') === 'score' && matchModeName('Score') === 'score' && matchModeName('on') === '' && matchModeName('off') === '' && matchModeName('xyz') === '');
 
-console.log(`\n${pass}/23 ผ่าน${fail ? ' — ❌ ตก ' + fail + ' เคส ห้ามไปต่อ' : ' — ✅ ด่านข้อสอบผ่าน'}`);
+// ── ⑩ 14 ส.ค. — สวิตช์ทดลอง "สูตรแสนไลก์" (VIRAL_HITS_FORMULA): ปิด=แพ็คเดิมเป๊ะ · เปิด=แพ็ค v2
+{
+  delete process.env.VIRAL_HITS_FORMULA;
+  // ★ ผู้ตรวจ S3: noHistory บังคับ — กันข้อสอบ insert แถวขยะลงสมุดโปรดักชันถ้ารันบนเครื่องที่มี env Supabase
+  const off = await getViralFewshotBlock({ category: 'ทดสอบ', noHistory: true });
+  t('24 สวิตช์ปิด = สไตล์แพ็คเดิม (ไม่มี v2 หลุดมา)', off.includes('VIRAL STYLE PACK —') && !off.includes('v2'));
+  process.env.VIRAL_HITS_FORMULA = '1';
+  const on = await getViralFewshotBlock({ category: 'ทดสอบ', noHistory: true });
+  t('25 สวิตช์เปิด = แพ็ค v2 (สูตรจากไลก์จริง)', on.includes('VIRAL STYLE PACK v2'));
+  t('26 กฎหลัก v2 ครบ: ห้ามเปิดคำพูด + แบนประโยคบอกความรู้สึก + จบประโยคนิยามภาพ',
+    on.includes('ห้ามใช้เปิดโพสต์') && on.includes('ควรรู้สึกอะไร') && on.includes('ประโยคนิยามภาพ'));
+  delete process.env.VIRAL_HITS_FORMULA;
+}
+
+// ── ⑫ 14 ส.ค. — ตัวถ่วงไลก์จริง _applyRealLikes ยิงตรง (ผู้ตรวจ S3: โค้ดเสี่ยงสุดต้องมีข้อสอบ)
+{
+  const rows = [
+    { id: 'a', content: 'x', engagement_likes: 0 },
+    { id: 'b', content: 'y', engagement_likes: 0 },
+    { id: 'c', content: 'z', engagement_likes: 0 },
+  ];
+  const map = { byId: { a: { likes: 250000 }, b: { likes: -50 } } }; // b = ค่าขยะต้องถูกทิ้ง
+  const out = _applyRealLikes(rows, map);
+  t('29 ใบแมชได้ถูกทับด้วย sqrt (250000→500)', out[0].engagement_likes === 500);
+  t('30 ใบไม่แมช/ค่าขยะ ได้ค่ากลาง ไม่ตาย (ทุกใบน้ำหนัก ≥1)',
+    out[1].engagement_likes >= 1 && out[2].engagement_likes >= 1 && out[2].engagement_likes === out[1].engagement_likes);
+  t('31 แถวเดิมไม่ถูก mutate (แคชปลอดภัย)', rows[0].engagement_likes === 0);
+  t('32 map ว่าง/ไม่มีไฟล์ → คืนแถวเดิมเป๊ะ ไม่พัง', _applyRealLikes(rows, null) === rows && _applyRealLikes([], map).length === 0);
+}
+
+// ── ⑪ 14 ส.ค. — ไฟล์ไลก์จริง (สร้างโดย scripts/match-real-likes.mjs): โครงถูก + ค่าบวกล้วน
+{
+  const fs = await import('node:fs');
+  try {
+    const m = JSON.parse(fs.readFileSync(new URL('../data/viral-likes-real.json', import.meta.url), 'utf8'));
+    const ids = Object.values(m.byId || {});
+    t('27 ไฟล์ไลก์จริงมีโครง byId/byKey และมีข้อมูล', ids.length > 0 && Object.keys(m.byKey || {}).length > 0);
+    t('28 ไลก์ทุกค่าเป็นบวกจริง (ไม่มีติดลบ/ศูนย์/NaN)', ids.every((e) => Number(e?.likes ?? e) > 0));
+  } catch {
+    t('27 ไฟล์ไลก์จริงอ่านได้', false); t('28 (ข้ามเพราะข้อ 27 ตก)', false);
+  }
+}
+
+console.log(`\n${pass}/32 ผ่าน${fail ? ' — ❌ ตก ' + fail + ' เคส ห้ามไปต่อ' : ' — ✅ ด่านข้อสอบผ่าน'}`);
 process.exit(fail ? 1 : 0);

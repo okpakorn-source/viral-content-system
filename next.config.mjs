@@ -20,9 +20,14 @@ const nextConfig = {
     //   ไม่ trace = บน Vercel ไฟล์หาย → สารบัญเหลือชื่อการ์ดล้วนแบบเงียบๆ (คนละตัวกับที่ผ่านการประเมิน blind)
     // ★ 8 ส.ค. 69 (กับดักเดิมรอบ 4 — ผู้ตรวจจับก่อนพัง): บัตรลักษณะคลังไวรัล viral-essences.json ก็อ่านด้วย fs
     //   ไม่ trace = โหมดจับคู่ (VIRAL_MATCH_MODE) บน Vercel ตาบอดเงียบๆ — ต้องแนบทุก route ที่เข้าท่อเขียน
-    '/api/auto': ['./data/card-essences.json', './data/viral-essences.json'],
-    '/api/auto/process': ['./data/card-essences.json', './data/viral-essences.json'],
-    '/api/queue/worker': ['./data/card-essences.json', './data/viral-essences.json'],
+    // ★ 14 ส.ค. 69 (กับดักเดิมรอบ 5 — กันไว้ก่อนพัง): viral-likes-real.json (สูตรแสนไลก์) ก็อ่านด้วย fs
+    //   ไม่ trace = เปิด VIRAL_HITS_FORMULA บน Vercel แล้วไลก์จริงเงียบหาย (โค้ดข้ามไม่พังท่อ แต่ผลเทสไม่ตรงจริง)
+    '/api/auto': ['./data/card-essences.json', './data/viral-essences.json', './data/viral-likes-real.json'],
+    '/api/auto/process': ['./data/card-essences.json', './data/viral-essences.json', './data/viral-likes-real.json'],
+    '/api/queue/worker': ['./data/card-essences.json', './data/viral-essences.json', './data/viral-likes-real.json'],
+    // ★ ผู้ตรวจอิสระ S2 (14 ส.ค.): หน้าเว็บยิง /api/summarize ตรง (content/new) — ต้องได้ไฟล์ชุดเดียวกัน
+    //   ไม่งั้นข่าวผ่านคิวได้ไลก์จริง แต่ผ่านหน้าเว็บไม่ได้ แบบเงียบๆ (ช่องนี้ viral-essences ก็เคยขาด)
+    '/api/summarize': ['./data/card-essences.json', './data/viral-essences.json', './data/viral-likes-real.json'],
   },
 };
 
