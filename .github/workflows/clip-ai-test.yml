@@ -31,7 +31,7 @@ jobs:
         run: |
           for i in $(seq 1 20); do
             html=$(curl -sS -m 20 https://viral-content-system.vercel.app/clip-transcript || true)
-            if [ -n "$html" ] && ! echo "$html" | grep -q "ไม่ย้ำผู้เล่า"; then
+            if [ -n "$html" ] && ! echo "$html" | grep -qE "ไม่ย้ำผู้เล่า|คลังบทถอด"; then
               echo "✅ production เป็นโค้ดยุคนิ่งแล้ว (รอบ $i)"; exit 0
             fi
             echo "⏳ ยังเป็นโค้ดเก่า/ยังโหลดไม่ได้ — รอ 30 วิ ($i/20)"; sleep 30

@@ -21,9 +21,7 @@ export default function ClipTranscriptPage() {
   const [out, setOut] = useState(null);
   const [err, setErr] = useState('');
   const [view, setView] = useState('tidy'); // tidy | raw
-  const [cases, setCases] = useState([]);
-  const [casesOpen, setCasesOpen] = useState(true);
-  const [expanded, setExpanded] = useState(null);
+  // (★ 14 ส.ค. 69 เจ้าของสั่ง: ถอดแผง "คลังบทถอด" ออก — ไม่ได้ใช้ · บทถอดยังเก็บเข้าคลังฝั่งเซิร์ฟเวอร์ตามเดิม)
   const [copied, setCopied] = useState('');
   // ★ 16 มิ.ย.: ถอดประเด็นข่าว → ข้อมูลดิบ (Gemini ดูคลิป)
   const [insight, setInsight] = useState(null);
@@ -51,9 +49,6 @@ export default function ClipTranscriptPage() {
   const [huntExpanded, setHuntExpanded] = useState(null);
   const [huntFilter, setHuntFilter] = useState('all'); // all | clip | article — กรองคลังตามที่มา
 
-  const loadCases = async () => {
-    try { const r = await fetch('/api/clip-transcript/cases?limit=40', { cache: 'no-store' }); const d = await r.json(); if (d.success) setCases(d.cases || []); } catch {}
-  };
   const loadInsightCases = async () => {
     try { const r = await fetch('/api/clip-transcript/cases?kind=insight&limit=40', { cache: 'no-store' }); const d = await r.json(); if (d.success) setInsightCases(d.cases || []); } catch {}
   };
@@ -73,7 +68,7 @@ export default function ClipTranscriptPage() {
     } catch {}
     loadQueueList(); // รีเฟรชให้คลิปหายจากคิวทันที
   };
-  useEffect(() => { loadCases(); loadInsightCases(); loadHuntCases(); loadQueueList(); }, []);
+  useEffect(() => { loadInsightCases(); loadHuntCases(); loadQueueList(); }, []);
   // ★ 26 มิ.ย.: รีเฟรชแผงคิวทุก 10 วิ — เห็นคิวเดินสด แม้ไม่ได้ส่งงานเอง (คนอื่นในทีมส่งก็เห็น)
   useEffect(() => { const t = setInterval(loadQueueList, 10000); return () => clearInterval(t); }, []);
   // ★ 26 มิ.ย.: เช็กสถานะ Gemini เรียลไทม์ — โหลดหน้า + ทุก 45 วิ (server cache 30 วิ กันยิงถี่)
@@ -106,7 +101,7 @@ export default function ClipTranscriptPage() {
       const r = await fetch('/api/clip-transcript', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), tidy }) });
       const d = await safeJson(r);
       if (!d.success) { setErr(d.error || 'ถอดไม่สำเร็จ'); }
-      else { setOut(d.data); setView(d.data.tidyText ? 'tidy' : 'raw'); loadCases(); }
+      else { setOut(d.data); setView(d.data.tidyText ? 'tidy' : 'raw'); }
     } catch (e) { setErr(e.message); }
     setLoading(false);
   };
@@ -242,7 +237,6 @@ export default function ClipTranscriptPage() {
   };
 
   const copy = (text, key) => { navigator.clipboard?.writeText(text); setCopied(key); setTimeout(() => setCopied(''), 2000); };
-  const deleteCase = async (id) => { await fetch('/api/clip-transcript/cases?id=' + id, { method: 'DELETE' }); loadCases(); };
   const deleteInsightCase = async (id) => { await fetch('/api/clip-transcript/cases?kind=insight&id=' + id, { method: 'DELETE' }); loadInsightCases(); };
 
   // ข้อความคัดลอกของ "1 ประเด็น" (ใช้ทั้งคลิปยาวรายประเด็น)
@@ -463,7 +457,7 @@ export default function ClipTranscriptPage() {
               })()}
               {queueJob.status === 'done' && <>✅ <b>ถอดเสร็จแล้ว</b> — ผลอยู่ด้านล่าง + เก็บเข้าคลังประเด็นข่าวให้แล้ว</>}
               {queueJob.status === 'error' && <>❌ <b>ถอดไม่สำเร็จ</b> — {queueJob.error || 'ลองส่งใหม่อีกครั้ง'}</>}
-              {queueJob._pollEnded && queueJob.status !== 'done' && queueJob.status !== 'error' && <><br /><span style={{ fontSize: 11.5, opacity: 0.85 }}>⏱️ หยุดอัปเดตสดแล้ว แต่ <b>งานยังทำต่อเบื้องหลัง</b> — กลับมาดูผลที่ "คลังบทถอด" ด้านล่างได้เลย</span></>}
+              {queueJob._pollEnded && queueJob.status !== 'done' && queueJob.status !== 'error' && <><br /><span style={{ fontSize: 11.5, opacity: 0.85 }}>⏱️ หยุดอัปเดตสดแล้ว แต่ <b>งานยังทำต่อเบื้องหลัง</b> — เสร็จแล้วระบบเก็บผลเข้าคลังให้อัตโนมัติ</span></>}
             </div>
           )}
           {/* ★ 26 มิ.ย.: แผงคิวรวม — เห็นทุกคลิปที่ส่งเข้าคิว (รออยู่/รอ Gemini หาย/ถอดอยู่/เสร็จล่าสุด) */}
@@ -710,40 +704,7 @@ export default function ClipTranscriptPage() {
           </div>
         )}
 
-        {/* คลัง */}
-        <button onClick={() => setCasesOpen(!casesOpen)} style={{ padding: '10px 18px', borderRadius: 10, border: '1px solid var(--border, #2a2a3e)', background: casesOpen ? 'rgba(99,102,241,0.12)' : 'var(--bg-card, #1a1a2e)', color: casesOpen ? '#818cf8' : 'inherit', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-          📦 คลังบทถอด ({cases.length}) {casesOpen ? '▲' : '▼'}
-        </button>
-        {casesOpen && (
-          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {cases.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted, #888)', fontSize: 13 }}>ยังไม่มีบทถอด — ถอดคลิปสักครั้งแล้วจะเก็บที่นี่อัตโนมัติ</div>}
-            {cases.map((c) => (
-              <div key={c.id} style={{ border: '1px solid var(--border, #2a2a3e)', borderRadius: 10, overflow: 'hidden' }}>
-                <div onClick={() => setExpanded(expanded === c.id ? null : c.id)} style={{ padding: '11px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: 'var(--bg-card, #1a1a2e)' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 3, flexWrap: 'wrap' }}>
-                      {(c.category || c.classify?.category) && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(245,158,11,0.16)', color: '#f59e0b', fontWeight: 800 }}>📂 {c.category || c.classify?.category}</span>}
-                      {(c.clipTypeLabel || c.classify?.clipTypeLabel) && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontWeight: 700 }}>{c.classify?.emoji || '🎬'} {c.clipTypeLabel || c.classify?.clipTypeLabel}</span>}
-                    </div>
-                    <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{platformIcon(c.platform)} {c.title || c.url}</div>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted, #888)', marginTop: 3 }}>{c.platform} · {c.wordCount} ตัวอักษร · {new Date(c.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
-                  </div>
-                  <button onClick={(e) => { e.stopPropagation(); deleteCase(c.id); }} style={{ marginLeft: 10, padding: '4px 10px', borderRadius: 6, border: 'none', background: 'rgba(239,68,68,0.1)', color: '#ef4444', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>ลบ</button>
-                </div>
-                {expanded === c.id && (
-                  <div style={{ padding: 14, borderTop: '1px solid var(--border, #2a2a3e)' }}>
-                    <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                      <a href={c.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: '#3b82f6' }}>🔗 เปิดคลิป</a>
-                      {c.tidyText && <button onClick={() => copy(c.tidyText, 'c-tidy-' + c.id)} style={{ padding: '3px 10px', borderRadius: 6, border: 'none', background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'c-tidy-' + c.id ? '✅' : '📋 คัดลอกที่เรียบเรียง'}</button>}
-                      <button onClick={() => copy(c.rawText, 'c-raw-' + c.id)} style={{ padding: '3px 10px', borderRadius: 6, border: 'none', background: 'rgba(59,130,246,0.15)', color: '#3b82f6', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'c-raw-' + c.id ? '✅' : '📋 คัดลอกบทดิบ'}</button>
-                    </div>
-                    <div style={{ fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap', maxHeight: 300, overflowY: 'auto', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 12 }}>{c.tidyText || c.rawText}</div>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        {/* (★ 14 ส.ค. 69 เจ้าของสั่ง: แผง "คลังบทถอด" ถูกถอดออก — ไม่ได้ใช้) */}
 
         {/* ★ 22 มิ.ย.: คลังถอดประเด็นข่าว (ข้อมูลดิบ) — เก็บทุกครั้งที่ถอดสำเร็จ */}
         <button onClick={() => setInsightCasesOpen(!insightCasesOpen)} style={{ marginTop: 16, padding: '10px 18px', borderRadius: 10, border: '1px solid rgba(37,99,235,0.3)', background: insightCasesOpen ? 'rgba(37,99,235,0.12)' : 'var(--bg-card, #1a1a2e)', color: insightCasesOpen ? '#60a5fa' : 'inherit', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
