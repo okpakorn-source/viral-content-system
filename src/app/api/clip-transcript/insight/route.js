@@ -100,7 +100,7 @@ function humanizeErr(raw) {
   if (/503|429|high demand|overload|unavailable|temporar|rate limit|parse ไม่ได้/i.test(m)) {
     return 'ตอนนี้ Gemini มีคนใช้งานหนัก (แน่นชั่วคราว) — กดปุ่ม "ถอดประเด็นข่าว" อีกครั้งได้เลย เดี๋ยวก็ผ่าน (ระบบรอ Gemini ดูคลิปจริงเพื่อข้อมูลดิบคุณภาพสูงสุด ไม่ถอยไปสรุปจากเสียงล้วน)';
   }
-  return m.slice(0, 120) || 'ถอดประเด็นล้มเหลว';
+  return m.slice(0, 300) || 'ถอดประเด็นล้มเหลว'; // ★ 14 ส.ค. 69: 120→300 — error สั้นเกินจนวินิจฉัยเคสโมเดลใหม่ไม่ได้
 }
 
 // ★ 21 มิ.ย. (บั๊ก: URL ติด &fbclid=... ยาว → Gemini ดูคลิปไม่ได้): ล้าง URL ให้สะอาด
@@ -151,7 +151,8 @@ function _raceTimeout(promise, ms, label) {
 //     ถ้าฝั่งโหลด YouTube ฟื้น: ครบ 20 นาทีจะลอง URL เอง · ถ้าอยากกลับไปลอง URL ก่อนเสมอ ตั้งเป็น 0
 let _ytUrlBrokenUntil = Date.now() + 20 * 60 * 1000;
 
-async function buildInsight({ url, type }) {
+// ★ 14 ส.ค. 69 (เจ้าของสั่งเทียบสองโมเดล): model (optional) — ไม่ส่ง = VIDEO_MODEL ตามเดิมเป๊ะ
+async function buildInsight({ url, type, model = '' }) {
   // ★ 25 มิ.ย.: ใช้ insight เดียว (enhanced) เสมอ — Gemini "ตัดสินเอง" (content-aware) ว่าคลิปมีหลายประเด็นไหม
   //   มีหลายประเด็น → ใส่ subStories (เนื้อดิบแยกประเด็น) เพิ่มจาก rawData รวม · เรื่องเดียว → subStories ว่าง
   //   เลิกพึ่ง getClipDurationSec (ยึด yt-dlp = พังบนคลาวด์ → เคยได้ single เสมอ) — ตอนนี้ทำงานทั้ง cloud+โลคัล
@@ -167,7 +168,7 @@ async function buildInsight({ url, type }) {
     const YT_FMT = 'best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best';
     const downloadAndExtract = async () => {
       const buf = await downloadMetaBuffer(url, YT_FMT);
-      return await extractInsightFromVideoBuffer(buf, 'video/mp4');
+      return await extractInsightFromVideoBuffer(buf, 'video/mp4', model);
     };
     if (process.platform === 'win32') {
       if (Date.now() < _ytUrlBrokenUntil) {
@@ -175,18 +176,18 @@ async function buildInsight({ url, type }) {
         return await downloadAndExtract();
       }
       try {
-        return await _raceTimeout(extractClipInsight({ url, platform: 'youtube' }), 170_000, 'YouTube URL passthrough');
+        return await _raceTimeout(extractClipInsight({ url, platform: 'youtube', ...(model ? { model } : {}) }), 170_000, 'YouTube URL passthrough');
       } catch (e) {
         _ytUrlBrokenUntil = Date.now() + 20 * 60 * 1000; // จำว่า URL ค้าง → ข้าม 20 นาที
         console.log(`[ClipInsight] 🔄 YouTube URL ค้าง → โหลดเอง + ข้าม URL 20 นาที: ${String(e.message).slice(0, 60)}`);
         return await downloadAndExtract();
       }
     }
-    return await extractClipInsight({ url, platform: 'youtube' }); // cloud: URL passthrough เท่านั้น
+    return await extractClipInsight({ url, platform: 'youtube', ...(model ? { model } : {}) }); // cloud: URL passthrough เท่านั้น
   }
   // TikTok/FB/IG → โหลดไฟล์ให้ Gemini "ดูจริง" (เห็นภาพ+ตัวหนังสือบนจอ) — ไม่มี fallback ถอดเสียง
   const buf = type === 'tiktok' ? await downloadTiktokBuffer(url) : await downloadMetaBuffer(url);
-  return await extractInsightFromVideoBuffer(buf, 'video/mp4');
+  return await extractInsightFromVideoBuffer(buf, 'video/mp4', model);
 }
 
 // ★ (เลิกใช้ชั่วคราว 26 มิ.ย. — เก็บไว้เผื่อเปิด fallback ถอดเสียงภายหลัง)
@@ -212,7 +213,12 @@ function insightQualityIssues(insight) {
 export async function POST(request) {
   try {
     // ★ 8 ก.ค.: รับเพิ่ม force (ถอดใหม่ ไม่เอาผลจากคลัง) + user (ใครส่ง — เก็บเป็น metadata คลัง)
-    const { url: _rawUrl, force = false, user = '' } = await request.json();
+    // ★ 14 ส.ค. 69 (เจ้าของสั่งเทียบสองโมเดล): model (optional) — ใช้คู่ force เสมอ (คลังกันซ้ำไม่แยกตามโมเดล)
+    //   จำกัด allowlist เพราะ endpoint เปิดรับจากภายนอก · ค่านอกรายการ = เพิกเฉย ใช้โมเดลหลักตามเดิม ไม่ล้มคำขอ
+    const { url: _rawUrl, force = false, user = '', model: _reqModel = '' } = await request.json();
+    const MODEL_ALLOWED = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash'];
+    const modelOverride = MODEL_ALLOWED.includes(String(_reqModel)) ? String(_reqModel) : '';
+    if (_reqModel && !modelOverride) console.warn(`[ClipInsight] ⚠️ model นอกรายการ "${String(_reqModel).slice(0, 30)}" → ใช้โมเดลหลักตามเดิม`);
     if (!_rawUrl || typeof _rawUrl !== 'string') {
       return NextResponse.json({ success: false, error: 'กรุณาวางลิงก์คลิป', errorType: 'MISSING_URL' }, { status: 400 });
     }
@@ -246,7 +252,7 @@ export async function POST(request) {
     let insight;
     let attempts = 1;
     try {
-      insight = await getClipVideoQueue().run(() => buildInsight({ url, type }), { label: `insight:${type}` });
+      insight = await getClipVideoQueue().run(() => buildInsight({ url, type, model: modelOverride }), { label: `insight:${type}${modelOverride ? `@${modelOverride}` : ''}` });
     } catch (e) {
       const code = e.code || 'INSIGHT_FAILED';
       return NextResponse.json({ success: false, error: humanizeErr(e.message), errorType: code }, { status: 422 });
@@ -260,7 +266,7 @@ export async function POST(request) {
       console.warn(`[ClipInsight] ⚠️ ไม่ผ่านด่านคุณภาพ (${issues.join(' · ')}) → ถอดใหม่อัตโนมัติ 1 ครั้ง`);
       attempts = 2;
       try {
-        const retryInsight = await getClipVideoQueue().run(() => buildInsight({ url, type }), { label: `insight-qc-retry:${type}` });
+        const retryInsight = await getClipVideoQueue().run(() => buildInsight({ url, type, model: modelOverride }), { label: `insight-qc-retry:${type}` });
         const retryIssues = insightQualityIssues(retryInsight);
         if (retryIssues.length < issues.length || String(retryInsight?.rawData || '').length > String(insight?.rawData || '').length) {
           insight = retryInsight; issues = retryIssues; // เอารอบที่ดีกว่า
@@ -283,6 +289,7 @@ export async function POST(request) {
       insight,
       category: insight.category || '', clipDurationSec: insight.clipDurationSec || 0,
       user: String(user || '').slice(0, 40), elapsedMs, attempts,
+      ...(modelOverride ? { modelUsed: modelOverride } : {}), // ★ 14 ส.ค.: ใบเทสโมเดลระบุรุ่นที่ใช้จริง (ไม่ส่ง = โมเดลหลัก)
       ...(lowQuality ? { lowQuality: true, qualityNote } : {}),
       createdAt: new Date().toISOString(),
     };
@@ -305,7 +312,7 @@ export async function POST(request) {
       } catch { /* Vercel filesystem อ่านอย่างเดียว — ข้าม */ }
     })();
 
-    return NextResponse.json({ success: true, data: { id: caseId, platform: type, ...insight, ...(lowQuality ? { lowQuality: true, qualityNote } : {}) } });
+    return NextResponse.json({ success: true, data: { id: caseId, platform: type, ...insight, ...(modelOverride ? { modelUsed: modelOverride } : {}), ...(lowQuality ? { lowQuality: true, qualityNote } : {}) } });
   } catch (error) {
     console.error('[ClipInsight]', error.message);
     return NextResponse.json({ success: false, error: humanizeErr(error.message), errorType: 'INSIGHT_ERROR' }, { status: 500 });

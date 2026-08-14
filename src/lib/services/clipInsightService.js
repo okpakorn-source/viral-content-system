@@ -184,13 +184,14 @@ function normalizeInsight(p, engine) {
  * @param {string} args.platform  'youtube' = Gemini ดูคลิป | อื่น = ใช้ rawText + LLM
  * @param {string} args.rawText   บทถอดเสียง (จำเป็นเมื่อไม่ใช่ youtube หรือ fallback)
  */
-export async function extractClipInsight({ url, platform, rawText = '' }) {
+// ★ 14 ส.ค. 69 (เจ้าของสั่งเทียบสองโมเดล): รับ model (optional) — ไม่ส่ง = ใช้ VIDEO_MODEL ตามเดิมเป๊ะ
+export async function extractClipInsight({ url, platform, rawText = '', model = '' }) {
   // YouTube → ให้ Gemini ดูคลิปจริงจากลิงก์ตรง — ปล่อย error ขึ้นไปให้ route จัดการ fallback
   if (platform === 'youtube') {
     const { callGeminiVideo } = await import('@/lib/ai/geminiClient');
     // ★ 21 มิ.ย.: 8000→16000 · ★ 25 มิ.ย.: 16000→24000 (เพิ่ม subStories) · ★ 8 ก.ค.: 24000→32000
     //   (พรอมต์ใหม่บังคับ rawData ละเอียดขึ้นมาก — เผื่อ output กัน JSON ถูกตัดท้าย = ต้นเหตุเคส rawData ว่างในคลัง)
-    const r = await callGeminiVideo({ prompt: VIDEO_INSIGHT_PROMPT, youtubeUrl: url, maxTokens: 32000 });
+    const r = await callGeminiVideo({ prompt: VIDEO_INSIGHT_PROMPT, youtubeUrl: url, maxTokens: 32000, ...(model ? { model } : {}) });
     return normalizeInsight(r, 'gemini-video');
   }
 
@@ -225,10 +226,11 @@ ${INSIGHT_SCHEMA}`;
  * @param {Buffer} videoBuffer
  * @param {string} mimeType
  */
-export async function extractInsightFromVideoBuffer(videoBuffer, mimeType = 'video/mp4') {
+export async function extractInsightFromVideoBuffer(videoBuffer, mimeType = 'video/mp4', model = '') {
   const { callGeminiVideoFile } = await import('@/lib/ai/geminiClient');
   // ★ 8 ก.ค.: 24000→32000 — เท่าเส้นทางลิงก์ตรง (พรอมต์ละเอียดขึ้น กัน JSON ถูกตัดท้าย)
-  const r = await callGeminiVideoFile({ prompt: VIDEO_INSIGHT_PROMPT, videoBuffer, mimeType, maxTokens: 32000 });
+  // ★ 14 ส.ค. 69: model (optional) — ไม่ส่ง = VIDEO_MODEL ตามเดิมเป๊ะ (ใช้เทียบสองโมเดลบนคลิปเดียวกัน)
+  const r = await callGeminiVideoFile({ prompt: VIDEO_INSIGHT_PROMPT, videoBuffer, mimeType, maxTokens: 32000, ...(model ? { model } : {}) });
   return normalizeInsight(r, 'gemini-video');
 }
 
