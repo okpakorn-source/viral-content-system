@@ -3,7 +3,10 @@ rem ACS YouTube job server keeper - port 3900 (6 Jul 2026)
 rem เซิร์ฟเวอร์แยกเฉพาะงานแคปเฟรม YouTube — กัน pipeline หนักทำเซิร์ฟเวอร์ข่าว :3000 ตาย
 rem (บทเรียน 6 ก.ค.: รัน pipeline ใน :3000 แล้ว server crash 2 รอบ 13:04/13:17)
 set PATH=C:\Program Files\nodejs;%PATH%
-cd /d "C:\Users\User\แบล็กอัพก่อนแก้2เวอร์ชัน27-5-12.16"
+rem ★ 15 ส.ค. 69 (เจ้าของสั่ง "ให้เป็นโค้ดใหม่ทั้งหมด"): ย้ายมาโฟลเดอร์ตาม main/Vercel
+rem   เดิมชี้กลับ C:\Users\User\แบล็กอัพก่อนแก้2เวอร์ชัน27-5-12.16 — สคริปต์อยู่ npd แต่ cd กลับของเก่า
+rem   = สตาร์ทจาก npd ก็ยังได้โค้ดเก่าเงียบๆ (กับดักเดียวกับที่ clip-worker เคยเจอ แก้ไปแล้ว 1e5f055)
+cd /d "C:\news-pipeline-dev"
 rem ★ 9 ก.ค.: :3900 ใช้ build แยกโฟลเดอร์ .next-3900 (ไม่ใช้ .next ร่วมกับ :3000)
 rem   เพื่อ build โค้ดใหม่ (เช่น /api/quick-test) ให้ :3900 โดยไม่ต้องแตะ/รีสตาร์ทเซิร์ฟเวอร์ข่าว :3000
 set NEXT_DISTDIR=.next-3900
