@@ -2347,7 +2347,9 @@ ${_cat.join('\n')}
       try {
         // ★ 15 ส.ค. 69 (ขั้น 4 sonnet-5 — เจ้าของอนุมัติ หลังแล็บ 44+12 นัด): โมเดลขึ้นต้น claude- → callClaude คิดเบา + แคชสารบัญ
         //   ไม่ตั้ง env = luna เส้นเดิมทุกไบต์ · สวิตช์: CARD_PICKER_MODEL=claude-sonnet-5 · CARD_PICKER_EFFORT_A=low · CARD_PICKER_CACHE=0 ปิดแคช
-        const _pickerModelA = process.env.CARD_PICKER_MODEL || MODEL_FAST_CHEAP; // gpt-5.6-luna
+        // ★ 15 ส.ค. 69 ดึก (เจ้าของสั่ง "เปิดใช้ sonnet5"): default → claude-sonnet-5 · ถอยกลับ: CARD_PICKER_MODEL=gpt-5.6-luna
+        //   ของเดิม: const _pickerModelA = process.env.CARD_PICKER_MODEL || MODEL_FAST_CHEAP; // gpt-5.6-luna
+        const _pickerModelA = process.env.CARD_PICKER_MODEL || 'claude-sonnet-5';
         if (/^claude-/.test(_pickerModelA)) {
           const { callClaude } = await import('@/lib/ai/claudeClient');
           // แตกพรอมต์ 2 ก้อน: ก้อนคงที่ (หัว+สารบัญ 201 ใบ เหมือนกันทุกข่าว) ติดแคช → ก้อนแปรผัน (ข่าว+กติกา)
@@ -2413,7 +2415,8 @@ ${String(actualNewsBody || '').replace(/\s+/g, ' ').slice(0, 2000)}
   if (process.env.CARD_PICKER_AI !== '0' && topPrompts.length > 1) {
     // ★ รอบเทสจริง s5_abort (15 ส.ค. 69): ประกาศนอก try — catch (_pickErr) ใช้ชื่อโมเดลใน log ต้องมองเห็น
     //   (เดิมประกาศใน try = ReferenceError ตอนสาย B ล่ม ทำเส้นถอยพังแทนที่จะถอยสูตรเดิม)
-    const _pickerModelB = process.env.CARD_PICKER_MODEL_B || process.env.CARD_PICKER_MODEL || MODEL_FAST_CHEAP;
+    // ★ 15 ส.ค. 69 ดึก (เจ้าของสั่ง "เปิดใช้ sonnet5"): default → claude-sonnet-5 (ของเดิม: || MODEL_FAST_CHEAP = luna)
+    const _pickerModelB = process.env.CARD_PICKER_MODEL_B || process.env.CARD_PICKER_MODEL || 'claude-sonnet-5';
     try {
       // ★ Opus P2-7: จับคู่ scored↔card แล้วกรองใบไร้ id ออกก่อน — กัน find เจอใบผิด/ตรรกะเทียบ id เพี้ยน
       // ★ สารบัญ 201: มีโผสารบัญ → ผู้เข้ารอบ = โผสารบัญ ∪ สูตร top-4 (กันเหนียว, ไม่เกิน 16) · ไม่มี = top-8 สูตรเดิม
