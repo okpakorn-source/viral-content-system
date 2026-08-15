@@ -205,7 +205,20 @@ async function processNewsJob(job) {
     }
 
     // 1. Add to server queue
-    const addRes = await axios.post(queueUrl, payload, { headers, timeout: 15000 });
+    // ★ 15 ส.ค. 69 (เจ้าของสั่งแก้ timeout ดิสคอร์ด): เดิม timeout 15000 — ช่วงคิวแน่น /api/queue/add ตอบช้ากว่า 15 วิ
+    //   บอทตัดเองทั้งที่ข่าวกำลังจะเข้าคิว = ทีมเห็น "timeout of 15000ms exceeded" หลายข่าว (เห็นจริง 15 ส.ค. ~14:28)
+    //   แก้: ขยายเป็น 60 วิ + ลองซ้ำ 1 ครั้ง (เว้น 3 วิ) เฉพาะตอน timeout/สายพัง — ฝั่งเซิร์ฟเวอร์มีกันงานซ้ำ (dedup) อยู่แล้ว ยิงซ้ำไม่ทำให้เจนเบิ้ล
+    //   ของเดิม: const addRes = await axios.post(queueUrl, payload, { headers, timeout: 15000 });
+    let addRes;
+    try {
+      addRes = await axios.post(queueUrl, payload, { headers, timeout: 60000 });
+    } catch (enqErr) {
+      const retriable = /timeout|ECONNRESET|ETIMEDOUT|ECONNABORTED|socket hang up/i.test(String(enqErr.message || ''));
+      if (!retriable) throw enqErr;
+      console.log(`[Bot] ⚠️ ส่งเข้าคิวล้ม (${String(enqErr.message).slice(0, 60)}) — ลองซ้ำอีกครั้งใน 3 วิ`);
+      await new Promise((r) => setTimeout(r, 3000));
+      addRes = await axios.post(queueUrl, payload, { headers, timeout: 60000 });
+    }
     const addData = addRes.data;
 
     if (!addData.success) {
