@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import EvaluationDashboard from './EvaluationDashboard';
+import NicknameGate from '@/components/NicknameGate';
 
 /**
  * Generation Log — คลังผลงานเขียน (redesign 11 มิ.ย. 69)
@@ -99,7 +100,18 @@ function isToday(iso) {
 }
 
 // ══════════════════════════════════════════════════════
+// ★ 15 ส.ค. 69 (เจ้าของสั่ง): หน้านี้เปิดให้ทุกคนเข้าได้ ไม่ต้องล็อกอิน
+//   แต่ต้องใส่ชื่อเล่นก่อน → ครอบด้วย NicknameGate (ตัวหน้าจริงอยู่ใน GenerationLogsView ด้านล่าง)
+//   คู่กับการเพิ่ม '/generation-logs' ใน PUBLIC_ROUTES ที่ ClientLayout.js — ต้องมีทั้งคู่ถึงจะเข้าได้
 export default function GenerationLogsPage() {
+  return (
+    <NicknameGate title="📋 คลังผลงานเขียน">
+      <GenerationLogsView />
+    </NicknameGate>
+  );
+}
+
+function GenerationLogsView() {
   const [cases, setCases]             = useState([]);
   const [stats, setStats]             = useState({ total: 0, today: 0, unreviewed: 0, used: 0 });
   const [loading, setLoading]         = useState(true);
