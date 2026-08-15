@@ -2346,6 +2346,9 @@ ${String(actualNewsBody || '').replace(/\s+/g, ' ').slice(0, 2000)}
   //   คะแนนสูตรติดตัวใบเดิม → ด่าน ANGLE_MIN_MATCH_SCORE ทำงานต่อ · ล้ม/ปิดสวิตช์ = ลำดับสูตรเดิมเป๊ะ
   //   ปิด: CARD_PICKER_AI=0 · เปลี่ยนสมอง: CARD_PICKER_MODEL (default gpt-5.6-luna)
   if (process.env.CARD_PICKER_AI !== '0' && topPrompts.length > 1) {
+    // ★ รอบเทสจริง s5_abort (15 ส.ค. 69): ประกาศนอก try — catch (_pickErr) ใช้ชื่อโมเดลใน log ต้องมองเห็น
+    //   (เดิมประกาศใน try = ReferenceError ตอนสาย B ล่ม ทำเส้นถอยพังแทนที่จะถอยสูตรเดิม)
+    const _pickerModelB = process.env.CARD_PICKER_MODEL_B || process.env.CARD_PICKER_MODEL || MODEL_FAST;
     try {
       // ★ Opus P2-7: จับคู่ scored↔card แล้วกรองใบไร้ id ออกก่อน — กัน find เจอใบผิด/ตรรกะเทียบ id เพี้ยน
       // ★ สารบัญ 201: มีโผสารบัญ → ผู้เข้ารอบ = โผสารบัญ ∪ สูตร top-4 (กันเหนียว, ไม่เกิน 16) · ไม่มี = top-8 สูตรเดิม
@@ -2394,7 +2397,6 @@ ${_aiCands.join('\n')}
       // ★ 15 ส.ค. 69 (ขั้น 4 sonnet-5 — เจ้าของอนุมัติ · แฝดกับ summarizeServiceText.js ต้องแก้คู่กันเสมอ):
       //   ซ่อมบั๊ก race ไม่ตัดสาย HTTP จริง (จ่ายเงินฟรีหลัง timeout)
       //   ของเดิม: const _pick = await Promise.race([ callAI({ prompt, model, temperature: 0.1, maxTokens: 2000 }), timeout 35s ])
-      const _pickerModelB = process.env.CARD_PICKER_MODEL_B || process.env.CARD_PICKER_MODEL || MODEL_FAST;
       const _pickCtl = new AbortController();
       const _pickTimer = setTimeout(() => _pickCtl.abort(), (Number.isFinite(Number(process.env.CARD_PICKER_B_TIMEOUT_MS)) && Number(process.env.CARD_PICKER_B_TIMEOUT_MS) > 0) ? Number(process.env.CARD_PICKER_B_TIMEOUT_MS) : 35000);
       let _pick;
