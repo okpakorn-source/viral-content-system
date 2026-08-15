@@ -47,7 +47,11 @@ function getClaudeClient() {
  * เรียก Claude — ส่ง prompt เดียว + system prompt
  * Return: parsed JSON object
  */
-export async function callClaude({ prompt, systemPrompt, model = DEFAULT_WRITE_MODEL, temperature = 0.7, maxTokens = 8000, signal }) {
+// ★ 15 ส.ค. 69 (ขั้น 4 sonnet-5 — เจ้าของอนุมัติ): เพิ่ม 3 พารามิเตอร์เลือกได้ ไม่ส่ง = พฤติกรรมเดิมทุกไบต์
+//   ของเดิม: export async function callClaude({ prompt, systemPrompt, model, temperature = 0.7, maxTokens = 8000, signal })
+//   effort: ชนะ env กลาง CLAUDE_WRITE_EFFORT เฉพาะการเรียกนั้น (ผลแล็บ 44+12 นัด: จุดเลือกการ์ด A=low B=medium)
+//   promptBlocks: อาเรย์ [{text, cache}] → content blocks + cache_control (แคชสารบัญคงที่ ลดต้นทุน ~85%)
+export async function callClaude({ prompt, systemPrompt, model = DEFAULT_WRITE_MODEL, temperature = 0.7, maxTokens = 8000, signal, effort, promptBlocks }) {
   const client = getClaudeClient();
   if (!client) throw new Error('ANTHROPIC_API_KEY ไม่ได้ตั้งค่า — ไปตั้งค่าที่ Settings');
 
@@ -120,9 +124,14 @@ PASS 5: อ่านใหม่เหมือนคนอ่านจริง
   // ★ SPEED FIX (10 มิ.ย.): Opus 4.x default effort = "high" (คิดลึกสุดทุกครั้ง) → ช้าจน timeout
   //   งานเขียนที่ prompt ละเอียดอยู่แล้วใช้ "medium" = เร็วขึ้นมาก คุณภาพแทบไม่ต่าง
   //   ปรับได้ผ่าน .env: CLAUDE_WRITE_EFFORT=low|medium|high
-  const writeEffort = process.env.CLAUDE_WRITE_EFFORT || 'medium';
+  // ★ 15 ส.ค. 69: effort ต่อการเรียกชนะ env กลาง (ของเดิม: const writeEffort = process.env.CLAUDE_WRITE_EFFORT || 'medium';)
+  const writeEffort = effort || process.env.CLAUDE_WRITE_EFFORT || 'medium';
   console.log(`[Claude] model=${model}, temp=${stripSampling ? 'n/a (opus4.7+)' : temperature}, effort=${stripSampling ? writeEffort : 'n/a'}, maxTokens=${maxTokens}`);
-  console.log(`[Claude] prompt preview: ${prompt.slice(0, 300)}...`);
+  // ★ Sol #3 + Fable (15 ส.ค. 69): กันกับระเบิด — เรียกด้วย promptBlocks ล้วนโดยไม่ส่ง prompt ต้องไม่พังที่ preview
+  //   (ของเดิม: prompt.slice(0, 300) ตรงๆ = TypeError เมื่อ prompt เป็น undefined)
+  const _blocksOk = Array.isArray(promptBlocks) && promptBlocks.length > 0 && promptBlocks.some(b => String(b?.text || '').trim());
+  const _previewSrc = prompt || (_blocksOk ? promptBlocks.map(b => String(b?.text || '')).join('') : '');
+  console.log(`[Claude] prompt preview: ${String(_previewSrc).slice(0, 300)}...`);
 
   // ★ 1 ส.ค. 69: opus-5/fable "คิดก่อนเขียน" เปิดเองอัตโนมัติ และช่วงคิดกิน max_tokens ร่วมกับเนื้อ
   //   → เผื่อเพดานขั้นต่ำ 16000 กันเนื้อโดนตัดกลางคัน (ยังอยู่ในโซน non-streaming ปลอดภัย)
@@ -135,8 +144,23 @@ PASS 5: อ่านใหม่เหมือนคนอ่านจริง
     // ★ Opus 4.7/4.8/Fable: ห้ามส่ง temperature (API จะ 400) — คุมความหลากหลายผ่าน prompt แทน
     ...(stripSampling ? { output_config: { effort: writeEffort } } : { temperature }),
     system: systemMsg,
+    // ★ 15 ส.ค. 69: promptBlocks = แตกพรอมต์เป็นก้อน + ติด cache_control ก้อนคงที่ (สารบัญการ์ด 201 ใบเหมือนกันทุกข่าว)
+    //   ของเดิม (ยังใช้เมื่อไม่ส่ง promptBlocks): content: prompt + '\n\nตอบเป็น JSON เท่านั้น ห้ามมี text อื่นนอก JSON'
     messages: [
-      { role: 'user', content: prompt + '\n\nตอบเป็น JSON เท่านั้น ห้ามมี text อื่นนอก JSON' }
+      {
+        role: 'user',
+        // ★ Sol #3 + รอบ 2: ใช้ blocks เฉพาะเมื่อมีเนื้อจริง — กรองก้อนเนื้อว่างทิ้งก่อน map (กัน text block ว่างหลุดไป API)
+        content: _blocksOk
+          ? (() => {
+              const _fb = promptBlocks.filter(b => String(b?.text || '').trim());
+              return _fb.map((b, i) => ({
+                type: 'text',
+                text: String(b.text || '') + (i === _fb.length - 1 ? '\n\nตอบเป็น JSON เท่านั้น ห้ามมี text อื่นนอก JSON' : ''),
+                ...(b.cache ? { cache_control: { type: 'ephemeral' } } : {}),
+              }));
+            })()
+          : String(prompt || '') + '\n\nตอบเป็น JSON เท่านั้น ห้ามมี text อื่นนอก JSON',
+      }
     ],
   };
 
@@ -167,13 +191,19 @@ PASS 5: อ่านใหม่เหมือนคนอ่านจริง
   
   const inputTokens = response.usage?.input_tokens || 0;
   const outputTokens = response.usage?.output_tokens || 0;
-  console.log(`[Claude] OK: tokens input=${inputTokens}, output=${outputTokens}`);
+  // ★ 15 ส.ค. 69: โชว์แคชในลอค (cacheW=เขียนแคชครั้งแรก 1.25x · cacheR=อ่านแคช 0.1x) — เกณฑ์คานารี: มุม 2-3 ต้อง cacheR ≥9,000
+  const _cw = response.usage?.cache_creation_input_tokens || 0;
+  const _cr = response.usage?.cache_read_input_tokens || 0;
+  console.log(`[Claude] OK: tokens input=${inputTokens}, output=${outputTokens}${(_cw || _cr) ? `, cacheW=${_cw}, cacheR=${_cr}` : ''}`);
   
   // Asynchronously log usage to DB
+  // ★ Sol #2 + รอบ 2 (15 ส.ค. 69): input จริง = input + cache_creation + cache_read (เดิมนับแค่ input_tokens ทำ /cost ต่ำกว่าจริง)
+  //   usageLogger คิดทุกโทเคนที่อัตรา input ปกติ → แปลงโทเคนแคชเป็น "เทียบเท่าอัตราปกติ" ก่อนส่ง (cacheW 1.25x · cacheR 0.1x)
+  //   เงินตรงเป๊ะ ตัวเลขโทเคนคือค่าเทียบเท่า (จดใน comment นี้กันงงตอนอ่าน /cost)
   logApiUsage({
     provider: 'anthropic',
     model,
-    inputTokens,
+    inputTokens: Math.round(inputTokens + _cw * 1.25 + _cr * 0.1),
     outputTokens,
     feature: 'callClaude'
   });

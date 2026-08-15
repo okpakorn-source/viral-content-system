@@ -2281,15 +2281,47 @@ ${_cat.join('\n')}
       const _catTimer = setTimeout(() => _catCtl.abort(), 45000);
       let _catPick;
       try {
-        _catPick = await callAI({
-          prompt: _catPrompt,
-          // ★ Opus NOTE-6: system prompt สั้น — ไม่งั้น callAI ยัดกฎเขียนข่าว ~9KB ที่ไม่เกี่ยวกับงานคัดการ์ด (จ่ายฟรี 30%)
-          systemPrompt: 'คุณเป็นบรรณารักษ์คัดการ์ดพร้อมท์ ตอบเป็น JSON ตามที่สั่งเท่านั้น',
-          model: process.env.CARD_PICKER_MODEL || MODEL_FAST, // gpt-5.6-luna
-          temperature: 0.1,
-          maxTokens: 8000, // สารบัญ 201 ใบ = reasoning หนัก เพดานต่ำ=ตอบว่าง (บทเรียนเดโม: 2500 ว่างเปล่า)
-          signal: _catCtl.signal,
-        });
+        // ★ 15 ส.ค. 69 (ขั้น 4 sonnet-5 — เจ้าของอนุมัติ · แฝดกับ summarizeServiceText.js ต้องแก้คู่กันเสมอ):
+        //   โมเดลขึ้นต้น claude- → callClaude คิดเบา + แคชสารบัญ · ไม่ตั้ง env = luna เส้นเดิมทุกไบต์
+        const _pickerModelA = process.env.CARD_PICKER_MODEL || MODEL_FAST; // gpt-5.6-luna
+        if (/^claude-/.test(_pickerModelA)) {
+          const { callClaude } = await import('@/lib/ai/claudeClient');
+          const _useCache = process.env.CARD_PICKER_CACHE !== '0';
+          const _catConstant = `คุณเป็นบรรณารักษ์คลังพร้อมท์ข่าวไวรัล — คัดการ์ดที่ "แกนเรื่องเข้ากับข่าวนี้จริง" เข้ารอบ 14 ใบ
+
+=== สารบัญทั้งคลัง ${_cat.length} ใบ ===
+${_cat.join('\n')}
+=== จบสารบัญ ===`;
+          const _catVariable = `=== ข่าว (เนื้อเต็มจากผู้ใช้) ===
+${String(actualNewsBody || '').replace(/\s+/g, ' ').slice(0, 2000)}
+=== จบข่าว ===
+
+เลือก 14 ใบ เรียงจากเหมาะสุด กติกา: ดูแกนเรื่องจริง ห้ามเลือกเพราะดัง · ธีมซ้ำกันไม่เกิน 2 ใบ (เปิดมุมเขียนหลากหลาย) · ห้ามเลือกแกนเรื่องที่ข่าวไม่มี · ข่าวมีผู้เสียชีวิต→ต้องมีการ์ดรองรับการจากไปติดโผ
+ตอบ JSON: { "picks": [เลข 14 ตัว] }`;
+          _catPick = await callClaude({
+            // Sol #1: คั่นก้อนด้วยบรรทัดว่าง — รอยต่อ block เทียบเท่า _catPrompt เดิมทุกไบต์ (เหลือแค่สลับลำดับที่เจตนา)
+            ...(_useCache
+              ? { promptBlocks: [{ text: _catConstant, cache: true }, { text: '\n\n' + _catVariable }] }
+              : {}),
+            prompt: _catPrompt,
+            systemPrompt: 'คุณเป็นบรรณารักษ์คัดการ์ดพร้อมท์ ตอบเป็น JSON ตามที่สั่งเท่านั้น',
+            model: _pickerModelA,
+            maxTokens: 12000,
+            effort: process.env.CARD_PICKER_EFFORT_A || 'low',
+            signal: _catCtl.signal,
+          });
+        } else {
+          // ── เส้นเดิม (luna) — ห้ามแตะ ──
+          _catPick = await callAI({
+            prompt: _catPrompt,
+            // ★ Opus NOTE-6: system prompt สั้น — ไม่งั้น callAI ยัดกฎเขียนข่าว ~9KB ที่ไม่เกี่ยวกับงานคัดการ์ด (จ่ายฟรี 30%)
+            systemPrompt: 'คุณเป็นบรรณารักษ์คัดการ์ดพร้อมท์ ตอบเป็น JSON ตามที่สั่งเท่านั้น',
+            model: _pickerModelA,
+            temperature: 0.1,
+            maxTokens: 8000, // สารบัญ 201 ใบ = reasoning หนัก เพดานต่ำ=ตอบว่าง (บทเรียนเดโม: 2500 ว่างเปล่า)
+            signal: _catCtl.signal,
+          });
+        }
       } finally {
         clearTimeout(_catTimer);
       }
@@ -2359,22 +2391,42 @@ ${_aiCands.join('\n')}
 4. อ่านเนื้อการ์ดจริงก่อนตัดสิน ห้ามเดาจากชื่อการ์ด
 ตอบเป็น JSON: { "selectedIndex": <1-${_aiCands.length}>, "reason": "..." }`;
 
-      // ★ Opus P2-B: ครอบ timeout 25s — จุดนี้ถูกเรียกต่อมุม (เรียงกัน) ถ้าแขวนยาวจะชน maxDuration ของ route
-      const _pick = await Promise.race([
-        callAI({
-          prompt: _pickPrompt,
-          model: process.env.CARD_PICKER_MODEL || MODEL_FAST, // gpt-5.6-luna
-          temperature: 0.1, // สาย 5.x ถูกตัดทิ้งอัตโนมัติใน callAI
-          maxTokens: 2000, // ★ Opus P2-E: ผู้เข้ารอบ 8→16 ใบ อินพุตเบิ้ล — ขยายเพดานตาม (เดิม 1200 เสี่ยงตอบว่าง)
-        }),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('CardPicker timeout 35s')), 35000)),
-      ]);
+      // ★ 15 ส.ค. 69 (ขั้น 4 sonnet-5 — เจ้าของอนุมัติ · แฝดกับ summarizeServiceText.js ต้องแก้คู่กันเสมอ):
+      //   ซ่อมบั๊ก race ไม่ตัดสาย HTTP จริง (จ่ายเงินฟรีหลัง timeout)
+      //   ของเดิม: const _pick = await Promise.race([ callAI({ prompt, model, temperature: 0.1, maxTokens: 2000 }), timeout 35s ])
+      const _pickerModelB = process.env.CARD_PICKER_MODEL_B || process.env.CARD_PICKER_MODEL || MODEL_FAST;
+      const _pickCtl = new AbortController();
+      const _pickTimer = setTimeout(() => _pickCtl.abort(), (Number.isFinite(Number(process.env.CARD_PICKER_B_TIMEOUT_MS)) && Number(process.env.CARD_PICKER_B_TIMEOUT_MS) > 0) ? Number(process.env.CARD_PICKER_B_TIMEOUT_MS) : 35000);
+      let _pick;
+      try {
+        if (/^claude-/.test(_pickerModelB)) {
+          const { callClaude } = await import('@/lib/ai/claudeClient');
+          _pick = await callClaude({
+            prompt: _pickPrompt,
+            systemPrompt: 'คุณเป็นผู้เชี่ยวชาญเลือกการ์ดพร้อมท์ข่าวไวรัล ตอบเป็น JSON ตามที่สั่งเท่านั้น', // กัน DNA 9KB ของ callClaude ยัดฟรี
+            model: _pickerModelB,
+            maxTokens: 8000, // เผื่อโทเคนคิดร่วมเพดาน (แล็บ medium: คิด+ตอบ ~500-900)
+            effort: process.env.CARD_PICKER_EFFORT_B || 'medium',
+            signal: _pickCtl.signal,
+          });
+        } else {
+          _pick = await callAI({
+            prompt: _pickPrompt,
+            model: _pickerModelB, // gpt-5.6-luna
+            temperature: 0.1, // สาย 5.x ถูกตัดทิ้งอัตโนมัติใน callAI
+            maxTokens: 2000, // ★ Opus P2-E: ผู้เข้ารอบ 8→16 ใบ อินพุตเบิ้ล — ขยายเพดานตาม (เดิม 1200 เสี่ยงตอบว่าง)
+            signal: _pickCtl.signal,
+          });
+        }
+      } finally {
+        clearTimeout(_pickTimer);
+      }
 
       if (_pick && _pick.selectedIndex >= 1 && _pick.selectedIndex <= _aiPairs.length) {
         const _s = _aiPairs[_pick.selectedIndex - 1].s;
         const _pr = _aiPairs[_pick.selectedIndex - 1].pr;
         if (_pr && topPrompts[0].id && _pr.id !== topPrompts[0].id) {
-          console.log(`[🤖 CardPicker] luna เลือก "${_pr.promptName}" แทนหัวแถวสูตร "${topPrompts[0].promptName}" — เหตุผล: ${_pick.reason || '-'}`);
+          console.log(`[🤖 CardPicker] ${_pickerModelB} เลือก "${_pr.promptName}" แทนหัวแถวสูตร "${topPrompts[0].promptName}" — เหตุผล: ${_pick.reason || '-'}`);
           const _coreDims2 = (_s.dims || []).filter(d => !String(d).startsWith('boost'));
           const _mtBase = (_s.score >= 60 && _coreDims2.length >= 2) ? 'EXACT' : _s.score >= 40 ? 'CLOSE' : 'BORROWED';
           const _aiEntry = {
@@ -2390,14 +2442,14 @@ ${_aiCands.join('\n')}
           topPrompts.length = 0;
           topPrompts.push(_aiEntry, ..._rest);
         } else {
-          console.log(`[🤖 CardPicker] luna ยืนยันหัวแถวสูตร "${topPrompts[0].promptName}"`);
+          console.log(`[🤖 CardPicker] ${_pickerModelB} ยืนยันหัวแถวสูตร "${topPrompts[0].promptName}"`);
           topPrompts[0]._aiPickReason = _pick.reason || 'AI ยืนยันตัวเลือกสูตร';
         }
       } else {
-        console.log('[🤖 CardPicker] luna ตอบนอกช่วง — ใช้ลำดับสูตรเดิม');
+        console.log(`[🤖 CardPicker] ${_pickerModelB} ตอบนอกช่วง — ใช้ลำดับสูตรเดิม`);
       }
     } catch (_pickErr) {
-      console.warn('[🤖 CardPicker] luna ล่ม — ใช้ลำดับสูตรเดิม:', _pickErr.message);
+      console.warn(`[🤖 CardPicker] ${_pickerModelB} ล่ม — ใช้ลำดับสูตรเดิม:`, _pickErr.message);
     }
   }
 
