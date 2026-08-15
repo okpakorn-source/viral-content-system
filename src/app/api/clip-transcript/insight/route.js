@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { extractClipInsight, extractInsightFromVideoBuffer, extractMultiTopicInsight, extractMultiTopicFromVideoBuffer } from '@/lib/services/clipInsightService';
 import { createStore } from '@/lib/persistStore';
 import { getClipVideoQueue } from '@/lib/services/clipQueue';
+import { pickCasesToPurge, CLIP_CASE_KEEP } from '@/lib/services/clipArchive';
 import { randomUUID } from 'crypto';
 
 // โหลดไฟล์วิดีโอ TikTok (tikwm) — ใช้บนคลาวด์ได้
@@ -338,10 +339,9 @@ export async function POST(request) {
         const store = createStore('clip-insights');
         await store.add(record);
         const all = await store.getAll();
-        if (all.length > 400) {
-          const old = all.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)).slice(0, all.length - 400);
-          for (const o of old) await store.remove(o.id).catch(() => {});
-        }
+        // ★ 15 ส.ค. 69 (เจ้าของสั่ง "เก็บทุกบทความที่พนักงานถอด"): ใบที่พนักงานปักหมุด "ใช้ใบนี้" ห้ามลบ
+        //   กติกาอยู่ที่ clipArchive.pickCasesToPurge (มีเทสคุม กันหลุดซ้ำแบบตอนย้อนยุคนิ่ง 14 ส.ค.)
+        for (const o of pickCasesToPurge(all, CLIP_CASE_KEEP)) await store.remove(o.id).catch(() => {});
       } catch (e) { console.warn('[ClipInsight] เก็บคลังล้ม:', e.message?.slice(0, 50)); }
       // ★ สำเนาถาวร append-only (ไม่ถูกลบตาม retention — ไว้วิเคราะห์ย้อนหลัง/ลูปเรียนรู้ในอนาคต)
       //   เขียนได้เฉพาะเครื่องที่มีดิสก์จริง (เครื่องทีม ~82% ของงาน) — บน Vercel จะเงียบๆ ข้ามไป ไม่กระทบงานหลัก
@@ -350,6 +350,24 @@ export async function POST(request) {
         const { join } = await import('path');
         await appendFile(join(process.cwd(), 'data', 'clip-insights-archive.ndjson'), JSON.stringify(record) + '\n', 'utf8');
       } catch { /* Vercel filesystem อ่านอย่างเดียว — ข้าม */ }
+      // ★ 15 ส.ค. 69 (เจ้าของสั่ง) — สำเนาถาวรบนคลาวด์ ให้ "ถอดผ่านเว็บ" ก็ไม่หายเหมือนกัน
+      //   ที่มา: สำเนา NDJSON ข้างบนเขียนได้เฉพาะเครื่องที่มีดิสก์จริง → งานที่ถอดผ่าน Vercel ไม่มีสำเนาเลย
+      //   วัดจริง 15 ส.ค.: คลังหลัก 400 ใบ แต่ NDJSON มีแค่ 125 ใบ = ส่วนต่างคืองานที่ถอดผ่านเว็บแล้วหลุดคลังไป
+      //   เขียนตรงเข้าตารางกลาง ไม่ผ่าน createStore ตั้งใจ — createStore.add() จะ sync ไฟล์แคชทั้งก้อนทุกครั้ง
+      //   (คลังโตขึ้นเรื่อยๆ = เขียนไฟล์ใหญ่ขึ้นทุกใบ) และไม่มีการ getAll() ที่นี่เลย → ค่า egress คงที่ต่อใบ
+      //   ล้มยังไงก็ไม่กระทบผลถอด (fire-and-forget + try/catch) · ปิดได้ด้วย CLIP_ARCHIVE_CLOUD=0
+      if (process.env.CLIP_ARCHIVE_CLOUD !== '0') {
+        try {
+          const { getSupabase, isSupabaseReady } = await import('@/lib/supabase');
+          if (isSupabaseReady()) {
+            const { error } = await getSupabase().from('store_items').insert({
+              id: caseId, store_name: 'clip-insights-archive', data: record,
+              created_at: record.createdAt, updated_at: record.createdAt,
+            });
+            if (error) console.warn('[ClipInsight] สำเนาถาวรคลาวด์ล้ม:', error.message?.slice(0, 60));
+          }
+        } catch (e) { console.warn('[ClipInsight] สำเนาถาวรคลาวด์ล้ม:', e.message?.slice(0, 60)); }
+      }
     })();
 
     return NextResponse.json({ success: true, data: { id: caseId, platform: type, ...insight, ...(modelOverride ? { modelUsed: modelOverride } : {}), ...(lowQuality ? { lowQuality: true, qualityNote } : {}) } });
