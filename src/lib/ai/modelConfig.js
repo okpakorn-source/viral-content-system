@@ -69,6 +69,7 @@ export const MODEL_COSTS = {
   'gpt-5.6-luna':  { input: 1.0, output: 6.0 },
   // Anthropic (ตัวเขียนจริง + ตัว A/B)
   'claude-opus-4-8': { input: 5.0, output: 25.0 },
+  'claude-fable-5': { input: 10.0, output: 50.0 }, // ★ 15 ส.ค. 69 นักเขียนหลักใหม่ — ไม่มีแถวนี้ /cost จะบันทึก $0 (ผู้ตรวจ Fable จับ)
   'claude-sonnet-5': { input: 2.0, output: 10.0 }, // โปรถึง 31 ส.ค. 69 → หลังนั้น 3/15
   // Legacy
   'gpt-4o':        { input: 2.5, output: 10.0 },  // ราคา grandfathered ปัจจุบัน (เดิมใส่ 5/15 ตกรุ่น)

@@ -79,7 +79,12 @@ function getStrategy(task) {
 
     case 'write':
       // Content Writing: ใช้ Claude -> GPT-4o
-      if (isClaudeAvailable()) chain.push('claude');
+      // ★ 15 ส.ค. 69 (เจ้าของเคาะหลังศึกดวล 2 รอบ: fable ชนะ 18/18 + 17-4): นักเขียนหลัก → claude-fable-5
+      //   ผ่าน token ใหม่ 'claude-write' (โซ่ถอยในตัว: fable → opus-4.8 → gpt เดิม) — แตะเฉพาะสายเขียน
+      //   case 'claude' เดิมคงไว้ทุกไบต์ให้ breakdown/ผู้ใช้อื่น (แผน Fable: ห้ามแก้ DEFAULT_WRITE_MODEL กลาง กันลาม fabricationGate)
+      //   ของเดิม: if (isClaudeAvailable()) chain.push('claude');
+      //   ถอยกลับระบบเดิมเป๊ะ: ตั้ง env CLAUDE_WRITE_MODEL=claude-opus-4-8 (primary=fallback → เรียกครั้งเดียวเหมือนเดิม)
+      if (isClaudeAvailable()) chain.push('claude-write');
       chain.push('gpt4o');
       defaultTemp = 0.7;
       defaultMaxTokens = 16000;
@@ -105,6 +110,29 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
   switch (modelName) {
     case 'claude':
       return callClaude({ prompt, temperature, maxTokens, systemPrompt, signal });
+
+    // ★ 15 ส.ค. 69 (เจ้าของเคาะ · แผน Fable+Sol · แล็บพิสูจน์ ladder 5 เคส): สายนักเขียนโดยเฉพาะ
+    //   fable-5 ล้ม (refusal/HTTP/เนื้อว่าง/JSON พัง — โยนเป็น error จาก callClaude ทั้งหมด) → ถอย opus-4.8
+    //   ไม่ถอยเมื่อ: งบเวลาหมด (signal.aborted — ชั้นนอกตัดแล้ว) · ตั้ง fallback=off · primary=fallback (โหมดถอยกลับระบบเดิม)
+    //   opus-4.8 ล้มซ้ำ → โยนต่อเข้าโซ่ chain เดิม (gpt4o) — โซ่ GPT เดิมไม่ถูกลบ (กฎ AGENTS.md)
+    case 'claude-write': {
+      // 🔴 ห้ามตั้ง env CLAUDE_WRITE_MODEL=claude-fable-5 เด็ดขาด (ปล่อยว่าง = fable อยู่แล้ว) —
+      //    env ตัวนี้ป้อน DEFAULT_WRITE_MODEL ใน claudeClient ด้วย ตั้งแล้วจะลาก fabricationGate + โซ่สำรอง breakdown
+      //    ไป fable ทั้งคู่ (จ่ายแพง 2 เท่าผิดจุด) — ใช้ env นี้ทางเดียว: =claude-opus-4-8 เพื่อถอยกลับระบบเดิม
+      // ★ ผู้ตรวจก่อน push: strip เครื่องหมายคำพูด/ช่องว่าง (กับดัก vercel env ใน memory) + off เทียบแบบไม่สนตัวพิมพ์
+      const _clean = (v) => String(v || '').trim().replace(/^["']|["']$/g, '');
+      const _primary = _clean(process.env.CLAUDE_WRITE_MODEL) || 'claude-fable-5';
+      const _fbRaw = _clean(process.env.CLAUDE_WRITE_FALLBACK_MODEL);
+      const _fb = _fbRaw || 'claude-opus-4-8';
+      try {
+        return await callClaude({ prompt, temperature, maxTokens, systemPrompt, signal, model: _primary });
+      } catch (wErr) {
+        const _noRetry = signal?.aborted || _fb.toLowerCase() === 'off' || _fb === _primary;
+        if (_noRetry) throw wErr;
+        console.warn(`[aiRouter] ⚠️ นักเขียนหลัก ${_primary} ล้ม (${String(wErr.message || '').slice(0, 90)}) → ถอยตัวสำรอง ${_fb}`);
+        return await callClaude({ prompt, temperature, maxTokens, systemPrompt, signal, model: _fb });
+      }
+    }
     case 'gemini':
       // callGemini มี timeout 15s ในตัว — ไม่ต้องส่ง signal
       return callGemini({ prompt, temperature, maxTokens });
