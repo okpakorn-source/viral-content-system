@@ -16,21 +16,28 @@ for /f %%h in ('git rev-parse --short HEAD') do echo     ✔ ตอนนี้�
 echo [2/5] ติดตั้ง dependencies ...
 call npm install --no-audit --no-fund
 
-echo [3/5] next build (เผื่อพอร์ตที่รันแบบ next start) ...
+echo [3/6] next build (.next สำหรับ :3000) ...
 call npx next build
 if errorlevel 1 (echo ❌ build ล้ม — ดู error ด้านบน & pause & exit /b 1)
 
-echo [4/5] ปิดโปรเซสเดิมบนพอร์ต 3000 ...
+echo [4/6] next build (.next-3900 สำหรับ :3900 — บ้านงานหนักถอดคลิป ตั้งแต่ 15 ส.ค. 69) ...
+set NEXT_DISTDIR=.next-3900
+call npx next build
+if errorlevel 1 (echo ❌ build .next-3900 ล้ม — ดู error ด้านบน & pause & exit /b 1)
+set NEXT_DISTDIR=
+
+echo [5/6] ปิดโปรเซสเดิม :3000 + :3900 (ตัว forever ของ 3900 จะเปิดคืนเองบน build ใหม่) ...
 for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":3000 " ^| findstr LISTENING') do taskkill /f /pid %%p >nul 2>&1
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":3900 " ^| findstr LISTENING') do taskkill /f /pid %%p >nul 2>&1
 
-echo [5/5] เปิดใหม่: dev server (3000) + clip-worker ...
+echo [6/6] เปิดใหม่: dev server (3000 — ข่าว/UI) + :3900 keeper (ถ้ายังไม่มี) + clip-worker (ชี้ :3900) ...
 start "clip-dev-3000" cmd /k npm run dev
-start "clip-worker" cmd /k node scripts\clip-worker.mjs
+tasklist /fi "windowtitle eq ACS YT Server 3900*" 2>nul | findstr cmd.exe >nul || start "ACS YT Server 3900" /min cmd /k scripts\acs-yt-server-forever.cmd
+start "clip-worker" cmd /k "set CLIP_WORKER_BASE=http://localhost:3900&& node scripts\clip-worker.mjs"
 
 echo.
-echo ✅ เสร็จ — เช็คโค้ดใหม่ (รอ dev ขึ้นสัก 10-20 วิ):
-echo    http://localhost:3000/api/clip-transcript/gemini-health?list=3.7   ต้องได้ "success":true
-echo.
-echo ⚠️ พอร์ต 3900: สคริปต์นี้ไม่แตะ (ไม่รู้คำสั่งเปิดเฉพาะของพอร์ตนั้น) —
-echo    ถ้าใช้อยู่ ให้ปิดหน้าต่างเดิมแล้วเปิดใหม่ตามวิธีที่ทีมใช้ (โค้ดที่ build แล้วเป็นรุ่นใหม่ให้อัตโนมัติ)
+echo ✅ เสร็จ — เช็ค (รอเซิร์ฟเวอร์ขึ้นสัก 10-30 วิ):
+echo    :3900 (สมองถอดคลิป)  http://localhost:3900/api/clip-transcript/gemini-health?list=3.7   ต้องได้ "success":true
+echo    :3000 (ข่าว/หน้าเว็บ) http://localhost:3000/api/clip-transcript/queue-list              ต้องได้ "success":true
+echo    (กติกา 15 ส.ค. 69: งานหนักถอดคลิปวิ่ง :3900 · :3000 เก็บไว้ให้ระบบข่าว · คิวแยกกันอยู่แล้ว clip-jobs กับ job_queue)
 pause
