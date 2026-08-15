@@ -1,8 +1,34 @@
 import { NextResponse } from 'next/server';
+import { Agent } from 'undici';
 import { getNextPendingJobs, updateJobStatus, cleanupStaleJobs } from '@/lib/services/queueService';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('QUEUE_WORKER');
+
+// ★ 15 ส.ค. 69 (Sol + Fable ตรวจตรงกัน · เจ้าของสั่งแก้): "fetch failed" ปลอมของงานข่าว
+//   ต้นตอ: fetch ที่ไม่ส่ง dispatcher โดน undici headersTimeout ค่าโรงงาน 300 วิ ตัดเอง —
+//   AbortSignal 900 วิ คุมไม่ถึงชั้นนี้ · ข่าวจริงวันนี้ p90 = 279 วิ (เกิน 300 แล้ว 1 เคส = ตัวที่ล้มพอดี)
+//   → งานเขียนเสร็จ+เข้าคลังจริง แต่ worker ตีตรา failed ทีมเห็น ❌ แล้วส่งซ้ำ = เจนซ้ำเปลืองเงิน
+//   แพตเทิร์นเดียวกับที่ระบบเคยแก้โรคนี้ที่ quick-test/route.js:16,75 (REF_LONG_AGENT)
+//   ⚠️ ใช้เฉพาะ "งานข่าว" — ปก/mineclip คงเส้นเดิมทุกไบต์ (มี self-report + เส้นผ่อนผันของตัวเอง)
+//   ถอยกลับ: QUEUE_FETCH_LONG_AGENT=0 (กลับพฤติกรรมเดิมทันที) · ปรับเพดาน: QUEUE_NEWS_DEADLINE_MS
+const NEWS_DEADLINE_MS = (() => {
+  const v = Number(String(process.env.QUEUE_NEWS_DEADLINE_MS || '').trim().replace(/^["']|["']$/g, ''));
+  // ต้องต่ำกว่า maxDuration=800s เสมอ (worker เองตายก่อน) — ของเดิมตั้ง 900s ซึ่งไม่มีวันได้ใช้จริง
+  return Number.isFinite(v) && v > 0 && v < 800_000 ? v : 770_000;
+})();
+let _newsAgent = null;
+function getNewsAgent() {
+  if (process.env.QUEUE_FETCH_LONG_AGENT === '0') return undefined; // สวิตช์ถอย = ไม่ส่ง dispatcher (พฤติกรรมเดิม)
+  if (!_newsAgent) {
+    _newsAgent = new Agent({
+      connectTimeout: 30_000,          // ต่อไม่ติดให้รู้เร็ว (Sol)
+      headersTimeout: NEWS_DEADLINE_MS + 20_000, // สูงกว่า deadline ของแอป แต่ยังต่ำกว่า maxDuration 800s
+      bodyTimeout: NEWS_DEADLINE_MS + 20_000,
+    });
+  }
+  return _newsAgent;
+}
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -73,22 +99,35 @@ export async function POST(req) {
         logger.info(`[Queue Worker] ▶️ Starting ${isCoverJob ? 'cover ' : ''}job ${job.id.slice(0, 8)}`);
 
         // AbortController: pipeline ใช้เวลา >12min — timeout ต้องมากกว่านั้น
-        // maxDuration=800 → ใช้ 900s (15 min) เป็น safety margin
+        // ★ 15 ส.ค. 69: งานข่าวใช้ deadline 770s (ต่ำกว่า maxDuration 800 — ของเดิม 900s ไม่มีวันได้ใช้จริง)
+        //   ปก/mineclip คงของเดิม 900s ทุกไบต์ · ของเดิม: setTimeout(() => controller.abort(), 900_000)
+        const _isNewsJob = !isCoverJob && !isMineClipJob;
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 900_000); // 900s = 15 min
+        const timeout = setTimeout(() => controller.abort(), _isNewsJob ? NEWS_DEADLINE_MS : 900_000);
 
-        const res = await fetch(processUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            // ชั้นกันที่สอง: ถ้าตั้ง bypass secret ไว้ใน Vercel จะทะลุ Deployment Protection ได้เสมอ (ไม่ตั้ง = header ไม่ถูกส่ง)
-            ...(process.env.VERCEL_AUTOMATION_BYPASS_SECRET ? { 'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET } : {}),
-          },
-          body: JSON.stringify({ ...job.payload, _queueJobId: job.id }),
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-        
+        let res;
+        try {
+          res = await fetch(processUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              // ชั้นกันที่สอง: ถ้าตั้ง bypass secret ไว้ใน Vercel จะทะลุ Deployment Protection ได้เสมอ (ไม่ตั้ง = header ไม่ถูกส่ง)
+              ...(process.env.VERCEL_AUTOMATION_BYPASS_SECRET ? { 'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET } : {}),
+            },
+            body: JSON.stringify({ ...job.payload, _queueJobId: job.id }),
+            signal: controller.signal,
+            // ★ dispatcher เฉพาะงานข่าว — ยกเพดาน transport ที่ AbortSignal คุมไม่ถึง (ปก/mineclip ไม่ส่ง = เส้นเดิม)
+            ...(_isNewsJob && getNewsAgent() ? { dispatcher: getNewsAgent() } : {}),
+          });
+        } catch (fetchErr) {
+          // ★ Sol: log ให้ชี้ตัวได้ทันทีว่าเป็นเพดาน transport หรือ deadline ของแอป (ห้าม log payload/secret)
+          logger.warn(`[Queue Worker] fetch ล้ม job=${job.id.slice(0, 8)} type=${job.payload?.jobType || 'news'} name=${fetchErr?.name} code=${fetchErr?.cause?.code || '-'}`);
+          throw fetchErr;
+        } finally {
+          // ★ Sol: ย้าย clearTimeout มา finally — เดิมถ้า fetch โยน error timer ค้าง
+          clearTimeout(timeout);
+        }
+
         // Guard: ถ้า HTTP error ให้ throw เข้า catch block เพื่อ mark failed
         if (!res.ok) {
           const errText = await res.text().catch(() => `HTTP ${res.status}`);
