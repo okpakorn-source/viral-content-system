@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { extractClipInsight, extractInsightFromVideoBuffer, extractMultiTopicInsight, extractMultiTopicFromVideoBuffer } from '@/lib/services/clipInsightService';
 import { createStore } from '@/lib/persistStore';
 import { getClipVideoQueue } from '@/lib/services/clipQueue';
-import { pickCasesToPurge, CLIP_CASE_KEEP } from '@/lib/services/clipArchive';
+import { pickCasesToPurge, CLIP_CASE_KEEP, archiveRowId, CLIP_ARCHIVE_STORE } from '@/lib/services/clipArchive';
 import { randomUUID } from 'crypto';
 
 // โหลดไฟล์วิดีโอ TikTok (tikwm) — ใช้บนคลาวด์ได้
@@ -360,8 +360,9 @@ export async function POST(request) {
         try {
           const { getSupabase, isSupabaseReady } = await import('@/lib/supabase');
           if (isSupabaseReady()) {
+            // 🔴 id ต้องไม่ซ้ำใบจริง — กติกา + เหตุผลอยู่ที่ clipArchive.archiveRowId (มีเทสคุม)
             const { error } = await getSupabase().from('store_items').insert({
-              id: caseId, store_name: 'clip-insights-archive', data: record,
+              id: archiveRowId(caseId), store_name: CLIP_ARCHIVE_STORE, data: record,
               created_at: record.createdAt, updated_at: record.createdAt,
             });
             if (error) console.warn('[ClipInsight] สำเนาถาวรคลาวด์ล้ม:', error.message?.slice(0, 60));

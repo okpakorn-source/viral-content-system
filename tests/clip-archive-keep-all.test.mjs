@@ -10,7 +10,7 @@
 // ============================================================
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pickCasesToPurge, CLIP_CASE_KEEP } from '../src/lib/services/clipArchive.js';
+import { pickCasesToPurge, CLIP_CASE_KEEP, archiveRowId, CLIP_ARCHIVE_STORE } from '../src/lib/services/clipArchive.js';
 
 const mk = (n, opts = {}) => Array.from({ length: n }, (_, i) => ({
   id: `case-${String(i).padStart(4, '0')}`,
@@ -47,6 +47,15 @@ test('ใบเก่าเป็นใบปักหมุดหมด → ล
 
 test('เพดานเริ่มต้นยังเป็น 400 (ถ้าเปลี่ยนต้องตั้งใจ ไม่ใช่หลุด)', () => {
   assert.equal(CLIP_CASE_KEEP, 400);
+});
+
+test('🔴 id สำเนาถาวรต้องไม่ซ้ำ id ใบจริง (ไม่งั้นชน primary key = เขียนไม่ติดเลย)', () => {
+  const caseId = 'c9e61407-0b4b-478c-9bfe-41a9d76663a5';
+  const rowId = archiveRowId(caseId);
+  assert.notEqual(rowId, caseId, 'ใช้ id เดียวกับใบจริง = duplicate key 23505 ทุกครั้ง (เจอจริง 15 ส.ค. 69)');
+  assert.ok(rowId.includes(caseId), 'ต้องยังอ้างกลับไปหาใบจริงได้');
+  assert.equal(rowId, 'arc-' + caseId);
+  assert.equal(CLIP_ARCHIVE_STORE, 'clip-insights-archive', 'ชื่อ store เปลี่ยน = สำเนาเก่าหาไม่เจอ ต้องตั้งใจเปลี่ยนเท่านั้น');
 });
 
 test('ข้อมูลเพี้ยน (null/ไม่มีวันที่) ต้องไม่ทำตัวตัดคลังพัง', () => {
