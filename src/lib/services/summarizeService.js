@@ -1637,7 +1637,8 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
 
       const coreStory = actualBreakdown.core_story || '';
       const keyPoints = actualBreakdown.key_points?.map(kp => kp.point || kp).join('\n') || '';
-      const quotes = actualBreakdown.quotes?.join(' | ') || '';
+      // 🔴 17 ส.ค. 69: แฝดสาย URL — บั๊ก quotes เป็นกล่อง เหมือน summarizeServiceText
+      const quotes = flattenList(actualBreakdown.quotes, ' | ');
       // 🔴 16 ส.ค. 69: แฝดสาย URL — บั๊กเดียวกับ summarizeServiceText (conflicts เป็นอ็อบเจกต์)
       //   แก้คู่กันไว้ กันวันข้างหน้าเปิดสาย URL แล้วบั๊กฟื้น · ถอย BREAKDOWN_LIST_FIX=0
       const conflicts = flattenList(actualBreakdown.conflicts, ', ');

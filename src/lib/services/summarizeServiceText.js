@@ -1777,7 +1777,10 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
 
       const coreStory = actualBreakdown.core_story || '';
       const keyPoints = actualBreakdown.key_points?.map(kp => kp.point || kp).join('\n') || '';
-      const quotes = actualBreakdown.quotes?.join(' | ') || '';
+      // 🔴 17 ส.ค. 69: quotes เป็นกล่องได้ {quote,speaker,context,emotional_impact} — เจอจริง 1/4 ใบ
+      //   เดิม .join() ⇒ "คำพูดสำคัญ: [object Object]" เข้าพรอมต์วางแผนของท่ออัตโนมัติ (ผู้ตรวจจับได้
+      //   จากข้อมูลผลรันของผมเอง หลังผมเพิ่งจดไว้ผิดว่า quotes เป็นสตริงเสมอ)
+      const quotes = flattenList(actualBreakdown.quotes, ' | ');
       // 🔴 16 ส.ค. 69: conflicts เป็นอาเรย์อ็อบเจกต์ → .join() เดิมได้ "[object Object]" ยัดเข้าพรอมต์วางแผน
       //   (AI บ่นเองใน log: "เนื้อข่าวระบุจุดขัดแย้งเป็น [object Object]") · ถอย BREAKDOWN_LIST_FIX=0
       const conflicts = flattenList(actualBreakdown.conflicts, ', ');

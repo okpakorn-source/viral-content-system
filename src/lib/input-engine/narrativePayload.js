@@ -159,7 +159,11 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
 
   // Quote Fragments (≤15 words, no surrounding context)
   const quoteFragments = (bd.quotes || []).map(q => {
-    const text = (typeof q === 'string' ? q : q.text || '').trim();
+    // 🔴 17 ส.ค. 69: ของจริงชื่อฟิลด์ 'quote' ไม่ใช่ 'text' ⇒ ประโยคเด็ดถูกทิ้งเงียบทุกใบที่ AI คืนเป็นกล่อง
+    //   ผลคือ quoteFragments ว่าง แล้วกฎ FACT SAFETY สั่งนักเขียนว่า "ใช้ได้เฉพาะ quoteFragments"
+    //   = นักเขียนถูกบอกว่าไม่มีคำพูดให้ใช้ ทั้งที่ข่าวมี (ผู้ตรวจอิสระจับได้)
+    //   จงใจอยู่นอกสวิตช์: ของเดิมทิ้งข้อมูลเปล่าๆ ไม่มีข้อดีให้ถอยกลับไปหา
+    const text = String(typeof q === 'string' ? q : (q?.quote || q?.text || '')).trim();
     const words = text.split(/\s+/);
     return words.length <= 15 ? text : words.slice(0, 15).join(' ') + '...';
   }).filter(q => q.length > 0);
@@ -175,7 +179,9 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
     // Merge people
     enriched.names.forEach(n => {
       const cleanName = n.replace(/^(นาย|นาง|น\.ส\.|นางสาว|พล\.ต\.อ\.|พล\.ต\.ท\.|พล\.ต\.ต\.|พ\.ต\.อ\.|ดร\.|อาจารย์|ครู|โค้ช)\s*/, '');
-      const exists = people.some(p => p.includes(cleanName) || cleanName.includes(p));
+      // 🔴 17 ส.ค. 69: เกราะแบบเดียวกับ timeline ข้างล่าง — ถ้า people เป็นกล่อง .includes จะ throw
+      //   = ข่าวล้มทั้งใบ และจุดนี้ยิงบ่อยกว่า (ข่าวไหนมีชื่อคนไทยก็เข้า) ต้องอยู่นอกสวิตช์เหมือนกัน
+      const exists = people.some(p => { const ps = String(p ?? ''); return ps.includes(cleanName) || cleanName.includes(ps); });
       if (!exists) {
         people.push(n);
       }

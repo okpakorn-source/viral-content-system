@@ -151,9 +151,13 @@ t('20 [ต่อสาย] ทั้งสองไฟล์ import flattenList 
 t('21 [ต่อสาย] flattenList ถูก export ออกจาก workflowEngine',
   wired(WFC, 'export function flattenList\\('));
 
-t('22 [ไม่ล้ำเส้น] emotional_hooks/quotes/pain_points ที่พิสูจน์แล้วว่าเป็นสตริง — ไม่ถูกแตะในขั้นเขียน',
+// 🔴 17 ส.ค. 69 — ข้อนี้เคยเขียนผิดจนกลายเป็น "ข้อสอบที่ล็อกบั๊กไว้" (ผู้ตรวจอิสระจับได้):
+//   เดิม assert ว่า `actualBreakdown.quotes?.join(` ต้องยังอยู่ = ใครไปแก้ quotes ให้ถูกจะเจอข้อสอบแดงแล้วถอย
+//   ความจริง: quotes เป็นกล่องได้ (เจอ 1/4 ใบ) — ตอนนี้ต่อสายเข้าตัวคลี่แล้ว
+//   บทเรียน: ก่อน assert ว่า "อันนี้ปลอดภัย ห้ามแตะ" ต้องมีข้อมูลจริงยืนยันก่อน ไม่ใช่เดาจากชื่อฟิลด์
+t('22 [ไม่ล้ำเส้น] emotional_hooks/pain_points ที่พิสูจน์แล้วว่าเป็นสตริงจริง 4/4 ใบ — ไม่ถูกแตะ',
   wired(TXTC, 'actualBreakdown\\.emotional_hooks\\.join\\(') &&
-  wired(TXTC, 'actualBreakdown\\.quotes\\?\\.join\\('));
+  !wired(TXTC, 'flattenList\\(actualBreakdown\\.pain_points'));
 
 t('23 [ไม่ล้ำเส้น] key_points ยังใช้ .map(kp => kp.point || kp) แบบเดิม ไม่ถูกเปลี่ยนรูป',
   wired(TXTC, 'key_points\\?\\.map\\(kp => kp\\.point \\|\\| kp\\)') &&
@@ -234,6 +238,57 @@ t('33 [กันล้ม] key_facts.dates เป็นกล่อง + ข่�
 
 t('32 [ค่าศูนย์] ฟิลด์ที่มีค่าเป็นเลข 0 ต้องไม่ถูกข้าม',
   withEnv(undefined, () => flattenList([{ point: 0, detail: 'ไม่ควรได้อันนี้' }]) === '0'));
+
+// ═══ ⑤ รอบผู้ตรวจรอบสอง — quotes เป็นกล่อง + รูที่ mutation ยังไม่ถูกจับ ═══
+// 🔴 quotes: เจอเป็นกล่อง {quote,speaker,context,emotional_impact} จริง 1 ใน 4 ใบ (out-live-tak-nuay.json)
+const REAL_QUOTES = [{ quote: 'ปรับแต่ไม่เปลี่ยน', speaker: 'หนุ่ย ธาดา', context: 'ยอมรับในเรื่องที่ผิด', emotional_impact: 'ประโยคสั้นที่มีแรงถกเถียงสูง' }];
+
+t('34 [quotes] กล่องคำพูดต้องคลี่ได้ และต้องเอา "ประโยค" ไม่ใช่คำวิจารณ์ของ AI',
+  withEnv(undefined, () => flattenList(REAL_QUOTES, ' | ') === 'ปรับแต่ไม่เปลี่ยน'));
+
+t('35 [ต่อสาย quotes] ทั้ง 3 จุดใช้ตัวคลี่ ไม่ใช่ .join() ดิบ (สาย TEXT / สาย URL / buildFullContext)',
+  wired(TXTC, "const quotes = flattenList\\(actualBreakdown\\.quotes") &&
+  wired(URLC, "const quotes = flattenList\\(actualBreakdown\\.quotes") &&
+  wired(WFC, 'flattenList\\(bd\\.quotes') &&
+  !wired(TXTC, 'actualBreakdown\\.quotes\\?\\.join\\(') && !wired(WFC, 'bd\\.quotes\\.join\\('));
+
+t('36 [ประโยคเด็ดต้องไม่หายเงียบ] ของจริงชื่อฟิลด์ quote ไม่ใช่ text — ต้องไปถึงนักเขียน',
+  withEnv(undefined, () => {
+    const p = buildPrompt({ ...REAL_BD, quotes: REAL_QUOTES }, BODY_WITH_DATE);
+    return p.includes('ปรับแต่ไม่เปลี่ยน') && !p.includes('[object Object]');
+  }));
+
+t('37 [กันล้ม people] key_facts.people เป็นกล่อง + ข่าวมีชื่อคนไทย → ต้องไม่ล้ม (ทั้งเปิดและปิดสวิตช์)',
+  [undefined, '0'].every((v) => withEnv(v, () => {
+    try {
+      buildPrompt({ ...REAL_BD, key_facts: { people: [{ name: 'อ้น ศรีพรรณ' }], dates: [], places: [] } },
+        'ครูสมชาย ใจดี เล่าว่า นางสาวมานี รักเรียน ดูแลกันมานาน');
+      return true;
+    } catch { return false; }
+  })));
+
+t('38 [กันล้ม quotes] quotes มี null ปนมา → ต้องไม่ล้ม',
+  withEnv(undefined, () => { try { buildPrompt({ ...REAL_BD, quotes: [null, 'ปกติ'] }, BODY_WITH_DATE); return true; } catch { return false; } }));
+
+// 🔴 3 ข้อนี้ปิดรูที่ผู้ตรวจพบว่า "ทุบแล้วข้อสอบยังเขียว" (M9/M11/M12)
+t('39 [ปิดรู M9] ลำดับคีย์: detail ต้องชนะ name/title/value — ใครสลับกลับต้องแดง',
+  withEnv(undefined, () => flattenList([{ name: 'อ้น', title: 'นักแสดง', detail: 'แก่นเรื่องที่ต้องใช้' }]) === 'แก่นเรื่องที่ต้องใช้'));
+
+t('40 [ปิดรู M12] ใบที่คลี่แล้วว่างต้องถูกคัดทิ้ง ไม่ทิ้งตัวคั่นเปล่าไว้ในพรอมต์',
+  withEnv(undefined, () => flattenList([{ conflict: 'ก' }, {}, { conflict: 'ข' }, { emotional_weight: {} }], ' | ') === 'ก | ข'));
+
+// ⚠️ ข้อนี้เขียนกว้างไปรอบแรกจนไปจับอีกฟังก์ชัน (VIRAL_SHORTLIST_K) ที่ใช้ console.log อย่างถูกต้องอยู่แล้ว
+//    ต้องผูกกับชื่อสวิตช์ให้ตรงตัว ไม่ใช่จับรูปแบบ if (!Number.isFinite(n)) ลอยๆ
+t('41 [ปิดรู M11] คำเตือนเพดานตัวอย่างครูต้องเตือนครั้งเดียวต่อโปรเซส (log ไม่รก)',
+  (() => {
+    const VF = stripComments(read('src/lib/services/viralFewshot.js'));
+    const warnOnce = (VF.match(/_warnOnce\(`\[ViralFewshot\] 📏 VIRAL_EXAMPLE_CHARS/g) || []).length;
+    const rawLog = (VF.match(/console\.log\(`\[ViralFewshot\] 📏 VIRAL_EXAMPLE_CHARS/g) || []).length;
+    return warnOnce === 3 && rawLog === 0;
+  })());
+
+t('42 [ตัดแล้วต้องส่งเสียง] เพดานจำนวนใบตัดของทิ้ง ต้องมี log ไม่ตัดเงียบ (บทเรียนเพดานครู 700)',
+  /เกินเพดาน \$\{_LIST_MAX\}/.test(WF) || /_LIST_MAX\} — ตัดทิ้ง/.test(WF));
 
 console.log(`\n${fail === 0 ? '🎉' : '🔴'} ผ่าน ${pass}/${pass + fail}`);
 process.exit(fail === 0 ? 0 : 1);

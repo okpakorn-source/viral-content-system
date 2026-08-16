@@ -70,15 +70,18 @@ export async function saveAnalysis(id, analysisResult, presetUsed) {
  *   ⇒ **แก่นดราม่าที่คมที่สุดของข่าวถูกทิ้งทุกใบ** เช่น "รักในวันแต่งงาน vs รักในวันพักฟื้น"
  *      และ "รักมากพออยู่ต่อ vs เจ็บมากพอควรถอย"
  * ช่องที่พังจริง (วัดจากผลเจนจริง 16 ส.ค.): `conflicts` (conflict/detail/...) · `best_sections` (section/why_strong)
- *   ส่วน quotes / pain_points / emotional_hooks เป็นสตริงอยู่แล้ว — ตัวนี้ปล่อยผ่านไม่แตะ
+ *   🔴 17 ส.ค. แก้ความจริงที่ผมเคยจดผิดตรงนี้ (ผู้ตรวจอิสระจับได้จากข้อมูลของผมเอง):
+ *   `quotes` **ก็เป็นกล่องได้** — เจอจริง 1 ใน 4 ใบ รูป {quote, speaker, context, emotional_impact}
+ *   (out-live-tak-nuay.json) ⇒ ต่อสายเข้าตัวคลี่แล้วเหมือนกัน และเติม 'quote' เข้า _LIST_KEYS
+ *   ส่วน pain_points / emotional_hooks เป็นสตริงจริงทั้ง 4/4 ใบ — ตัวนี้ปล่อยผ่านไม่แตะ
  * 🔴 ทำไมไม่แก้เป็น `.map(x => x.conflict)` ตรงๆ: ชื่อฟิลด์ต่างกันแต่ละช่อง (conflict / section / point)
  *   และ AI อาจเปลี่ยนรูปได้อีก → ตัวนี้เดาชื่อฟิลด์ให้เอง และถ้าไม่รู้จักก็คลี่ค่าทั้งอ็อบเจกต์แทนที่จะทิ้ง
  * ถอยกลับพฤติกรรมเดิม (ได้ [object Object] เหมือนเดิม): BREAKDOWN_LIST_FIX=0
  */
 // ลำดับคีย์ = ลำดับความน่าจะเป็น "หัวข้อของรายการ"
 //   detail มาก่อน name/title/value เพราะผู้ตรวจชี้ว่า {name:'อ้น', detail:'แก่นเรื่อง'} ควรได้แก่น ไม่ใช่ชื่อ
-const _LIST_KEYS = ['conflict', 'section', 'point', 'text', 'detail', 'name', 'title', 'value'];
-const _ITEM_MAX = 500;  // เพดานต่อใบ — กันพรอมต์บวมถ้าโมเดลคืนก้อนยาวผิดปกติ (ของจริง 50-150 ตัว)
+const _LIST_KEYS = ['conflict', 'section', 'quote', 'point', 'text', 'detail', 'name', 'title', 'value'];
+const _ITEM_MAX = 500;  // เพดานต่อใบ — กันพรอมต์บวมถ้าโมเดลคืนก้อนยาวผิดปกติ (ของจริงยาวสุด 53 ตัว)
 const _LIST_MAX = 20;   // เพดานจำนวนใบ — ของจริง 2-5 ใบ
 
 function _fixOn() {
@@ -103,6 +106,8 @@ export function flattenItem(x) {
 export function flattenList(arr, sep = ' | ') {
   if (!Array.isArray(arr)) return '';
   if (!_fixOn()) return arr.join(sep); // ถอยของเดิมเป๊ะ (รวมอาการ [object Object])
+  // 🔴 ตัดแล้วต้องส่งเสียง — บทเรียนเพดานตัวอย่างครู 700 ที่ตัดเงียบๆ อยู่เป็นเดือนโดยไม่มีใครรู้
+  if (arr.length > _LIST_MAX) console.log(`[flattenList] ✂️ รายการ ${arr.length} ใบ เกินเพดาน ${_LIST_MAX} — ตัดทิ้ง ${arr.length - _LIST_MAX} ใบ`);
   return arr.slice(0, _LIST_MAX).map(flattenItem).filter(Boolean).join(sep);
 }
 
@@ -134,7 +139,7 @@ export function buildFullContext(workflow) {
         ctx += `${i + 1}. ${kp.point || kp}: ${kp.detail || ''} [${kp.category || ''}, สำคัญ: ${kp.importance || '-'}, อารมณ์: ${kp.emotional_value || '-'}, ไวรัล: ${kp.viral_potential || '-'}]\n`;
       });
     }
-    if (bd.quotes?.length > 0) ctx += `\nคำพูดสำคัญ: ${bd.quotes.join(' | ')}\n`;
+    if (bd.quotes?.length > 0) ctx += `\nคำพูดสำคัญ: ${flattenList(bd.quotes, ' | ')}\n`;
     if (bd.conflicts?.length > 0) ctx += `จุดขัดแย้ง: ${flattenList(bd.conflicts, ' | ')}\n`;
     if (bd.pain_points?.length > 0) ctx += `Pain Points: ${flattenList(bd.pain_points, ' | ')}\n`;
     if (bd.best_sections?.length > 0) ctx += `ท่อนดีที่สุด: ${flattenList(bd.best_sections, ' | ')}\n`;
