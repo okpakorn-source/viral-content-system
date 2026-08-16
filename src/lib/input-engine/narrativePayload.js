@@ -11,8 +11,6 @@
  *  quoteFragments (≤15 words each)
  */
 
-import { flattenItem, flattenName, toArr } from '@/lib/workflow/workflowEngine'; // 16 ส.ค. 69: ตัวคลี่กล่อง->ข้อความ (ถอย BREAKDOWN_LIST_FIX=0)
-
 // ─── Fact Extraction Helper ────────────────────────────────────────
 
 export function extractHighDensityFacts(text) {
@@ -90,28 +88,17 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
   // Timeline
   const timeline = [];
   if (bd.key_facts?.dates?.length > 0) {
-    toArr(bd.key_facts.dates).forEach(d => timeline.push({ event: flattenItem(d), type: 'date' }));
+    bd.key_facts.dates.forEach(d => timeline.push({ event: d, type: 'date' }));
   }
   if (bd.best_sections?.length > 0) {
-    // 🔴 16 ส.ค. 69: best_sections เป็นอ็อบเจกต์ {section, why_strong} — เดิมยัดทั้งก้อนเป็น event
-    //   ⇒ พรอมต์ 'ขั้นเขียนจริง' (formatNarrativePayload) พิมพ์ออกมาเป็น [object Object] ทุกใบ
-    //   นี่คือเส้นทางจริงของท่อข่าว (summarizeServiceText: สร้างที่ 1259 -> เข้าพรอมต์ที่ 1401)
-    toArr(bd.best_sections).forEach(s => timeline.push({ event: flattenItem(s), type: 'key_moment' }));
+    bd.best_sections.forEach(s => timeline.push({ event: s, type: 'key_moment' }));
   }
 
   // People
-  // 🔴 17 ส.ค. 69 (ตาข่ายรวม): เลิกไล่ตบทีละช่อง — ผมเคลม "ช่องนี้ปลอดภัย" ผิดมา 3 รอบ
-  //   เกราะเดิมกันแค่ "ไม่ล้ม" แต่ยังปล่อย [object Object] เข้าพรอมต์ได้ = เปลี่ยนอาการดังเป็นอาการเงียบ
-  // ⚠️ แก้คำเคลมเกินจริงรอบก่อน (ผู้ตรวจจับได้): **ยังไม่ใช่ทุกช่อง**
-  //   ผ่านตัวคลี่แล้ว: conflicts · best_sections · quotes · pain_points · people · places · numbers · dates
-  //   ยังดิบอยู่ (วัดจากของจริง 140 ชุดทั้งเครื่อง = เป็นกล่อง 0%): key_points[].point ·
-  //     possible_angles[].angle_name · emotional_hooks (ประกาศยกเว้นไว้ที่บรรทัดล่าง) ·
-  //     blueprint.emotional_timeline/bridges — มีเกราะกันล้มแล้ว แต่ยังปล่อยขยะได้ถ้าโมเดลเปลี่ยนรูป
-  const people = toArr(bd.key_facts?.people).map(flattenName).filter(Boolean);
+  const people = bd.key_facts?.people || [];
 
   // Conflicts
-  // 🔴 16 ส.ค. 69: conflicts เป็นอ็อบเจกต์ {conflict, detail, emotional_weight} — เดิมคัดลอกดิบมาทั้งก้อน
-  const conflicts = toArr(bd.conflicts).map(flattenItem).filter(Boolean);
+  const conflicts = [...(bd.conflicts || [])];
   if (bd.conflict_point && !conflicts.includes(bd.conflict_point)) {
     conflicts.unshift(bd.conflict_point);
   }
@@ -138,10 +125,10 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
   // Background Knowledge
   const backgroundKnowledge = [];
   if (bd.key_facts?.numbers?.length > 0) {
-    toArr(bd.key_facts.numbers).forEach(n => backgroundKnowledge.push({ type: 'statistic', data: flattenItem(n) }));
+    bd.key_facts.numbers.forEach(n => backgroundKnowledge.push({ type: 'statistic', data: n }));
   }
   if (bd.key_facts?.places?.length > 0) {
-    toArr(bd.key_facts.places).forEach(p => backgroundKnowledge.push({ type: 'location', data: flattenName(p) }));
+    bd.key_facts.places.forEach(p => backgroundKnowledge.push({ type: 'location', data: p }));
   }
 
   // Emotional Blueprint
@@ -165,22 +152,15 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
     : '';
 
   // Quote Fragments (≤15 words, no surrounding context)
-  const quoteFragments = toArr(bd.quotes).map(q => {
-    // 🔴 17 ส.ค. 69: ของจริงชื่อฟิลด์ 'quote' ไม่ใช่ 'text' ⇒ ประโยคเด็ดถูกทิ้งเงียบทุกใบที่ AI คืนเป็นกล่อง
-    //   ผลคือ quoteFragments ว่าง แล้วกฎ FACT SAFETY สั่งนักเขียนว่า "ใช้ได้เฉพาะ quoteFragments"
-    //   = นักเขียนถูกบอกว่าไม่มีคำพูดให้ใช้ ทั้งที่ข่าวมี (ผู้ตรวจอิสระจับได้)
-    //   จงใจอยู่นอกสวิตช์: ของเดิมทิ้งข้อมูลเปล่าๆ ไม่มีข้อดีให้ถอยกลับไปหา
-    const text = String(typeof q === 'string' ? q : (q?.quote || q?.content || q?.text || '')).trim();
+  const quoteFragments = (bd.quotes || []).map(q => {
+    const text = (typeof q === 'string' ? q : q.text || '').trim();
     const words = text.split(/\s+/);
     return words.length <= 15 ? text : words.slice(0, 15).join(' ') + '...';
   }).filter(q => q.length > 0);
 
   // Emotional hooks + pain points
   const emotionalHooks = bd.emotional_hooks || [];
-  // 🔴 17 ส.ค. 69: pain_points ก็เป็นกล่องได้ {pain_point/pain, detail, why_it_hits} — วัดจากตัวอย่างจริง 26 ชุด เจอ 6 ชุด (23%)
-  //   เดิมยัดกล่องดิบเข้าพรอมต์นักเขียนที่บรรทัด ~338 ⇒ "😢 Pain Points: [object Object]"
-  //   ผมเคยจดไว้ว่าช่องนี้ปลอดภัย และเขียนข้อสอบยืนยันด้วย — ผิดทั้งคู่ เพราะตอนนั้นดูข้อมูลแค่ 4 ชุด
-  const painPoints = toArr(bd.pain_points).map(flattenItem).filter(Boolean);
+  const painPoints = bd.pain_points || [];
 
   // Merge high density facts if rawNewsBody is available
   if (rawNewsBody && rawNewsBody.length > 20) {
@@ -189,10 +169,7 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
     // Merge people
     enriched.names.forEach(n => {
       const cleanName = n.replace(/^(นาย|นาง|น\.ส\.|นางสาว|พล\.ต\.อ\.|พล\.ต\.ท\.|พล\.ต\.ต\.|พ\.ต\.อ\.|ดร\.|อาจารย์|ครู|โค้ช)\s*/, '');
-      // 🔴 17 ส.ค. 69: เกราะกันล้ม — ⚠️ ผู้ตรวจชี้ว่าตอนนี้เป็น "เกราะสำรอง" แล้ว ไม่ใช่เกราะหลัก
-      //   เพราะ people ผ่าน .map(flattenName) ข้างบนจึงเป็นสตริงเสมอ .includes ล้มไม่ได้อีก
-      //   เก็บไว้เพราะราคาถูกและกันกรณีที่ใครแก้ต้นทางแล้วลืมจุดนี้ — อย่านึกว่ามันยังทำงานอยู่
-      const exists = people.some(p => { const ps = String(p ?? ''); return ps.includes(cleanName) || cleanName.includes(ps); });
+      const exists = people.some(p => p.includes(cleanName) || cleanName.includes(p));
       if (!exists) {
         people.push(n);
       }
@@ -200,9 +177,7 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
 
     // Merge timeline dates
     enriched.dates.forEach(d => {
-      // 🔴 เกราะกันล้ม (ต้องอยู่นอกสวิตช์): ถ้า t.event ไม่ใช่สตริง .includes จะ throw -> ข่าวล้มทั้งใบ
-      //   ผู้ตรวจวัดแล้ว 16% ของข่าวในคลังมีวันที่ไทยในเนื้อ = เข้าเงื่อนไขจุดนี้
-      const exists = timeline.some(t => { const ev = String(t.event ?? ''); return ev.includes(d) || d.includes(ev); });
+      const exists = timeline.some(t => t.event.includes(d) || d.includes(t.event));
       if (!exists) {
         timeline.push({ event: d, type: 'extracted_date' });
       }
@@ -237,8 +212,7 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
     // If coreFacts is thin, enrich it with extracted quote highlights
     if (coreFacts.length < 3 && quoteFragments.length > 0) {
       quoteFragments.slice(0, 3).forEach((q) => {
-        // 🔴 เกราะกันล้ม (นอกสวิตช์): f.fact มาจาก key_points[].point ซึ่งเป็นกล่องได้ ⇒ .includes throw = ข่าวล้มทั้งใบ
-        const factExists = coreFacts.some(f => { const fx = String(f.fact ?? ''); return fx.includes(q) || q.includes(fx); });
+        const factExists = coreFacts.some(f => f.fact.includes(q) || q.includes(f.fact));
         if (!factExists) {
           coreFacts.push({
             fact: `ประเด็นสำคัญจากการพูดคุย: "${q}"`,

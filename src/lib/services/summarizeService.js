@@ -1,6 +1,6 @@
 import { callAI } from '@/lib/ai/openai';
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStore';
-import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, buildFullContext, validateOutput, flattenList } from '@/lib/workflow/workflowEngine';
+import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, buildFullContext, validateOutput } from '@/lib/workflow/workflowEngine';
 import { MasterAgent } from '@/lib/agents/masterAgent';
 import { callSmartAI, getAvailableModels } from '@/lib/ai/aiRouter';
 import { moderateVersions } from '@/lib/ai/moderationAgent';
@@ -1637,11 +1637,8 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
 
       const coreStory = actualBreakdown.core_story || '';
       const keyPoints = actualBreakdown.key_points?.map(kp => kp.point || kp).join('\n') || '';
-      // 🔴 17 ส.ค. 69: แฝดสาย URL — บั๊ก quotes เป็นกล่อง เหมือน summarizeServiceText
-      const quotes = flattenList(actualBreakdown.quotes, ' | ');
-      // 🔴 16 ส.ค. 69: แฝดสาย URL — บั๊กเดียวกับ summarizeServiceText (conflicts เป็นอ็อบเจกต์)
-      //   แก้คู่กันไว้ กันวันข้างหน้าเปิดสาย URL แล้วบั๊กฟื้น · ถอย BREAKDOWN_LIST_FIX=0
-      const conflicts = flattenList(actualBreakdown.conflicts, ', ');
+      const quotes = actualBreakdown.quotes?.join(' | ') || '';
+      const conflicts = actualBreakdown.conflicts?.join(', ') || '';
       const bestAngle = actualBreakdown.best_main_angle?.angle_name || '';
       const emotionalCore = actualBreakdown.main_emotional_core || '';
 
@@ -1845,9 +1842,8 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
       const hookInfo = actualBreakdown.emotional_hooks?.length ?
         `จุดที่คนจะอิน: ${actualBreakdown.emotional_hooks.join(' | ')}` : '';
 
-      // 🔴 16 ส.ค. 69: แฝดสาย URL — บั๊ก best_sections เดียวกับ summarizeServiceText
       const bestSections = actualBreakdown.best_sections?.length ?
-        `ท่อนที่ดีที่สุด: ${flattenList(actualBreakdown.best_sections, ' | ')}` : '';
+        `ท่อนที่ดีที่สุด: ${actualBreakdown.best_sections.join(' | ')}` : '';
 
       const langStrategy = actualBreakdown.language_strategy ?
         `กลยุทธ์ภาษา: เปิด=${actualBreakdown.language_strategy.opening_style || '-'}, เล่า=${actualBreakdown.language_strategy.storytelling_style || '-'}, จังหวะ=${actualBreakdown.language_strategy.emotional_pacing || '-'}, ปิด=${actualBreakdown.language_strategy.ending_style || '-'}` : '';
