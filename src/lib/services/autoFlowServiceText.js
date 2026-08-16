@@ -377,8 +377,19 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
       const count = versionsPerAngle;
       const focusAngle = `${angleObj.angle_name}: ${angleObj.description}`;
       // ★ DNA v3.3: พร้อมท์ที่จับคู่แน่น (score ≥60) มีเทคนิคเปิดจาก DNA จริง — ให้ชนะสูตรหมุนเวียนกลาง
+      // ★ 16 ส.ค. 69 (เจ้าของสั่ง "ปิดเส้นสำรองไปก่อนเลย ให้การ์ดมีอำนาจเต็ม"):
+      //   เหตุผลจากหลักฐาน — เกณฑ์ ≥60 ทิ้งเฉพาะ "คำสั่งเปิดเรื่อง" ของการ์ด แต่ระบบยังใช้
+      //   โครง/โทน/ข้อห้าม/promptText ของการ์ดใบเดิมเต็มรูปแบบ (REF_WEIGHT_BY_MATCH ปิดอยู่)
+      //   = เชื่อการ์ดทุกอย่างยกเว้นบรรทัดเดียว แล้วเอาสูตรกลางที่ไม่รู้จักข่าวนี้มาแทน
+      //   เทียบของจริง 3 ฉบับที่เคยตกเส้นสำรอง: คำสั่งของการ์ดพูดถึงเนื้อข่าวจริงและมีเกราะ 2 ชั้น
+      //   (กันฝืน + ตัวแปลง "ตัวเลขผูกประโยค") ส่วนสูตรกลางลอยๆ ไม่มีเกราะเลย
+      //   ตรวจแล้ว: การ์ดทั้ง 201/201 ใบมี hookStyle ครบ → ปิดแล้วไม่มีฉบับไหนไร้คำสั่ง
+      //   ถอยกลับพฤติกรรมเดิม (เกณฑ์ 60 + สูตรหมุน 4 แบบ): OPENING_FALLBACK_OFF=0
+      const _fallbackOff = String(process.env.OPENING_FALLBACK_OFF || '').trim().toLowerCase() !== '0';
       const _ap = anglePrompts[index];
-      const _promptHook = (_ap && Number(_ap._matchScore) >= 60 && _ap.hookStyle) ? String(_ap.hookStyle) : null;
+      const _promptHook = _fallbackOff
+        ? (_ap?.hookStyle ? String(_ap.hookStyle) : null)
+        : ((_ap && Number(_ap._matchScore) >= 60 && _ap.hookStyle) ? String(_ap.hookStyle) : null);
       // ★ 16 ก.ค. 69 (B5): เพิ่ม guard "ห้ามฝืน" — hookStyle เช่น "ตัวเลขผูกประโยค" เคยกดดันโมเดล
       //   ให้แต่งตัวเลข/นับสิ่งของเอง (เคสจริง: นับพระเป็น "หนึ่งชุด") แบบเดียวกับ guard ที่ exampleHooks มีอยู่แล้ว
       // ★ 16 ส.ค. 69 (เจ้าของสั่งทดลอง 3 วิธี): แก้ปัญหา "ตัวเลขผูกประโยค" ทำภาษาฝืน
@@ -400,10 +411,14 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         : '';
       const _openingStyle = _hookText
         ? `${_hookText} — ตามเทคนิคเปิดของพร้อมท์ที่จับคู่ ห้ามขึ้นต้นด้วยวันที่ (⚠️ถ้าข่าวไม่มีองค์ประกอบตามสไตล์นี้จริง เช่น ไม่มีตัวเลขเด่น — ห้ามฝืน ห้ามแต่งตัวเลขหรือนับสิ่งของเอง ให้เปิดด้วยภาพเหตุการณ์จริงแทน)${_guardA}`
-        : OPENING_STYLES[index % OPENING_STYLES.length];
+        // ตาข่ายสุดท้าย: ใช้เมื่อการ์ดไม่มี hookStyle เท่านั้น (ตรวจแล้วไม่เคยเกิด — 201/201 ใบมีครบ)
+        : (_fallbackOff
+          ? 'เข้าเรื่องทันทีด้วยภาพการกระทำจริงของคนในข่าว ห้ามขึ้นต้นด้วยวันที่หรือตัวเลขลอย'
+          : OPENING_STYLES[index % OPENING_STYLES.length]);
       // C: เปลี่ยนคำนำจาก "บังคับ" เป็น "แนวทาง" — ที่เหลือเหมือนเดิมทุกตัวอักษร
       const _styleLabel = _hookMode === 'C' ? 'แนวทางเปิดเรื่องของเวอร์ชันนี้ (เป็นคำแนะนำ ไม่ใช่คำบังคับ — ถ้าเขียนแล้วภาษาไม่ลื่น ให้เลือกวิธีเปิดที่เป็นธรรมชาติกว่าได้เอง)' : 'สไตล์เปิดเรื่องบังคับของเวอร์ชันนี้';
-      if (_hookMode !== 'OFF') console.log(`[HookStyle] 🎣 โหมด ${_hookMode} | ${_styleLabel.slice(0, 30)}... | hook=${String(_openingStyle).slice(0, 45)}`);
+      // 🔎 ล็อกให้ไล่เคสพังย้อนหลังได้ (เจ้าของสั่ง "เจอเคสไหนพังค่อยมาไล่แก้") — เส้นทาง/การ์ด/คะแนน
+      if (_hookMode !== 'OFF') console.log(`[HookStyle] 🎣 โหมด ${_hookMode} | เส้นทาง=${_hookText ? 'การ์ด' : 'ตาข่าย'} | การ์ด="${String(_ap?.promptName || '-').slice(0, 40)}" | คะแนน=${_ap?._matchScore ?? '-'} | ${_styleLabel.slice(0, 20)}... | hook=${String(_openingStyle).slice(0, 60)}`);
       const writeAngle = `${focusAngle}\n${_styleLabel}: ${_openingStyle}`;
       
       // 1. Research for this angle
