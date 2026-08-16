@@ -48,6 +48,36 @@ export function classifyHttpError(status, provider) {
 // ─── Env Validation ────────────────────────────────────────────────
 
 /**
+ * ★ 16 ส.ค. 69 (เจ้าของสั่ง "Apify แก้ให้ตรง ใช้งานได้") — ตัวอ่านกุญแจกลางของฝั่ง provider
+ *
+ * ปัญหาที่แก้: บน Vercel ตั้งชื่อ `APIFY_API_KEY` แต่โค้ดทั้ง 13 จุดอ่าน `APIFY_API_TOKEN`
+ *   ⇒ กุญแจตัวนี้ "ตั้งไว้แต่ไม่เคยถูกใช้เลย" — ท่อ Apify (TikTok/Facebook) ตกไปใช้ตัวสำรองมาตลอด
+ * ทำไมแก้ที่ตัวอ่าน ไม่ใช่แก้ชื่อ 13 จุด หรือไปแก้ค่าบน Vercel:
+ *   · แก้ชื่อ 13 จุด = ใครตั้ง TOKEN ไว้อยู่แล้วจะพังทันที
+ *   · แก้บน Vercel ไม่ได้ — ค่าตั้งเป็น Sensitive อ่านค่าเดิมออกมาไม่ได้ (ก๊อปไปตั้งชื่อใหม่ไม่ได้)
+ *   · แก้ที่ตัวอ่าน = ตั้งชื่อไหนก็ติด และไม่ทำลายของเดิม (ชื่อหลักชนะก่อนเสมอ)
+ * พ่วงล้างรูปแบบให้ด้วย: ตัดช่องว่าง + ถอดเครื่องหมายคำพูดที่ `vercel env add` ชอบติดมา
+ *   (กุญแจที่ติดอัญประกาศ = ยิง API แล้ว 401 อยู่แล้ว การถอดออกมีแต่ทำให้ใช้ได้ ไม่ทำให้พัง)
+ */
+const ENV_ALIASES = {
+  APIFY_API_TOKEN: ['APIFY_API_KEY'],
+};
+export function readEnvKey(name) {
+  if (!name) return '';
+  const clean = (v) => String(v ?? '').trim().replace(/^["']|["']$/g, '');
+  const direct = clean(process.env[name]);
+  if (direct) return direct;
+  for (const alt of ENV_ALIASES[name] || []) {
+    const v = clean(process.env[alt]);
+    if (v) {
+      console.log(`[baseProvider] 🔑 ${name} ไม่ได้ตั้ง — ใช้ชื่อพ้อง ${alt} แทน`);
+      return v;
+    }
+  }
+  return '';
+}
+
+/**
  * ตรวจ env key ว่ามีหรือไม่
  * @param {string} envKey    — e.g. 'FIRECRAWL_API_KEY'
  * @param {string} provider  — e.g. 'firecrawl'
@@ -56,7 +86,7 @@ export function classifyHttpError(status, provider) {
 export function validateEnv(envKey, provider) {
   if (!envKey) return { available: true, value: null, masked: 'N/A (no key needed)' };
 
-  const value = process.env[envKey] || '';
+  const value = readEnvKey(envKey);
   const available = value.length > 0;
   const masked = available
     ? value.slice(0, 6) + '...' + value.slice(-4)
@@ -239,8 +269,8 @@ export async function runProviderChain(chain, context = '') {
   const startTime = Date.now();
 
   for (const { name, fn, envKey } of chain) {
-    // Skip if env not available
-    if (envKey && !process.env[envKey]) {
+    // Skip if env not available (ผ่านตัวอ่านกลาง — รองรับชื่อพ้อง เช่น APIFY_API_KEY)
+    if (envKey && !readEnvKey(envKey)) {
       errors.push({ provider: name, error: `${envKey} not set`, skipped: true });
       continue;
     }

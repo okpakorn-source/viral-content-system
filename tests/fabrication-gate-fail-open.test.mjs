@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 
+// 🔴 16 ส.ค. 69 — ตั้งแต่วันนี้ "ตัวผ่า" ปิดเป็นค่าตั้งต้นในโค้ด (เจ้าของสั่งปิดถาวร)
+//   ข้อสอบชุดนี้ตรวจ "พฤติกรรมภายในด่าน" จึงต้องเปิดด่านก่อน ไม่งั้นด่านข้ามทันทีแล้วทุกข้อจะเจอ undefined
+//   ⛔ ห้ามลบบรรทัดนี้ และห้ามลบข้อสอบชุดนี้ — มันคือตัวกันไม่ให้โค้ดที่ dormant อยู่ "เน่า" โดยไม่มีใครรู้
+process.env.FAB_GATE = '1';
+
 const sourceCode = readFileSync(new URL('../src/lib/correction/fabricationGate.js', import.meta.url), 'utf8');
 const runtimeStart = sourceCode.indexOf('const GATE_CHECK_SYS');
 assert.ok(runtimeStart >= 0, 'ต้องหา GATE_CHECK_SYS ใน fabricationGate จริงได้');

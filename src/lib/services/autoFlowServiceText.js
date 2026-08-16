@@ -3,6 +3,7 @@ import { transcribeTiktok } from '@/lib/services/tiktokService';
 import { transcribeYoutube } from '@/lib/services/youtubeService';
 import { transcribeMetaReel, isMetaVideoUrl } from '@/lib/services/metaReelsService';
 import { performResearch } from '@/lib/services/researchService';
+import { isNewsResearchOn } from '@/lib/utils/researchSwitch'; // 🔎 ใช้แยก log "ปิดอยู่" ออกจาก "ค้นแล้วไม่เจอ"
 import { performSummarize, getTopPrompts } from '@/lib/services/summarizeServiceText';
 import { smartResearch } from '@/lib/services/achievementResearch';
 import { logGeneration } from '@/lib/services/generationLogger';
@@ -259,6 +260,10 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     factPool = srResult;
     addLog('SmartResearch', `✅ พบ ${factPool.facts.length} ข้อเท็จจริงเกี่ยวกับ "${factPool.entityName || '?'}" (${factPool.duration || '?'}s)`);
     await logPipeline({ workflowId: _autoWorkflowId, step: 'smart-research', status: 'success', duration: (factPool.duration || 0) * 1000, detail: `${factPool.facts.length} facts for "${factPool.entityName}"` }).catch(() => {});
+  } else if (!isNewsResearchOn()) {
+    // ★ 16 ส.ค. 69 (ผู้ตรวจอิสระท้วง): ข้อความเดิมอ่านแล้วเหมือน "ค้นแล้วไม่เจอ"
+    //   ทั้งที่ความจริงคือ "ถูกปิดตามคำสั่ง" — คนสืบย้อนทีหลังจะหลงทางว่าระบบค้นล้มเหลว
+    addLog('SmartResearch', '⏭️ ปิดอยู่ตามคำสั่ง — ข่าวนี้ใช้เนื้อต้นฉบับอย่างเดียว (เปิดคืน: NEWS_RESEARCH=1)');
   } else {
     addLog('SmartResearch', '⚠️ ไม่พบข้อมูลเพียงพอ — ใช้ flow เดิม');
   }

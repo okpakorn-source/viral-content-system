@@ -15,6 +15,7 @@ import { createLogger } from '@/lib/logger';
 import { MODEL_FAST } from '@/lib/ai/modelConfig';
 import { tavilySearch, isTavilyAvailable } from '@/lib/services/tavilyService';
 import { extractIdentityAnchors } from '@/lib/services/researchVerifier';
+import { isNewsResearchOn } from '@/lib/utils/researchSwitch'; // 🔎 สวิตช์ปิดค้นข้อมูลเสริม (16 ส.ค. 69)
 
 const rlog = createLogger('SMART-RESEARCH');
 const SERPER_API_KEY = process.env.SERPER_API_KEY;
@@ -351,6 +352,15 @@ export async function smartResearch(newsData, breakdownData) {
   const startTime = Date.now();
   const newsTitle = newsData?.newsTitle || '';
   const newsBody = newsData?.newsBody || '';
+
+  // 🔎 ประตูสวิตช์รีเสิร์ช (16 ส.ค. 69) — ตัวนี้คือคนสร้างบล็อก "SMART RESEARCH FACTS"
+  //   ที่สั่งนักเขียนว่า "นำไปเสริมในเนื้อหา" = ต้นทางของข้อมูลนอกต้นฉบับที่โผล่ในข่าว
+  //   คืน null = เส้นเดิมที่ระบบเดินอยู่แล้วเมื่อหา entity ไม่เจอ (บรรทัด ~364) → ปลายทางรับ null ได้อยู่แล้ว
+  //   🔴 ไม่ throw เด็ดขาด · ไม่เรียก AI แม้แต่ครั้งเดียว (ประหยัดเงินด้วย)
+  if (!isNewsResearchOn()) {
+    console.log('[Smart-Research] ⏭️ ปิดอยู่ — ข้ามการค้นข้อมูลเสริมทั้งดุ้น (เปิดคืนด้วย NEWS_RESEARCH=1)');
+    return null;
+  }
 
   try {
     rlog.start(`Smart Research for: "${newsTitle.slice(0, 50)}"`);

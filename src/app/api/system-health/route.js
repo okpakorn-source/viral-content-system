@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { isSupabaseReady } from '@/lib/supabase';
 import { createLogger } from '@/lib/logger';
+import { readEnvKey } from '@/lib/providers/baseProvider';
 
 const rlog = createLogger('SYSTEM-HEALTH');
 
@@ -61,8 +62,9 @@ export async function GET(request) {
 
   checks.apify = {
     label: 'Apify',
-    configured: Boolean(process.env.APIFY_API_TOKEN),
-    keyPrefix: maskKey(process.env.APIFY_API_TOKEN),
+    // ★ 16 ส.ค. 69: อ่านผ่านตัวกลาง — ไม่งั้นหน้าสุขภาพระบบรายงาน "ไม่มีกุญแจ" ทั้งที่ตั้งชื่อพ้องไว้ (APIFY_API_KEY)
+    configured: Boolean(readEnvKey('APIFY_API_TOKEN')),
+    keyPrefix: maskKey(readEnvKey('APIFY_API_TOKEN')),
     usedFor: 'TikTok + Facebook scraping',
     fallback: 'Built-in extractors',
   };

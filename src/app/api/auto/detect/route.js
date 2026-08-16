@@ -14,6 +14,7 @@
 import { NextResponse } from 'next/server';
 import { detectInputType } from '@/lib/input-engine/detector';
 import { routePipeline } from '@/lib/input-engine/router';
+import { readEnvKey } from '@/lib/providers/baseProvider';
 
 export async function POST(request) {
   const startTime = Date.now();
@@ -110,7 +111,8 @@ export async function GET() {
   const envCheck = {
     OPENAI_API_KEY:    Boolean(process.env.OPENAI_API_KEY),
     FIRECRAWL_API_KEY: Boolean(process.env.FIRECRAWL_API_KEY),
-    APIFY_API_TOKEN:   Boolean(process.env.APIFY_API_TOKEN),
+    // ★ 16 ส.ค. 69: ผ่านตัวอ่านกลาง — รองรับชื่อพ้อง APIFY_API_KEY ที่ตั้งไว้บน Vercel
+    APIFY_API_TOKEN:   Boolean(readEnvKey('APIFY_API_TOKEN')),
     YOUTUBE_API_KEY:   Boolean(process.env.YOUTUBE_API_KEY),
     JINA_API_KEY:      Boolean(process.env.JINA_API_KEY),
     // ★ 14 ส.ค. 69 (เจ้าของอนุมัติ · Sol DB-audit ข้อ 8 + backlog 4b): ถอด ASSEMBLYAI_API_KEY —

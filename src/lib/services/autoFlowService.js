@@ -3,6 +3,7 @@ import { transcribeTiktok } from '@/lib/services/tiktokService';
 import { transcribeYoutube } from '@/lib/services/youtubeService';
 import { transcribeMetaReel, isMetaVideoUrl } from '@/lib/services/metaReelsService';
 import { performResearch } from '@/lib/services/researchService';
+import { isNewsResearchOn } from '@/lib/utils/researchSwitch'; // 🔎 ใช้แยก log "ปิดอยู่" ออกจาก "ค้นแล้วไม่เจอ"
 import { performSummarize, getTopPrompts } from '@/lib/services/summarizeService';
 import { smartResearch } from '@/lib/services/achievementResearch';
 import { getSession } from '@/lib/auth';
@@ -277,6 +278,9 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
     factPool = srResult;
     addLog('SmartResearch', `✅ พบ ${factPool.facts.length} ข้อเท็จจริงเกี่ยวกับ "${factPool.entityName || '?'}" (${factPool.duration || '?'}s)`);
     await logPipeline({ workflowId: _autoWorkflowId, step: 'smart-research', status: 'success', duration: (factPool.duration || 0) * 1000, detail: `${factPool.facts.length} facts for "${factPool.entityName}"` }).catch(() => {});
+  } else if (!isNewsResearchOn()) {
+    // ★ 16 ส.ค. 69: แยก "ถูกปิดตามคำสั่ง" ออกจาก "ค้นแล้วไม่เจอ" (เหมือนสาย TEXT — ผู้ตรวจอิสระท้วง)
+    addLog('SmartResearch', '⏭️ ปิดอยู่ตามคำสั่ง — ข่าวนี้ใช้เนื้อต้นฉบับอย่างเดียว (เปิดคืน: NEWS_RESEARCH=1)');
   } else {
     addLog('SmartResearch', '⚠️ ไม่พบข้อมูลเพียงพอ — ใช้ flow เดิม');
   }

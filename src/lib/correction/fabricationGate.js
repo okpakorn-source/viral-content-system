@@ -14,7 +14,14 @@
  *      ไม่ผ่าน = ย้อนกลับเนื้อเดิม (เลขที่นักเขียนแต่งเพิ่มเอง อนุญาตให้หายไปกับการผ่า)
  *
  * กติกาความปลอดภัย: ล้มขั้นไหน = ปล่อยเนื้อเดิมผ่าน (fail-open) ห้ามทำท่อพัง
- * ปิดได้: FAB_GATE=0
+ *
+ * 🔴 สถานะ 16 ส.ค. 69 — เจ้าของสั่ง "ตัวผ่าปิดเลย ไม่ใช้" (ถาวร ไม่ใช่ปิดชั่วคราว)
+ *    ⇒ ค่าเริ่มต้น "ปิด" อยู่ในโค้ด **ไม่พึ่ง env เลย** · เปิดคืน: FAB_GATE=1
+ *    ทำไมไม่ใช้วิธี "ตั้ง FAB_GATE=0 บน Vercel" อย่างเดียว (ผู้ตรวจ 2 ทีมชี้ตรงกัน):
+ *      · ตั้ง env แล้วต้อง redeploy ด้วย ถ้าลืม = ตัวผ่ายังกินเนื้อข่าวต่อโดยไม่มีใครรู้
+ *      · ค่าบน Vercel ตั้งเป็น Sensitive → อ่านย้อนไม่ได้ ตรวจสอบไม่ได้ว่าตั้งถูกไหม
+ *      · ถ้าใครเผลอลบ env ทิ้ง ตัวผ่าจะกลับมาทำงานเงียบๆ
+ *    ⇒ ให้ "ปิด" เป็นค่าตั้งต้นของโค้ด = ปิดเหมือนกันทุกที่ (Vercel/เครื่องทีม/เครื่องพัฒนา) โดยไม่ต้องตั้งอะไร
  */
 
 import { callAI } from '@/lib/ai/openai';
@@ -24,6 +31,16 @@ import { MODEL_FAST_CHEAP } from '@/lib/ai/modelConfig';
 // system prompt สั้น — กัน callClaude/callAI ยัดกฎเขียนข่าวก้อนใหญ่ที่ไม่เกี่ยวกับงานตรวจ (บทเรียน Opus NOTE-6)
 const GATE_CHECK_SYS = 'คุณคือผู้ตรวจข้อเท็จจริงของกองบรรณาธิการ เทียบบทความกับต้นฉบับอย่างเข้มงวด ตอบเป็น JSON เท่านั้น';
 const GATE_FIX_SYS = 'คุณคือบรรณาธิการแก้บทความแบบศัลยกรรม แก้เฉพาะจุดที่สั่ง ห้ามแตะส่วนอื่น ตอบเป็น JSON เท่านั้น';
+
+// 🔴 16 ส.ค. 69: ตัวตัดสินว่าด่านนี้เปิดหรือปิด — **ปิดเป็นค่าตั้งต้น** เปิดได้ทางเดียวคือตั้ง FAB_GATE เป็นค่าเปิด
+//   ทางเปิดคืนต้องทนรูปแบบค่าทุกแบบ ไม่งั้นวันหน้าตั้ง FAB_GATE="1" ผ่าน `vercel env add` (ที่ติดอัญประกาศมา)
+//   แล้วปลุกไม่ขึ้น = ด่านนี้กลายเป็นโค้ดตายจริงๆ ปลุกไม่ได้อีกเลย
+//   ⚠️ ตำแหน่งวางสำคัญ: ต้องอยู่ "ใต้ GATE_FIX_SYS" เพราะ tests/fabrication-gate-fail-open.test.mjs
+//      ตัดซอร์สด้วย indexOf('const GATE_CHECK_SYS') แล้วโยนเข้า new Function — วางเหนือบรรทัดนั้นจะถูกตัดทิ้ง
+function isFabGateEnabled() {
+  const raw = String(process.env.FAB_GATE ?? '').trim().replace(/^["']+|["']+$/g, '').trim().toLowerCase();
+  return raw === '1' || raw === 'on' || raw === 'true' || raw === 'yes';
+}
 
 // ขั้น 2: ทวนด้วยโค้ด — คำเนื้อหา (ยาว ≥3 ตัวอักษร) ของข้อความผู้ต้องสงสัย โผล่ในต้นฉบับ ≥60% = น่าจะมีจริง
 function codeVerifyInSource(source, claim) {
@@ -45,7 +62,14 @@ function codeVerifyInSource(source, claim) {
  */
 export async function fabricationGate(content, newsBody, researchFacts = null) {
   const debug = { checked: false, sus: 0, confirmed: 0, fixed: false };
-  if (process.env.FAB_GATE === '0') return { content, debug: { ...debug, skipped: 'FAB_GATE=0' } };
+  if (!isFabGateEnabled()) {
+    console.log('  [FabGate] ⏭️ ปิดอยู่ตามคำสั่งเจ้าของ (ค่าตั้งต้นในโค้ด=ปิด · เปิดคืนด้วย FAB_GATE=1) — ปล่อยเนื้อเดิมผ่าน');
+    // ป้ายเหตุผล: ใช้ 'FAB_GATE_OFF' ไม่ใช่ 'FAB_GATE=0' เดิม
+    //   เพราะตั้งแต่ 16 ส.ค. 69 การข้ามด่านมาจาก "ค่าตั้งต้นในโค้ด" ไม่ใช่ "มีคนตั้ง env = 0"
+    //   ถ้ายังเขียน FAB_GATE=0 คนรุ่นหลังจะไปตามหา env ที่ไม่มีอยู่จริงแล้วสรุปผิด
+    //   (ค้นย้อนหลังยังหาเจอทั้งของเก่าและใหม่ด้วยคำว่า "FAB_GATE" — ข้อมูลเก่าใน job_queue ไม่หาย)
+    return { content, debug: { ...debug, skipped: 'FAB_GATE_OFF' } };
+  }
   // ★ ผู้ตรวจ #2: แคปต้นฉบับก่อนต่อ facts — ไม่งั้น facts อยู่ท้ายแล้วถูก slice ของพรอมต์ตัดทิ้งเงียบๆ (no-op)
   const source = String(newsBody || '').slice(0, 5000)
     + (researchFacts ? '\n\n[ข้อเท็จจริงจากการรีเสิร์ชที่ยืนยันแล้ว — ถือเป็นความจริงอ้างอิงเช่นกัน]\n' + String(researchFacts).slice(0, 2500) : '');

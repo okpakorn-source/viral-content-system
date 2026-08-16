@@ -294,7 +294,9 @@ async function processNewsJob(job) {
             { at: 2,   done: 12,  icon: '📡', label: 'ดึงเนื้อหาจากเว็บ',                      detail: 'Firecrawl → Jina → Direct fetch',                                  model: null },
             { at: 12,  done: 26,  icon: '📰', label: 'สกัดเนื้อข่าว (AI)',                     detail: 'สกัด newsTitle + newsBody + category',                             model: 'Gemini 2.0 Flash' },
             { at: 26,  done: 68,  icon: '🔍', label: 'วิเคราะห์มุมข่าว (AI)',                  detail: 'core story + key points + possible angles',                       model: 'GPT-5.5' },
-            { at: 68,  done: 160, icon: '🧬', label: 'วาง Blueprint + ค้นหาข้อมูล Google (Parallel)', detail: 'Emotional Blueprint + Smart Research × 6 agents (Serper+Wikipedia)', model: 'GPT-5.5' },
+            // ★ 16 ส.ค. 69: ถอดคำว่า "ค้นหาข้อมูล Google" ออก — ค้นข้อมูลเสริมปิดเป็นค่าตั้งต้นแล้ว
+            //   ป้ายเดิมโฆษณาสิ่งที่ระบบไม่ได้ทำ = ทีมอ่านแล้วเข้าใจผิดว่าข่าวมีข้อมูลจากเน็ตประกอบ
+            { at: 68,  done: 160, icon: '🧬', label: 'วาง Blueprint โครงอารมณ์',                  detail: 'Emotional Blueprint (ค้นข้อมูลเสริมปิดอยู่ — ใช้เนื้อต้นฉบับอย่างเดียว)', model: 'GPT-5.5' },
             { at: 160, done: 320, icon: '⚡', label: 'Classic + Enhanced (Parallel)',           detail: '2 Angles รันพร้อมกัน — Claude Sonnet 4 × 2',                      model: 'Claude Sonnet 4' },
             { at: 320, done: 999, icon: '🚀', label: 'สรุปผลและบันทึก',                        detail: 'รวมผลลัพธ์ + บันทึกลงคลัง',                                        model: null },
           ];
@@ -405,14 +407,21 @@ async function processNewsJob(job) {
     }
 
     // === แสดงสรุป Research ในข้อความแยกหลังเวอร์ชันทั้งหมด ===
+    // ★ 16 ส.ค. 69 — ตั้งแต่วันนี้ "ค้นข้อมูลเสริม" ปิดเป็นค่าตั้งต้น (เจ้าของสั่ง) ⇒ ไม่มีแหล่งอ้างอิง = สภาวะปกติ
+    //   ของเดิมขึ้น '⚠️ ไม่มีข้อมูล' + 'Research Grade: ❌ Missing' → ทีมจะนึกว่าระบบล่มทุกข่าว ทั้งที่ตั้งใจปิด
+    //   (ผู้ตรวจอิสระท้วง: ป้ายแบบนี้ทำให้คนเลิกเชื่อป้ายเตือน แล้ววันที่ล่มจริงจะไม่มีใครสังเกต)
+    //   → เขียนตามความจริงแบบเป็นกลาง ไม่ตีตราว่าล้มเหลว
+    const _hasResearch = researchItems.length > 0;
     const researchSummaryEmbed = new EmbedBuilder()
-      .setColor('#3b82f6')
-      .setTitle('📚 แหล่งอ้างอิง Research')
-      .setDescription(researchText 
+      .setColor(_hasResearch ? '#3b82f6' : '#6b7280')
+      .setTitle(_hasResearch ? '📚 แหล่งอ้างอิง Research' : '📄 เขียนจากเนื้อต้นฉบับอย่างเดียว')
+      .setDescription(_hasResearch
         ? `${researchText}\n\n_ใช้ข้อมูลจาก ${researchItems.length} แหล่ง เพื่อเสริมข้อเท็จจริงในเนื้อหา_`
-        : '⚠️ ไม่มีข้อมูลจากการ Research (Serper) — เนื้อหาใช้ข้อมูลจากข่าวต้นฉบับอย่างเดียว')
-      .setFooter({ text: `Research Grade: ${researchItems.length >= 3 ? '✅ Strong' : researchItems.length >= 1 ? '⚠️ Partial' : '❌ Missing'}` });
-    
+        : '_ระบบค้นข้อมูลเสริมปิดอยู่ — ข่าวนี้เขียนจากเนื้อที่วางเข้ามาเท่านั้น ไม่มีข้อมูลจากภายนอกปน (ไม่ใช่ข้อผิดพลาด)_')
+      .setFooter({ text: _hasResearch
+        ? `Research Grade: ${researchItems.length >= 3 ? '✅ Strong' : '⚠️ Partial'}`
+        : 'แหล่งข้อมูล: ต้นฉบับ 100%' });
+
     await message.reply({ embeds: [researchSummaryEmbed] });
 
     // Display Simulated Comments if available

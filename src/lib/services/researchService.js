@@ -5,6 +5,7 @@ import { createLogger } from '@/lib/logger';
 import { MODEL_PRIMARY, MODEL_FAST } from '@/lib/ai/modelConfig';
 import { tavilySearch, isTavilyAvailable } from '@/lib/services/tavilyService';
 import { verifyResearchItems } from '@/lib/services/researchVerifier';
+import { isNewsResearchOn, RESEARCH_OFF_REASON } from '@/lib/utils/researchSwitch'; // 🔎 สวิตช์ปิดค้นข้อมูลเสริม (16 ส.ค. 69)
 
 const rlog = createLogger('RESEARCH-SERVICE');
 
@@ -246,6 +247,27 @@ ${snippetBlock}
 export async function performResearch({ newsBody, newsTitle, breakdownData, focusAngle, workflowId: wfId }) {
   const startTime = Date.now();
   const workflowId = wfId || ('research_' + Date.now());
+
+  // 🔎 ประตูสวิตช์รีเสิร์ช (16 ส.ค. 69) — ปิดเป็นค่าตั้งต้น เจ้าของสั่งปิดจริงทุกที่
+  //   คืนรูปแบบ "ค้นแล้วไม่พบผล" ตัวเดิมเป๊ะ (บรรทัด ~474) → ปลายทางเดินเส้นที่เทสมาแล้ว
+  //   researchItems ว่าง ⇒ autoFlowServiceText ตั้ง researchData = null เอง = นักเขียนไม่เห็นบล็อกรีเสิร์ชเลย
+  //   🔴 ไม่ throw เด็ดขาด — ปิดสวิตช์ต้องไม่ทำให้ท่อข่าวพัง
+  if (!isNewsResearchOn()) {
+    console.log('[Research-Service] ⏭️ ปิดอยู่ — ข้ามการค้นข้อมูลเสริมทั้งดุ้น (เปิดคืนด้วย NEWS_RESEARCH=1)');
+    await logPipeline({ workflowId, step: 'research-search', status: 'success', duration: 0, detail: 'skipped: NEWS_RESEARCH off' }).catch(() => {});
+    return {
+      items: [],
+      notFound: [],
+      keywords: [],
+      totalKeywords: 0,
+      foundCount: 0,
+      duration: 0,
+      keywordSource: 'skipped',
+      fallbackUsed: false,
+      skipped: 'NEWS_RESEARCH_OFF',
+      warning: RESEARCH_OFF_REASON,
+    };
+  }
 
   try {
     rlog.start('newsTitle: "' + (newsTitle || '').slice(0, 50) + '" | body: ' + (newsBody?.length || 0) + 'ch');
