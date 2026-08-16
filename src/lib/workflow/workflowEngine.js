@@ -84,27 +84,48 @@ export async function saveAnalysis(id, analysisResult, presetUsed) {
 //   'content' = quotes บางใบใช้ {type, content, speaker} · 'pain_point'/'pain' = pain_points สองรูป
 //   ถ้าไม่มีชื่อพวกนี้ ตัวคลี่จะตกไปเส้น fallback แล้วหอบคำวิจารณ์ของ AI (why_it_hits) เข้าพรอมต์ด้วย
 const _LIST_KEYS = ['conflict', 'section', 'quote', 'content', 'pain_point', 'pain', 'point', 'text', 'detail', 'name', 'title', 'value'];
-const _ITEM_MAX = 500;  // เพดานต่อใบ — กันพรอมต์บวมถ้าโมเดลคืนก้อนยาวผิดปกติ (ของจริงยาวสุด 53 ตัว)
-const _LIST_MAX = 20;   // เพดานจำนวนใบ — ของจริง 2-5 ใบ
+// 🔴 ช่อง "คน/สถานที่" ต้องใช้ลำดับคนละชุด — ผู้ตรวจชี้ว่า {name:'อ้น ศรีพรรณ', detail:'ภรรยาผู้ดูแลสามี'}
+//   ถ้าใช้ลำดับปกติจะได้คำอธิบายแทนชื่อ แล้วพรอมต์จะบอกนักเขียนว่า "บุคคลสำคัญ: ภรรยาผู้ดูแลสามี
+//   — ชื่อต้องสะกดตรง 100%" = อาการดังกลายเป็นอาการเงียบ ซึ่งคือโรคที่งานชุดนี้ตั้งใจรักษาพอดี
+const _NAME_KEYS = ['name', 'person', 'full_name', 'fullname', 'place', 'location', 'text', 'value', 'title'];
+const _ITEM_MAX = 500;  // เพดานต่อใบ — วัดจากของจริง 140 ชุดทั้งเครื่อง ยาวสุด 154 ตัว (คอมเมนต์เดิมเขียน 53 = วัดจาก 26 ชุด ตกยุคแล้ว)
+const _LIST_MAX = 20;   // เพดานจำนวนใบ — ของจริงมากสุด 18 ใบ (numbers)
 
 function _fixOn() {
   return String(process.env.BREAKDOWN_LIST_FIX ?? '').trim().replace(/^["']|["']$/g, '').trim() !== '0';
 }
 
-/** คลี่ "หนึ่งใบ" ให้เป็นข้อความ — ใช้เวลาที่ปลายทางต้องการอาเรย์ของสตริง ไม่ใช่สตริงเดียว */
-export function flattenItem(x) {
+/** 🔴 กันอาเรย์ปลอม — ถ้าโมเดลคืนกล่องแทนอาเรย์ `.map` จะ throw = ข่าวล้มทั้งใบ และปิดสวิตช์ก็ไม่ช่วย
+ *  (พังก่อนถึงตัวสวิตช์) · โค้ดเก่ารอดเพราะไม่ได้ .map · ผู้ตรวจชี้ว่านี่คือจุดเดียวที่ของใหม่แย่กว่าของเก่า */
+export function toArr(x) { return Array.isArray(x) ? x : []; }
+
+const _cut = (s, where) => {
+  const t = String(s);
+  if (t.length <= _ITEM_MAX) return t;
+  // ตัดแล้วต้องส่งเสียง — กฎเดียวกับเพดานจำนวนใบ (บทเรียนเพดานตัวอย่างครู 700 ที่ตัดเงียบอยู่เป็นเดือน)
+  console.log(`[flattenItem] ✂️ ${where} ยาว ${t.length} ตัวอักษร เกินเพดาน ${_ITEM_MAX} — ตัดทิ้ง ${t.length - _ITEM_MAX} ตัว`);
+  return t.slice(0, _ITEM_MAX);
+};
+
+/** คลี่ "หนึ่งใบ" ให้เป็นข้อความ — ใช้เวลาที่ปลายทางต้องการอาเรย์ของสตริง ไม่ใช่สตริงเดียว
+ *  opts.nameFirst = true สำหรับช่องคน/สถานที่ (เอาชื่อ ไม่ใช่คำอธิบาย) */
+export function flattenItem(x, opts) {
   if (!_fixOn()) return String(x); // ถอยของเดิมเป๊ะ (ได้ [object Object])
   if (x === null || x === undefined) return '';
-  if (typeof x !== 'object') return String(x).slice(0, _ITEM_MAX);
+  if (typeof x !== 'object') return _cut(x, 'ค่า');
+  const keys = opts?.nameFirst ? _NAME_KEYS : _LIST_KEYS;
   // 🔴 ต้องเช็ค typeof !== 'object' ด้วย — ไม่งั้น {conflict:{left,right}} จะได้ [object Object] ซ้อนชั้น (ผู้ตรวจจับได้)
-  for (const k of _LIST_KEYS) {
+  for (const k of keys) {
     const v = x[k];
-    if (v !== null && v !== undefined && typeof v !== 'object' && String(v).trim()) return String(v).slice(0, _ITEM_MAX);
+    if (v !== null && v !== undefined && typeof v !== 'object' && String(v).trim()) return _cut(v, `ฟิลด์ ${k}`);
   }
   // ไม่รู้จักชื่อฟิลด์ → คลี่ค่าที่เป็นข้อความทั้งหมดออกมา ดีกว่าทิ้งเป็น [object Object]
   const vals = Object.values(x).filter((v) => typeof v === 'string' && v.trim());
-  return vals.length ? vals.join(' — ').slice(0, _ITEM_MAX) : '';
+  return vals.length ? _cut(vals.join(' — '), 'ค่ารวม') : '';
 }
+
+/** ตัวช่วยสำหรับช่องคน/สถานที่ — เอาชื่อก่อนคำอธิบายเสมอ */
+export const flattenName = (x) => flattenItem(x, { nameFirst: true });
 
 export function flattenList(arr, sep = ' | ') {
   if (!Array.isArray(arr)) return '';

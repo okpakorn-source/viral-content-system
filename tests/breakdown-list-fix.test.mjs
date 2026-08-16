@@ -216,7 +216,7 @@ t('28 [สวิตช์ถอย] ปิดฟิกซ์ → ขยะกล
   withEnv('0', () => buildPrompt(REAL_BD, BODY_WITH_DATE).includes('[object Object]')));
 
 t('29 [ต่อสาย] แฝดสาย URL แก้ครบ 3 จุดเดียวกัน (best_sections / conflicts / เกราะกันล้ม)',
-  /event: flattenItem\(s\)/.test(NPU) && /\(bd\.conflicts \|\| \[\]\)\.map\(flattenItem\)/.test(NPU) &&
+  /event: flattenItem\(s\)/.test(NPU) && /toArr\(bd\.conflicts\)\.map\(flattenItem\)/.test(NPU) &&
   /String\(t\.event \?\? ''\)/.test(NPU) && !/t\.event\.includes\(/.test(stripComments(NPU)));
 
 t('30 [รูที่ผู้ตรวจเจาะ] กล่องซ้อนกล่อง {conflict:{...}} ต้องไม่ทะลุเป็น [object Object]',
@@ -336,8 +336,8 @@ t('46 [quotes รูปที่ 3] {type,content,speaker} — ประโย�
   }));
 
 t('47 [ต่อสาย pain_points] ตัวประกอบโครงเรื่องทั้งคู่ต้องคลี่ ไม่ยัดกล่องดิบ',
-  /\(bd\.pain_points \|\| \[\]\)\.map\(flattenItem\)/.test(NP) &&
-  /\(bd\.pain_points \|\| \[\]\)\.map\(flattenItem\)/.test(NPU));
+  /toArr\(bd\.pain_points\)\.map\(flattenItem\)/.test(NP) &&
+  /toArr\(bd\.pain_points\)\.map\(flattenItem\)/.test(NPU));
 
 t('48 [ต่อสาย MasterAgent] painPoints + quotes ใน MasterAgent ต้องคลี่ (เดิม q.text ที่ไม่มีอยู่จริง = undefined)',
   (() => {
@@ -355,10 +355,10 @@ t('49 [ชื่อฟิลด์ครบทุกรูปที่เจอ�
 t('50 [ฝาแฝด URL] quote fix + เกราะ people ต้องมีในสาย URL ด้วย (เดิมทุบแล้วข้อสอบเขียว)',
   /q\?\.quote \|\| q\?\.content \|\| q\?\.text/.test(NPU) &&
   /String\(p \?\? ''\)/.test(NPU) &&
-  /\(bd\.key_facts\?\.people \|\| \[\]\)\.map\(flattenItem\)/.test(NPU));
+  /toArr\(bd\.key_facts\?\.people\)\.map\(flattenName\)/.test(NPU));
 
 t('51 [ตาข่ายรวม] numbers/places ที่ยัดเข้า "ข้อมูลพื้นฐาน" ต้องผ่านตัวคลี่ทั้งสองไฟล์',
-  [NP, NPU].every((s) => /type: 'statistic', data: flattenItem\(n\)/.test(s) && /type: 'location', data: flattenItem\(p\)/.test(s)));
+  [NP, NPU].every((s) => /type: 'statistic', data: flattenItem\(n\)/.test(s) && /type: 'location', data: flattenName\(p\)/.test(s)));
 
 t('52 [ตาข่ายรวม] numbers/places เป็นกล่อง → พรอมต์ต้องไม่มีขยะ',
   withEnv(undefined, () => {
@@ -415,6 +415,52 @@ t('57 [ปิดรู filter] ของว่าง/null ในช่องต�
       !/\d+\.\s*\n/.test(p) && !/\d+\.\s*""/.test(p) &&                       // รายการเลข/คำพูดว่าง (💬 คำพูดสำคัญ)
       !p.includes('[object Object]');
   }));
+
+// ═══ ⑧ รอบสี่ — ปิดจุดที่ผู้ตรวจชี้ว่า "ของใหม่แย่กว่าของเก่า" + รูที่ทุบทะลุ ═══
+// 🔴 จุดเดียวที่การแก้ของผมทำให้แย่ลง: โมเดลคืน "กล่อง" แทน "อาเรย์" → .map จะ throw = ข่าวล้มทั้งใบ
+//    โค้ดเก่ารอดเพราะไม่ได้ .map · และปิดสวิตช์ก็ไม่ช่วย เพราะพังก่อนถึงตัวสวิตช์
+t('58 [ของใหม่ห้ามแย่กว่าของเก่า] key_facts/pain_points/conflicts เป็น "กล่อง" แทนอาเรย์ → ต้องไม่ล้ม ทั้ง 2 สถานะสวิตช์',
+  [undefined, '0'].every((v) => withEnv(v, () => {
+    try {
+      buildPrompt({ ...REAL_BD, pain_points: { pain: 'ไม่ใช่อาเรย์' }, conflicts: { conflict: 'ก' }, quotes: { quote: 'ข' },
+        key_facts: { people: { name: 'อ้น' }, dates: { date: '10 ส.ค.' }, places: { name: 'ศิริราช' }, numbers: { value: '19 ปี' } } }, BODY_WITH_DATE);
+      return true;
+    } catch { return false; }
+  })));
+
+t('59 [ชื่อคนต้องได้ชื่อ] {name, detail} ในช่องบุคคล ต้องได้ "ชื่อ" ไม่ใช่คำอธิบาย',
+  withEnv(undefined, () => {
+    const p = buildPrompt({ ...REAL_BD, key_facts: { people: [{ name: 'อ้น ศรีพรรณ', detail: 'ภรรยาผู้ดูแลสามี' }], dates: [], places: [] } }, BODY_WITH_DATE);
+    return p.includes('อ้น ศรีพรรณ') && !/บุคคลสำคัญ:[^\n]*ภรรยาผู้ดูแลสามี/.test(p);
+  }));
+
+t('60 [ชื่อคน ≠ จุดขัดแย้ง] ลำดับคีย์ของช่องคน ต้องแยกจากลำดับปกติ (ปกติ detail ชนะ · ช่องคน name ชนะ)',
+  withEnv(undefined, () => flattenList([{ name: 'อ้น', detail: 'แก่นเรื่อง' }]) === 'แก่นเรื่อง'));
+
+t('61 [dates] key_facts.dates เป็นกล่อง → พรอมต์ต้องไม่มีขยะ (เดิม assert แค่ "ไม่ล้ม")',
+  withEnv(undefined, () => {
+    const p = buildPrompt({ ...REAL_BD, key_facts: { people: [], dates: [{ date: '10 สิงหาคม 2569' }], places: [] } }, BODY_WITH_DATE);
+    return !p.includes('[object Object]') && p.includes('10 สิงหาคม 2569');
+  }));
+
+// 🔴 รูที่ผู้ตรวจทุบทะลุ: หั่น _ITEM_MAX ลงแล้วข้อสอบยังเขียว = ตัดเนื้อทิ้งเงียบไม่มีใครรู้
+t('62 [ปิดรูเพดานต่อใบ] ใบยาวเท่าของจริง (154 ตัว) ต้องผ่านครบ ไม่ถูกตัด',
+  withEnv(undefined, () => {
+    const long = 'ก'.repeat(154);
+    return flattenList([{ conflict: long }]) === long;
+  }));
+
+t('63 [ตัดแล้วต้องส่งเสียง] เพดานต่อใบตัดเมื่อไร ต้องมี log เหมือนเพดานจำนวนใบ',
+  (() => {
+    let said = 0; const real = console.log;
+    console.log = (m) => { if (String(m).includes('เกินเพดาน')) said++; };
+    try { flattenList([{ conflict: 'ก'.repeat(900) }]); } finally { console.log = real; }
+    return said === 1;
+  })());
+
+t('64 [ต่อสาย toArr] ทั้งสองไฟล์ต้องกันอาเรย์ปลอมทุกจุดที่ .map/.forEach',
+  [NP, NPU].every((s) => (s.match(/toArr\(/g) || []).length >= 8) &&
+  [NP, NPU].every((s) => !/\(bd\.key_facts\?\.people \|\| \[\]\)\.map/.test(s) && !/\(bd\.pain_points \|\| \[\]\)\.map/.test(s)));
 
 console.log(`\n${fail === 0 ? '🎉' : '🔴'} ผ่าน ${pass}/${pass + fail}`);
 process.exit(fail === 0 ? 0 : 1);

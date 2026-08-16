@@ -11,7 +11,7 @@
  *  quoteFragments (≤15 words each)
  */
 
-import { flattenItem } from '@/lib/workflow/workflowEngine'; // 16 ส.ค. 69: ตัวคลี่กล่อง->ข้อความ (ถอย BREAKDOWN_LIST_FIX=0)
+import { flattenItem, flattenName, toArr } from '@/lib/workflow/workflowEngine'; // 16 ส.ค. 69: ตัวคลี่กล่อง->ข้อความ (ถอย BREAKDOWN_LIST_FIX=0)
 
 // ─── Fact Extraction Helper ────────────────────────────────────────
 
@@ -90,24 +90,28 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
   // Timeline
   const timeline = [];
   if (bd.key_facts?.dates?.length > 0) {
-    bd.key_facts.dates.forEach(d => timeline.push({ event: d, type: 'date' }));
+    toArr(bd.key_facts.dates).forEach(d => timeline.push({ event: flattenItem(d), type: 'date' }));
   }
   if (bd.best_sections?.length > 0) {
     // 🔴 16 ส.ค. 69: best_sections เป็นอ็อบเจกต์ {section, why_strong} — เดิมยัดทั้งก้อนเป็น event
     //   ⇒ พรอมต์ 'ขั้นเขียนจริง' (formatNarrativePayload) พิมพ์ออกมาเป็น [object Object] ทุกใบ
     //   นี่คือเส้นทางจริงของท่อข่าว (summarizeServiceText: สร้างที่ 1259 -> เข้าพรอมต์ที่ 1401)
-    bd.best_sections.forEach(s => timeline.push({ event: flattenItem(s), type: 'key_moment' }));
+    toArr(bd.best_sections).forEach(s => timeline.push({ event: flattenItem(s), type: 'key_moment' }));
   }
 
   // People
-  // 🔴 17 ส.ค. 69 (ตาข่ายรวม): เลิกไล่ตบทีละช่อง — ผู้ตรวจชี้ว่าผมเคลม "ช่องนี้ปลอดภัย" ผิดมา 3 รอบ
-  //   ทุกช่องที่ยัดค่าดิบเข้าพรอมต์ ให้ผ่านตัวคลี่หมด ถึงวันนี้ยังไม่เคยเจอเป็นกล่องก็ตาม
+  // 🔴 17 ส.ค. 69 (ตาข่ายรวม): เลิกไล่ตบทีละช่อง — ผมเคลม "ช่องนี้ปลอดภัย" ผิดมา 3 รอบ
   //   เกราะเดิมกันแค่ "ไม่ล้ม" แต่ยังปล่อย [object Object] เข้าพรอมต์ได้ = เปลี่ยนอาการดังเป็นอาการเงียบ
-  const people = (bd.key_facts?.people || []).map(flattenItem).filter(Boolean);
+  // ⚠️ แก้คำเคลมเกินจริงรอบก่อน (ผู้ตรวจจับได้): **ยังไม่ใช่ทุกช่อง**
+  //   ผ่านตัวคลี่แล้ว: conflicts · best_sections · quotes · pain_points · people · places · numbers · dates
+  //   ยังดิบอยู่ (วัดจากของจริง 140 ชุดทั้งเครื่อง = เป็นกล่อง 0%): key_points[].point ·
+  //     possible_angles[].angle_name · emotional_hooks (ประกาศยกเว้นไว้ที่บรรทัดล่าง) ·
+  //     blueprint.emotional_timeline/bridges — มีเกราะกันล้มแล้ว แต่ยังปล่อยขยะได้ถ้าโมเดลเปลี่ยนรูป
+  const people = toArr(bd.key_facts?.people).map(flattenName).filter(Boolean);
 
   // Conflicts
   // 🔴 16 ส.ค. 69: conflicts เป็นอ็อบเจกต์ {conflict, detail, emotional_weight} — เดิมคัดลอกดิบมาทั้งก้อน
-  const conflicts = (bd.conflicts || []).map(flattenItem).filter(Boolean);
+  const conflicts = toArr(bd.conflicts).map(flattenItem).filter(Boolean);
   if (bd.conflict_point && !conflicts.includes(bd.conflict_point)) {
     conflicts.unshift(bd.conflict_point);
   }
@@ -134,10 +138,10 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
   // Background Knowledge
   const backgroundKnowledge = [];
   if (bd.key_facts?.numbers?.length > 0) {
-    bd.key_facts.numbers.forEach(n => backgroundKnowledge.push({ type: 'statistic', data: flattenItem(n) }));
+    toArr(bd.key_facts.numbers).forEach(n => backgroundKnowledge.push({ type: 'statistic', data: flattenItem(n) }));
   }
   if (bd.key_facts?.places?.length > 0) {
-    bd.key_facts.places.forEach(p => backgroundKnowledge.push({ type: 'location', data: flattenItem(p) }));
+    toArr(bd.key_facts.places).forEach(p => backgroundKnowledge.push({ type: 'location', data: flattenName(p) }));
   }
 
   // Emotional Blueprint
@@ -161,7 +165,7 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
     : '';
 
   // Quote Fragments (≤15 words, no surrounding context)
-  const quoteFragments = (bd.quotes || []).map(q => {
+  const quoteFragments = toArr(bd.quotes).map(q => {
     // 🔴 17 ส.ค. 69: ของจริงชื่อฟิลด์ 'quote' ไม่ใช่ 'text' ⇒ ประโยคเด็ดถูกทิ้งเงียบทุกใบที่ AI คืนเป็นกล่อง
     //   ผลคือ quoteFragments ว่าง แล้วกฎ FACT SAFETY สั่งนักเขียนว่า "ใช้ได้เฉพาะ quoteFragments"
     //   = นักเขียนถูกบอกว่าไม่มีคำพูดให้ใช้ ทั้งที่ข่าวมี (ผู้ตรวจอิสระจับได้)
@@ -176,7 +180,7 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
   // 🔴 17 ส.ค. 69: pain_points ก็เป็นกล่องได้ {pain_point/pain, detail, why_it_hits} — วัดจากตัวอย่างจริง 26 ชุด เจอ 6 ชุด (23%)
   //   เดิมยัดกล่องดิบเข้าพรอมต์นักเขียนที่บรรทัด ~338 ⇒ "😢 Pain Points: [object Object]"
   //   ผมเคยจดไว้ว่าช่องนี้ปลอดภัย และเขียนข้อสอบยืนยันด้วย — ผิดทั้งคู่ เพราะตอนนั้นดูข้อมูลแค่ 4 ชุด
-  const painPoints = (bd.pain_points || []).map(flattenItem).filter(Boolean);
+  const painPoints = toArr(bd.pain_points).map(flattenItem).filter(Boolean);
 
   // Merge high density facts if rawNewsBody is available
   if (rawNewsBody && rawNewsBody.length > 20) {
@@ -185,8 +189,9 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
     // Merge people
     enriched.names.forEach(n => {
       const cleanName = n.replace(/^(นาย|นาง|น\.ส\.|นางสาว|พล\.ต\.อ\.|พล\.ต\.ท\.|พล\.ต\.ต\.|พ\.ต\.อ\.|ดร\.|อาจารย์|ครู|โค้ช)\s*/, '');
-      // 🔴 17 ส.ค. 69: เกราะแบบเดียวกับ timeline ข้างล่าง — ถ้า people เป็นกล่อง .includes จะ throw
-      //   = ข่าวล้มทั้งใบ และจุดนี้ยิงบ่อยกว่า (ข่าวไหนมีชื่อคนไทยก็เข้า) ต้องอยู่นอกสวิตช์เหมือนกัน
+      // 🔴 17 ส.ค. 69: เกราะกันล้ม — ⚠️ ผู้ตรวจชี้ว่าตอนนี้เป็น "เกราะสำรอง" แล้ว ไม่ใช่เกราะหลัก
+      //   เพราะ people ผ่าน .map(flattenName) ข้างบนจึงเป็นสตริงเสมอ .includes ล้มไม่ได้อีก
+      //   เก็บไว้เพราะราคาถูกและกันกรณีที่ใครแก้ต้นทางแล้วลืมจุดนี้ — อย่านึกว่ามันยังทำงานอยู่
       const exists = people.some(p => { const ps = String(p ?? ''); return ps.includes(cleanName) || cleanName.includes(ps); });
       if (!exists) {
         people.push(n);
