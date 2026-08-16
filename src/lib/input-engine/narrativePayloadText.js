@@ -11,6 +11,8 @@
  *  quoteFragments (≤15 words each)
  */
 
+import { flattenItem } from '@/lib/workflow/workflowEngine'; // 16 ส.ค. 69: ตัวคลี่กล่อง->ข้อความ (ถอย BREAKDOWN_LIST_FIX=0)
+
 // ─── Fact Extraction Helper ────────────────────────────────────────
 
 export function extractHighDensityFacts(text) {
@@ -91,14 +93,18 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
     bd.key_facts.dates.forEach(d => timeline.push({ event: d, type: 'date' }));
   }
   if (bd.best_sections?.length > 0) {
-    bd.best_sections.forEach(s => timeline.push({ event: s, type: 'key_moment' }));
+    // 🔴 16 ส.ค. 69: best_sections เป็นอ็อบเจกต์ {section, why_strong} — เดิมยัดทั้งก้อนเป็น event
+    //   ⇒ พรอมต์ 'ขั้นเขียนจริง' (formatNarrativePayload) พิมพ์ออกมาเป็น [object Object] ทุกใบ
+    //   นี่คือเส้นทางจริงของท่อข่าว (summarizeServiceText: สร้างที่ 1259 -> เข้าพรอมต์ที่ 1401)
+    bd.best_sections.forEach(s => timeline.push({ event: flattenItem(s), type: 'key_moment' }));
   }
 
   // People
   const people = bd.key_facts?.people || [];
 
   // Conflicts
-  const conflicts = [...(bd.conflicts || [])];
+  // 🔴 16 ส.ค. 69: conflicts เป็นอ็อบเจกต์ {conflict, detail, emotional_weight} — เดิมคัดลอกดิบมาทั้งก้อน
+  const conflicts = (bd.conflicts || []).map(flattenItem).filter(Boolean);
   if (bd.conflict_point && !conflicts.includes(bd.conflict_point)) {
     conflicts.unshift(bd.conflict_point);
   }
@@ -177,7 +183,9 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
 
     // Merge timeline dates
     enriched.dates.forEach(d => {
-      const exists = timeline.some(t => t.event.includes(d) || d.includes(t.event));
+      // 🔴 เกราะกันล้ม (ต้องอยู่นอกสวิตช์): ถ้า t.event ไม่ใช่สตริง .includes จะ throw -> ข่าวล้มทั้งใบ
+      //   ผู้ตรวจวัดแล้ว 16% ของข่าวในคลังมีวันที่ไทยในเนื้อ = เข้าเงื่อนไขจุดนี้
+      const exists = timeline.some(t => { const ev = String(t.event ?? ''); return ev.includes(d) || d.includes(ev); });
       if (!exists) {
         timeline.push({ event: d, type: 'extracted_date' });
       }

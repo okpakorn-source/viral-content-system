@@ -13,7 +13,8 @@
 //      · "ปิดสวิตช์ = เส้นเดิมเป๊ะ" และ "ลำดับสวิตช์เก่าชนะ" — สองเรื่องนี้ต้องพิสูจน์ที่ getViralFewshotBlock
 //        ด้วยการเทียบกับ HEAD (ทำโดยผู้ตรวจอิสระ ไม่ได้อยู่ในไฟล์นี้)
 
-import { shortlistExamples, _hasWord } from '../src/lib/services/viralFewshot.js';
+import { readFileSync } from 'node:fs';
+import { shortlistExamples, _hasWord, exampleChars } from '../src/lib/services/viralFewshot.js';
 
 let pass = 0, fail = 0;
 const t = (name, cond) => { if (cond) { pass++; console.log('✅ ' + name); } else { fail++; console.log('❌ ' + name); } };
@@ -236,6 +237,52 @@ const mk = (id, cat, title) => ({ id, category: cat, title, content: 'x'.repeat(
   t('19 คะแนนเสมอกันเป๊ะ → เรียงตามรหัสตัวอักษร (aaa มาก่อน bbb)', fwd[0] === 'aaa');
   t('20 คะแนนเสมอ + สลับลำดับขาเข้า → ได้ลำดับเดิม (ถอดตัวตัดเสมอ = สลับตาม input ข้อนี้ต้องแดง)',
     fwd.join(',') === rev.join(','));
+}
+
+// ═══ ⑨ เพดานตัวอย่างครูไวรัล (16 ส.ค. 69 — เจ้าของสั่งขยายจาก 700 เป็น 1300 + ทำสวิตช์) ═══
+//   ⚠️ แก้ตัวเลขที่เคยเขียนผิดรอบแรก (ผู้ตรวจอิสระจับได้): รอบแรกผมวัดผิดคลัง
+//      ใช้ fb-posts-parsed.json (โพสต์เพจ 1,422 ใบ) ซึ่ง "ไม่ใช่" ครูที่ระบบหยิบไปสอนจริง
+//   ที่มาของจริง: วัดคลังครู viral_examples 202 ใบ → เพดาน 700 ตัดครูกลางเรื่อง 52.5%
+//      (700 → ครูครบทั้งใบ 47.5% · 1100 → 99.5% · 1300 → 100%) จึงเคาะ 1300
+//   และตรงที่ถูกตัดคือ "ประโยคจบ" ซึ่งเป็นท่าไม้ตายของโพสต์ไวรัล
+{
+  const withEnv = (v, fn) => {
+    const had = Object.prototype.hasOwnProperty.call(process.env, 'VIRAL_EXAMPLE_CHARS');
+    const old = process.env.VIRAL_EXAMPLE_CHARS;
+    if (v === undefined) delete process.env.VIRAL_EXAMPLE_CHARS; else process.env.VIRAL_EXAMPLE_CHARS = v;
+    const r = fn();
+    if (had) process.env.VIRAL_EXAMPLE_CHARS = old; else delete process.env.VIRAL_EXAMPLE_CHARS;
+    return r;
+  };
+  t('21 ไม่ตั้ง env → ได้ 1300 (ครูครบทั้งใบ 202/202 จากคลัง viral_examples · เทียบ 700 ได้ 47.5%)',
+    withEnv(undefined, () => exampleChars()) === 1300);
+  t('22 ถอยของเดิมได้: VIRAL_EXAMPLE_CHARS=700 → ได้ 700 เป๊ะ',
+    withEnv('700', () => exampleChars()) === 700);
+  // 🔴 ต้องใช้ค่าที่ "ไม่ใช่ค่าเริ่มต้น" เท่านั้น — ผู้ตรวจจับได้ว่าเดิมใช้ "1100" ซึ่งเท่ากับ default
+  //    ทำให้ถอดตัวถอดอัญประกาศทิ้งไปเลยข้อสอบก็ยังเขียว (false pass)
+  t('23 ทนค่าเพี้ยนแบบ vercel env add: "900" (อัญประกาศ) / \' 900 \' (เว้นวรรค) → ต้องได้ 900 ทั้งคู่',
+    withEnv('"900"', () => exampleChars()) === 900 && withEnv(' 900 ', () => exampleChars()) === 900);
+  t('24 ค่าอ่านไม่ออก → กลับค่าเริ่มต้น ไม่พัง',
+    withEnv('abc', () => exampleChars()) === 1300 && withEnv('', () => exampleChars()) === 1300);
+  t('25 พื้น/เพดานกันค่าสุดขั้ว (50→300 · 9999→3000)',
+    withEnv('50', () => exampleChars()) === 300 && withEnv('9999', () => exampleChars()) === 3000);
+  // 🔴 ข้อนี้ต้องแดงถ้าใครเผลอเปลี่ยนค่าเริ่มต้นกลับไป 700 โดยไม่ได้ตั้งใจ
+  t('26 ค่าเริ่มต้นต้องมากกว่าเพดานเก่า 700 เสมอ (ไม่งั้นครูกลับไปถูกตัดปากเหมือนเดิม)',
+    withEnv(undefined, () => exampleChars()) > 700);
+}
+
+// ═══ ⑩ ข้อสอบ "สายต่อถึงจริง" (wiring) — ผู้ตรวจอิสระจับได้ว่าชุด 21-26 ไม่กัดจุดนี้ ═══
+//   ปัญหา: ถ้าใครแก้ "จุดใช้งาน" กลับไป hardcode 700 หรือ 300 โดยที่ฟังก์ชัน+สวิตช์ยังอยู่ครบ
+//   ข้อสอบ 21-26 จะเขียว 100% ทั้งที่นักเขียนได้ครูถูกตัดเหมือนเดิม
+//   (นี่คือหลุมเดิมที่ไฟล์ viralFewshot.js เขียนเตือนตัวเองไว้: "เปิดสวิตช์แล้วเหมือนไม่มีอะไรเกิดขึ้น แต่ log บอกว่าทำงานอยู่")
+{
+  const src = readFileSync(new URL('../src/lib/services/viralFewshot.js', import.meta.url), 'utf8');
+  t('27 จุดใช้งานเรียก exampleChars() จริง ไม่ได้ hardcode ตัวเลข',
+    /const\s+_exCap\s*=\s*exampleChars\(\)/.test(src));
+  t('28 ตัวตัดตัวอย่างครูใช้ค่าจากสวิตช์ (full.slice(0, _exCap)) ไม่ใช่เลขตายตัว',
+    /\.slice\(0,\s*_exCap\)/.test(src));
+  t('29 ไม่มี slice(0, 700) หลงเหลือในไฟล์แล้ว (ของเดิมที่ต้องหายไป)',
+    !/slice\(0,\s*700\)/.test(src));
 }
 
 console.log(`\n${pass}/${pass + fail} ผ่าน — ${fail === 0 ? '✅ ด่านข้อสอบผ่าน' : '❌ ยังไม่ผ่าน'}`);

@@ -3,7 +3,7 @@ import { newsForStage } from '@/lib/utils/newsCap'; // 📖 สมุดเพ�
 import { MODEL_NEWS_ANALYSIS, MODEL_BREAKDOWN, MODEL_FAST_CHEAP, MODEL_HEAVY_FALLBACK , MODEL_BLUEPRINT } from '@/lib/ai/modelConfig';
 import { withTimeoutSignal } from '@/lib/utils/withTimeout'; // ★ 16 ก.ค. 69: withTimeout เดิมไม่ถูกใช้ในไฟล์นี้แล้ว (ทุกจุดย้ายไป withTimeoutSignal)
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStoreText';
-import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, buildFullContext, validateOutput } from '@/lib/workflow/workflowEngine';
+import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, buildFullContext, validateOutput, flattenList } from '@/lib/workflow/workflowEngine';
 import { MasterAgent } from '@/lib/agents/masterAgent';
 import { callSmartAI, getAvailableModels } from '@/lib/ai/aiRouter';
 import { moderateVersions } from '@/lib/ai/moderationAgent';
@@ -1778,7 +1778,9 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       const coreStory = actualBreakdown.core_story || '';
       const keyPoints = actualBreakdown.key_points?.map(kp => kp.point || kp).join('\n') || '';
       const quotes = actualBreakdown.quotes?.join(' | ') || '';
-      const conflicts = actualBreakdown.conflicts?.join(', ') || '';
+      // 🔴 16 ส.ค. 69: conflicts เป็นอาเรย์อ็อบเจกต์ → .join() เดิมได้ "[object Object]" ยัดเข้าพรอมต์วางแผน
+      //   (AI บ่นเองใน log: "เนื้อข่าวระบุจุดขัดแย้งเป็น [object Object]") · ถอย BREAKDOWN_LIST_FIX=0
+      const conflicts = flattenList(actualBreakdown.conflicts, ', ');
       const bestAngle = actualBreakdown.best_main_angle?.angle_name || '';
       const emotionalCore = actualBreakdown.main_emotional_core || '';
 
@@ -1988,8 +1990,13 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
       const hookInfo = actualBreakdown.emotional_hooks?.length ?
         `จุดที่คนจะอิน: ${actualBreakdown.emotional_hooks.join(' | ')}` : '';
 
+      // 🔴 16 ส.ค. 69: best_sections เป็นอาเรย์อ็อบเจกต์ {section, why_strong} เหมือน conflicts
+      // ⚠️ แก้คำอธิบายที่ผมเขียนผิดรอบแรก (ผู้ตรวจอิสระจับได้): จุดนี้อยู่ใน mode === 'mix'
+      //   = โหมด "ผสมมุมข่าว" ที่ผู้ใช้กดเอง — **ไม่ใช่ท่อข่าวอัตโนมัติ** (ท่ออัตโนมัติคือ mode analyze
+      //   ซึ่งส่ง breakdown เข้าพรอมต์ผ่าน formatNarrativePayload ทางเดียว → แก้ที่ narrativePayloadText.js)
+      //   (emotional_hooks ข้างบนเป็นสตริงจริง วัดจากผลรันแล้ว จึงไม่แตะ) · ถอย BREAKDOWN_LIST_FIX=0
       const bestSections = actualBreakdown.best_sections?.length ?
-        `ท่อนที่ดีที่สุด: ${actualBreakdown.best_sections.join(' | ')}` : '';
+        `ท่อนที่ดีที่สุด: ${flattenList(actualBreakdown.best_sections, ' | ')}` : '';
 
       const langStrategy = actualBreakdown.language_strategy ?
         `กลยุทธ์ภาษา: เปิด=${actualBreakdown.language_strategy.opening_style || '-'}, เล่า=${actualBreakdown.language_strategy.storytelling_style || '-'}, จังหวะ=${actualBreakdown.language_strategy.emotional_pacing || '-'}, ปิด=${actualBreakdown.language_strategy.ending_style || '-'}` : '';

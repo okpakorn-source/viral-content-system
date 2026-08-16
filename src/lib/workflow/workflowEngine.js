@@ -61,6 +61,51 @@ export async function saveAnalysis(id, analysisResult, presetUsed) {
  * สร้าง Full Context สำหรับส่ง AI
  * รวมข้อมูลจาก Step 2 + Step 3 ทั้งหมด
  */
+/**
+ * 🔴 16 ส.ค. 69 — ตัวคลี่รายการของ breakdown ให้เป็นข้อความอ่านออก (ผู้ตรวจอิสระจับได้ · ผมยืนยันจากผลรันจริง)
+ *
+ * บั๊กที่แก้: `bd.conflicts.join(' | ')` — แต่ AI คืน conflicts เป็น **อาเรย์ของอ็อบเจกต์**
+ *   ⇒ `.join()` ได้ `"[object Object] | [object Object] | [object Object]"` ยัดเข้าพรอมต์
+ *   ⇒ AI ปลายทางบ่นเองใน log: "เนื้อข่าวระบุจุดขัดแย้งเป็น [object Object] จึงวางแผนจาก...เท่านั้น"
+ *   ⇒ **แก่นดราม่าที่คมที่สุดของข่าวถูกทิ้งทุกใบ** เช่น "รักในวันแต่งงาน vs รักในวันพักฟื้น"
+ *      และ "รักมากพออยู่ต่อ vs เจ็บมากพอควรถอย"
+ * ช่องที่พังจริง (วัดจากผลเจนจริง 16 ส.ค.): `conflicts` (conflict/detail/...) · `best_sections` (section/why_strong)
+ *   ส่วน quotes / pain_points / emotional_hooks เป็นสตริงอยู่แล้ว — ตัวนี้ปล่อยผ่านไม่แตะ
+ * 🔴 ทำไมไม่แก้เป็น `.map(x => x.conflict)` ตรงๆ: ชื่อฟิลด์ต่างกันแต่ละช่อง (conflict / section / point)
+ *   และ AI อาจเปลี่ยนรูปได้อีก → ตัวนี้เดาชื่อฟิลด์ให้เอง และถ้าไม่รู้จักก็คลี่ค่าทั้งอ็อบเจกต์แทนที่จะทิ้ง
+ * ถอยกลับพฤติกรรมเดิม (ได้ [object Object] เหมือนเดิม): BREAKDOWN_LIST_FIX=0
+ */
+// ลำดับคีย์ = ลำดับความน่าจะเป็น "หัวข้อของรายการ"
+//   detail มาก่อน name/title/value เพราะผู้ตรวจชี้ว่า {name:'อ้น', detail:'แก่นเรื่อง'} ควรได้แก่น ไม่ใช่ชื่อ
+const _LIST_KEYS = ['conflict', 'section', 'point', 'text', 'detail', 'name', 'title', 'value'];
+const _ITEM_MAX = 500;  // เพดานต่อใบ — กันพรอมต์บวมถ้าโมเดลคืนก้อนยาวผิดปกติ (ของจริง 50-150 ตัว)
+const _LIST_MAX = 20;   // เพดานจำนวนใบ — ของจริง 2-5 ใบ
+
+function _fixOn() {
+  return String(process.env.BREAKDOWN_LIST_FIX ?? '').trim().replace(/^["']|["']$/g, '').trim() !== '0';
+}
+
+/** คลี่ "หนึ่งใบ" ให้เป็นข้อความ — ใช้เวลาที่ปลายทางต้องการอาเรย์ของสตริง ไม่ใช่สตริงเดียว */
+export function flattenItem(x) {
+  if (!_fixOn()) return String(x); // ถอยของเดิมเป๊ะ (ได้ [object Object])
+  if (x === null || x === undefined) return '';
+  if (typeof x !== 'object') return String(x).slice(0, _ITEM_MAX);
+  // 🔴 ต้องเช็ค typeof !== 'object' ด้วย — ไม่งั้น {conflict:{left,right}} จะได้ [object Object] ซ้อนชั้น (ผู้ตรวจจับได้)
+  for (const k of _LIST_KEYS) {
+    const v = x[k];
+    if (v !== null && v !== undefined && typeof v !== 'object' && String(v).trim()) return String(v).slice(0, _ITEM_MAX);
+  }
+  // ไม่รู้จักชื่อฟิลด์ → คลี่ค่าที่เป็นข้อความทั้งหมดออกมา ดีกว่าทิ้งเป็น [object Object]
+  const vals = Object.values(x).filter((v) => typeof v === 'string' && v.trim());
+  return vals.length ? vals.join(' — ').slice(0, _ITEM_MAX) : '';
+}
+
+export function flattenList(arr, sep = ' | ') {
+  if (!Array.isArray(arr)) return '';
+  if (!_fixOn()) return arr.join(sep); // ถอยของเดิมเป๊ะ (รวมอาการ [object Object])
+  return arr.slice(0, _LIST_MAX).map(flattenItem).filter(Boolean).join(sep);
+}
+
 export function buildFullContext(workflow) {
   let ctx = '';
 
@@ -90,10 +135,10 @@ export function buildFullContext(workflow) {
       });
     }
     if (bd.quotes?.length > 0) ctx += `\nคำพูดสำคัญ: ${bd.quotes.join(' | ')}\n`;
-    if (bd.conflicts?.length > 0) ctx += `จุดขัดแย้ง: ${bd.conflicts.join(' | ')}\n`;
-    if (bd.pain_points?.length > 0) ctx += `Pain Points: ${bd.pain_points.join(' | ')}\n`;
-    if (bd.best_sections?.length > 0) ctx += `ท่อนดีที่สุด: ${bd.best_sections.join(' | ')}\n`;
-    if (bd.emotional_hooks?.length > 0) ctx += `จุดที่คนอิน: ${bd.emotional_hooks.join(' | ')}\n`;
+    if (bd.conflicts?.length > 0) ctx += `จุดขัดแย้ง: ${flattenList(bd.conflicts, ' | ')}\n`;
+    if (bd.pain_points?.length > 0) ctx += `Pain Points: ${flattenList(bd.pain_points, ' | ')}\n`;
+    if (bd.best_sections?.length > 0) ctx += `ท่อนดีที่สุด: ${flattenList(bd.best_sections, ' | ')}\n`;
+    if (bd.emotional_hooks?.length > 0) ctx += `จุดที่คนอิน: ${flattenList(bd.emotional_hooks, ' | ')}\n`;
 
     // Possible Angles — ส่งทุกมุมพร้อม viral score
     if (bd.possible_angles?.length > 0) {
