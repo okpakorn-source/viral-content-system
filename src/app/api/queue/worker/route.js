@@ -168,10 +168,19 @@ export async function POST(req) {
       } catch (err) {
         // ★ FIX (11 มิ.ย.): cover job >5 นาทีโดน undici headersTimeout ("fetch failed") ทั้งที่ pipeline ยังวิ่งจนจบ
         //   → อย่า mark failed; route จะ self-report สถานะเอง (มี cleanupStaleJobs เป็น safety net ถ้าค้างจริง)
+        // ★ 16 ส.ค. 69 (เจ้าของสั่ง): ถอดเงื่อนไข "เฉพาะงานปก" ออก — ให้ตาข่ายนี้ครอบงานข่าวด้วย
+        //   ปัญหาเดิม: ตาข่ายเขียนไว้ตั้งแต่ 11 มิ.ย. ตอนที่มีแต่งานปกยาวเกิน 5 นาที
+        //   พองานข่าวยาวขึ้น (เพดานตอนนี้ 770 วิ) ข่าวที่เขียนเสร็จ+บันทึกคลังแล้ว
+        //   แต่ชั้นเชื่อมต่อตายก่อน กลับถูกตีตรา ❌ → ทีมเห็นล้มแล้วส่งซ้ำ = จ่ายซ้ำ + ข่าวซ้ำในคลัง
+        //   ทุกงานที่ตายด้วยอาการ timeout จะรอ route รายงานสถานะเอง (มี cleanupStaleJobs กันค้างอยู่แล้ว)
+        //   ถอยกลับพฤติกรรมเดิม (กู้เฉพาะงานปก): QUEUE_TIMEOUT_RESCUE=cover-only
         const isTimeoutish = /fetch failed|UND_ERR|HeadersTimeout|aborted|timeout/i.test(err.message || '');
-        const isCoverJob2 = job.payload?.jobType === 'cover';
-        if (isCoverJob2 && isTimeoutish) {
-          logger.info(`[Queue Worker] ⏳ Cover job ${job.id.slice(0, 8)} fetch died (${err.message?.slice(0, 50)}) — pipeline ยังวิ่งต่อ รอ self-report จาก route`);
+        const _rescueMode = String(process.env.QUEUE_TIMEOUT_RESCUE || '').trim().toLowerCase().replace(/^["']|["']$/g, '');
+        const _rescueOn = _rescueMode === 'cover-only'
+          ? job.payload?.jobType === 'cover'
+          : _rescueMode !== 'off';
+        if (_rescueOn && isTimeoutish) {
+          logger.info(`[Queue Worker] ⏳ Job ${job.id.slice(0, 8)} (${job.payload?.jobType || 'news'}) fetch died (${err.message?.slice(0, 50)}) — pipeline ยังวิ่งต่อ รอ self-report จาก route`);
         } else {
           await updateJobStatus(job.id, 'failed', {
             error: err.message,
