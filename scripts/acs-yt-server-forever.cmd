@@ -1,4 +1,5 @@
 @echo off
+setlocal enabledelayedexpansion
 rem ACS YouTube job server keeper - port 3900 (6 Jul 2026)
 rem เซิร์ฟเวอร์แยกเฉพาะงานแคปเฟรม YouTube — กัน pipeline หนักทำเซิร์ฟเวอร์ข่าว :3000 ตาย
 rem (บทเรียน 6 ก.ค.: รัน pipeline ใน :3000 แล้ว server crash 2 รอบ 13:04/13:17)
@@ -10,10 +11,26 @@ cd /d "C:\news-pipeline-dev"
 rem ★ 9 ก.ค.: :3900 ใช้ build แยกโฟลเดอร์ .next-3900 (ไม่ใช้ .next ร่วมกับ :3000)
 rem   เพื่อ build โค้ดใหม่ (เช่น /api/quick-test) ให้ :3900 โดยไม่ต้องแตะ/รีสตาร์ทเซิร์ฟเวอร์ข่าว :3000
 set NEXT_DISTDIR=.next-3900
-rem build ถ้ายังไม่มี (มี .next-3900\BUILD_ID = ข้าม start เลย) · เปลี่ยนโค้ดแล้วอยาก deploy :3900 ใหม่: ลบ .next-3900 แล้วรีสตาร์ท keeper นี้
-if not exist ".next-3900\BUILD_ID" (
-  echo [acs-yt-server] no build - building .next-3900... %date% %time% >> _acs_yt_server.log
+rem ★ 16 ส.ค. 69 (เจ้าของสั่ง "ห้ามปลุกของเก่า" · ผู้ตรวจอิสระชี้ว่านี่คือรากของปัญหา):
+rem   ของเดิมเช็คแค่ "มี .next-3900\BUILD_ID ไหม" → พอมีโค้ดใหม่ ไฟล์ยังอยู่ = ข้าม build
+rem   ⇒ รีสตาร์ตกี่รอบก็ได้โค้ดเก่า (16 ส.ค. :3900 ตกหลัง main ถึง 12 คอมมิตเพราะเหตุนี้)
+rem   → จำว่า "บิลด์นี้มาจากคอมมิตไหน" แล้วเทียบ HEAD ทุกครั้ง · ไม่ตรง = build ใหม่เอง
+for /f "delims=" %%i in ('git rev-parse HEAD 2^>nul') do set "HEADSHA=%%i"
+set "STAMP=.next-3900\.built-from-commit"
+set "NEEDBUILD=0"
+if not exist ".next-3900\BUILD_ID" set "NEEDBUILD=1"
+if not exist "%STAMP%" set "NEEDBUILD=1"
+if exist "%STAMP%" (
+  set /p BUILTSHA=<"%STAMP%"
+  if not "!BUILTSHA!"=="!HEADSHA!" (
+    echo [acs-yt-server] build เก่ากว่าโค้ด ^(บิลด์จาก !BUILTSHA:~0,7! · HEAD !HEADSHA:~0,7!^) - build ใหม่ %date% %time% >> _acs_yt_server.log
+    set "NEEDBUILD=1"
+  )
+)
+if "!NEEDBUILD!"=="1" (
+  echo [acs-yt-server] building .next-3900... %date% %time% >> _acs_yt_server.log
   call npm run build >> _acs_yt_server.log 2>&1
+  if exist ".next-3900\BUILD_ID" ( >"%STAMP%" echo !HEADSHA! )
 )
 :loop
 echo [forever] starting acs-yt-server :3900 %date% %time% >> _acs_yt_server.log
