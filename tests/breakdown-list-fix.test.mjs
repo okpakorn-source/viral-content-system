@@ -288,14 +288,24 @@ t('39 [ปิดรู M9] ลำดับคีย์: detail ต้องช�
 t('40 [ปิดรู M12] ใบที่คลี่แล้วว่างต้องถูกคัดทิ้ง ไม่ทิ้งตัวคั่นเปล่าไว้ในพรอมต์',
   withEnv(undefined, () => flattenList([{ conflict: 'ก' }, {}, { conflict: 'ข' }, { emotional_weight: {} }], ' | ') === 'ก | ข'));
 
-// ⚠️ ข้อนี้เขียนกว้างไปรอบแรกจนไปจับอีกฟังก์ชัน (VIRAL_SHORTLIST_K) ที่ใช้ console.log อย่างถูกต้องอยู่แล้ว
-//    ต้องผูกกับชื่อสวิตช์ให้ตรงตัว ไม่ใช่จับรูปแบบ if (!Number.isFinite(n)) ลอยๆ
-t('41 [ปิดรู M11] คำเตือนเพดานตัวอย่างครูต้องเตือนครั้งเดียวต่อโปรเซส (log ไม่รก)',
+// ⚠️ ข้อนี้แก้มา 2 รอบ:
+//    รอบ 1 เขียนกว้างไปจนไปจับอีกฟังก์ชัน (VIRAL_SHORTLIST_K) ที่ใช้ console.log อย่างถูกต้องอยู่แล้ว
+//    รอบ 2 ผู้ตรวจฝั่งรันจริงทุบนิยาม _warnOnce ให้เตือนทุกครั้ง แล้วข้อสอบยังเขียว
+//      = ค้นคำ ไม่ได้ตรวจพฤติกรรม ⇒ รอบนี้ดึงตัว _warnOnce จริงมารันแล้วนับจำนวนครั้งที่มันพิมพ์
+t('41 [ปิดรู M11] คำเตือนเพดานครูต้องเตือน "ครั้งเดียวจริง" — ตรวจพฤติกรรม ไม่ใช่ค้นคำ',
   (() => {
     const VF = stripComments(read('src/lib/services/viralFewshot.js'));
-    const warnOnce = (VF.match(/_warnOnce\(`\[ViralFewshot\] 📏 VIRAL_EXAMPLE_CHARS/g) || []).length;
+    const a = VF.indexOf('let _exWarned'), b = VF.indexOf('export function exampleChars');
+    if (a < 0 || b <= a) return false;
+    let hits = 0;
+    const realLog = console.log;
+    console.log = () => { hits++; };
+    try {
+      // eslint-disable-next-line no-new-func
+      new Function(VF.slice(a, b) + '\n_warnOnce("x");_warnOnce("y");_warnOnce("z");')();
+    } finally { console.log = realLog; }
     const rawLog = (VF.match(/console\.log\(`\[ViralFewshot\] 📏 VIRAL_EXAMPLE_CHARS/g) || []).length;
-    return warnOnce === 3 && rawLog === 0;
+    return hits === 1 && rawLog === 0;
   })());
 
 t('42 [ตัดแล้วต้องส่งเสียง] เพดานจำนวนใบตัดของทิ้ง ต้องมี log ไม่ตัดเงียบ (บทเรียนเพดานครู 700)',
@@ -372,6 +382,39 @@ t('54 [รีเสิร์ช] จุดที่หลับอยู่เ�
       /flattenList\(breakdownData\?\.key_facts\?\.places/.test(RS) &&
       !/breakdownData\?\.quotes\?\.join\(/.test(RS);
   })());
+
+// 🔴 รูที่ผู้ตรวจฝั่งรันจริงเจอ: สวิตช์ถอยมี 2 ชั้นซ้อน (flattenList + flattenItem)
+//    ถอดชั้นเดียวแล้วอีกชั้นถอยแทน อาการหลักยังถูก ข้อสอบเลยเขียว — แต่ขอบเคสเพี้ยนเงียบ
+t('55 [ปิดรู 2 ชั้น] ถอดสวิตช์ชั้นใดชั้นหนึ่งต้องแดง — ตรวจว่าทั้ง flattenList และ flattenItem อ่านสวิตช์เอง',
+  (() => {
+    const blk = WF.slice(WF.indexOf('function _fixOn'), WF.indexOf('export function buildFullContext'));
+    const item = blk.slice(blk.indexOf('export function flattenItem'), blk.indexOf('export function flattenList'));
+    const list = blk.slice(blk.indexOf('export function flattenList'));
+    return /_fixOn\(\)/.test(item) && /_fixOn\(\)/.test(list);
+  })());
+
+t('56 [ปิดรู 2 ชั้น] ปิดสวิตช์แล้วขอบเคสต้องถอยด้วย: เกินเพดานจำนวนใบต้องไม่ถูกตัด',
+  withEnv('0', () => {
+    const big = Array.from({ length: 25 }, (_, i) => 'ใบที่' + i);
+    return flattenList(big, ' | ').split(' | ').length === 25;
+  }));
+
+// 🔴 รูที่ผู้ตรวจฝั่งรันจริงเจอเพิ่ม: ตัวคัดของว่างในตัวประกอบโครงเรื่อง ไม่มีข้อสอบคุมเลย
+//    ถอดทิ้งแล้วเขียวทั้งข้อสอบเก่าและใหม่ — ผลคือพรอมต์มีบรรทัดเปล่า/ตัวคั่นลอยให้ AI งง
+t('57 [ปิดรู filter] ของว่าง/null ในช่องต่างๆ ต้องไม่กลายเป็นบรรทัดเปล่าหรือตัวคั่นลอยในพรอมต์',
+  withEnv(undefined, () => {
+    const p = buildPrompt({
+      ...REAL_BD,
+      pain_points: [{ pain_point: 'ของจริง' }, {}, null, { emotion: {} }],
+      key_facts: { people: ['อ้น ศรีพรรณ', {}, null], dates: [], places: [] },
+      quotes: ['คำพูดจริง', '', null, {}],
+    }, BODY_WITH_DATE);
+    // อาการที่ต้องไม่มี: ตัวคั่นลอยทั้งแบบ " | " และ ", " · รายการเลขที่ว่าง · คำพูดว่าง ""
+    return !/\|\s*\|/.test(p) && !/:\s*\|/.test(p) && !/\|\s*\n/.test(p) &&   // ตัวคั่นแท่ง
+      !/,\s*,/.test(p) && !/:\s*,/.test(p) && !/,\s*\n/.test(p) &&            // ตัวคั่นจุลภาค (👤 บุคคลสำคัญ)
+      !/\d+\.\s*\n/.test(p) && !/\d+\.\s*""/.test(p) &&                       // รายการเลข/คำพูดว่าง (💬 คำพูดสำคัญ)
+      !p.includes('[object Object]');
+  }));
 
 console.log(`\n${fail === 0 ? '🎉' : '🔴'} ผ่าน ${pass}/${pass + fail}`);
 process.exit(fail === 0 ? 0 : 1);
