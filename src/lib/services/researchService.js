@@ -1,4 +1,5 @@
 import { callAI } from '@/lib/ai/openai';
+import { newsForStage } from '@/lib/utils/newsCap'; // 📖 สมุดเพดานเนื้อข่าวกลาง (16 ส.ค. 69)
 import { logPipeline } from '@/lib/pipelineLogger';
 import { createLogger } from '@/lib/logger';
 import { MODEL_PRIMARY, MODEL_FAST } from '@/lib/ai/modelConfig';
@@ -162,7 +163,7 @@ function resolveKeywordInput(newsTitle, newsBody, breakdownData) {
     return { text: newsTitle, source: 'newsTitle' };
   }
   if (newsBody && newsBody.length > 20) {
-    return { text: newsBody.slice(0, 500), source: 'newsBody[:500]' };
+    return { text: newsForStage('RESEARCH', newsBody), source: 'newsBody' };
   }
   return null;
 }
@@ -286,7 +287,7 @@ export async function performResearch({ newsBody, newsTitle, breakdownData, focu
 
 === ข่าวที่ต้องวิเคราะห์ ===
 หัวข้อ: ${newsTitle || '(ไม่มีหัวข้อ)'}
-เนื้อหา: ${newsBody.slice(0, 2000)}
+เนื้อหา: ${newsForStage('RESEARCH', newsBody)}
 ${coreStory ? 'แก่นข่าว: ' + coreStory : ''}
 ${keyPointsSummary ? 'ประเด็นสำคัญ: ' + keyPointsSummary : ''}
 ${keyPeople ? 'บุคคล: ' + keyPeople : ''}

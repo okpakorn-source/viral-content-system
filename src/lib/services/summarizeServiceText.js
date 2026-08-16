@@ -1,4 +1,5 @@
 import { callAI } from '@/lib/ai/openai';
+import { newsForStage } from '@/lib/utils/newsCap'; // 📖 สมุดเพดานเนื้อข่าวกลาง (16 ส.ค. 69)
 import { MODEL_NEWS_ANALYSIS, MODEL_BREAKDOWN, MODEL_FAST_CHEAP, MODEL_HEAVY_FALLBACK , MODEL_BLUEPRINT } from '@/lib/ai/modelConfig';
 import { withTimeoutSignal } from '@/lib/utils/withTimeout'; // ★ 16 ก.ค. 69: withTimeout เดิมไม่ถูกใช้ในไฟล์นี้แล้ว (ทุกจุดย้ายไป withTimeoutSignal)
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStoreText';
@@ -17,7 +18,62 @@ import { clusterMatch, findClusterScore, mapCategory, EMOTION_CLUSTERS, CONFLICT
 const MODEL_GEMINI_PRO = 'gemini-3.6-flash'; // ★ 1 ส.ค. 69 เจ้าของสั่ง 3.5→3.6 (ใหม่ ไว ไม่ล่ม)
 
 // ═══════════════════════════════════════════════════════════
-// 🔍 POST-PROCESSING QUALITY FILTERS
+// ══════════════════════════════════════════════════════════════
+// 📖 เพดานเนื้อข่าวที่ "สมองเลือกการ์ด" ได้อ่าน
+// ══════════════════════════════════════════════════════════════
+// ★ 16 ส.ค. 69 (เจ้าของสั่ง "เลิกจำกัด ให้อ่านได้ครบเนื้อที่ส่งเข้าระบบ")
+//   เดิมตัดที่ 400 ตัวอักษร ฝังไว้ตั้งแต่ยุคแรก ไม่มีสวิตช์ ไม่มีคำเตือน
+//   หลักฐานที่ทำให้เปลี่ยน (วัดจากคลังจริง 3,994 ข่าว พ.ค.–ส.ค. 69):
+//     • ข่าวตัวกลาง 760 ตัวอักษร · p99 = 3,633 · ยาวสุด 7,963
+//     • เพดาน 400 ตัดข่าวทิ้ง 91.5% ของงาน — ต่ำกว่าข่าวขนาดกลางเกือบครึ่ง
+//     • เคสจริง (ข่าวพ่อพี/น้องเซญ่า): ประโยคชี้ขาด "พีแม้ไม่ใช่พ่อแท้ๆ"
+//       อยู่ที่ตัวอักษรที่ 419 — พ้นหน้าต่าง 400 ไป 19 ตัว สมองเลือกการ์ดไม่เห็น
+//     • กฎข้อ 2 ของตัวเลือกการ์ด ("ข่าวมีผู้เสียชีวิต ห้ามเลือกการ์ดโทนบวก")
+//       จะพังเงียบทันทีถ้าการเสียชีวิตถูกเล่าหลังตัวอักษรที่ 400
+//   0 = ไม่จำกัด (ค่าเริ่มต้น) · ตั้งตัวเลขเพื่อจำกัดกลับ เช่น CARD_PICK_NEWS_CHARS=400
+//   ⚠️ ใช้ตัวอ่านตัวเดียวทั้งไฟล์ (บทเรียน 16 ส.ค.: HOOK_STYLE_MODE ถูกเช็ค 3 แบบ
+//      จนพิมพ์ตัวใหญ่แล้วปิดได้แค่ 1 ใน 3 ไฟล์) — ทน "400" / 400 / ช่องว่าง
+function _cardPickNewsText(body) {
+  const raw = String(process.env.CARD_PICK_NEWS_CHARS || '').trim().replace(/^["']|["']$/g, '');
+  const cap = Number(raw);
+  const clean = String(body || '').replace(/\s+/g, ' ');
+  if (Number.isFinite(cap) && cap > 0 && clean.length > cap) {
+    console.log(`[CardPicker] ✂️ ตัดเนื้อข่าวให้สมองเลือกการ์ด ${clean.length} → ${cap} ตัวอักษร (CARD_PICK_NEWS_CHARS)`);
+    return clean.slice(0, cap);
+  }
+  return clean;
+}
+
+// ══════════════════════════════════════════════════════════════
+// 📖 เพดานเนื้อข่าวต้นฉบับที่ "นักเขียน" ได้อ่าน
+// ══════════════════════════════════════════════════════════════
+// ★ 16 ส.ค. 69 (เจ้าของสั่ง "ปรับให้ยาวกว่านี้ได้ เพราะแต่ละข่าวมีเนื้อเรื่องต่างกัน
+//   เพื่อให้ศักยภาพการอ่านมันครบ")
+//   เดิมตัดที่ 3,000 ตัวอักษร ฝังไว้ยุคแรก ไม่มีสวิตช์ ไม่มีคำเตือน
+//   หลักฐาน (วัดจากคลังจริง 3,994 ข่าว): ตัวกลาง 760 · p99 = 3,633 · ยาวสุด 7,963
+//     → 3,000 ตัดข่าวทิ้ง 1.6% — ไม่บ่อย แต่ข่าวที่โดนคือข่าวสัมภาษณ์/เรื่องเล่ายาว
+//       ซึ่งเป็นกลุ่มที่ทำยอดดีที่สุด และเป็นกลุ่มที่ต้องการ "เนื้อสัมผัส" มากที่สุด
+//   หมายเหตุ: ข้อเท็จจริงไม่เคยหายจากการตัดนี้ (ตัวสกัดชื่อ/เลข/คำพูดวิ่งบนข่าวเต็ม
+//   และขั้นแตกประเด็นก็เห็นเต็ม) สิ่งที่หายคือฉาก ลำดับเหตุการณ์ และน้ำเสียงคำพูด
+//   ค่าใหม่ 12,000 = คลุมข่าวยาวสุดในคลัง (7,963) เผื่อไว้อีก 50%
+//   ทำไมไม่ปลดสุด: นักเขียนคือ claude-fable-5 (โมเดลแพงสุดในท่อ) ถ้ามีคนวางเอกสาร
+//   ยาวผิดปกติเข้ามา จะจ่ายบานโดยไม่ตั้งใจ — เพดานนี้จึงเป็นกันชนกันเหตุสุดวิสัย
+//   ไม่ใช่ตัวจำกัดข่าวปกติ · ตั้ง 0 = ไม่จำกัดเลย · ถอยกลับ: WRITER_SOURCE_CHARS=3000
+function _writerSourceText(body) {
+  const raw = String(process.env.WRITER_SOURCE_CHARS ?? '').trim().replace(/^["']|["']$/g, '');
+  const n = Number(raw);
+  const cap = Number.isFinite(n) && raw !== '' ? n : 12000;
+  const clean = String(body || '');
+  if (cap > 0 && clean.length > cap) {
+    console.log(`[Analyze-Service] ✂️ ตัดเนื้อข่าวที่ส่งให้นักเขียน ${clean.length} → ${cap} ตัวอักษร (WRITER_SOURCE_CHARS)`);
+    return clean.slice(0, cap);
+  }
+  return clean;
+}
+
+// ══════════════════════════════════════════════════════════════
+// 📖 เพดานเนื้อข่าวที่ "สมองเลือกการ์ด" ได้อ่าน
+// ══════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════
 
 /**
@@ -827,7 +883,7 @@ export async function performSummarize({
 
 === ข่าวที่ต้องวิเคราะห์ ===
 หัวข้อ: ${actualNewsTitle || 'ไม่มีหัวข้อ'}
-เนื้อหาย่อ: ${(actualNewsBody || '').slice(0, 2500)}
+เนื้อหาย่อ: ${newsForStage('DNA', actualNewsBody)}
 === จบข่าว ===
 
 วิเคราะห์ข่าวนี้ออกมาเป็น JSON Format โดยมีโครงสร้างดังนี้:
@@ -1005,7 +1061,7 @@ export async function performSummarize({
 อารมณ์: ${(newsAnalysis?.emotionalTags || newsAnalysis?.emotionalThemes || []).join(', ')}
 ความขัดแย้ง: ${(newsAnalysis?.conflictTags || newsAnalysis?.conflictTypes || []).join(', ')}
 Archetype: ${newsAnalysis?.narrativeArchetype || '-'}
-เนื้อข่าว (ย่อ): ${(actualNewsBody || '').replace(/\s+/g, ' ').slice(0, 400)}
+เนื้อข่าว: ${newsForStage('CARD_PICK', actualNewsBody, { squash: true })}
 === จบข่าว ===
 
 === ตัวเลือก Prompt (Top ${topCandidates.length}) ===
@@ -1347,7 +1403,7 @@ ${process.env.FORCE_LESSON_ANGLE === '1'
     // ★ FIX (10 มิ.ย. 2026): ส่งเนื้อข่าวต้นฉบับเข้า compose (ตัดที่ 3000 ตัวอักษร)
     // เดิมตัวเขียนเห็นแค่ fact list จาก breakdown → เนื้อหาแห้ง ขาดรายละเอียด/บริบท/อารมณ์จริง
     // ANTI-DUPLICATE SYSTEM (ด้านล่าง) ยังบังคับห้ามลอกสำนวนอยู่เหมือนเดิม
-    const _srcExcerpt = (actualNewsBody || '').slice(0, 3000);
+    const _srcExcerpt = newsForStage('WRITER', actualNewsBody);
     if (_srcExcerpt.length >= 80) {
       prompt += '\n=== 📰 เนื้อข่าวต้นฉบับ (อ้างอิงรายละเอียด/บริบทเท่านั้น) ===\n' +
         _srcExcerpt + '\n' +
@@ -1422,12 +1478,12 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
         archetype: newsAnalysis?.narrativeArchetype || actualBreakdown?.narrativeArchetype || '',
         newsTitle: actualNewsTitle || '', // 📒 ผูกประวัติการหยิบเข้ากับข่าว (สมุดประวัติ 8 ส.ค. 69)
         // 🎯 โหมดจับคู่ (VIRAL_MATCH_MODE): ส่ง "เนื้อดิบจริง + แก่นเรื่อง" ให้ตัวเลือกใช้แมชตามคำสั่งเจ้าของ
-        newsBrief: { coreStory: actualBreakdown?.core_story || actualBreakdown?.coreStory || '', excerpt: String(actualNewsBody || '').slice(0, 900) }, // ★ สคีมาจริงใช้ core_story (ผู้ตรวจจับได้)
+        newsBrief: { coreStory: actualBreakdown?.core_story || actualBreakdown?.coreStory || '', excerpt: newsForStage('VIRAL_MATCH', actualNewsBody) }, // ★ สคีมาจริงใช้ core_story (ผู้ตรวจจับได้)
       });
     } catch (e) { console.log('[ViralFewshot] skip:', e.message?.slice(0, 40)); }
 
     // ★ โหมดทางการ (11 มิ.ย. — บทเรียน GEN-177): ข่าวพระราชวงศ์/พิธีทางการ ห้ามมโนภาพ+คำลำลอง และเก็บประกาศครบ
-    const _formalSrc = `${actualNewsTitle || ''} ${String(actualNewsBody || '').slice(0, 1500)}`;
+    const _formalSrc = `${actualNewsTitle || ''} ${newsForStage('FORMAL', actualNewsBody)}`;
     const formalModeRule = /พระบรม|ถวายบังคม|พระราชพิธี|พระศพ|เสด็จ|ทรงพระ|พระบาทสมเด็จ|สมเด็จพระ|พระมหากรุณาธิคุณ|พระราชทาน|บำเพ็ญพระกุศล/.test(_formalSrc)
       ? '=== 🏛️ โหมดข่าวทางการ/พระราชพิธี (บังคับเหนือทุกกฎสำนวน) ===\n' +
         '- ใช้ภาษาสุภาพเป็นทางการทั้งเรื่อง ห้ามคำลำลองทุกคำ (มัน/แหละ/เลยล่ะ/ซะ/เม้าท์)\n' +
@@ -1731,7 +1787,7 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
 
 === ข่าวที่ต้องวางแผน ===
 หัวข้อ: ${actualNewsTitle}
-เนื้อหา: ${actualNewsBody.slice(0, 2500)}
+เนื้อหา: ${newsForStage('BLUEPRINT', actualNewsBody)}
 ${coreStory ? `แก่นข่าว: ${coreStory}` : ''}
 ${keyPoints ? `ประเด็นสำคัญ:\n${keyPoints}` : ''}
 ${quotes ? `คำพูดสำคัญ: ${quotes}` : ''}
@@ -1846,7 +1902,7 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
 
       const researchPrompt = researchPromptTemplate.prompt
         .replace('{title}', actualNewsTitle)
-        .replace('{content}', actualNewsBody.slice(0, 3000))
+        .replace('{content}', newsForStage('RESEARCH', actualNewsBody))
         .replace('{analysis_context}', analysisCtx);
 
       console.log('[Research-Service] Prompt from promptStore, length: ' + researchPrompt.length + 'ch');
@@ -2240,7 +2296,7 @@ export async function getTopPrompts({ newsTitle, text, focusAngle, workflowId, e
 
 === ข่าวที่ต้องวิเคราะห์ ===
 หัวข้อ: ${actualNewsTitle || 'ไม่มีหัวข้อ'}
-เนื้อหาย่อ: ${(actualNewsBody || '').slice(0, 1500)}
+เนื้อหาย่อ: ${newsForStage('DNA', actualNewsBody)}
 === จบข่าว ===
 ${focusAngle ? '\n=== มุมมองที่ต้องการเน้น (Focus Angle) ===\n' + focusAngle + '\n' : ''}
 โปรดแตกมิติของข่าวตามหมวดหมู่ดังต่อไปนี้ (ต้องเลือกจากตัวเลือกที่กำหนดเท่านั้น):
@@ -2362,7 +2418,7 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
       const _catPrompt = `คุณเป็นบรรณารักษ์คลังพร้อมท์ข่าวไวรัล — คัดการ์ดที่ "แกนเรื่องเข้ากับข่าวนี้จริง" เข้ารอบ 14 ใบ
 
 === ข่าว (เนื้อเต็มจากผู้ใช้) ===
-${String(actualNewsBody || '').replace(/\s+/g, ' ').slice(0, 2000)}
+${newsForStage('CATALOG', actualNewsBody, { squash: true })}
 === จบข่าว ===
 
 === สารบัญทั้งคลัง ${_cat.length} ใบ ===
@@ -2391,7 +2447,7 @@ ${_cat.join('\n')}
 ${_cat.join('\n')}
 === จบสารบัญ ===`;
           const _catVariable = `=== ข่าว (เนื้อเต็มจากผู้ใช้) ===
-${String(actualNewsBody || '').replace(/\s+/g, ' ').slice(0, 2000)}
+${newsForStage('CATALOG', actualNewsBody, { squash: true })}
 === จบข่าว ===
 
 เลือก 14 ใบ เรียงจากเหมาะสุด กติกา: ดูแกนเรื่องจริง ห้ามเลือกเพราะดัง · ธีมซ้ำกันไม่เกิน 2 ใบ (เปิดมุมเขียนหลากหลาย) · ห้ามเลือกแกนเรื่องที่ข่าวไม่มี · ข่าวมีผู้เสียชีวิต→ต้องมีการ์ดรองรับการจากไปติดโผ
@@ -2478,7 +2534,7 @@ ${String(actualNewsBody || '').replace(/\s+/g, ' ').slice(0, 2000)}
 === ข่าว ===
 หัวข้อ: ${actualNewsTitle || 'ไม่มีหัวข้อ'}
 ${focusAngle ? `มุมที่กำลังเขียน: ${focusAngle}` : ''}
-เนื้อข่าว (ย่อ): ${String(actualNewsBody || '').replace(/\s+/g, ' ').slice(0, 400)}
+เนื้อข่าว: ${newsForStage('CARD_PICK', actualNewsBody, { squash: true })}
 === จบข่าว ===
 
 === ตัวเลือก Prompt (Top ${_aiCands.length}) ===
