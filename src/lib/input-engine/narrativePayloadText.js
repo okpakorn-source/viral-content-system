@@ -100,7 +100,10 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
   }
 
   // People
-  const people = bd.key_facts?.people || [];
+  // 🔴 17 ส.ค. 69 (ตาข่ายรวม): เลิกไล่ตบทีละช่อง — ผู้ตรวจชี้ว่าผมเคลม "ช่องนี้ปลอดภัย" ผิดมา 3 รอบ
+  //   ทุกช่องที่ยัดค่าดิบเข้าพรอมต์ ให้ผ่านตัวคลี่หมด ถึงวันนี้ยังไม่เคยเจอเป็นกล่องก็ตาม
+  //   เกราะเดิมกันแค่ "ไม่ล้ม" แต่ยังปล่อย [object Object] เข้าพรอมต์ได้ = เปลี่ยนอาการดังเป็นอาการเงียบ
+  const people = (bd.key_facts?.people || []).map(flattenItem).filter(Boolean);
 
   // Conflicts
   // 🔴 16 ส.ค. 69: conflicts เป็นอ็อบเจกต์ {conflict, detail, emotional_weight} — เดิมคัดลอกดิบมาทั้งก้อน
@@ -131,10 +134,10 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
   // Background Knowledge
   const backgroundKnowledge = [];
   if (bd.key_facts?.numbers?.length > 0) {
-    bd.key_facts.numbers.forEach(n => backgroundKnowledge.push({ type: 'statistic', data: n }));
+    bd.key_facts.numbers.forEach(n => backgroundKnowledge.push({ type: 'statistic', data: flattenItem(n) }));
   }
   if (bd.key_facts?.places?.length > 0) {
-    bd.key_facts.places.forEach(p => backgroundKnowledge.push({ type: 'location', data: p }));
+    bd.key_facts.places.forEach(p => backgroundKnowledge.push({ type: 'location', data: flattenItem(p) }));
   }
 
   // Emotional Blueprint
@@ -163,14 +166,17 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
     //   ผลคือ quoteFragments ว่าง แล้วกฎ FACT SAFETY สั่งนักเขียนว่า "ใช้ได้เฉพาะ quoteFragments"
     //   = นักเขียนถูกบอกว่าไม่มีคำพูดให้ใช้ ทั้งที่ข่าวมี (ผู้ตรวจอิสระจับได้)
     //   จงใจอยู่นอกสวิตช์: ของเดิมทิ้งข้อมูลเปล่าๆ ไม่มีข้อดีให้ถอยกลับไปหา
-    const text = String(typeof q === 'string' ? q : (q?.quote || q?.text || '')).trim();
+    const text = String(typeof q === 'string' ? q : (q?.quote || q?.content || q?.text || '')).trim();
     const words = text.split(/\s+/);
     return words.length <= 15 ? text : words.slice(0, 15).join(' ') + '...';
   }).filter(q => q.length > 0);
 
   // Emotional hooks + pain points
   const emotionalHooks = bd.emotional_hooks || [];
-  const painPoints = bd.pain_points || [];
+  // 🔴 17 ส.ค. 69: pain_points ก็เป็นกล่องได้ {pain_point/pain, detail, why_it_hits} — วัดจากตัวอย่างจริง 26 ชุด เจอ 6 ชุด (23%)
+  //   เดิมยัดกล่องดิบเข้าพรอมต์นักเขียนที่บรรทัด ~338 ⇒ "😢 Pain Points: [object Object]"
+  //   ผมเคยจดไว้ว่าช่องนี้ปลอดภัย และเขียนข้อสอบยืนยันด้วย — ผิดทั้งคู่ เพราะตอนนั้นดูข้อมูลแค่ 4 ชุด
+  const painPoints = (bd.pain_points || []).map(flattenItem).filter(Boolean);
 
   // Merge high density facts if rawNewsBody is available
   if (rawNewsBody && rawNewsBody.length > 20) {
@@ -226,7 +232,8 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
     // If coreFacts is thin, enrich it with extracted quote highlights
     if (coreFacts.length < 3 && quoteFragments.length > 0) {
       quoteFragments.slice(0, 3).forEach((q) => {
-        const factExists = coreFacts.some(f => f.fact.includes(q) || q.includes(f.fact));
+        // 🔴 เกราะกันล้ม (นอกสวิตช์): f.fact มาจาก key_points[].point ซึ่งเป็นกล่องได้ ⇒ .includes throw = ข่าวล้มทั้งใบ
+        const factExists = coreFacts.some(f => { const fx = String(f.fact ?? ''); return fx.includes(q) || q.includes(fx); });
         if (!factExists) {
           coreFacts.push({
             fact: `ประเด็นสำคัญจากการพูดคุย: "${q}"`,

@@ -1,4 +1,5 @@
 import { callAI } from '@/lib/ai/openai';
+import { flattenList } from '@/lib/workflow/workflowEngine'; // 🔴 17 ส.ค. 69: ตัวคลี่กล่อง->ข้อความ (ถอย BREAKDOWN_LIST_FIX=0)
 import { newsForStage } from '@/lib/utils/newsCap'; // 📖 สมุดเพดานเนื้อข่าวกลาง (16 ส.ค. 69)
 import { logPipeline } from '@/lib/pipelineLogger';
 import { createLogger } from '@/lib/logger';
@@ -291,9 +292,11 @@ export async function performResearch({ newsBody, newsTitle, breakdownData, focu
     rlog.step('keyword-extraction', 'สกัด keywords...');
     const keyPointsSummary = breakdownData?.key_points?.map(kp => kp.point || kp).join(', ') || '';
     const coreStory = breakdownData?.core_story || '';
-    const keyPeople = breakdownData?.key_facts?.people?.join(', ') || '';
-    const keyPlaces = breakdownData?.key_facts?.places?.join(', ') || '';
-    const quotes = breakdownData?.quotes?.join(' | ') || '';
+    // 🔴 17 ส.ค. 69: บั๊กเดิมเป๊ะ นอนหลับอยู่เพราะ NEWS_RESEARCH ตั้งต้น=ปิด (ผู้ตรวจอิสระจับได้)
+    //   วันที่เจ้าของสั่งเปิดรีเสิร์ช บั๊กจะกลับมาทันทีโดยไม่มีใครรู้ — ปิดไว้ตั้งแต่ตอนนี้
+    const keyPeople = flattenList(breakdownData?.key_facts?.people, ', ');
+    const keyPlaces = flattenList(breakdownData?.key_facts?.places, ', ');
+    const quotes = flattenList(breakdownData?.quotes, ' | ');
 
     // ★ STEP 0.5: Context-Resolve — ข่าวชื่อเล่นล้วนให้ค้นระบุตัวตนก่อน (เพิ่มความแม่นยำตัวละคร)
     const resolvedIdentity = await resolveIdentityFromContext({ newsTitle, newsBody, breakdownData });

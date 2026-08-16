@@ -80,7 +80,10 @@ export async function saveAnalysis(id, analysisResult, presetUsed) {
  */
 // ลำดับคีย์ = ลำดับความน่าจะเป็น "หัวข้อของรายการ"
 //   detail มาก่อน name/title/value เพราะผู้ตรวจชี้ว่า {name:'อ้น', detail:'แก่นเรื่อง'} ควรได้แก่น ไม่ใช่ชื่อ
-const _LIST_KEYS = ['conflict', 'section', 'quote', 'point', 'text', 'detail', 'name', 'title', 'value'];
+// 🔴 17 ส.ค. 69 รอบสาม — เติมชื่อฟิลด์จากตัวอย่างจริง 26 ชุด (คิวงานจริง 22 + ผลรัน 4)
+//   'content' = quotes บางใบใช้ {type, content, speaker} · 'pain_point'/'pain' = pain_points สองรูป
+//   ถ้าไม่มีชื่อพวกนี้ ตัวคลี่จะตกไปเส้น fallback แล้วหอบคำวิจารณ์ของ AI (why_it_hits) เข้าพรอมต์ด้วย
+const _LIST_KEYS = ['conflict', 'section', 'quote', 'content', 'pain_point', 'pain', 'point', 'text', 'detail', 'name', 'title', 'value'];
 const _ITEM_MAX = 500;  // เพดานต่อใบ — กันพรอมต์บวมถ้าโมเดลคืนก้อนยาวผิดปกติ (ของจริงยาวสุด 53 ตัว)
 const _LIST_MAX = 20;   // เพดานจำนวนใบ — ของจริง 2-5 ใบ
 

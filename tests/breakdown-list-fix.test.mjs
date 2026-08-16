@@ -151,13 +151,16 @@ t('20 [ต่อสาย] ทั้งสองไฟล์ import flattenList 
 t('21 [ต่อสาย] flattenList ถูก export ออกจาก workflowEngine',
   wired(WFC, 'export function flattenList\\('));
 
-// 🔴 17 ส.ค. 69 — ข้อนี้เคยเขียนผิดจนกลายเป็น "ข้อสอบที่ล็อกบั๊กไว้" (ผู้ตรวจอิสระจับได้):
-//   เดิม assert ว่า `actualBreakdown.quotes?.join(` ต้องยังอยู่ = ใครไปแก้ quotes ให้ถูกจะเจอข้อสอบแดงแล้วถอย
-//   ความจริง: quotes เป็นกล่องได้ (เจอ 1/4 ใบ) — ตอนนี้ต่อสายเข้าตัวคลี่แล้ว
-//   บทเรียน: ก่อน assert ว่า "อันนี้ปลอดภัย ห้ามแตะ" ต้องมีข้อมูลจริงยืนยันก่อน ไม่ใช่เดาจากชื่อฟิลด์
-t('22 [ไม่ล้ำเส้น] emotional_hooks/pain_points ที่พิสูจน์แล้วว่าเป็นสตริงจริง 4/4 ใบ — ไม่ถูกแตะ',
+// 🔴 ข้อนี้เขียนผิดมา 2 รอบ — เป็นบทเรียนที่แพงที่สุดของงานนี้:
+//   รอบ 1: assert ว่า `quotes?.join(` ต้องยังอยู่ = **ข้อสอบล็อกบั๊กไว้** ใครแก้ให้ถูกจะเจอแดงแล้วถอย
+//   รอบ 2: ยังเคลมว่า pain_points ปลอดภัย ทั้งที่ดูข้อมูลแค่ 4 ชุด
+//   ความจริงจากตัวอย่างจริง 26 ชุด (คิวงานจริง 22 + ผลรัน 4):
+//     conflicts เป็นกล่อง 85% · best_sections 69% · quotes 31% · pain_points 23% · emotional_hooks 0%
+//   ⇒ เหลือช่องเดียวที่ยืนยันได้ว่าเป็นสตริงเสมอคือ emotional_hooks
+//   บทเรียน: ข้อสอบชนิด "ห้ามแตะตรงนี้" ต้องมีข้อมูลจริงครบพอ ไม่ใช่เดาจากชื่อฟิลด์หรือดูไม่กี่ใบ
+t('22 [ไม่ล้ำเส้น] emotional_hooks — ช่องเดียวที่วัดแล้วเป็นสตริง 26/26 ชุด — ไม่ถูกแตะ',
   wired(TXTC, 'actualBreakdown\\.emotional_hooks\\.join\\(') &&
-  !wired(TXTC, 'flattenList\\(actualBreakdown\\.pain_points'));
+  /const emotionalHooks = bd\.emotional_hooks \|\| \[\];/.test(read('src/lib/input-engine/narrativePayloadText.js')));
 
 t('23 [ไม่ล้ำเส้น] key_points ยังใช้ .map(kp => kp.point || kp) แบบเดิม ไม่ถูกเปลี่ยนรูป',
   wired(TXTC, 'key_points\\?\\.map\\(kp => kp\\.point \\|\\| kp\\)') &&
@@ -258,14 +261,22 @@ t('36 [ประโยคเด็ดต้องไม่หายเงีย�
     return p.includes('ปรับแต่ไม่เปลี่ยน') && !p.includes('[object Object]');
   }));
 
-t('37 [กันล้ม people] key_facts.people เป็นกล่อง + ข่าวมีชื่อคนไทย → ต้องไม่ล้ม (ทั้งเปิดและปิดสวิตช์)',
-  [undefined, '0'].every((v) => withEnv(v, () => {
+// 🔴 ข้อนี้เคย assert แค่ "ไม่ล้ม" — ผู้ตรวจชี้ว่านั่นคือการเปลี่ยนอาการดังเป็นอาการเงียบ
+//    ซึ่งคือโรคที่งานทั้งชุดนี้กำลังรักษาอยู่ ⇒ ต้อง assert "ไม่มีขยะ" ด้วย ไม่ใช่แค่ไม่ล้ม
+t('37 [กันล้ม+ไม่มีขยะ] people เป็นกล่อง + ข่าวมีชื่อคนไทย → ไม่ล้ม และพรอมต์ต้องไม่มี [object Object]',
+  withEnv(undefined, () => {
+    try {
+      const p = buildPrompt({ ...REAL_BD, key_facts: { people: [{ name: 'อ้น ศรีพรรณ' }], dates: [], places: [] } },
+        'ครูสมชาย ใจดี เล่าว่า นางสาวมานี รักเรียน ดูแลกันมานาน');
+      return !p.includes('[object Object]') && p.includes('อ้น ศรีพรรณ');
+    } catch { return false; }
+  }) && withEnv('0', () => {
     try {
       buildPrompt({ ...REAL_BD, key_facts: { people: [{ name: 'อ้น ศรีพรรณ' }], dates: [], places: [] } },
         'ครูสมชาย ใจดี เล่าว่า นางสาวมานี รักเรียน ดูแลกันมานาน');
-      return true;
+      return true; // ปิดสวิตช์แล้วขยะกลับมาได้ แต่ห้ามล้ม
     } catch { return false; }
-  })));
+  }));
 
 t('38 [กันล้ม quotes] quotes มี null ปนมา → ต้องไม่ล้ม',
   withEnv(undefined, () => { try { buildPrompt({ ...REAL_BD, quotes: [null, 'ปกติ'] }, BODY_WITH_DATE); return true; } catch { return false; } }));
@@ -289,6 +300,78 @@ t('41 [ปิดรู M11] คำเตือนเพดานตัวอย�
 
 t('42 [ตัดแล้วต้องส่งเสียง] เพดานจำนวนใบตัดของทิ้ง ต้องมี log ไม่ตัดเงียบ (บทเรียนเพดานครู 700)',
   /เกินเพดาน \$\{_LIST_MAX\}/.test(WF) || /_LIST_MAX\} — ตัดทิ้ง/.test(WF));
+
+// ═══ ⑥ รอบสาม — วัดจากตัวอย่างจริง 26 ชุด (เดิมดูแค่ 4 ชุดเลยเคลมผิด 2 รอบ) ═══
+// รูปฟิลด์ที่เจอจริงทั้งหมด ใช้ของจริงจาก data/job_queue.json ไม่ใช่ตัวอย่างสมมติ
+const REAL_PAIN_A = [{ pain_point: 'ต้องดูแลคนรักที่จำอะไรไม่ได้', detail: 'ทำเองทุกอย่างนานกว่า 1 ปี', emotion: 'เหนื่อยแต่ไม่ทิ้ง' }];
+const REAL_PAIN_B = [{ pain: 'ถูกนอกใจแต่เลือกอยู่ต่อ', why_it_hits: 'คนอ่านเคยเจอเอง' }];
+const REAL_Q_CONTENT = [{ type: 'direct', content: 'ปรับแต่ไม่เปลี่ยน', speaker: 'หนุ่ย ธาดา' }];
+
+t('43 [pain_points] รูป {pain_point,...} ต้องคลี่ได้ (เจอจริง 23% ของ 26 ชุด — ผมเคยเคลมว่าปลอดภัย)',
+  withEnv(undefined, () => flattenList(REAL_PAIN_A) === 'ต้องดูแลคนรักที่จำอะไรไม่ได้'));
+
+t('44 [pain_points] รูป {pain, why_it_hits} ต้องเอา "ความเจ็บ" ไม่ใช่คำวิจารณ์ของ AI',
+  withEnv(undefined, () => flattenList(REAL_PAIN_B) === 'ถูกนอกใจแต่เลือกอยู่ต่อ'));
+
+t('45 [pain_points] เข้าพรอมต์นักเขียนแล้วต้องไม่มีขยะ และเนื้อต้องไปถึง',
+  withEnv(undefined, () => {
+    const p = buildPrompt({ ...REAL_BD, pain_points: REAL_PAIN_A }, BODY_WITH_DATE);
+    return !p.includes('[object Object]') && p.includes('ต้องดูแลคนรักที่จำอะไรไม่ได้');
+  }));
+
+t('46 [quotes รูปที่ 3] {type,content,speaker} — ประโยคเด็ดต้องไม่ถูกทิ้ง (2 ใบใน 26 เป็นรูปนี้)',
+  withEnv(undefined, () => {
+    const p = buildPrompt({ ...REAL_BD, quotes: REAL_Q_CONTENT }, BODY_WITH_DATE);
+    return p.includes('ปรับแต่ไม่เปลี่ยน') && !p.includes('[object Object]');
+  }));
+
+t('47 [ต่อสาย pain_points] ตัวประกอบโครงเรื่องทั้งคู่ต้องคลี่ ไม่ยัดกล่องดิบ',
+  /\(bd\.pain_points \|\| \[\]\)\.map\(flattenItem\)/.test(NP) &&
+  /\(bd\.pain_points \|\| \[\]\)\.map\(flattenItem\)/.test(NPU));
+
+t('48 [ต่อสาย MasterAgent] painPoints + quotes ใน MasterAgent ต้องคลี่ (เดิม q.text ที่ไม่มีอยู่จริง = undefined)',
+  (() => {
+    const MA = stripComments(read('src/lib/agents/masterAgent.js'));
+    return /flattenList\(m\.emotional\.painPoints/.test(MA) && /flattenList\(m\.entities\.quotes/.test(MA) &&
+      !/m\.emotional\.painPoints\.join\(/.test(MA) && !/q\.text\)\.join/.test(MA) &&
+      /import \{[^}]*flattenList[^}]*\} from '\.\.\/workflow\/workflowEngine\.js'/.test(MA);
+  })());
+
+t('49 [ชื่อฟิลด์ครบทุกรูปที่เจอจริง] conflict/section/quote/content/pain_point/pain ต้องอยู่ใน _LIST_KEYS',
+  ['conflict', 'section', 'quote', 'content', 'pain_point', 'pain'].every((k) => new RegExp(`'${k}'`).test(WF.slice(WF.indexOf('const _LIST_KEYS'), WF.indexOf('const _ITEM_MAX')))));
+
+// ═══ ⑦ ปิดรูที่ผู้ตรวจทุบแล้วข้อสอบยังเขียว + ตาข่ายรวม ═══
+// 🔴 ฝาแฝดสาย URL: ข้อ 47 ปิด pain_points ให้แล้ว แต่ลืม quote/people ของรอบสอง — ทุบแล้วเคยเขียว
+t('50 [ฝาแฝด URL] quote fix + เกราะ people ต้องมีในสาย URL ด้วย (เดิมทุบแล้วข้อสอบเขียว)',
+  /q\?\.quote \|\| q\?\.content \|\| q\?\.text/.test(NPU) &&
+  /String\(p \?\? ''\)/.test(NPU) &&
+  /\(bd\.key_facts\?\.people \|\| \[\]\)\.map\(flattenItem\)/.test(NPU));
+
+t('51 [ตาข่ายรวม] numbers/places ที่ยัดเข้า "ข้อมูลพื้นฐาน" ต้องผ่านตัวคลี่ทั้งสองไฟล์',
+  [NP, NPU].every((s) => /type: 'statistic', data: flattenItem\(n\)/.test(s) && /type: 'location', data: flattenItem\(p\)/.test(s)));
+
+t('52 [ตาข่ายรวม] numbers/places เป็นกล่อง → พรอมต์ต้องไม่มีขยะ',
+  withEnv(undefined, () => {
+    const p = buildPrompt({ ...REAL_BD, key_facts: { people: [], dates: [], places: [{ name: 'โรงพยาบาลศิริราช' }], numbers: [{ value: '19 ปี' }] } }, BODY_WITH_DATE);
+    return !p.includes('[object Object]') && p.includes('โรงพยาบาลศิริราช') && p.includes('19 ปี');
+  }));
+
+t('53 [กันล้ม key_points] key_points[].point เป็นกล่อง + ข่าวมี quote → ต้องไม่ล้ม (รอยร้าวเก่า d414a8d ก็ล้ม)',
+  [undefined, '0'].every((v) => withEnv(v, () => {
+    try {
+      buildPrompt({ ...REAL_BD, key_points: [{ point: { a: 1 }, detail: 'x' }], quotes: ['คำพูดสั้น'] }, BODY_WITH_DATE);
+      return true;
+    } catch { return false; }
+  })));
+
+t('54 [รีเสิร์ช] จุดที่หลับอยู่เพราะสวิตช์ปิด ต้องถูกปิดไว้ล่วงหน้า (เปิด NEWS_RESEARCH เมื่อไรบั๊กจะไม่ฟื้น)',
+  (() => {
+    const RS = stripComments(read('src/lib/services/researchService.js'));
+    return /flattenList\(breakdownData\?\.quotes/.test(RS) &&
+      /flattenList\(breakdownData\?\.key_facts\?\.people/.test(RS) &&
+      /flattenList\(breakdownData\?\.key_facts\?\.places/.test(RS) &&
+      !/breakdownData\?\.quotes\?\.join\(/.test(RS);
+  })());
 
 console.log(`\n${fail === 0 ? '🎉' : '🔴'} ผ่าน ${pass}/${pass + fail}`);
 process.exit(fail === 0 ? 0 : 1);

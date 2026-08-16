@@ -20,7 +20,7 @@
  *     └── Scoring Agent (viral score + quality)
  */
 
-import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis } from '../workflow/workflowEngine.js';
+import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, flattenList } from '../workflow/workflowEngine.js';
 import { prisma } from '../db.js';
 
 // ============================================
@@ -241,7 +241,8 @@ export class MasterAgent {
       if (m.entities.places?.length) ctx += `สถานที่: ${m.entities.places.map(p => typeof p === 'string' ? p : p.name).join(', ')}\n`;
       if (m.entities.numbers?.length) ctx += `ตัวเลข: ${m.entities.numbers.map(n => typeof n === 'string' ? n : n.value).join(', ')}\n`;
       if (m.entities.dates?.length) ctx += `วันที่: ${m.entities.dates.map(d => typeof d === 'string' ? d : d.date).join(', ')}\n`;
-      if (m.entities.quotes?.length) ctx += `คำพูดสำคัญ: ${m.entities.quotes.map(q => typeof q === 'string' ? q : q.text).join(' | ')}\n`;
+      // 🔴 17 ส.ค. 69: q.text ไม่มีอยู่จริงในข้อมูล — ของจริงชื่อ quote หรือ content ⇒ เดิมได้ "undefined" ยัดเข้าพรอมต์
+      if (m.entities.quotes?.length) ctx += `คำพูดสำคัญ: ${flattenList(m.entities.quotes, ' | ')}\n`;
       ctx += `=== จบ Entity Map ===\n\n`;
     }
 
@@ -253,7 +254,8 @@ export class MasterAgent {
       if (m.emotional.conflictPoint) ctx += `Conflict: ${m.emotional.conflictPoint}\n`;
       if (m.emotional.viralTrigger) ctx += `Viral Trigger: ${m.emotional.viralTrigger}\n`;
       if (m.emotional.emotionalHooks?.length) ctx += `จุดที่คนอิน: ${m.emotional.emotionalHooks.join(' | ')}\n`;
-      if (m.emotional.painPoints?.length) ctx += `Pain Points: ${m.emotional.painPoints.join(' | ')}\n`;
+      // 🔴 17 ส.ค. 69: pain_points เป็นกล่อง 23% ของตัวอย่างจริง 26 ชุด — เดิม join ดิบ ได้ [object Object]
+      if (m.emotional.painPoints?.length) ctx += `Pain Points: ${flattenList(m.emotional.painPoints, ' | ')}\n`;
       ctx += `=== จบ Emotional Analysis ===\n\n`;
     }
 
