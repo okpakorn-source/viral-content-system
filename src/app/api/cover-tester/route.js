@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { extractContent } from '@/lib/scraper/index.js';
-import { performSummarize } from '@/lib/services/summarizeService';
+// 🔄 17 ส.ค. 69 (เจ้าของสั่ง 'เก็บหน้าไว้ให้ใช้ได้'): ย้ายจากสาย URL มาสาย TEXT
+//    หน้านี้ใช้แค่ 2 โหมด (extract + breakdown) ซึ่งสาย TEXT มีครบ — ไม่ได้ใช้โหมดเขียนข่าวเลย
+//    ⇒ ตัดการพึ่งพา summarizeService.js เพื่อให้ลบสาย URL ทิ้งได้
+import { performSummarize } from '@/lib/services/summarizeServiceText';
 import { autoGenerateCover } from '@/lib/services/imageSearchService';
 
 export const maxDuration = 120;
