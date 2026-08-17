@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { logApiUsage } from './usageLogger';
 import { sanitizeOutput } from './safetyFilter';
 import { MODEL_PRIMARY } from './modelConfig.js';
+import { ironRule5LengthLine, legacyLengthRule } from './legacyLengthRules.js'; // 🗑️ กฎที่ 5 ยุคแรก (ถอด 17 ส.ค. 69 · ถอยคืน LEGACY_LENGTH_RULES=1)
 
 let openaiClient = null;
 
@@ -54,10 +55,9 @@ export async function callAI({ prompt, systemPrompt, userPrompt, imageContents, 
 - ถ้า prompt มีเนื้อข่าวอยู่ระหว่าง === เนื้อข่าว === ให้ใช้ข้อมูลจากส่วนนั้นเท่านั้น
 
 [กฎที่ 5: โครงสร้างเนื้อหา Facebook]
-- เนื้อหาต้องยาวอย่างน้อย 250 คำ หรือ 3 ย่อหน้าเต็ม (แต่ละย่อหน้า 3-5 ประโยค คั่นด้วย \\n\\n)
+${ironRule5LengthLine('openai')}
 - โครงสร้าง: [เปิดแรง hook] → [เล่ารายละเอียด storytelling] → [ปิดด้วยประโยคบรรยายทรงพลัง]
-- ⚠️ ห้ามตั้งคำถามปิดท้าย ห้ามจบด้วย "คุณคิดยังไง?" "เห็นด้วยไหม?" — ปิดด้วยบรรยายเท่านั้น
-- ห้ามเขียนสั้น ห้ามสรุปรวบรัด ต้องเล่าเรื่องเต็มที่เหมือนโพสต์ Facebook จริง
+- ⚠️ ห้ามตั้งคำถามปิดท้าย ห้ามจบด้วย "คุณคิดยังไง?" "เห็นด้วยไหม?" — ปิดด้วยบรรยายเท่านั้น${legacyLengthRule('ironRule5NoShort')}
 
 [กฎที่ 6: ตัวเลขและลักษณนาม — บังคับทุกการเขียน]
 - ตัวเลขในประโยคเปิด/hook ใช้ได้กับ สิ่งของ จำนวนเงิน เวลา ระยะทาง ที่มีในข่าวจริงเท่านั้น — ถ้าข่าวไม่มีตัวเลข ห้ามประดิษฐ์ขึ้นเอง ให้เปิดด้วยภาพเหตุการณ์แทน

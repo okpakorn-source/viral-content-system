@@ -3,6 +3,7 @@
  * ทุก step จะ save/load context จาก DB
  */
 import { prisma } from '@/lib/db';
+import { legacyLengthRule } from '../ai/legacyLengthRules.js';
 
 // สร้าง workflow ใหม่
 export async function createWorkflow(sourceType = 'url') {
@@ -115,7 +116,9 @@ export function buildFullContext(workflow) {
     }
 
     ctx += `=== จบผลแตกประเด็น ===\n\n`;
-    ctx += `⚠️ คำสั่งเหล็ก: ต้องครอบคลุมทุกประเด็นด้านบน ห้ามข้าม ห้ามซ้ำ ห้ามแต่งเรื่องใหม่ ต้องเขียนยาวอย่างน้อย 250 คำ หรือ 3 ย่อหน้าเต็มสำหรับ Facebook (แต่ละย่อหน้า 3-5 ประโยค คั่นด้วย \n\n)\n`;
+    // 🗑️ 17 ส.ค. 69: ตัดเฉพาะวรรคความยาวออก — ส่วนครอบคลุมทุกประเด็น/ห้ามข้าม/ห้ามซ้ำ/ห้ามแต่งเรื่องใหม่ยังอยู่
+    //    เส้นนี้เป็นเส้นสำรอง (ใช้เมื่อ MasterAgent โหลดไม่ได้ — summarizeServiceText.js:1966)
+    ctx += `⚠️ คำสั่งเหล็ก: ต้องครอบคลุมทุกประเด็นด้านบน ห้ามข้าม ห้ามซ้ำ ห้ามแต่งเรื่องใหม่${legacyLengthRule('workflowIron')}\n`;
   }
 
   return ctx;
