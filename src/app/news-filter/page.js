@@ -65,6 +65,13 @@ export default function NewsFilterPage() {
 
 // ===== Page Content =====
 function NewsFilterContent() {
+  // 🛑 18 ส.ค. 69 — ปิดเจนข่าวบนหน้าเว็บ (สวิตช์ตัวเดียวกับ /content/new และ /m)
+  //   เจ้าของสั่ง (คำต่อคำ): ผู้ควบคุมงานถาม "ปิด /m · /news-filter · /mega ด้วยไหม" → เจ้าของตอบ "ปิด"
+  //   เส้นนี้ไม่มีบั๊กเลขขัดกัน (วิ่งสาย TEXT ที่แก้ใน bb4c23d แล้ว) — ปิดเพราะคำสั่ง ไม่ใช่เพราะเจอบั๊ก
+  //   ปิดเฉพาะ "ส่งเข้า Workflow" (เจนข่าว) — ปุ่มสกัด/แยกประเด็น/คัดลอก/Export ไม่แตะ
+  //   ไม่ตั้ง = ปิด (ค่าปกติ) · ตั้ง NEXT_PUBLIC_WEB_NEWS_GEN=1 + build ใหม่ = กลับมาทั้งหมด
+  //   (NEXT_PUBLIC_* ฝังตอน build — ตั้ง env เฉยๆ ไม่พอ ต้อง build ใหม่ปุ่มถึงกลับมา)
+  const WEB_NEWS_GEN_ON = process.env.NEXT_PUBLIC_WEB_NEWS_GEN === '1';
   // State
   const [inputText, setInputText] = useState('');
   const [outputData, setOutputData] = useState(null);
@@ -214,6 +221,9 @@ function NewsFilterContent() {
 
   // ส่งประเด็นเดียวเข้าคิวเขียน (เหมือนปุ่มส่งแก่น แต่ส่งเฉพาะประเด็นนี้)
   const sendTopicToWorkflow = async (t) => {
+    // 🛑 18 ส.ค. 69 — ยามคอขวด: ปุ่ม "ส่งประเด็นนี้เข้า Workflow" ทั้ง 2 จุดผ่านฟังก์ชันนี้ตัวเดียว
+    //   วางยามตรงนี้ = ปิดครบแม้มีปุ่มที่ยังหาไม่เจอ หรือมีคนเพิ่มปุ่มใหม่ทีหลัง (ดูวิธีถอยบนสุดของ component)
+    if (!WEB_NEWS_GEN_ON) { alert('ปิดเจนข่าวบนหน้าเว็บแล้ว — ส่งข่าวเข้าเขียนผ่านดิสคอร์ดเท่านั้น'); return; }
     if (sendingTopic) return;
     const name = ensureName();
     if (!name) { alert('กรุณาใส่ชื่อก่อนส่งเจน (กำกับว่าใครเป็นคนส่ง)'); return; }
@@ -533,6 +543,8 @@ function NewsFilterContent() {
   // ★ ส่งแก่นข้อเท็จจริงเข้าไลน์เจน (13 มิ.ย.) — ผ่านคิวเดียวกับ Discord (same-origin ไม่ต้อง auth)
   const [sendingWf, setSendingWf] = useState(false);
   const handleSendToWorkflow = async () => {
+    // 🛑 18 ส.ค. 69 — ยามคอขวด: ปุ่ม "ส่งเข้า Workflow" (แก่นข่าว) · ดูวิธีถอยบนสุดของ component
+    if (!WEB_NEWS_GEN_ON) { alert('ปิดเจนข่าวบนหน้าเว็บแล้ว — ส่งข่าวเข้าเขียนผ่านดิสคอร์ดเท่านั้น'); return; }
     if (!outputData?.cleanText || sendingWf) return;
     const name = ensureName();
     if (!name) { alert('กรุณาใส่ชื่อก่อนส่งเจน (กำกับว่าใครเป็นคนส่ง)'); return; }
@@ -1365,6 +1377,9 @@ function NewsFilterContent() {
                 >
                   📄 Export TXT
                 </button>
+                {/* 🛑 18 ส.ค. 69 — ซ่อนปุ่ม "ส่งเข้า Workflow" (เจนข่าว) · ดูเหตุผล+วิธีถอยที่ WEB_NEWS_GEN_ON บนสุดของ component
+                    ปุ่ม "คัดลอก" / "Export TXT" ในแถวเดียวกันยังอยู่ครบ */}
+                {WEB_NEWS_GEN_ON && (
                 <button
                   onClick={handleSendToWorkflow}
                   disabled={sendingWf || !outputData?.cleanText}
@@ -1378,6 +1393,7 @@ function NewsFilterContent() {
                 >
                   {sendingWf ? '⏳ กำลังส่ง...' : '📤 ส่งเข้า Workflow'}
                 </button>
+                )}
               </div>
             )}
           </div>
@@ -1460,10 +1476,14 @@ function NewsFilterContent() {
                               style={{ flex: 1, padding: '10px 0', borderRadius: 9, border: 'none', background: copiedTopic === t.id ? 'rgba(34,197,94,0.15)' : 'rgba(59,130,246,0.1)', color: copiedTopic === t.id ? '#22c55e' : '#3b82f6', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
                               {copiedTopic === t.id ? '✅ คัดลอกแล้ว!' : '📋 คัดลอกประเด็นนี้'}
                             </button>
+                            {/* 🛑 18 ส.ค. 69 — ซ่อนปุ่ม "ส่งประเด็นนี้เข้า Workflow" (เจนข่าว) · ดูเหตุผล+วิธีถอยที่ WEB_NEWS_GEN_ON บนสุดของ component
+                                ปุ่ม "คัดลอกประเด็นนี้" ข้างกันยังอยู่ */}
+                            {WEB_NEWS_GEN_ON && (
                             <button onClick={() => sendTopicToWorkflow(t)} disabled={sendingTopic === t.id}
                               style={{ flex: 1, padding: '10px 0', borderRadius: 9, border: '1px solid rgba(34,197,94,0.4)', background: sendingTopic === t.id ? 'rgba(255,255,255,0.04)' : 'rgba(34,197,94,0.12)', color: sendingTopic === t.id ? 'var(--text-muted)' : '#22c55e', fontSize: 13, fontWeight: 700, cursor: sendingTopic === t.id ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
                               {sendingTopic === t.id ? '⏳ กำลังส่ง...' : '📤 ส่งประเด็นนี้เข้า Workflow'}
                             </button>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1669,7 +1689,8 @@ function NewsFilterContent() {
                             <div style={{ fontSize: 12.5, lineHeight: 1.75, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', marginTop: 6, maxHeight: 200, overflowY: 'auto', background: 'rgba(0,0,0,0.12)', borderRadius: 8, padding: 10 }}>{t.content}</div>
                             <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 8, marginTop: 8 }}>
                               <button onClick={() => copyText(t.content)} style={{ flex: 1, padding: '8px 0', borderRadius: 8, border: 'none', background: 'rgba(59,130,246,0.1)', color: '#3b82f6', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>📋 คัดลอกมุมนี้</button>
-                              <button onClick={() => sendTopicToWorkflow(t)} disabled={sendingTopic === t.id} style={{ flex: 1, padding: '8px 0', borderRadius: 8, border: '1px solid rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.12)', color: '#22c55e', fontSize: 12.5, fontWeight: 700, cursor: sendingTopic === t.id ? 'wait' : 'pointer', fontFamily: 'inherit' }}>{sendingTopic === t.id ? '⏳...' : '📤 ส่งเข้า Workflow'}</button>
+                              {/* 🛑 18 ส.ค. 69 — ซ่อนปุ่ม "ส่งเข้า Workflow" (เจนข่าว · การ์ดประเด็นในคลังเคส) · ดูเหตุผล+วิธีถอยที่ WEB_NEWS_GEN_ON บนสุดของ component */}
+                              {WEB_NEWS_GEN_ON && <button onClick={() => sendTopicToWorkflow(t)} disabled={sendingTopic === t.id} style={{ flex: 1, padding: '8px 0', borderRadius: 8, border: '1px solid rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.12)', color: '#22c55e', fontSize: 12.5, fontWeight: 700, cursor: sendingTopic === t.id ? 'wait' : 'pointer', fontFamily: 'inherit' }}>{sendingTopic === t.id ? '⏳...' : '📤 ส่งเข้า Workflow'}</button>}
                             </div>
                           </div>
                         ))}

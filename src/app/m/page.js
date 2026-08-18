@@ -194,6 +194,13 @@ const evText = (e) => {
 };
 
 export default function MobileApp() {
+  // 🛑 18 ส.ค. 69 — ปิดเจนข่าวบนหน้าเว็บ (สวิตช์ตัวเดียวกับ /content/new: ExtractedView/ResultVersions/InputSection)
+  //   เจ้าของสั่ง (คำต่อคำ): ผู้ควบคุมงานถาม "ปิด /m · /news-filter · /mega ด้วยไหม" → เจ้าของตอบ "ปิด"
+  //   ⚠️ ผู้ควบคุมงานเตือนแล้วว่า /m คือแอพมือถือที่เจ้าของใช้อยู่ — เจ้าของยืนยัน "ปิด"
+  //   เส้นนี้ไม่มีบั๊กเลขขัดกัน (วิ่งสาย TEXT ที่แก้ใน bb4c23d แล้ว) — ปิดเพราะคำสั่ง ไม่ใช่เพราะเจอบั๊ก
+  //   ไม่ตั้ง = ปิด (ค่าปกติ) · ตั้ง NEXT_PUBLIC_WEB_NEWS_GEN=1 + build ใหม่ = กลับมาทั้งหมด
+  //   (NEXT_PUBLIC_* ฝังตอน build — ตั้ง env เฉยๆ ไม่พอ ต้อง build ใหม่ปุ่มถึงกลับมา)
+  const WEB_NEWS_GEN_ON = process.env.NEXT_PUBLIC_WEB_NEWS_GEN === '1';
   const [tab, setTab] = useState('write');
   const [toast, setToast] = useState('');
   const [ov, setOv] = useState(null);
@@ -565,6 +572,10 @@ export default function MobileApp() {
 
   // ═══ ส่งเข้าคิวเขียนจริง ═══
   const submitNews = async (input, { forceNew = false, source = 'text' } = {}) => {
+    // 🛑 18 ส.ค. 69 — ยามคอขวด: ปุ่มเจนข่าวทุกตัวใน /m (แท็บส่งข่าว/ถอดคลิป/สกัดเนื้อ) ผ่านฟังก์ชันนี้ตัวเดียว
+    //   วางยามตรงนี้ = ปิดครบแม้มีปุ่มที่ยังหาไม่เจอ หรือมีคนเพิ่มปุ่มใหม่ทีหลัง (ซ่อนปุ่มอย่างเดียวกันไม่ครบ)
+    //   ถอย: ตั้ง NEXT_PUBLIC_WEB_NEWS_GEN=1 + build ใหม่ (ดูคอมเมนต์บนสุดของ component)
+    if (!WEB_NEWS_GEN_ON) { say('ปิดเจนข่าวบนหน้าเว็บแล้ว — ส่งข่าวผ่านดิสคอร์ดเท่านั้น'); return; }
     const body = (forceNew ? 'ทำใหม่ ' : '') + input.trim();
     if (body.replace('ทำใหม่ ', '').length < 60) { say('เนื้อสั้นเกินไป — ขอความยาวสักหน่อย'); return; }
     setErrMsg(''); setResult(null); setPhase('queued'); setPos(0); setElapsed(0); setTab('write');
@@ -1303,17 +1314,22 @@ export default function MobileApp() {
       {tab === 'write' && <div className="wrap">
         {phase === 'idle' || phase === 'neardup' || phase === 'error' ? <>
           <h1>ส่งข่าว</h1>
-          <p className="sub">ส่งในชื่อ <b style={{ color: 'var(--pink)' }}>{member?.displayName || '…'}</b> · เข้าคิวเดียวกับบอทดิสคอร์ด</p>
-          <div className="compose">
-            <textarea className="ta" value={text} onChange={e => setText(e.target.value)} placeholder="วางเนื้อข่าวเต็มตรงนี้… (ระบบจะเขียนให้ 2 เวอร์ชัน 2 มุมเล่า)" />
-            <div className="row" style={{ marginTop: 9 }}>
-              <button className="gh" onClick={pasteClip}>วางจากคลิปบอร์ด</button>
-              <button className="gh" onClick={() => setTab('clip')}>จากคลิป</button>
+          {/* 🛑 18 ส.ค. 69 — ซ่อนช่องส่งข่าว + ปุ่มเจนทั้งก้อน (ดูเหตุผล+วิธีถอยที่ WEB_NEWS_GEN_ON บนสุดของ component)
+              ซ่อนทั้งกล่อง compose เพราะช่องพิมพ์นี้มีไว้ป้อน submitNews อย่างเดียว — เหลือไว้ = ช่องพิมพ์ที่กดส่งไม่ได้ */}
+          {!WEB_NEWS_GEN_ON && <p className="sub">ปิดเจนข่าวบนหน้าเว็บแล้ว — ส่งข่าวผ่านดิสคอร์ดเท่านั้น (แท็บ &quot;ถอดคลิป / สกัดเนื้อ / ผลงาน&quot; ยังใช้ได้ตามปกติ)</p>}
+          {WEB_NEWS_GEN_ON && <>
+            <p className="sub">ส่งในชื่อ <b style={{ color: 'var(--pink)' }}>{member?.displayName || '…'}</b> · เข้าคิวเดียวกับบอทดิสคอร์ด</p>
+            <div className="compose">
+              <textarea className="ta" value={text} onChange={e => setText(e.target.value)} placeholder="วางเนื้อข่าวเต็มตรงนี้… (ระบบจะเขียนให้ 2 เวอร์ชัน 2 มุมเล่า)" />
+              <div className="row" style={{ marginTop: 9 }}>
+                <button className="gh" onClick={pasteClip}>วางจากคลิปบอร์ด</button>
+                <button className="gh" onClick={() => setTab('clip')}>จากคลิป</button>
+              </div>
             </div>
-          </div>
-          {phase === 'neardup' && <div className="err">{errMsg}<button className="gh" style={{ marginTop: 9 }} onClick={() => submitNews(text, { forceNew: true })}>ยืนยันทำใหม่ (ข้ามด่านกันซ้ำ)</button></div>}
-          {phase === 'error' && <div className="err">❌ {errMsg}</div>}
-          <button className="cta" onClick={() => submitNews(text)}>สร้างข่าว 2 เวอร์ชัน — เข้าคิวจริง</button>
+            {phase === 'neardup' && <div className="err">{errMsg}<button className="gh" style={{ marginTop: 9 }} onClick={() => submitNews(text, { forceNew: true })}>ยืนยันทำใหม่ (ข้ามด่านกันซ้ำ)</button></div>}
+            {phase === 'error' && <div className="err">❌ {errMsg}</div>}
+            <button className="cta" onClick={() => submitNews(text)}>สร้างข่าว 2 เวอร์ชัน — เข้าคิวจริง</button>
+          </>}
         </> : null}
 
         {(phase === 'queued' || phase === 'processing') && <>
@@ -1344,7 +1360,8 @@ export default function MobileApp() {
           </div>}
           <div className="row" style={{ margin: '11px 0 9px' }}>
             <button className="gh" onClick={() => copyText(cur?.content || '', result.caseId || jobId)}>คัดลอกเวอร์ชันนี้</button>
-            <button className="gh" onClick={() => submitNews(text || cur?.content || '', { forceNew: true })}>เจนใหม่</button>
+            {/* 🛑 18 ส.ค. 69 — ซ่อนปุ่ม "เจนใหม่" (ดูเหตุผล+วิธีถอยที่ WEB_NEWS_GEN_ON บนสุดของ component) · ปุ่มคัดลอกยังอยู่ */}
+            {WEB_NEWS_GEN_ON && <button className="gh" onClick={() => submitNews(text || cur?.content || '', { forceNew: true })}>เจนใหม่</button>}
           </div>
           {/* 🛑 31 ก.ค. 69 (เจ้าของสั่ง): ปุ่ม "ทำปกจากข่าวนี้" ถูกถอดพร้อมแท็บทำปก — ท่อ MEGA ปิดใช้งาน
           <button className="gh" style={{ marginBottom: 9 }} onClick={coverFromNews}>🖼️ ทำปกจากข่าวนี้</button> */}
@@ -1433,7 +1450,9 @@ export default function MobileApp() {
               <div className="bd" style={{ fontSize: 13, lineHeight: 1.75, whiteSpace: 'pre-wrap', maxHeight: 320, overflowY: 'auto', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, padding: 12 }}>{rawEdit ?? insight.rawData}</div>
               <div className="row" style={{ gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
                 <button className="gh" style={{ width: 'auto', padding: '5px 12px', fontSize: 11.5 }} onClick={() => copyText(insight.rawData, insight.id || '')}>📋 คัดลอกข้อมูลดิบ</button>
-                <button className="gh" style={{ width: 'auto', padding: '5px 12px', fontSize: 11.5, borderColor: 'var(--pink)', color: 'var(--pink)' }} onClick={sendRawToWrite}>🚀 ส่งกรอบนี้เข้าเขียนข่าว</button>
+                {/* 🛑 18 ส.ค. 69 — ซ่อนปุ่มส่งเข้าเขียนข่าว (กรอบเทา/ข้อมูลดิบ) · ดูเหตุผล+วิธีถอยที่ WEB_NEWS_GEN_ON บนสุดของ component
+                    ปุ่มแก้/คัดลอกในกรอบเดียวกันยังอยู่ครบ — ถอดคลิปยังใช้ได้ตามปกติ */}
+                {WEB_NEWS_GEN_ON && <button className="gh" style={{ width: 'auto', padding: '5px 12px', fontSize: 11.5, borderColor: 'var(--pink)', color: 'var(--pink)' }} onClick={sendRawToWrite}>🚀 ส่งกรอบนี้เข้าเขียนข่าว</button>}
               </div>
             </div>
           )}
@@ -1486,7 +1505,9 @@ export default function MobileApp() {
 
           {/* ★ item 1: แถบเตือนแดง — ธงคุณภาพไม่สมบูรณ์ เหนือปุ่มส่ง เท่าเว็บ */}
           {insightMeta?.lowQuality && <div className="err">⚠️ {insightMeta.qualityNote || 'ผลอาจไม่สมบูรณ์ — แนะนำกดถอดใหม่'}</div>}
-          <button className="cta" style={{ marginTop: 6 }} onClick={sendTopicsToWrite}>ส่งประเด็นที่เลือกเข้าเขียนข่าว</button>
+          {/* 🛑 18 ส.ค. 69 — ซ่อนปุ่มส่งประเด็นที่เลือกเข้าเขียนข่าว · ดูเหตุผล+วิธีถอยที่ WEB_NEWS_GEN_ON บนสุดของ component
+              การเลือก/แก้ประเด็นยังทำได้ (ใช้ต่อกับปุ่มคัดลอกได้) */}
+          {WEB_NEWS_GEN_ON && <button className="cta" style={{ marginTop: 6 }} onClick={sendTopicsToWrite}>ส่งประเด็นที่เลือกเข้าเขียนข่าว</button>}
 
           {/* ★ item 2: subStories เต็มกล่อง (ไม่ใช่แค่ตัวนับ) — เท่าเว็บ */}
           {insight.subStories?.length > 0 && (
@@ -1534,7 +1555,8 @@ export default function MobileApp() {
                   <div className="bd" style={{ fontSize: 13 }}>{purpleEdit ?? insight.transcriptQuotes.enrichedRaw}</div>
                   <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
                     <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5 }} onClick={() => copyText(insight.transcriptQuotes.enrichedRaw)}>📋 คัดลอกกรอบนี้</button>
-                    <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5, borderColor: 'var(--pink)', color: 'var(--pink)' }} onClick={sendPurpleToWrite}>🚀 ส่งกรอบนี้เข้าเขียนข่าว</button>
+                    {/* 🛑 18 ส.ค. 69 — ซ่อนปุ่มส่งเข้าเขียนข่าว (กรอบม่วง/เนื้อดิบมีมิติ) · ดูเหตุผล+วิธีถอยที่ WEB_NEWS_GEN_ON บนสุดของ component */}
+                    {WEB_NEWS_GEN_ON && <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5, borderColor: 'var(--pink)', color: 'var(--pink)' }} onClick={sendPurpleToWrite}>🚀 ส่งกรอบนี้เข้าเขียนข่าว</button>}
                   </div>
                 </div>
               )}
@@ -1623,7 +1645,9 @@ export default function MobileApp() {
             <button className="gh" onClick={() => copyText(nfOut.cleanText)}>คัดลอก</button>
             <button className="gh" disabled={nfBusy === 'split'} onClick={nfDoSplit}>{nfBusy === 'split' ? 'กำลังแยก…' : 'แยกประเด็นย่อย'}</button>
           </div>
-          <button className="cta" onClick={() => submitNews(nfOut.cleanText, { source: 'filter' })}>ส่งแก่นข่าวเข้าเขียน — เข้าคิวจริง</button>
+          {/* 🛑 18 ส.ค. 69 — ซ่อนปุ่มส่งแก่นข่าวเข้าเขียน · ดูเหตุผล+วิธีถอยที่ WEB_NEWS_GEN_ON บนสุดของ component
+              ปุ่ม "สกัดแก่นข่าว" / "แยกประเด็นย่อย" / "คัดลอก" ยังอยู่ครบ — สกัดเนื้อยังใช้ได้ตามปกติ */}
+          {WEB_NEWS_GEN_ON && <button className="cta" onClick={() => submitNews(nfOut.cleanText, { source: 'filter' })}>ส่งแก่นข่าวเข้าเขียน — เข้าคิวจริง</button>}
         </>}
 
         {nfSplit?.topics?.length > 0 && <>
@@ -1638,7 +1662,8 @@ export default function MobileApp() {
                 {t.summary && <p className="du" style={{ marginTop: 3 }}>{t.summary}</p>}
                 {t.content && <details className="raw"><summary>เนื้อประเด็นนี้ ({t.content.length} ตัวอักษร)</summary><div>{t.content}</div></details>}
                 <div className="row" style={{ marginTop: 8 }}>
-                  <button className="gh" style={{ width: 'auto', padding: '6px 16px', fontSize: 12.5 }} onClick={() => { log('send_topic', '', { from: 'filter' }); submitNews((t.title ? t.title + '\n\n' : '') + (t.content || t.summary || ''), { source: 'filter-topic' }); }}>ส่งประเด็นนี้เข้าเขียน</button>
+                  {/* 🛑 18 ส.ค. 69 — ซ่อนปุ่มส่งประเด็นนี้เข้าเขียน · ดูเหตุผล+วิธีถอยที่ WEB_NEWS_GEN_ON บนสุดของ component · ปุ่มคัดลอกประเด็นยังอยู่ */}
+                  {WEB_NEWS_GEN_ON && <button className="gh" style={{ width: 'auto', padding: '6px 16px', fontSize: 12.5 }} onClick={() => { log('send_topic', '', { from: 'filter' }); submitNews((t.title ? t.title + '\n\n' : '') + (t.content || t.summary || ''), { source: 'filter-topic' }); }}>ส่งประเด็นนี้เข้าเขียน</button>}
                   <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5 }} onClick={() => copyText((t.title ? t.title + '\n\n' : '') + (t.content || t.summary || ''))}>📋 คัดลอกประเด็นนี้</button>
                 </div>
               </div>
