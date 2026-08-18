@@ -5,6 +5,9 @@ export default function ExtractedView({ states, setters, handlers, utils }) {
   const { newsData, copied, breakdownPromptText, loading, blueprinting, blueprintData, editedBlueprint, researchData, researching, selectedResearch, addedResearchItems, breakdownData, customPrompt, sourceType, contentLength, workflowId } = states;
   const { copyText, setBreakdownPromptText, handleBreakdown, handleBlueprint, setEditedBlueprint, handleResearch, toggleResearchItem, setSelectedResearch, handleAddResearch, handleMixAngles, handleAnalyze, setContentLength } = handlers;
 
+  // ซ่อนปุ่มเจนข่าวหน้าเว็บ (18 ส.ค. 69) — /api/summarize ตั้ง max=300/350 คำ ขัดกับกฎอ้างอิงกลาง 146-269 คำ (เลขสั่งขัดกัน) — เปิดคืนด้วย NEXT_PUBLIC_WEB_NEWS_GEN=1
+  const WEB_NEWS_GEN_ON = process.env.NEXT_PUBLIC_WEB_NEWS_GEN === '1';
+
   return (
     <>
                 <div className="card slide-up">
@@ -432,6 +435,8 @@ export default function ExtractedView({ states, setters, handlers, utils }) {
                     )}
                   </div>
       
+                  {WEB_NEWS_GEN_ON && (
+                  <>
                   {/* 🧬 AI ผสมมุมข่าว — เลือกหัวข้อดีมาผสมเป็นเนื้อหาใหม่ */}
                   <div style={{ background: 'linear-gradient(135deg, rgba(168,85,247,0.15), rgba(236,72,153,0.15))', padding: 20, borderRadius: 'var(--radius-md)', border: '2px solid rgba(168,85,247,0.5)', marginBottom: 16 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -455,7 +460,11 @@ export default function ExtractedView({ states, setters, handlers, utils }) {
                     </button>
                     <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6, textAlign: 'center' }}>ยึด Prompt + Safety Rules ครบทุกข้อ • ใช้ข้อมูลจากข่าวจริงเท่านั้น</div>
                   </div>
-      
+                  </>
+                  )}
+
+                  {WEB_NEWS_GEN_ON && (
+                  <>
                   {/* 📏 เลือกความยาวเนื้อหา */}
                   <div style={{ background: 'var(--bg-primary)', padding: 20, borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', marginBottom: 16 }}>
                     <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 4 }}>📏 เลือกความยาวเนื้อหา</div>
@@ -480,7 +489,11 @@ export default function ExtractedView({ states, setters, handlers, utils }) {
                       ))}
                     </div>
                   </div>
-      
+                  </>
+                  )}
+
+                  {WEB_NEWS_GEN_ON && (
+                  <>
                   {/* สร้างเนื้อหา — AI เลือก Prompt จากหอสมุดอัตโนมัติ */}
                   <div style={{ background: 'var(--bg-primary)', padding: 20, borderRadius: 'var(--radius-md)', border: '2px solid var(--accent)' }}>
                     <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--accent-light)', marginBottom: 4 }}>🧠 AI เลือก Prompt จากหอสมุดอัตโนมัติ</div>
@@ -490,6 +503,8 @@ export default function ExtractedView({ states, setters, handlers, utils }) {
                       {loading ? '⏳ AI กำลังวิเคราะห์และเลือก Prompt...' : '⚡ สร้างเนื้อหา (AI เลือก Prompt จากหอสมุดให้)'}
                     </button>
                   </div>
+                  </>
+                  )}
                 </div>
               )}
             </div>

@@ -5,6 +5,13 @@ export default function ResultVersions({ states, handlers }) {
   const { analysisResult, composedImages, composingImage, imageLayout, newsData, copied, sentToReview, sendingReview, simulatedComments, loading, researchData, factPoolData } = states;
   const { copyText, handleSendToReview, setCopied, handleAnalyze, handleReset } = handlers;
 
+  // 🚫 ซ่อนปุ่มเจนข่าวหน้าเว็บ (18 ส.ค. 69) — ตามคำสั่งเจ้าของ "ฉันเจนผ่านดิสคอสเท่านั้น"
+  //   (อ้างจากคำสั่งเจ้าของ ไม่ใช่ข้อสรุปจากโค้ด — Auto Mode บนเว็บยังเจนได้ผ่าน /api/auto/process ซึ่งใช้สาย TEXT ที่เลขถูกแล้ว)
+  // ⚠️ NEXT_PUBLIC_* ถูกฝังตอน build — ตั้งค่าแล้วต้อง build ใหม่ ปุ่มถึงจะกลับมา
+  // เหตุ: ใบสั่งความยาวมีเลขขัดกัน (summarizeService max=300/350 ขัดกับกรอบกลาง 146-269 คำ)
+  // ไม่ตั้ง = ซ่อน (ค่าปกติ) · ตั้ง NEXT_PUBLIC_WEB_NEWS_GEN=1 = ปุ่มกลับมา
+  const WEB_NEWS_GEN_ON = process.env.NEXT_PUBLIC_WEB_NEWS_GEN === '1';
+
   // รองรับรูปแบบ payload ที่ต่างกันจากการดึงข้อมูล AutoFlow หรือ Extract ตรงๆ
   const researchItems = researchData?.items || analysisResult?.researchItems || analysisResult?.researchData?.items || newsData?.researchData?.items || [];
   
@@ -457,13 +464,15 @@ export default function ResultVersions({ states, handlers }) {
               </details>
             )}
 
-            {/* ปุ่มวิเคราะห์ใหม่ */}
+            {/* ปุ่มวิเคราะห์ใหม่ — ซ่อนด้วยสวิตช์ WEB_NEWS_GEN_ON (ดูเหตุผลบนสุดของ component) */}
+            {WEB_NEWS_GEN_ON && (
             <div style={{ paddingTop: 16, borderTop: '1px solid var(--border)', marginBottom: 16 }}>
               <button className="btn btn-outline" disabled={loading} onClick={() => handleAnalyze()}
                 style={{ fontSize: 12 }}>
                 {loading ? '⏳ สร้างใหม่...' : '🔄 สร้างใหม่ (AI เลือก Prompt อัตโนมัติ)'}
               </button>
             </div>
+            )}
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <button onClick={handleReset} className="btn btn-primary btn-lg" style={{ flex: 1 }}>
