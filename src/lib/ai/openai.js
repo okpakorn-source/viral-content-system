@@ -4,6 +4,10 @@ import { sanitizeOutput } from './safetyFilter';
 import { MODEL_PRIMARY } from './modelConfig.js';
 import { ironRule5LengthLine, legacyLengthRule } from './legacyLengthRules.js'; // 🗑️ กฎที่ 5 ยุคแรก (ถอด 17 ส.ค. 69 · ถอยคืน LEGACY_LENGTH_RULES=1)
 
+
+// ★ 18 ส.ค. 69 เจ้าของสั่ง "เก็บ log 100% ทุกขั้นตอน ทุกคำสั่ง" — สวิตช์ LOG_FULL_PROMPT=1
+//   ไม่ตั้ง = พฤติกรรมเดิมทุกตัวอักษร (ตัดพรีวิวเท่าเดิม) · ตั้ง 1 = พิมพ์พรอมต์+คำตอบเต็ม
+const _fullLog = () => process.env.LOG_FULL_PROMPT === '1';
 let openaiClient = null;
 
 export function getOpenAIClient() {
@@ -161,7 +165,11 @@ PASS 5: อ่านใหม่เหมือนเป็นคนอ่าน
 
   // Debug log — แสดง prompt ที่ส่งไปจริง
   console.log(`[callAI] model=${model}, temp=${temperature}, maxTokens=${maxTokens}`);
-  console.log(`[callAI] prompt preview (first 500ch): ${(prompt || userPrompt || '').slice(0, 500)}`);
+  { const _p = String(prompt || userPrompt || '');
+    if (_fullLog()) console.log(`[callAI] 📜 PROMPT เต็ม (${_p.length}ch):
+${_p}
+[callAI] 📜 จบ PROMPT`);
+    else console.log(`[callAI] prompt preview (first 500ch): ${_p.slice(0, 500)}`); }
 
   // ★ ตระกูล gpt-5.x: ใช้ max_completion_tokens + ไม่รับ temperature (ใช้ default=1 เท่านั้น)
   const modelsToTry = [model];
@@ -211,6 +219,9 @@ PASS 5: อ่านใหม่เหมือนเป็นคนอ่าน
       const inputTokens = response.usage?.prompt_tokens || 0;
       const outputTokens = response.usage?.completion_tokens || 0;
       console.log(`[callAI] OK: model=${currentModel}, tokens=${response.usage?.total_tokens || '?'}, output=${content.length}ch`);
+      if (_fullLog()) console.log(`[callAI] 📄 คำตอบเต็ม (${content.length}ch):
+${content}
+[callAI] 📄 จบคำตอบ`);
       
       // Asynchronously log usage to DB
       logApiUsage({

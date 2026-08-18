@@ -1,3 +1,7 @@
+
+// ★ 18 ส.ค. 69 เจ้าของสั่ง "เก็บ log 100% ทุกขั้นตอน ทุกคำสั่ง" — สวิตช์ LOG_FULL_PROMPT=1
+//   ไม่ตั้ง = พฤติกรรมเดิมทุกตัวอักษร (ตัดพรีวิวเท่าเดิม) · ตั้ง 1 = พิมพ์พรอมต์+คำตอบเต็ม
+const _fullLog = () => process.env.LOG_FULL_PROMPT === '1';
 /**
  * ========================================
  * CLAUDE CLIENT — Anthropic (ตัวเขียนข่าวหลัก)
@@ -131,7 +135,10 @@ PASS 5: อ่านใหม่เหมือนคนอ่านจริง
   //   (ของเดิม: prompt.slice(0, 300) ตรงๆ = TypeError เมื่อ prompt เป็น undefined)
   const _blocksOk = Array.isArray(promptBlocks) && promptBlocks.length > 0 && promptBlocks.some(b => String(b?.text || '').trim());
   const _previewSrc = prompt || (_blocksOk ? promptBlocks.map(b => String(b?.text || '')).join('') : '');
-  console.log(`[Claude] prompt preview: ${String(_previewSrc).slice(0, 300)}...`);
+  if (_fullLog()) console.log(`[Claude] 📜 PROMPT เต็ม (${String(_previewSrc).length}ch):
+${String(_previewSrc)}
+[Claude] 📜 จบ PROMPT`);
+  else console.log(`[Claude] prompt preview: ${String(_previewSrc).slice(0, 300)}...`);
 
   // ★ 1 ส.ค. 69: opus-5/fable "คิดก่อนเขียน" เปิดเองอัตโนมัติ และช่วงคิดกิน max_tokens ร่วมกับเนื้อ
   //   → เผื่อเพดานขั้นต่ำ 16000 กันเนื้อโดนตัดกลางคัน (ยังอยู่ในโซน non-streaming ปลอดภัย)
@@ -195,6 +202,9 @@ PASS 5: อ่านใหม่เหมือนคนอ่านจริง
   const _cw = response.usage?.cache_creation_input_tokens || 0;
   const _cr = response.usage?.cache_read_input_tokens || 0;
   console.log(`[Claude] OK: tokens input=${inputTokens}, output=${outputTokens}${(_cw || _cr) ? `, cacheW=${_cw}, cacheR=${_cr}` : ''}`);
+  if (_fullLog()) console.log(`[Claude] 📄 คำตอบเต็ม (${String(content||'').length}ch):
+${content}
+[Claude] 📄 จบคำตอบ`);
   
   // Asynchronously log usage to DB
   // ★ Sol #2 + รอบ 2 (15 ส.ค. 69): input จริง = input + cache_creation + cache_read (เดิมนับแค่ input_tokens ทำ /cost ต่ำกว่าจริง)

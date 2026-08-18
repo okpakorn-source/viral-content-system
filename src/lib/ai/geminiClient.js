@@ -1,3 +1,7 @@
+
+// ★ 18 ส.ค. 69 เจ้าของสั่ง "เก็บ log 100% ทุกขั้นตอน ทุกคำสั่ง" — สวิตช์ LOG_FULL_PROMPT=1
+//   ไม่ตั้ง = พฤติกรรมเดิมทุกตัวอักษร (ตัดพรีวิวเท่าเดิม) · ตั้ง 1 = พิมพ์พรอมต์+คำตอบเต็ม
+const _fullLog = () => process.env.LOG_FULL_PROMPT === '1';
 /**
  * ========================================
  * GEMINI CLIENT — Google Gemini 3.5 Flash
@@ -72,7 +76,10 @@ export async function callGemini({ prompt, model = process.env.GEMINI_TEXT_MODEL
   if (!client) throw new Error('GEMINI_API_KEY ไม่ได้ตั้งค่า — ไปตั้งค่าที่ Settings');
 
   console.log(`[Gemini] model=${model}, temp=${temperature}`);
-  console.log(`[Gemini] prompt preview: ${prompt.slice(0, 300)}...`);
+  if (_fullLog()) console.log(`[Gemini] 📜 PROMPT เต็ม (${String(prompt).length}ch):
+${prompt}
+[Gemini] 📜 จบ PROMPT`);
+  else console.log(`[Gemini] prompt preview: ${prompt.slice(0, 300)}...`);
 
   const genModel = client.getGenerativeModel({
     model,
@@ -100,6 +107,9 @@ export async function callGemini({ prompt, model = process.env.GEMINI_TEXT_MODEL
   const outputTokens = usageMetadata?.candidatesTokenCount || 0;
 
   console.log(`[Gemini] OK: tokens input=${inputTokens}, output=${outputTokens}`);
+  if (_fullLog()) console.log(`[Gemini] 📄 คำตอบเต็ม (${String(content||'').length}ch):
+${content}
+[Gemini] 📄 จบคำตอบ`);
   
   // Asynchronously log usage to DB
   logApiUsage({
