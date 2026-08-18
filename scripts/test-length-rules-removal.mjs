@@ -465,15 +465,18 @@ for (const legacy of [false, true]) {
     for (const mode of ['analyze', 'mix']) {
       const tag = `จริง/${legacy ? 'ถอย' : 'ปกติ'}+LENGTH_BY_CONTENT/${mode}/${pipe.tag}`;
       const msg = await capturedOrEmpty(tag, { pipe, mode });
+      // ★ 18 ส.ค. 69 (เลขชุดเดียว 🅰️): โหมดปกติของ **สาย TEXT** ใช้กรอบ 146-269 → เพดานในใบสั่ง = 269 (เดิม 300 จากตาราง short)
+      //   🔴 สาย URL เจ้าของสั่งไม่แก้ (ปิดด้วย TEXT_ONLY_MODE:184 ไม่มีข่าวเดินผ่าน) ⇒ ตรึงเลขเดิม 300 ไว้เป็นหลักฐานว่าไม่ได้ไปแตะ
+      const newCap = pipe.tag === 'TEXT' ? '269' : '300';
       let expected;
       if (mode === 'analyze') {
         expected = legacy
           ? 'ความยาว: เล่าให้ครบทุกประเด็นสำคัญจากต้นฉบับเป็นหลัก สูงสุดไม่เกิน 300 คำ — เนื้อน้อยเขียนสั้นได้ ห้ามยืดความ/เติมสิ่งที่ต้นฉบับไม่มีเพื่อให้ยาวขึ้น'
-          : 'ความยาว: ประเมินจากเนื้อข่าวดิบก่อนว่ามีสาระจริงมากแค่ไหน แล้วเขียนให้พอดีกับสาระที่มีจริง — สูงสุดไม่เกิน 300 คำ';
+          : `ความยาว: ประเมินจากเนื้อข่าวดิบก่อนว่ามีสาระจริงมากแค่ไหน แล้วเขียนให้พอดีกับสาระที่มีจริง — สูงสุดไม่เกิน ${newCap} คำ`;
       } else {
         expected = legacy
           ? 'ความยาวตามเนื้อจริง สูงสุดไม่เกิน 300 คำ — ครบทุกประเด็นสำคัญ ห้ามยืดความ / 3 ย่อหน้า'
-          : 'ความยาวตามเนื้อจริง สูงสุดไม่เกิน 300 คำ — ครบทุกประเด็นสำคัญ ห้ามยืดความ ห้ามเติมคำเพื่อให้ยาว · แต่ห้ามตัดข้อเท็จจริงสำคัญทิ้งเพื่อให้สั้น — ครบก่อน แล้วค่อยกระชับ / 3 ย่อหน้า';
+          : `ความยาวตามเนื้อจริง สูงสุดไม่เกิน ${newCap} คำ — ครบทุกประเด็นสำคัญ ห้ามยืดความ ห้ามเติมคำเพื่อให้ยาว · แต่ห้ามตัดข้อเท็จจริงสำคัญทิ้งเพื่อให้สั้น — ครบก่อน แล้วค่อยกระชับ / 3 ย่อหน้า`;
       }
       check(`[${tag}] ใบสั่งงานใช้ทางแยกที่ถูกต้อง`, msg.includes(expected), expected);
     }
@@ -534,6 +537,95 @@ for (const legacy of [false, true]) {
         !msg.includes(conflictNeedle), conflictNeedle.trim());
     }
   }
+}
+
+// ══════════════════════════════════════════════════════════════
+// ▸ ชุด ญ. เลขความยาวใน "ใบสั่งงานทั้งใบ" ต้องมีชุดเดียว 146-269 (18 ส.ค. 69 — เจ้าของเคาะ 🅰️)
+//   🐛 จุดตาบอดของข้อสอบ 147 ข้อเดิม: ตรวจ "ถอดข้อความเก่าออกไหม" แต่ไม่เคยตรวจ "เลขที่เหลือขัดกันเองไหม"
+//      ⇒ ชั้นในพูด 146-269 ชั้นนอกพูด 350/833/300 แล้วข้อสอบยังเขียวหมด
+//   หลักตรวจ: เลขคาดหวังเขียนตายตัวในข้อสอบ (ห้าม import จากไฟล์ที่ตรวจ — บทเรียนชุด ข.)
+console.log('▸ ชุด ญ. เลขความยาวชุดเดียวทั้งใบสั่งงาน (146-269)');
+
+function systemMsgText(b) {
+  const m = (b?.messages || []).find((x) => x?.role === 'system');
+  if (m) return typeof m.content === 'string' ? m.content : Array.isArray(m.content) ? m.content.map((c) => c?.text || '').join('\n') : '';
+  const s = b?.system;
+  return typeof s === 'string' ? s : Array.isArray(s) ? s.map((x) => x?.text ?? '').join('') : '';
+}
+/** เหมือน captureRealWritePrompt แต่คืน request ทั้งก้อน (ต้องอ่านทั้ง system และ user) */
+async function captureWriterRequest({ pipe, mode = 'analyze', body = BODY, contentLength }) {
+  capturedAll.length = 0;
+  const originalLog = console.log;
+  console.log = () => {};
+  try {
+    const { performSummarize } = await import(R(pipe.modPath));
+    const args = { text: body, newsTitle: TITLE, breakdownData: BREAKDOWN, mode, sourceType: pipe.sourceType, contentLength, targetCount: 2 };
+    if (mode === 'analyze') args.presetPrompt = PRESET;
+    try { await performSummarize(args); } catch { /* ดัก prompt ก่อน error ปลายทางแล้ว */ }
+  } finally {
+    console.log = originalLog;
+  }
+  const marker = mode === 'mix' ? MARK_MIX : MARK_ANALYZE;
+  for (const b of capturedAll) if (userMsgText(b).includes(marker)) return b;
+  return null;
+}
+
+// ── โหมดปกติ: ทุกสาย ทุกโหมด ทุกปุ่ม ทุกขนาดดิบ ต้องพูด 269/146-269 เท่านั้น ──
+//    เลขคาดหวังเขียนตายตัว — แถว "ดิบยาว" กัด WORD_FLEX เดิม (เคยดันเพดานตามดิบ) · แถว URL กัด factSufficiency (เคยทับเป็น 300)
+const NEW_ANALYZE_LINE = '- ความยาว: ประเมินจากเนื้อข่าวดิบก่อนว่ามีสาระจริงมากแค่ไหน แล้วเขียนให้พอดีกับสาระที่มีจริง — สูงสุดไม่เกิน 269 คำ · เนื้อน้อยเขียนสั้นได้ ห้ามยืดความหรือเติมสิ่งที่ต้นฉบับไม่มีเพื่อให้ยาวขึ้น · แต่ห้ามตัดข้อเท็จจริงสำคัญทิ้งเพื่อให้สั้น — ครบก่อน แล้วค่อยกระชับ';
+const NEW_MIX_LINE = '- ความยาวตามเนื้อจริง สูงสุดไม่เกิน 269 คำ — ครบทุกประเด็นสำคัญ ห้ามยืดความ ห้ามเติมคำเพื่อให้ยาว · แต่ห้ามตัดข้อเท็จจริงสำคัญทิ้งเพื่อให้สั้น — ครบก่อน แล้วค่อยกระชับ / 3 ย่อหน้า';
+const NEW_JSON_HINT = '"content": "เนื้อหาครบทุกประเด็นสำคัญ ยาวพอดีกับสาระที่มีจริง ไม่เกิน 269 คำ แบ่ง 3 ย่อหน้า คั่นด้วย';
+const RULE5_FRAME_LINE = '  · กรอบอ้างอิง 146-269 คำ — เนื้อดิบน้อยให้จบแถวช่วงล่างของกรอบ เนื้อดิบแน่นค่อยไล่ขึ้นช่วงบน';
+
+// 🔴 18 ส.ค. 69 เจ้าของสั่ง "ตัดสาย URL ออก" — สายนั้นปิดด้วย TEXT_ONLY_MODE (auto/process/route.js:184)
+//    ไม่มีข่าวเดินผ่านเลย ⇒ ไม่แก้ตามกฎ "แก้แค่ที่เจอ ห้ามแก้เผื่อ"
+//    ⚠️ สาย URL ยังพูด 300/350 อยู่จริง — ถ้าวันไหนเปิดสายนั้นคืน ต้องกลับมาแก้ + เปิดแถว URL ที่นี่ก่อน
+for (const pipe of REAL_PIPELINES.filter((p) => p.tag === 'TEXT')) {
+  for (const [rowTag, mode, contentLength, body] of [
+    ['analyze/medium (ท่อ auto หลัก)', 'analyze', 'medium', BODY],
+    ['analyze/short (แอพ /m + news-filter)', 'analyze', 'short', BODY],
+    ['analyze/medium/ดิบยาว (กัด WORD_FLEX)', 'analyze', 'medium', LONG_BODY],
+    ['mix/medium', 'mix', 'medium', BODY],
+  ]) {
+    setSwitchEnv();
+    const tag = `เลขเดียว/${pipe.tag}/${rowTag}`;
+    const req = await captureWriterRequest({ pipe, mode, body, contentLength });
+    check(`[${tag}] ดักใบสั่งตัวเขียนได้`, !!req);
+    if (!req) continue;
+    const sys = systemMsgText(req);
+    const usr = userMsgText(req);
+    check(`[${tag}] ชั้นในพูดกรอบ 146-269 บรรทัดเดิมเป๊ะ`, sys.includes(RULE5_FRAME_LINE));
+    check(`[${tag}] ชั้นในไม่มีกรอบเลขชุดอื่น`, !/กรอบอ้างอิง (?!146-269 คำ)\d{3,4}\s*-\s*\d{3,4}\s*คำ/.test(sys));
+    check(`[${tag}] บรรทัดความยาวชั้นนอก = 269 เป๊ะ`, usr.includes(mode === 'mix' ? NEW_MIX_LINE : NEW_ANALYZE_LINE));
+    if (mode === 'analyze') check(`[${tag}] ตัวอย่าง JSON = 269 เป๊ะ`, usr.includes(NEW_JSON_HINT));
+    check(`[${tag}] 🔴 ไม่มีเพดานเลขอื่นหลงเหลือทั้งใบ (350/833/300/...)`,
+      !/สูงสุดไม่เกิน (?!269 คำ)\d{3,4}\s*คำ/.test(usr),
+      (usr.match(/.{0,30}สูงสุดไม่เกิน (?!269 คำ)\d{3,4}\s*คำ.{0,20}/) || [''])[0]);
+    check(`[${tag}] ไม่มีสตริงโหมดถอยหลุดมา ("ความยาวบังคับ")`, !/ความยาวบังคับ/.test(usr));
+    check(`[${tag}] 🛡️ ยังแบ่ง 3 ย่อหน้า`, /3 ย่อหน้า/.test(usr));
+  }
+}
+
+// ── โหมดถอย: เลขเดิมของ 89df00a ต้องกลับมา และห้ามมีเลขใหม่ปน (กันขาถอยพัง + กัน gate ผิดทาง) ──
+{
+  const pipes = Object.fromEntries(REAL_PIPELINES.map((p) => [p.tag, p]));
+  setSwitchEnv({ LEGACY_LENGTH_RULES: '1' });
+  // TEXT/medium: override {250,350} → factSufficiency (รันเสมอในโหมดถอย) → short {250,300} → WORD_FLEX (default เปิด) → {165,350}
+  let req = await captureWriterRequest({ pipe: pipes.TEXT, mode: 'analyze', contentLength: 'medium' });
+  let usr = req ? userMsgText(req) : '';
+  check('[ถอย/TEXT/analyze/medium] เลขเดิม 89df00a กลับมา ("ความยาวบังคับ 165-350 คำ")', usr.includes('ความยาวบังคับ 165-350 คำ'),
+    (usr.match(/ความยาวบังคับ [\d-]+ คำ/) || ['ไม่พบ'])[0]);
+  check('[ถอย/TEXT/analyze/medium] ไม่มีเลขใหม่ปน', !usr.includes('269 คำ') && (req ? !systemMsgText(req).includes('146-269') : false));
+  // URL/medium: override {250,350} → factSufficiency → short {250,300} · สายนี้ไม่มี WORD_FLEX
+  req = await captureWriterRequest({ pipe: pipes.URL, mode: 'analyze', contentLength: 'medium' });
+  usr = req ? userMsgText(req) : '';
+  check('[ถอย/URL/analyze/medium] เลขเดิม 89df00a กลับมา ("ความยาวบังคับ 250-300 คำ" — factSufficiency ยังรันในโหมดถอย)',
+    usr.includes('ความยาวบังคับ 250-300 คำ'), (usr.match(/ความยาวบังคับ [\d-]+ คำ/) || ['ไม่พบ'])[0]);
+  // TEXT/mix/medium: {250,350} ตรงๆ (mix ไม่ผ่าน factSufficiency/WORD_FLEX)
+  req = await captureWriterRequest({ pipe: pipes.TEXT, mode: 'mix', contentLength: 'medium' });
+  usr = req ? userMsgText(req) : '';
+  check('[ถอย/TEXT/mix/medium] เลขเดิม 89df00a กลับมา ("ต้องยาวอย่างน้อย 250 คำ ถึง 350 คำ")',
+    usr.includes('ต้องยาวอย่างน้อย 250 คำ ถึง 350 คำ'), (usr.match(/ต้องยาวอย่างน้อย .{0,25}/) || ['ไม่พบ'])[0]);
 }
 
 setSwitchEnv();

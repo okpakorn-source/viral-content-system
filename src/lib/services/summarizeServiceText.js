@@ -1,5 +1,5 @@
 import { callAI } from '@/lib/ai/openai';
-import { isLegacyLengthOn, legacyLengthRule, lengthLineAnalyze, lengthLineMix, sentenceQuotaLine, mixJsonContentHint, analyzeJsonContentHint, finalReminderLengthClause } from '@/lib/ai/legacyLengthRules'; // 🗑️ ซากกฎ "เขียนให้ยาว" ยุคแรก (ถอด 17 ส.ค. 69 · ถอยคืน LEGACY_LENGTH_RULES=1)
+import { isLegacyLengthOn, legacyLengthRule, lengthLineAnalyze, lengthLineMix, sentenceQuotaLine, mixJsonContentHint, analyzeJsonContentHint, finalReminderLengthClause, NEW_LENGTH_CFG } from '@/lib/ai/legacyLengthRules'; // 🗑️ ซากกฎ "เขียนให้ยาว" ยุคแรก (ถอด 17 ส.ค. 69 · ถอยคืน LEGACY_LENGTH_RULES=1) + นโยบายเลขชุดเดียว 146-269 (18 ส.ค. 69)
 import { newsForStage } from '@/lib/utils/newsCap'; // 📖 สมุดเพดานเนื้อข่าวกลาง (16 ส.ค. 69)
 import { MODEL_NEWS_ANALYSIS, MODEL_BREAKDOWN, MODEL_FAST_CHEAP, MODEL_HEAVY_FALLBACK , MODEL_BLUEPRINT } from '@/lib/ai/modelConfig';
 import { withTimeoutSignal } from '@/lib/utils/withTimeout'; // ★ 16 ก.ค. 69: withTimeout เดิมไม่ถูกใช้ในไฟล์นี้แล้ว (ทุกจุดย้ายไป withTimeoutSignal)
@@ -541,11 +541,17 @@ export async function performSummarize({
     long:   { min: 500, max: 1000, paragraphs: '6-8', paraDesc: '6-8 ย่อหน้า', sentences: '4-8' },
   };
   let lenCfg = lengthConfig[contentLength] || lengthConfig.short;
-  // ★ 17 ส.ค. 69: หลักใหม่ล็อก 3 ย่อหน้าเหนือ VIRAL_HITS_FORMULA — ปิดสูตรไวรัลแล้วห้ามย้อนเป็น 4-5/6-8 ย่อหน้า
-  //   LEGACY_LENGTH_RULES=1 เท่านั้นที่คืนทางแยกเดิมของ 89df00a (รวมกรณี VIRAL_HITS_FORMULA=0)
-  if ((contentLength === 'medium' || contentLength === 'long')
-      && (!isLegacyLengthOn() || process.env.VIRAL_HITS_FORMULA !== '0')) {
-    lenCfg = { min: 250, max: 350, paragraphs: '3', paraDesc: '3 ย่อหน้า', sentences: '3-5' };
+  if (isLegacyLengthOn()) {
+    // 🔙 โหมดถอย: ทางแยกเดิมของ 89df00a เป๊ะทุกไบต์ (ลำดับเงื่อนไขตามต้นฉบับ) — VIRAL_HITS_FORMULA คุม medium/long เหมือนเดิม
+    if (process.env.VIRAL_HITS_FORMULA !== '0' && (contentLength === 'medium' || contentLength === 'long')) {
+      lenCfg = { min: 250, max: 350, paragraphs: '3', paraDesc: '3 ย่อหน้า', sentences: '3-5' };
+    }
+  } else {
+    // ★ 18 ส.ค. 69 (เจ้าของเคาะทางเลือก 🅰️): เลขชุดเดียวทั้งใบสั่งงาน — 146-269 คำ · 3 ย่อหน้า ทุกปุ่มความยาว
+    //   บั๊กที่แก้: ชั้นใน (กฎที่ 5) พูด "กรอบอ้างอิง 146-269" แต่บรรทัดนี้เคยส่ง max=350 เข้าใบสั่ง → AI เลือกตัวใหญ่
+    //   → ยาวเกินกรอบ 7/12 ฉบับ · 3 ย่อหน้ายังล็อกเหนือ VIRAL_HITS_FORMULA เหมือนหลัก 17 ส.ค. (ค่าคงที่ในนโยบายกลาง)
+    //   spread กัน mutate ก้อนกลางร่วม (NEW_LENGTH_CFG ถูก freeze ไว้อีกชั้น)
+    lenCfg = { ...NEW_LENGTH_CFG };
   }
 
   // ===== MODE: extract — สกัดเนื้อข่าวอย่างเดียว =====
@@ -1267,7 +1273,10 @@ ${process.env.FORCE_LESSON_ANGLE === '1'
     }
 
     // Dynamic Word Count Scaling
-    if (narrativePayload && (narrativePayload.factSufficiency === 'minimal' || narrativePayload.factSufficiency === 'insufficient')) {
+    // ★ 18 ส.ค. 69: จำกัดไว้โหมดถอยเท่านั้น — ถ้าปล่อยรันในโหมดปกติ จะทับเลขกลับเป็น short {250,300}
+    //   → ใบสั่งพิมพ์ "สูงสุดไม่เกิน 300 คำ" ขัดชุดเลขเดียว (พิสูจน์จากใบสั่งจริงฝั่งแฝด URL ที่ไม่มี WORD_FLEX บัง)
+    //   เจตนาเดิม "กันฟิลเลอร์ข่าวข้อมูลบาง" มีตัวแทนแล้ว: เพดานใหม่ 269 ต่ำกว่า 300 + กฎ "พอดีแล้วต้องพอ ห้ามหาคำมาเติม"
+    if (isLegacyLengthOn() && narrativePayload && (narrativePayload.factSufficiency === 'minimal' || narrativePayload.factSufficiency === 'insufficient')) {
       lenCfg = lengthConfig.short;
       console.log(`[Analyze-Service] ⚠️ Fact sufficiency is ${narrativePayload.factSufficiency}. Overriding length config to short to prevent AI filler.`);
     }
@@ -1287,7 +1296,10 @@ ${process.env.FORCE_LESSON_ANGLE === '1'
     //   สูตรเพดาน: มากกว่าระหว่าง 350 คำ กับ 75% ของคำในต้นฉบับ — ไม่เกิน 900 กันบวมเกินเหตุ
     //   ปรับค่าได้: WORD_FLOOR / WORD_CAP_BASE / WORD_CAP_RATIO / WORD_CAP_MAX
     //   ถอยกลับพฤติกรรมเดิมทั้งหมด: WORD_FLEX_V2=0
-    if (process.env.WORD_FLEX_V2 !== '0') {
+    // ★ 18 ส.ค. 69: จำกัดไว้โหมดถอยเท่านั้น — สูตรเพดานโตตามดิบขัดกรอบใหม่ 146-269 ตรงๆ
+    //   (พิสูจน์จากใบสั่งจริง: ดิบ 1110 คำ → "สูงสุดไม่เกิน 833 คำ" ขณะชั้นในพูด 146-269 · สถิติเจ้าของ: 270+ คำ อัตราปัง 0%)
+    //   โหมดถอย: พฤติกรรม + env ทุกตัว (WORD_FLEX_V2/WORD_FLOOR/WORD_CAP_*) เหมือน 89df00a เป๊ะ
+    if (isLegacyLengthOn() && process.env.WORD_FLEX_V2 !== '0') {
       const _numEnv = (k, d) => {
         const v = Number(String(process.env[k] || '').trim().replace(/^["']|["']$/g, ''));
         return Number.isFinite(v) && v > 0 ? v : d;
