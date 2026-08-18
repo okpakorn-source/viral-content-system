@@ -10,9 +10,20 @@ export default function InputSection({ states, setters, handlers, utils }) {
 
   const needsUrl = ['url', 'facebook', 'tiktok', 'youtube'].includes(sourceType);
 
+  // 🚫 ปิด Auto Mode เจนข่าวบนหน้าเว็บ (18 ส.ค. 69) — คำสั่งเจ้าของ:
+  //   "จุดนี้สามารถเอาระบบเจนข่าวหน้าเว็บออกได้เลย ฉันเจนผ่านดิสคอสเท่านั้น" + "ปิดหน้าเว็บ"
+  //   (อ้างคำสั่งเจ้าของโดยตรง — ไม่ใช่เพราะเจอบั๊ก: เส้นนี้วิ่งเข้าสาย TEXT ที่แก้เลขความยาวแล้ว)
+  // ปิด 2 ทางเข้า: (1) กล่อง Auto Mode ทั้งก้อน → handleUniversalSubmit
+  //                (2) ปุ่ม "⚡ Auto สร้างเลย" TikTok/YouTube → handleAutoMode (ท่อเดียวกัน)
+  // ⚠️ NEXT_PUBLIC_* ถูกฝังตอน build — ตั้งค่าแล้วต้อง build ใหม่ Auto Mode ถึงจะกลับมา
+  // ไม่ตั้ง = ปิด (ค่าปกติ) · ตั้ง NEXT_PUBLIC_WEB_NEWS_GEN=1 = กลับมาทั้งหมด (สวิตช์ตัวเดียวกับ ExtractedView/ResultVersions)
+  const WEB_NEWS_GEN_ON = process.env.NEXT_PUBLIC_WEB_NEWS_GEN === '1';
+
   return (
     <>
                 <div className="card slide-up">
+                  {WEB_NEWS_GEN_ON && (
+                  <>
                   {/* ⚡ AUTO MODE */}
                   <div style={{
                     background: 'linear-gradient(135deg, rgba(249,24,128,0.1), rgba(124,58,237,0.1))',
@@ -266,7 +277,9 @@ export default function InputSection({ states, setters, handlers, utils }) {
                     <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>หรือใช้แบบ Manual</span>
                     <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
                   </div>
-      
+                  </>
+                  )}
+
                   <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>📥 เลือกแหล่งข้อมูล</h3>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 24 }}>
                     {SOURCE_TYPES.map((s) => (
@@ -296,10 +309,12 @@ export default function InputSection({ states, setters, handlers, utils }) {
                               className="btn btn-outline" style={{ whiteSpace: 'nowrap' }}>
                               {extracting ? '⏳ กำลังถอดเสียง...' : '🎤 ถอดเสียง (Manual)'}
                             </button>
+                            {WEB_NEWS_GEN_ON && (
                             <button type="button" onClick={() => handleAutoMode({ url, type: 'tiktok' })} disabled={!url || autoMode}
                               style={{ padding: '9px 16px', border: 'none', borderRadius: 'var(--radius-md)', background: 'linear-gradient(135deg, #f91880, #7c3aed)', color: '#fff', fontWeight: 800, fontSize: 12, cursor: autoMode ? 'wait' : 'pointer', whiteSpace: 'nowrap', boxShadow: '0 4px 12px rgba(249,24,128,0.3)', fontFamily: 'inherit' }}>
                               {autoMode ? '⏳ กำลัง...' : '⚡ Auto สร้างเลย'}
                             </button>
+                            )}
                           </>
                         ) : sourceType === 'youtube' ? (
                           <>
@@ -307,10 +322,12 @@ export default function InputSection({ states, setters, handlers, utils }) {
                               className="btn btn-outline" style={{ whiteSpace: 'nowrap' }}>
                               {extracting ? '⏳ กำลังดึง...' : '📺 ดึง Transcript (Manual)'}
                             </button>
+                            {WEB_NEWS_GEN_ON && (
                             <button type="button" onClick={() => handleAutoMode({ url, type: 'youtube' })} disabled={!url || autoMode}
                               style={{ padding: '9px 16px', border: 'none', borderRadius: 'var(--radius-md)', background: 'linear-gradient(135deg, #f91880, #7c3aed)', color: '#fff', fontWeight: 800, fontSize: 12, cursor: autoMode ? 'wait' : 'pointer', whiteSpace: 'nowrap', boxShadow: '0 4px 12px rgba(249,24,128,0.3)', fontFamily: 'inherit' }}>
                               {autoMode ? '⏳ กำลัง...' : '⚡ Auto สร้างเลย'}
                             </button>
+                            )}
                           </>
                         ) : (
                           <button type="button" onClick={handleExtract} disabled={!url || extracting}
