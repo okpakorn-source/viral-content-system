@@ -11,6 +11,7 @@
  *  quoteFragments (≤15 words each)
  */
 import { legacyLengthRule } from '../ai/legacyLengthRules.js';
+import { isCardAuthorityR3Enabled } from '../ai/cardAuthority.js';
 
 // ─── Fact Extraction Helper ────────────────────────────────────────
 
@@ -397,9 +398,12 @@ export function formatNarrativePayload(payload) {
   p += '=== NARRATIVE RECONSTRUCTION MANDATE ===\n';
   p += 'ใช้ facts, quotes และ context จาก payload นี้เป็นแกนของเรื่อง — เนื้อข่าวต้นฉบับ (ถ้าแนบมาด้านล่าง) มีไว้ตรวจความถูกต้องของรายละเอียดเท่านั้น\n';
   p += 'งาน: สร้างเรื่องเล่าใหม่ทั้งหมดจาก facts\n';
-  p += 'ห้าม: เรียง facts ตามลำดับที่ให้ (สลับตามความเหมาะสม)\n';
+  // ★ 19 ส.ค. 69 (CARD_AUTHORITY R3 — default ปิด): สำเนาสาย URL — ต้องเปิด CARD_AUTH_URL=1 คู่ด้วยถึงจะตัด
+  //   เหตุผลเดียวกับสาย TEXT: กฎ 2 บรรทัดนี้ทับ hookStyle + structure_formula ของการ์ด · ปิด = ใบสั่งเดิมทุกไบต์
+  const _r3On = isCardAuthorityR3Enabled({ url: true });
+  if (!_r3On) p += 'ห้าม: เรียง facts ตามลำดับที่ให้ (สลับตามความเหมาะสม)\n';
   p += 'ห้าม: สรุปทีละย่อหน้า ห้ามลอกโครงเรื่องหรือสำนวนจากต้นฉบับ\n';
-  p += 'ต้อง: เลือก angle → เปิดด้วย moment/conflict → เล่า → ปิดด้วยอารมณ์\n';
+  if (!_r3On) p += 'ต้อง: เลือก angle → เปิดด้วย moment/conflict → เล่า → ปิดด้วยอารมณ์\n';
   p += '=== จบ MANDATE ===\n\n';
 
   return p;

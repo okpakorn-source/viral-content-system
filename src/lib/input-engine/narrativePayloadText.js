@@ -11,6 +11,7 @@
  *  quoteFragments (≤15 words each)
  */
 import { isLegacyLengthOn, legacyLengthRule } from '../ai/legacyLengthRules.js';
+import { isCardAuthorityR3Enabled } from '../ai/cardAuthority.js';
 
 // ─── Fact Extraction Helper ────────────────────────────────────────
 
@@ -92,7 +93,7 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
     bd.key_facts.dates.forEach(d => timeline.push({ event: d, type: 'date' }));
   }
   if (bd.best_sections?.length > 0) {
-    bd.best_sections.forEach(s => timeline.push({ event: s, type: 'key_moment' }));
+    bd.best_sections.forEach(s => timeline.push({ event: typeof s === 'string' ? s : [s.section, s.reason].filter(Boolean).join(' — '), type: 'key_moment' }));
   }
 
   // People
@@ -142,19 +143,74 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
     forbidden: bp.forbidden || [],
   } : null;
 
+  // ★ 18 ส.ค. 69 (แบบ ก — ANGLE_CLOSING_SPLIT): bp.angle_closing = แผนจบเฉพาะมุมนี้
+  //   (autoFlowServiceText แนบมาเฉพาะเมื่อ ANGLE_CLOSING_SPLIT=1 + จับคู่ชื่อมุมสำเร็จ)
+  //   🔧 19 ส.ค. 69 แก้ตามผู้ตรวจอิสระ 4 คน (FIXLIST-planK):
+  //   ร้ายแรง 4 (fail-closed): เช็ค env ตรงนี้ด้วย — ข้อมูลป้อน bp.angle_closing อย่างเดียวห้ามเปิดฟีเจอร์ได้
+  //   ร้ายแรง 2 (ทั้งชุดหรือไม่เลย): hasAngleClosing ตั้ง "หลัง" regex ทุบท้ายติดเท่านั้น —
+  //     regex ไม่ติด = ไม่แตะสักชั้น ถอยพฤติกรรมเดิมทั้งใบ (เดิมชั้น 2/3 ยิงแม้ชั้น 1 พลาด = ได้ผลแย่สุดพร้อมกัน)
+  //   ร้ายแรง 1 (เลิกกรอง forbidden): ตัวกรอง regex เคยทิ้งกฎกันแต่งข้อเท็จจริง 8/34 ข้อ (เคส RUN6 มัทฉะ) —
+  //     ลบทั้งก้อน ใช้บรรทัดลำดับอำนาจในบล็อก 🔚 (ใน formatNarrativePayload) แทน
+  //     (ต้นทางกันไว้แล้ว: prompt Blueprint สั่งห้ามใส่เรื่องวิธีจบใน FORBIDDEN — summarizeServiceText ข้อ 7)
+  //   🟡 กัน [object Object]: รับเฉพาะ string — AI ตอบ field เป็น object เมื่อไหร่ = ถือว่าไม่มีค่า
+  //   ชั้นที่ตัดเมื่อทำงาน: ชั้น 1 แทนข้อสุดท้าย timeline · ชั้น 3 ตัด "ปิด:" (จุดสร้างด้านล่าง)
+  let hasAngleClosing = false;
+  if (process.env.ANGLE_CLOSING_SPLIT === '1'
+      && emotionalBlueprint && bp.angle_closing && typeof bp.angle_closing === 'object' && !Array.isArray(bp.angle_closing)) {
+    const _ac = bp.angle_closing;
+    const _str = (v) => (typeof v === 'string' ? v.trim() : '');
+    const _direction = _str(_ac.closing_direction);
+    const _sketch = _str(_ac.closing_sketch);
+    const _closingText = [_direction, _sketch].filter(Boolean).join(' — ');
+    const _tl = emotionalBlueprint.timeline;
+    // 🔧 19 ส.ค. 69 รอบ 3: เงื่อนไข "ทุบท้าย" ใช้ helper เดียวกับฝั่ง autoFlow (closingTailMatches ท้ายไฟล์นี้)
+    //   — autoFlow เช็คก่อนแนบแผน+ก่อน log เพื่อให้ log ตรงกับสิ่งที่ฝั่งเขียนใช้จริง (แก้ log โกหก)
+    const _tlTailIsClosing = closingTailMatches(_tl);
+    if (_closingText && _tlTailIsClosing) {
+      hasAngleClosing = true;
+      emotionalBlueprint.angleClosing = {
+        angleName: _str(_ac.angle_name),
+        direction: _direction,
+        sketch: _sketch,
+        avoidOverlap: _str(_ac.avoid_overlap),
+      };
+      // ชั้น 1: ข้อสุดท้ายของ timeline คือ "ประโยคทุบท้าย — ..." กลางที่แชร์ทุกมุม → แทนด้วยแผนของมุมนี้
+      //   (สร้าง array ใหม่เสมอ ห้ามแก้ array เดิมใน bp — blueprint ก้อนกลางถูกมุมอื่นใช้ต่อ)
+      emotionalBlueprint.timeline = [..._tl.slice(0, -1), `ประโยคทุบท้าย (เฉพาะมุมนี้) — ${_closingText}`];
+    }
+  }
+
+  // ★ 18 ส.ค. 69 (แบบ A — ANGLE_BLUEPRINT_MODE=per_angle): ตราประทับนี้มาจาก key ชื่อมุมที่ autoFlow ผูกไว้
+  //   Blueprint ทั้งใบ (รวม timeline/ท่อนจบ) จึงเป็นของมุมนี้อยู่แล้ว และต้องตัด "ปิด:" กลางจาก breakdown
+  //   ไม่มีตราประทับหรือ env ไม่ใช่ "per_angle" = ไม่เพิ่ม field และไม่เปลี่ยนใบสั่งเขียนเดิมแม้แต่ตัวอักษรเดียว
+  if (process.env.ANGLE_BLUEPRINT_MODE === 'per_angle'
+      && emotionalBlueprint && bp.angle_blueprint && typeof bp.angle_blueprint === 'object') {
+    const _angleName = String(bp.angle_blueprint.angle_name || '').trim();
+    if (_angleName) {
+      emotionalBlueprint.angleBlueprint = {
+        angleName: _angleName,
+        description: String(bp.angle_blueprint.description || '').trim(),
+      };
+      hasAngleClosing = true;
+    }
+  }
+
   // Narrative Angle
   const narrativeAngle = bd.best_main_angle
     ? `${bd.best_main_angle.angle_name}: ${bd.best_main_angle.why_best}`
     : '';
 
   // Storytelling Direction
+  // ★ ANGLE_CLOSING_SPLIT ชั้น 3: มุมที่มีแผนจบเฉพาะตัว ไม่รับ "ปิด: ..." กลางจาก breakdown (แชร์ข้ามมุม) — เปิด/เล่า คงเดิม
   const storytellingDirection = bd.language_strategy
-    ? `เปิด: ${bd.language_strategy.opening_style || '-'}, เล่า: ${bd.language_strategy.storytelling_style || '-'}, ปิด: ${bd.language_strategy.ending_style || '-'}`
+    ? (hasAngleClosing
+        ? `เปิด: ${bd.language_strategy.opening_style || '-'}, เล่า: ${bd.language_strategy.storytelling_style || '-'}`
+        : `เปิด: ${bd.language_strategy.opening_style || '-'}, เล่า: ${bd.language_strategy.storytelling_style || '-'}, ปิด: ${bd.language_strategy.ending_style || '-'}`)
     : '';
 
   // Quote Fragments (≤15 words, no surrounding context)
   const quoteFragments = (bd.quotes || []).map(q => {
-    const text = (typeof q === 'string' ? q : q.text || '').trim();
+    const text = (typeof q === 'string' ? q : q.quote || q.text || '').trim();
     const words = text.split(/\s+/);
     return words.length <= 15 ? text : words.slice(0, 15).join(' ') + '...';
   }).filter(q => q.length > 0);
@@ -301,7 +357,7 @@ export function formatNarrativePayload(payload) {
   // Conflicts
   if (payload.conflicts.length > 0) {
     p += `⚡ จุดขัดแย้ง:\n`;
-    payload.conflicts.forEach((c, i) => p += `  ${i + 1}. ${c}\n`);
+    payload.conflicts.forEach((c, i) => p += `  ${i + 1}. ${typeof c === 'string' ? c : [c.conflict, c.detail].filter(Boolean).join(' — ')}\n`);
     p += '\n';
   }
 
@@ -366,6 +422,11 @@ export function formatNarrativePayload(payload) {
     p += `แกนอารมณ์: ${eb.coreEmotion}`;
     if (eb.emotionReason) p += ` (${eb.emotionReason})`;
     p += '\n';
+    if (eb.angleBlueprint) {
+      p += `🎯 Blueprint ใบนี้สร้างเฉพาะมุม: ${eb.angleBlueprint.angleName}\n`;
+      if (eb.angleBlueprint.description) p += `  • คำอธิบายมุม: ${eb.angleBlueprint.description}\n`;
+      p += `  • ใช้ emotional timeline และท่อนจบจากใบนี้กับมุมนี้เท่านั้น\n`;
+    }
     if (eb.timeline.length > 0) {
       p += 'Emotional Timeline:\n';
       eb.timeline.forEach((t, i) => p += `  ${i + 1}. ${t}\n`);
@@ -375,6 +436,17 @@ export function formatNarrativePayload(payload) {
       eb.bridges.forEach(b => p += `  • "${b}"\n`);
     }
     if (eb.forbidden.length > 0) p += `ห้าม: ${eb.forbidden.join(' | ')}\n`;
+    // ★ 18 ส.ค. 69 (แบบ ก — ANGLE_CLOSING_SPLIT): แผนจบเฉพาะมุมนี้ — มีเฉพาะเมื่อสวิตช์เปิด+จับคู่มุมสำเร็จ
+    //   (ไม่มี = บล็อกนี้หายทั้งก้อน → ใบสั่งเขียนเดิมทุกไบต์)
+    if (eb.angleClosing) {
+      p += `🔚 แผนจบเฉพาะมุมนี้ (ท่อนจบของเวอร์ชันนี้ต้องเดินตามนี้ — ห้ามใช้ภาพจบ/ประโยคจบร่วมกับเวอร์ชันมุมอื่น):\n`;
+      if (eb.angleClosing.direction) p += `  • แนวทางปิด: ${eb.angleClosing.direction}\n`;
+      if (eb.angleClosing.sketch) p += `  • ร่างประโยคทุบท้าย (แนวทางใจความ — เกลาคำเองได้ แต่ห้ามหลุดใจความ): ${eb.angleClosing.sketch}\n`;
+      if (eb.angleClosing.avoidOverlap) p += `  • ห้ามซ้ำกับมุมอื่น: ${eb.angleClosing.avoidOverlap}\n`;
+      // ★ 19 ส.ค. 69 (ร้ายแรง 1 — แทนตัวกรอง forbidden ที่ลบทิ้ง): ลำดับอำนาจ ไม่ลบข้อมูล —
+      //   ข้อ "ห้าม" ทุกข้อยังอยู่ครบในใบสั่ง (โดยเฉพาะกฎกันแต่งข้อเท็จจริง) แค่เรื่องวิธีจบให้แผนนี้ชนะ
+      p += `  ⚠️ แผนจบเฉพาะมุมนี้มีอำนาจเหนือคำสั่ง "ต้องปิดด้วย..." ใดๆ ในข้อ "ห้าม" ด้านบน — ส่วนข้อห้ามที่กันแต่งข้อเท็จจริง ยังบังคับครบทุกข้อ\n`;
+    }
     p += '=== จบ Blueprint ===\n\n';
   }
 
@@ -414,9 +486,12 @@ export function formatNarrativePayload(payload) {
   p += '=== NARRATIVE RECONSTRUCTION MANDATE ===\n';
   p += 'ใช้ facts, quotes และ context จาก payload นี้เป็นแกนของเรื่อง — เนื้อข่าวต้นฉบับ (ถ้าแนบมาด้านล่าง) มีไว้ตรวจความถูกต้องของรายละเอียดเท่านั้น\n';
   p += 'งาน: สร้างเรื่องเล่าใหม่ทั้งหมดจาก facts\n';
-  p += 'ห้าม: เรียง facts ตามลำดับที่ให้ (สลับตามความเหมาะสม)\n';
+  // ★ 19 ส.ค. 69 (CARD_AUTHORITY R3 — default ปิด): กฎ 2 บรรทัดนี้ทับ hookStyle + structure_formula ของการ์ดตรงๆ
+  //   และถูกต่อท้ายการ์ด = ชนะโดยตำแหน่ง — เปิดสวิตช์เพื่อตัดออก · ปิด = ใบสั่งเดิมทุกไบต์
+  const _r3On = isCardAuthorityR3Enabled();
+  if (!_r3On) p += 'ห้าม: เรียง facts ตามลำดับที่ให้ (สลับตามความเหมาะสม)\n';
   p += 'ห้าม: สรุปทีละย่อหน้า ห้ามลอกโครงเรื่องหรือสำนวนจากต้นฉบับ\n';
-  p += 'ต้อง: เลือก angle → เปิดด้วย moment/conflict → เล่า → ปิดด้วยอารมณ์\n';
+  if (!_r3On) p += 'ต้อง: เลือก angle → เปิดด้วย moment/conflict → เล่า → ปิดด้วยอารมณ์\n';
   p += '=== จบ MANDATE ===\n\n';
 
   return p;
@@ -467,4 +542,57 @@ export function checkNarrativeSimilarity(sourceText, generatedText) {
     pass: score < 0.4,
     grade: score < 0.15 ? 'excellent' : score < 0.3 ? 'good' : score < 0.4 ? 'acceptable' : 'too_similar',
   };
+}
+
+// ─── ANGLE_CLOSING_SPLIT helpers — จุดความจริงเดียว (19 ส.ค. 69 รอบ 3 ตามผลตรวจโซล) ───
+// วางไว้ไฟล์นี้เพราะเป็นปลายทางของ dependency (ไม่ import ใคร) — autoFlow (แนบแผน+log)
+// และ summarize (นับรายงาน) import ไปใช้กติกาเดียวกันเป๊ะ ห้ามก๊อปสูตรไปแก้แยกที่
+
+// เงื่อนไขชั้น 1: ข้อสุดท้ายของ emotional_timeline ต้องเป็น "ประโยคทุบท้าย" (เช็คแค่คำ "ทุบท้าย" — AI อาจตัดคำหน้า)
+// autoFlow เช็คตัวนี้ "ก่อนแนบแผน+ก่อน log" → log ตรงกับที่ฝั่งเขียนใช้จริงเสมอ (แก้ log โกหก — โซลชี้)
+export function closingTailMatches(timeline) {
+  return Array.isArray(timeline) && timeline.length > 0 && /ทุบท้าย/.test(String(timeline[timeline.length - 1]));
+}
+
+// 🔧 19 ส.ค. 69 รอบ 3 (โซลรันเจอเคสกลับด้าน): จับคู่แผนจบกับมุมแบบ two-pass
+//   รอบ 1: จอง exact ให้ครบทุกมุมก่อน — กันมุมที่มาก่อนแบบ contain แย่งใบที่เป็น exact ของมุมหลัง
+//   รอบ 2: จ่าย contain จาก "ใบที่ยังว่าง" เท่านั้น — ใบที่เจอถูกจองแล้วให้ค้นใบว่างใบถัดไปต่อ ไม่ยอมแพ้กลางทาง
+//   ใบเดียวจ่ายได้มุมเดียว (กันจบแฝด) · field ต้องเป็น string (กัน [object Object]) ·
+//   ใบใช้ได้ = มีชื่อ + (แนวทางปิด หรือ ร่างประโยค) · คืน array ยาวเท่า angleNames — null = มุมนั้นใช้แผนกลาง
+export function assignAngleClosings(closings, angleNames) {
+  const names = Array.isArray(angleNames) ? angleNames : [];
+  const results = names.map(() => null);
+  try {
+    const _str = (v) => (typeof v === 'string' ? v.trim() : '');
+    const _norm = (v) => _str(v).replace(/\s+/g, '');
+    const targets = names.map((n) => _norm(n));
+    const usable = (Array.isArray(closings) ? closings : []).filter((c) =>
+      c && typeof c === 'object' && !Array.isArray(c) && _norm(c.angle_name)
+      && (_str(c.closing_direction) || _str(c.closing_sketch)));
+    if (usable.length === 0) return results;
+    const claimed = new Set();
+    const take = (hit, matchType) => ({
+      angle_name: _str(hit.angle_name),
+      closing_direction: _str(hit.closing_direction),
+      closing_sketch: _str(hit.closing_sketch),
+      avoid_overlap: _str(hit.avoid_overlap),
+      match_type: matchType,
+    });
+    // รอบ 1 — exact (หลัง normalize ช่องว่าง)
+    targets.forEach((t, i) => {
+      if (!t) return;
+      const hit = usable.find((c) => !claimed.has(c) && _norm(c.angle_name) === t);
+      if (hit) { claimed.add(hit); results[i] = take(hit, 'exact'); }
+    });
+    // รอบ 2 — contain เฉพาะมุมที่ยังไม่ได้แผน จากใบที่ยังว่าง
+    targets.forEach((t, i) => {
+      if (!t || results[i]) return;
+      const hit = usable.find((c) => !claimed.has(c) && (_norm(c.angle_name).includes(t) || t.includes(_norm(c.angle_name))));
+      if (hit) { claimed.add(hit); results[i] = take(hit, 'contain'); }
+    });
+    return results;
+  } catch (err) {
+    console.warn('[NarrativePayload] assignAngleClosings ล้ม — ทุกมุมถอยแผนกลาง:', err?.message || err);
+    return names.map(() => null);
+  }
 }

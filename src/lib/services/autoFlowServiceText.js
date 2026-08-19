@@ -13,6 +13,10 @@ import { createLogger } from '@/lib/logger';
 import { withTimeout } from '@/lib/utils/withTimeout';
 import { runCorrectionPipeline } from '@/lib/correction/correctionPipeline';
 import { getBuiltinFallbackPrompt } from '@/lib/ai/builtinFallbackPrompt';
+// ★ 19 ส.ค. 69 รอบ 3 (ANGLE_CLOSING_SPLIT): กติกาจับคู่แผนจบ+เงื่อนไขทุบท้าย อยู่ที่เดียวใน narrativePayloadText
+//   (ปลายทาง dependency — ไม่เกิด circular import) เพื่อให้ log ฝั่งนี้ตรงกับที่ฝั่งเขียนใช้จริงเสมอ
+import { assignAngleClosings, closingTailMatches } from '@/lib/input-engine/narrativePayloadText';
+import { isCardAuthorityR6Enabled } from '@/lib/ai/cardAuthority'; // 🎛️ สวิตช์ปลดหาง "ห้ามขึ้นต้นด้วยวันที่" (19 ส.ค. 69) — ห้ามอ่าน env CARD_AUTH* เอง ต้อง import จากไฟล์กลางเท่านั้น
 
 const rlog = createLogger('AUTO-SERVICE');
 
@@ -226,10 +230,51 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   // ★ 14 ส.ค. 69 (Sol 9.5/10 — sol-backlog4 ข้อ 4a): จับเวลาจริงของแต่ละงานใน finally —
   //   เดิม stepTimings รายงาน blueprint/research เป็นช่วงขนานรวมก้อนเดียว = เลขซ้ำกันทุกเคส วัดคอขวดจริงไม่ได้
   const _taskElapsed = { blueprint: null, research: null };
+  // ★ 18 ส.ค. 69 (แบบ ก — เฟเบิ้ล-สุด): ANGLE_CLOSING_SPLIT — ให้ Blueprint วางแผนจบแยกรายมุม "ในใบเดียว"
+  //   (ยังเรียก Blueprint ครั้งเดียวต่อข่าวเหมือนเดิม — ไม่เพิ่มค่า API)
+  //   ปัญหา: ท่อนจบ 2 มุมออกมาแฝดกัน (RUN5 นกจริยา — สองฉบับจบ "วันที่เกือบปล่อยมือ..." ~15 คำติดเหมือนกัน)
+  //   เพราะแผนจบ 3 ชั้น (ประโยคทุบท้าย/forbidden/ปิด: จาก breakdown) แชร์ข้ามมุมทั้งหมด
+  //   เปิด: ANGLE_CLOSING_SPLIT=1 · ปิด (ค่าเริ่มต้น — ไม่ตั้ง env): พฤติกรรมเดิมทุกไบต์
+  //   ⚠️ สูตรจำนวนมุมต้องตรงกับ GEN_ANGLES ในบล็อก MULTI-ANGLE ด้านล่าง — แก้ที่หนึ่งต้องแก้อีกที่ด้วย
+  const isAngleClosingSplitEnabled = process.env.ANGLE_CLOSING_SPLIT === '1';
+  let _closingAngleList = null;
+  if (isAngleClosingSplitEnabled) {
+    // 🔧 19 ส.ค. 69 (🟡 FIXLIST-planK): สูตรจำนวนมุมรวมศูนย์ที่ getGenAnglesCount() — เดิมก๊อปสูตรมา 2 ที่
+    const _nAngles = getGenAnglesCount();
+    _closingAngleList = (breakdownData.possible_angles || [])
+      .slice(0, _nAngles)
+      .map((a) => ({ angle_name: String(a?.angle_name || '').trim(), description: String(a?.description || '').trim() }))
+      .filter((a) => a.angle_name);
+    if (_closingAngleList.length < 2) _closingAngleList = null; // มุมเดียวไม่มีปัญหาจบแฝด — ใช้พฤติกรรมเดิม
+  }
+  // ★ 18 ส.ค. 69 (แบบ A — ANGLE_BLUEPRINT_MODE=per_angle): Blueprint หนึ่งใบต่อหนึ่งมุม
+  //   ค่าที่รับมีค่าเดียวคือ "per_angle"; ไม่ตั้งค่า / "off" / ค่าอื่น = เส้นเดิมด้านล่างทุกประการ
+  //   รายการนี้คำนวณด้วยเพดานเดียวกับ MULTI-ANGLE (1-4) และใช้ชื่อมุมเป็น key ตั้งแต่ต้น
+  const isAngleBlueprintPerAngle = isAngleBlueprintPerAngleMode(process.env.ANGLE_BLUEPRINT_MODE);
+  const _perAngleBlueprintAngles = isAngleBlueprintPerAngle
+    ? selectPerAngleBlueprintAngles(breakdownData, process.env.GEN_ANGLES)
+    : null;
   const _bpT0 = Date.now();
   const _srT0 = Date.now();
+  // เริ่ม N calls ตรงนี้พร้อมกันทั้งหมด และยังทำขนานกับ SmartResearch เหมือนเส้นเดิม
+  // เมื่อเปิดพร้อม ANGLE_CLOSING_SPLIT: ไม่ส่ง angleList ให้แต่ละ call เพราะใบต่อมุมมี closing เฉพาะตัวอยู่แล้ว
+  // ป้องกันไม่ให้ Blueprint ใบเดียวต้องวางซ้ำทุกมุมอีกชั้นและไม่ให้สองแผนขัดกัน (per_angle มี precedence)
+  const _perAngleBlueprintTask = isAngleBlueprintPerAngle
+    ? runPerAngleBlueprintCalls(_perAngleBlueprintAngles, (blueprintAngle) => withTimeout(performSummarize({
+        text: newsData.newsBody,
+        newsTitle: newsData.newsTitle,
+        mode: 'blueprint',
+        breakdownData,
+        workflowId: _autoWorkflowId,
+        user: _user,
+        blueprintAngle,
+      }), 120000, `blueprint:${blueprintAngle.angle_name || 'unnamed'}`))
+      .catch(() => null)
+      .finally(() => { _taskElapsed.blueprint = Date.now() - _bpT0; })
+    : null;
   const [bpSettled, srSettled] = await Promise.allSettled([
     // Task 1: Blueprint
+    _perAngleBlueprintTask ||
     withTimeout(performSummarize({
       text: newsData.newsBody,
       newsTitle: newsData.newsTitle,
@@ -237,6 +282,8 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
       breakdownData,
       workflowId: _autoWorkflowId,
       user: _user,
+      // ★ ANGLE_CLOSING_SPLIT=1 เท่านั้นถึงส่งรายชื่อมุม — ไม่ตั้ง env = ไม่มี key นี้ = prompt Blueprint เดิมไบต์ต่อไบต์
+      ...(_closingAngleList ? { angleList: _closingAngleList } : {}),
     }), 120000, 'blueprint').catch(() => null).finally(() => { _taskElapsed.blueprint = Date.now() - _bpT0; }), // ★ 120s — GPT-5.5 needs more time
 
     // Task 2: Smart Research
@@ -251,7 +298,18 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   // Extract Blueprint result
   const bpResult = bpSettled.status === 'fulfilled' ? bpSettled.value : null;
   const blueprint = bpResult?.success ? bpResult.data?.blueprint : null;
+  const angleBlueprintsByName = isAngleBlueprintPerAngle && bpResult?.data?.angleBlueprintsByName instanceof Map
+    ? bpResult.data.angleBlueprintsByName
+    : null;
+  const _perAngleBlueprintFailedKeys = new Set(
+    isAngleBlueprintPerAngle && Array.isArray(bpResult?.meta?.failedAngleKeys) ? bpResult.meta.failedAngleKeys : []
+  );
   addLog('Enhanced', `Blueprint: ${blueprint ? blueprint.core_emotion : '❌'}`);
+  if (isAngleBlueprintPerAngle) {
+    const _bpOk = Number(bpResult?.meta?.successCount || 0);
+    const _bpTotal = _perAngleBlueprintAngles.length;
+    addLog('Enhanced', `🎯 Blueprint per-angle: สำเร็จ ${_bpOk}/${_bpTotal} มุม${blueprint ? ` · fallback=${bpResult?.meta?.fallbackSourceAngleName || 'มุมแรก'}` : ' · ล้มหมด ใช้ null แล้วเขียนต่อ'}`);
+  }
 
   // Extract SmartResearch result
   let factPool = null;
@@ -278,7 +336,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   
   // ★ ปรับ 10 ก.ค. 69 (คำสั่งทีม หลังเคส #01641): default 2 มุม — ฝืนหามุมที่ 3 = พร้อมท์อันดับท้ายธีมผิดเรื่อง
   //   "ออกแค่ 1-2 แต่มุมจริง แมตช์จริง ไม่บิดเบือน" — ปรับได้ผ่าน .env: GEN_ANGLES
-  const GEN_ANGLES = Math.max(1, Math.min(4, parseInt(process.env.GEN_ANGLES || '2', 10) || 2));
+  const GEN_ANGLES = getGenAnglesCount(); // 🔧 19 ส.ค. 69 (🟡 FIXLIST-planK): สูตรเดียวกับสวิตช์แบบ ก — รวมศูนย์ helper เดียว ค่าเท่าเดิมเป๊ะ
   const GEN_PER_ANGLE = Math.max(1, Math.min(3, parseInt(process.env.GEN_PER_ANGLE || '1', 10) || 1));
   // ★ REVERT 10 ก.ค. 69 (เคส #01635): ห้ามเรียงตามคะแนนไวรัล — มุมคะแนนสูงมักเป็นมุมพี่น้องเรื่องเดียวกัน
   //   → 3 เวอร์ชันเปิดเหมือนกันหมด + ชื่อมุมแคบจนจับคู่พร้อมท์คลังเพี้ยน (เจอพร้อมท์ไว้อาลัยกับข่าวมูฟออน)
@@ -296,6 +354,11 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   // === PRE-SELECT: เลือก prompt ล่วงหน้าทุก angle (sequential — ป้องกันซ้ำ) ===
   // ★ BUG FIX: Cache AI analysis + prompt lib จาก angle แรก → ใช้ซ้ำทุก angle
   const usedPromptIds = [];
+  // 18 ส.ค. 69 (แบบ 2 — สถาปนิกออกแบบ · โซลตรวจไขว้ · เจ้าของอนุมัติ): มุมถัดไปเห็นการ์ดที่มุมก่อนหน้าใช้ไปแล้ว เพื่อไม่ให้ 2 ฉบับเปิดซ้ำ
+  // ปิดกลับเดิม: ANGLE_CARD_CONTEXT=0
+  const usedCardInfo = [];
+  const isAngleCardContextEnabled = process.env.ANGLE_CARD_CONTEXT !== '0';
+  const MIN_ANGLE_MATCH = Math.max(0, parseInt(process.env.ANGLE_MIN_MATCH_SCORE || '45', 10) || 45);
   const anglePrompts = [];
   let _cachedNewsAnalysis = null;
   let _cachedPromptLib = null;
@@ -309,6 +372,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
       focusAngle,
       workflowId: _autoWorkflowId,
       excludePromptIds: [...usedPromptIds],
+      ...(isAngleCardContextEnabled ? { usedCardInfo: [...usedCardInfo] } : {}),
       _cachedNewsAnalysis,
       _cachedPromptLib,
       _cachedCatalogPicks,
@@ -335,14 +399,26 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     } else {
       addLog('PromptSelect', `📋 Angle "${angleObj.angle_name}" → ${topPrompt.promptName?.slice(0, 40)} (excluded: ${usedPromptIds.length - 1})${_cachedNewsAnalysis ? ' ♻️' : ''}`);
     }
+    if (process.env.REF_WEIGHT_BY_MATCH === '1' && anglePrompts.length === 0 && topPrompt && topPrompt.id !== 'fallback_builtin'
+        && topPrompt._matchType !== 'AI_PICKED' /* ★ Opus P2-A: ใบที่ luna เลือกห้ามถูกสลับทิ้งด้วยคะแนนสูตร */) {
+      const _s0 = Number(topPrompt._matchScore ?? 0);
+      if (_s0 < MIN_ANGLE_MATCH) {
+        addLog('PromptSelect', `🔁 มุมแรกจับคู่หลวม (score ${_s0} < ${MIN_ANGLE_MATCH}) → ใช้ Built-in V12 แทนพร้อมท์ผิดเรื่อง (REF_WEIGHT_BY_MATCH)`);
+        topPrompt = getBuiltinFallbackPrompt();
+      }
+    }
     anglePrompts.push(topPrompt);
+    // ★ ผู้ตรวจ (โซล) จับได้: มุม 2+ ที่จะถูกตัดทีหลัง ห้ามเก็บเป็นบริบทให้มุมถัดไป (เงื่อนไขต้องตรงกับลูปตัดด้านล่าง)
+    if (isAngleCardContextEnabled && (anglePrompts.length === 1 || topPrompt._matchType === 'AI_PICKED' || Number(topPrompt._matchScore ?? 0) >= MIN_ANGLE_MATCH)) {
+      const cleanCardField = (value) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+      usedCardInfo.push({ name: topPrompt.promptName, tone: cleanCardField(topPrompt.tone), hookStyle: cleanCardField(topPrompt.hookStyle) });
+    }
   }
 
   // ★ 10 ก.ค. 69 (เคส #01641 "แม่ยังอยู่"): มุมจริง-แมตช์จริงเท่านั้น — ห้ามฝืนเขียนด้วยพร้อมท์ธีมผิดเรื่อง
   //   มุมที่ 2 เป็นต้นไป ถ้าจับคู่หลวม (_matchScore < 45 หรือหลุดไป Built-in Fallback ซึ่งไม่มี score)
   //   → ตัดมุมทิ้ง ออกน้อยเวอร์ชันแต่ไม่บิดเบือน (พร้อมท์อันดับท้ายเคยพาตัวเขียนละข้อเท็จจริง "แม่เสียชีวิต")
   //   มุมแรกเก็บเสมอ = การันตีมีผลลัพธ์อย่างน้อย 1 เวอร์ชัน
-  const MIN_ANGLE_MATCH = Math.max(0, parseInt(process.env.ANGLE_MIN_MATCH_SCORE || '45', 10) || 45);
   for (let i = anglesToUse.length - 1; i >= 1; i--) {
     // ★ 1 ส.ค. 69 (Opus P2-A): ใบที่ luna ตั้งใจเลือก (AI_PICKED) อ่านการ์ดเต็ม+เนื้อข่าวแล้ว — ห้ามใช้คะแนนสูตร
     //   (ที่มันตัดสินว่าด้อยกว่าอยู่แล้ว) มาโยนทิ้ง ไม่งั้นฟีเจอร์ถูกล้างเงียบๆ ในเคสที่ควรช่วยที่สุด
@@ -355,25 +431,34 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     }
   }
 
-  // ★ 16 ก.ค. 69 (B5 — ใต้สวิตช์ REF_WEIGHT_BY_MATCH=1): มุมแรกไม่เคยมีเกต (ลูปบนเริ่ม i>=1) —
-  //   winner คะแนนต่ำ/ผิดเรื่องก็ถูกยึดเป็นแกนเวอร์ชันหลัก → สลับเป็น Built-in V12 (โทนกลาง ไม่มีธีมเฉพาะ)
-  //   แทนการฝืนใช้พร้อมท์ผิดเรื่อง — ยังการันตีมีผลลัพธ์ ≥1 เวอร์ชันเหมือนเดิม
-  if (process.env.REF_WEIGHT_BY_MATCH === '1' && anglePrompts[0] && anglePrompts[0].id !== 'fallback_builtin'
-      && anglePrompts[0]._matchType !== 'AI_PICKED' /* ★ Opus P2-A: ใบที่ luna เลือกห้ามถูกสลับทิ้งด้วยคะแนนสูตร */) {
-    const _s0 = Number(anglePrompts[0]._matchScore ?? 0);
-    if (_s0 < MIN_ANGLE_MATCH) {
-      addLog('PromptSelect', `🔁 มุมแรกจับคู่หลวม (score ${_s0} < ${MIN_ANGLE_MATCH}) → ใช้ Built-in V12 แทนพร้อมท์ผิดเรื่อง (REF_WEIGHT_BY_MATCH)`);
-      anglePrompts[0] = getBuiltinFallbackPrompt();
+  // ★ 19 ส.ค. 69 (ร้ายแรง 3 — FIXLIST-planK): จองแผนจบ "ก่อนยิงขนาน" — closing ใบเดียวห้ามถูกใช้ 2 มุม
+  //   ทำตรงนี้ (หลังลูปตัดมุม) ลำดับจองจึงแน่นอนตามลำดับมุมที่รอด — ถ้าไปจองใน task ขนานลำดับจะแข่งกันเอง
+  // 🔧 19 ส.ค. 69 รอบ 3 (โซลตรวจ): 3 อย่างในบล็อกเดียว —
+  //   1) จับคู่ two-pass ผ่าน assignAngleClosings (exact ครบทุกมุมก่อน แล้วค่อย contain จากใบว่าง — แก้เคสกลับด้าน
+  //      "มุมแรก contain ไปคว้าใบ exact ของมุมหลัง" + ใบที่เจอถูกจองแล้วต้องค้นใบว่างถัดไป ไม่ยอมแพ้)
+  //   2) log ตรงกับของจริง: เช็ค closingTailMatches (เงื่อนไขเดียวกับฝั่งเขียนใน narrativePayloadText) ก่อนแนบ+ก่อน log
+  //      — เดิม log ขึ้น "ใช้แผนเฉพาะมุม" ทั้งที่ฝั่งเขียนถอยเพราะ regex ไม่ติด (log โกหก ห้ามใช้ตัดสินผลเทส)
+  //   3) เปิดคู่กับ per_angle (แบบ A): ไม่แนบและไม่ log เลย — per_angle ทับ blueprint ทั้งใบอยู่แล้ว
+  //      log "ใช้แผนเฉพาะมุม" ของแบบ ก จะเป็นเท็จทันที (ของโซลไม่ถูกแตะ — บล็อกนี้แค่หลบทาง)
+  let _angleClosingPicks = null;
+  if (isAngleClosingSplitEnabled && !isAngleBlueprintPerAngle && blueprint && Array.isArray(blueprint.angle_closings)) {
+    if (closingTailMatches(blueprint.emotional_timeline)) {
+      _angleClosingPicks = assignAngleClosings(blueprint.angle_closings, anglesToUse.map((a) => a.angle_name));
+      addLog('ClosingSplit', `🔚 แผนจบรายมุมจับคู่ได้จริง ${_angleClosingPicks.filter(Boolean).length}/${anglesToUse.length} มุม (ไม่ซ้ำใบ)`);
+    } else {
+      addLog('ClosingSplit', '⚠️ ข้อสุดท้าย timeline ของ Blueprint ไม่ใช่ "ประโยคทุบท้าย" — ฝั่งเขียนจะถอยแผนกลางทุกมุม จึงไม่แนบแผนรายมุม');
     }
   }
 
   // ★ HOTFIX (10 มิ.ย.): สไตล์เปิดเรื่องหมุนเวียนต่อ angle — กันทุกเวอร์ชันเปิดเหมือนกัน (ดู autoFlowService.js)
   //   (12 มิ.ย. ทีมสั่งย้อนกลับสูตรนี้ — เวอร์ชันที่ทีมชอบ (#00189) เขียนด้วยสูตรนี้)
+  // 🎛️ CARD_AUTHORITY R6 (19 ส.ค. 69): เปิดสวิตช์ = ถอดหาง " ห้ามขึ้นต้นด้วยวันที่" ทั้ง 4 สูตร + หางพร้อมท์ด้านล่าง · ปิด (default) = ข้อความเดิมทุกไบต์
+  const _caR6Tail = isCardAuthorityR6Enabled() ? '' : ' ห้ามขึ้นต้นด้วยวันที่';
   const OPENING_STYLES = [
-    'เปิดด้วยภาพ/ฉากของเหตุการณ์ (visual moment) — พาคนอ่านไปยืนอยู่ตรงนั้นตั้งแต่ประโยคแรก ห้ามขึ้นต้นด้วยวันที่',
-    'เปิดด้วยตัวเลขหรือ contrast ที่สะดุดใจ — ขัดความคาดหมายตั้งแต่ประโยคแรก ห้ามขึ้นต้นด้วยวันที่',
-    'เปิดด้วยคำพูดของคนในเหตุการณ์ หรือความรู้สึก/คำถามที่ค้างในใจคนอ่าน ห้ามขึ้นต้นด้วยวันที่',
-    'เปิดด้วยผลลัพธ์/ปลายทางของเรื่องก่อน แล้วค่อยย้อนเล่าที่มา ห้ามขึ้นต้นด้วยวันที่',
+    'เปิดด้วยภาพ/ฉากของเหตุการณ์ (visual moment) — พาคนอ่านไปยืนอยู่ตรงนั้นตั้งแต่ประโยคแรก' + _caR6Tail,
+    'เปิดด้วยตัวเลขหรือ contrast ที่สะดุดใจ — ขัดความคาดหมายตั้งแต่ประโยคแรก' + _caR6Tail,
+    'เปิดด้วยคำพูดของคนในเหตุการณ์ หรือความรู้สึก/คำถามที่ค้างในใจคนอ่าน' + _caR6Tail,
+    'เปิดด้วยผลลัพธ์/ปลายทางของเรื่องก่อน แล้วค่อยย้อนเล่าที่มา' + _caR6Tail,
   ];
 
   // === PARALLEL GENERATE: สร้างเนื้อหาขนานด้วย prompt ที่เลือกไว้แล้ว ===
@@ -386,7 +471,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
       const _ap = anglePrompts[index];
       const _promptHook = (_ap && Number(_ap._matchScore) >= 60 && _ap.hookStyle) ? String(_ap.hookStyle) : null;
       const _openingStyle = _promptHook
-        ? `${_promptHook} — ตามเทคนิคเปิดของพร้อมท์ที่จับคู่ ห้ามขึ้นต้นด้วยวันที่`
+        ? `${_promptHook} — ตามเทคนิคเปิดของพร้อมท์ที่จับคู่${_caR6Tail}`
         : OPENING_STYLES[index % OPENING_STYLES.length];
       const writeAngle = `${focusAngle}\nสไตล์เปิดเรื่องบังคับของเวอร์ชันนี้: ${_openingStyle}`;
       
@@ -412,6 +497,32 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
       }
       
       // 3. Generate content
+      // ★ 18 ส.ค. 69 (แบบ ก — ANGLE_CLOSING_SPLIT): มุมนี้รับเฉพาะแผนจบของมุมตัวเอง — กันท่อนจบแฝดข้ามมุม
+      //   ผลจับคู่มาจาก _angleClosingPicks (two-pass · จองใบไม่ซ้ำ · เช็คเงื่อนไขทุบท้ายแล้ว) ที่สร้างหลังลูปตัดมุม
+      //   index ของ map นี้จึงชี้มุมเดียวกันแน่นอน (แพตเทิร์นเดียวกับ anglePrompts[index])
+      //   🔧 19 ส.ค. 69 รอบ 3: _angleClosingPicks non-null = ฝั่งเขียนจะใช้แผนที่แนบแน่นอน (เงื่อนไข gate ฝั่งเขียน
+      //   ถูกเช็คครบตั้งแต่ precompute: env เปิด + ใบมีเนื้อ + ทุบท้ายติด) → log สองบรรทัดล่างเป็นความจริงเสมอ
+      //   มุมที่ได้ null = ใช้แผนกลางเดิมทั้งใบเงียบๆ ห้ามทำข่าวล้ม
+      let angleBlueprint = blueprint;
+      if (isAngleClosingSplitEnabled && blueprint && _angleClosingPicks) {
+        const _angleClosing = _angleClosingPicks[index];
+        if (_angleClosing) {
+          angleBlueprint = { ...blueprint, angle_closing: _angleClosing };
+          addLog('ClosingSplit', `🔚 มุม "${angleObj.angle_name}" ใช้แผนจบเฉพาะมุม [${_angleClosing.match_type === 'exact' ? 'ชื่อตรง' : 'ชื่อคาบเกี่ยว'}]: ${(_angleClosing.closing_direction || _angleClosing.closing_sketch || '').slice(0, 60)}`);
+        } else {
+          addLog('ClosingSplit', `⚠️ มุม "${angleObj.angle_name}" ไม่ได้แผนจบรายมุม (ชื่อไม่แมตช์/ใบถูกมุมอื่นจองไป) — ใช้แผนกลางเดิม`);
+        }
+      }
+      // ★ แบบ A: เลือกด้วยชื่อมุมหลังขั้นตัดมุมแล้ว จึงไม่ผูกกับ index ที่อาจเลื่อน
+      //   ถ้า call ของมุมนี้ล้ม Map จะชี้ไปแผนมุมแรก; ถ้าล้มหมดจะได้ null และ analyze เดินต่อเหมือนเดิม
+      //   วางหลังบล็อกแบบ ก โดยเจตนา: เมื่อเปิดสองสวิตช์ per_angle เป็นแผนที่ละเอียดกว่าและมี precedence
+      if (isAngleBlueprintPerAngle) {
+        angleBlueprint = pickPerAngleBlueprint(angleBlueprintsByName, angleObj.angle_name, blueprint);
+        const _angleKey = normalizeAngleBlueprintKey(angleObj.angle_name);
+        addLog('BlueprintAngle', angleBlueprint
+          ? `🎯 มุม "${angleObj.angle_name}" ใช้ Blueprint "${angleBlueprint.angle_blueprint?.angle_name || bpResult?.meta?.fallbackSourceAngleName || 'มุมแรก'}"${_perAngleBlueprintFailedKeys.has(_angleKey) ? ' (fallback)' : ''}`
+          : `⚠️ มุม "${angleObj.angle_name}" ไม่มี Blueprint — เขียนต่อด้วย flow เดิม`);
+      }
       const genResult = await performSummarize({
         text: newsData.newsBody,
         newsTitle: newsData.newsTitle,
@@ -421,7 +532,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         contentLength: selectedLength,
         presetPrompt: topPrompt,
         targetCount: count,
-        emotionalBlueprint: blueprint,
+        emotionalBlueprint: angleBlueprint, // ★ สวิตช์ปิด = ตัวแปรนี้คือ blueprint ก้อนเดิมเป๊ะ (reference เดียวกัน)
         researchData: researchItems.length > 0 ? { items: researchItems } : null,
         factPool: factPool,
         focusAngle: writeAngle, // ★ มุมเล่า + สไตล์เปิดเรื่องบังคับของ angle นี้
@@ -614,4 +725,106 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
       log,
     },
   };
+}
+
+// ★ 19 ส.ค. 69 (🟡 FIXLIST-planK): สูตรจำนวนมุม 1-4 (default 2) รวมศูนย์ที่เดียว — เดิมก๊อปสูตรไว้ 2 จุด
+//   (สวิตช์แบบ ก + MULTI-ANGLE) เสี่ยงแก้ที่หนึ่งลืมอีกที่ · export เพื่อให้ข้อสอบหน่วยเรียกได้
+export function getGenAnglesCount() {
+  return Math.max(1, Math.min(4, parseInt(process.env.GEN_ANGLES || '2', 10) || 2));
+}
+
+// ★ 18 ส.ค. 69 (แบบ ก — ANGLE_CLOSING_SPLIT): หาแผนจบของมุมเดียวจาก blueprint.angle_closings
+// 🔧 19 ส.ค. 69 รอบ 3 (โซลตรวจ): กติกาจับคู่จริงย้ายไปรวมศูนย์ที่ assignAngleClosings
+//   (two-pass: exact ครบทุกมุมก่อน → contain จากใบว่าง · จองใบไม่ซ้ำ · กัน [object Object] · catch มี log)
+//   ใน narrativePayloadText.js — ตัวนี้เหลือเป็นทางลัดเรียกมุมเดียว (ยัง export ให้ข้อสอบ/โค้ดเก่าเรียกได้)
+//   ⚠️ งานหลายมุมห้ามเรียกตัวนี้วนทีละมุม (จะไม่เห็นการจองข้ามมุม) — ใช้ assignAngleClosings ทีเดียวทั้งชุด
+export function pickAngleClosing(blueprint, angleName) {
+  return assignAngleClosings(Array.isArray(blueprint?.angle_closings) ? blueprint.angle_closings : null, [angleName])[0] || null;
+}
+
+// ─── ANGLE_BLUEPRINT_MODE helpers (pure/testable; ห้ามผูกด้วย index) ───
+export function isAngleBlueprintPerAngleMode(value) {
+  return String(value ?? '') === 'per_angle';
+}
+
+export function normalizeAngleBlueprintKey(angleName) {
+  return String(angleName ?? '').normalize('NFKC').replace(/\s+/g, ' ').trim();
+}
+
+export function selectPerAngleBlueprintAngles(breakdownData, rawAngleCount) {
+  const parsedCount = parseInt(String(rawAngleCount ?? '2'), 10);
+  const count = Math.max(1, Math.min(4, parsedCount || 2));
+  const possibleAngles = Array.isArray(breakdownData?.possible_angles) ? breakdownData.possible_angles : [];
+  const selected = possibleAngles.slice(0, count).map((angle, index) => ({
+    angle_name: String(angle?.angle_name || '').trim() || `มุมข่าว ${index + 1}`,
+    description: String(angle?.description || '').trim(),
+  }));
+  return selected.length > 0
+    ? selected
+    : [{ angle_name: 'นำเสนอข่าวสารทั่วไป', description: 'เล่าเหตุการณ์ตามจริง' }];
+}
+
+export async function runPerAngleBlueprintCalls(angles, callBlueprint) {
+  const selected = Array.isArray(angles) ? angles.slice(0, 4) : [];
+  if (selected.length === 0 || typeof callBlueprint !== 'function') {
+    return {
+      success: false,
+      data: { blueprint: null, angleBlueprintsByName: new Map() },
+      meta: { successCount: 0, totalCount: selected.length, failedAngleKeys: [], fallbackSourceAngleName: '' },
+    };
+  }
+
+  // Promise.allSettled ยืนยันว่า N มุมเริ่มเป็น N promises พร้อมกัน และความล้มเหลวรายมุมไม่โยนข่าวทั้งงาน
+  const settled = await Promise.allSettled(
+    selected.map((angle) => Promise.resolve().then(() => callBlueprint(angle)))
+  );
+  const ownBlueprints = new Map();
+  const outcomes = settled.map((result, index) => {
+    const angle = selected[index];
+    const key = normalizeAngleBlueprintKey(angle.angle_name);
+    const rawBlueprint = result.status === 'fulfilled' && result.value?.success
+      ? result.value?.data?.blueprint
+      : null;
+    const blueprintForAngle = rawBlueprint && typeof rawBlueprint === 'object'
+      ? {
+          ...rawBlueprint,
+          angle_blueprint: {
+            mode: 'per_angle',
+            angle_name: angle.angle_name,
+            description: angle.description,
+          },
+        }
+      : null;
+    if (blueprintForAngle && !ownBlueprints.has(key)) ownBlueprints.set(key, blueprintForAngle);
+    return { key, angleName: angle.angle_name, blueprint: blueprintForAngle };
+  });
+
+  const firstAngleKey = normalizeAngleBlueprintKey(selected[0]?.angle_name);
+  // ปกติ fallback คือแผนมุมแรกตามข้อกำหนด; ถ้ามุมแรกเองล้ม ใช้แผนแรกที่รอดแทน เพื่อให้ "ล้มหมดเท่านั้นจึง null"
+  const fallbackBlueprint = ownBlueprints.get(firstAngleKey)
+    || outcomes.find((outcome) => outcome.blueprint)?.blueprint
+    || null;
+  const resolvedBlueprints = new Map();
+  const failedAngleKeys = [];
+  for (const outcome of outcomes) {
+    if (!outcome.blueprint) failedAngleKeys.push(outcome.key);
+    resolvedBlueprints.set(outcome.key, outcome.blueprint || fallbackBlueprint);
+  }
+
+  return {
+    success: Boolean(fallbackBlueprint),
+    data: { blueprint: fallbackBlueprint, angleBlueprintsByName: resolvedBlueprints },
+    meta: {
+      successCount: outcomes.filter((outcome) => outcome.blueprint).length,
+      totalCount: selected.length,
+      failedAngleKeys,
+      fallbackSourceAngleName: fallbackBlueprint?.angle_blueprint?.angle_name || '',
+    },
+  };
+}
+
+export function pickPerAngleBlueprint(angleBlueprintsByName, angleName, fallbackBlueprint = null) {
+  const key = normalizeAngleBlueprintKey(angleName);
+  if (!angleBlueprintsByName || typeof angleBlueprintsByName.get !== 'function') return fallbackBlueprint;
+  return angleBlueprintsByName.get(key) || fallbackBlueprint;
 }
