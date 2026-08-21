@@ -57,7 +57,7 @@ function getClaudeClient() {
 //   ของเดิม: export async function callClaude({ prompt, systemPrompt, model, temperature = 0.7, maxTokens = 8000, signal })
 //   effort: ชนะ env กลาง CLAUDE_WRITE_EFFORT เฉพาะการเรียกนั้น (ผลแล็บ 44+12 นัด: จุดเลือกการ์ด A=low B=medium)
 //   promptBlocks: อาเรย์ [{text, cache}] → content blocks + cache_control (แคชสารบัญคงที่ ลดต้นทุน ~85%)
-export async function callClaude({ prompt, systemPrompt, model = DEFAULT_WRITE_MODEL, temperature = 0.7, maxTokens = 8000, signal, effort, promptBlocks }) {
+export async function callClaude({ prompt, systemPrompt, model = DEFAULT_WRITE_MODEL, temperature = 0.7, maxTokens = 8000, signal, effort, promptBlocks, maxRetries, retryWithoutEffort = true }) {
   const client = getClaudeClient();
   if (!client) throw new Error('ANTHROPIC_API_KEY ไม่ได้ตั้งค่า — ไปตั้งค่าที่ Settings');
 
@@ -174,14 +174,18 @@ ${String(_previewSrc)}
 
   // ★ 16 ก.ค. 69 (B4): รับ AbortSignal จาก withTimeoutSignal — timeout แล้วยกเลิก HTTP จริง ตัดจ่ายซ้อน
   const requestSignal = preparePipelineSignal(signal, `claude:${model}`, 15_000);
-  const _reqOpts = requestSignal ? { signal: requestSignal } : undefined;
+  const _reqOptsData = {
+    ...(requestSignal ? { signal: requestSignal } : {}),
+    ...(Number.isInteger(maxRetries) && maxRetries >= 0 ? { maxRetries } : {}),
+  };
+  const _reqOpts = Object.keys(_reqOptsData).length ? _reqOptsData : undefined;
   let response;
   try {
     response = await client.messages.create(requestBody, _reqOpts);
   } catch (effortErr) {
     rethrowPipelineDeadline(effortErr, `claude:${model}`);
     // Defensive: SDK/รุ่น model ไม่รองรับ output_config → ลองใหม่แบบไม่ส่ง (ไม่ให้ pipeline ตายเพราะ param เดียว)
-    if (requestBody.output_config && /output_config|effort/i.test(effortErr.message || '')) {
+    if (retryWithoutEffort && requestBody.output_config && /output_config|effort/i.test(effortErr.message || '')) {
       console.warn('[Claude] ⚠️ output_config not supported — retrying without effort param');
       delete requestBody.output_config;
       response = await client.messages.create(requestBody, _reqOpts);

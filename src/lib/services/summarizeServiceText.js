@@ -1902,25 +1902,15 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
     console.log(`📦 ${'─'.repeat(50)}\n`);
 
     try {
-      console.log(`[🤖 AI CALL] mode=write | calling SmartAI (Claude > gpt-5.5)...`);
+      console.log(`[🤖 AI CALL] mode=write | calling SmartAI (Opus 4.8 > Fable 5 > GPT-5.6 Sol)...`);
       // ★ 16 ก.ค. 69 (B4): ขั้นเขียน (แพง+ช้าสุด) เดิมไม่มีเพดานเวลาชั้นใน — โมเดลค้าง = ตายทั้งมุม
-      //   ครอบ inner 180s → ตัดแล้ว fallback gpt-5.5 (90s) — งบนี้แชร์ outer 420s ต่อมุมกับ performResearch
+      //   ครอบโซ่นักเขียนทั้งหมดด้วย 270s; ภายในแยก Opus 90s + Fable 75s + Sol 90s
       //   (review fix: outer เดิม 300s ไม่พอเพราะ research กินก่อน ~30-60s → ขยายเป็น 420s ที่ autoFlowServiceText)
-      let _writeOut;
-      try {
-        _writeOut = await withTimeoutSignal(
-          (requestSignal) => callSmartAI('write', { prompt: multiPrompt, temperature: 0.7, maxTokens: 10000, signal: requestSignal }),
-          180000, 'write_inner', signal
-        );
-      } catch (writeErr) {
-        rethrowPipelineDeadline(writeErr, 'write_inner');
-        console.warn(`[🤖 AI CALL] ⚠️ write_inner ล้ม/หมดเวลา (${writeErr.message}) → fallback ${MODEL_NEWS_ANALYSIS}`);
-        const _fbResult = await withTimeoutSignal(
-          (requestSignal) => callAI({ prompt: multiPrompt, temperature: 0.7, maxTokens: 10000, model: MODEL_NEWS_ANALYSIS, signal: requestSignal }),
-          90000, 'write_fallback', signal
-        );
-        _writeOut = { result: _fbResult, model: (_fbResult && _fbResult._modelUsed) || MODEL_NEWS_ANALYSIS };
-      }
+      // callSmartAI('write') เป็นเจ้าของโซ่ Opus→Fable→Sol ครบแล้ว ห้ามยิง Sol ซ้ำที่ service
+      const _writeOut = await withTimeoutSignal(
+        (requestSignal) => callSmartAI('write', { prompt: multiPrompt, temperature: 0.7, maxTokens: 10000, signal: requestSignal }),
+        270000, 'write_inner', signal
+      );
       const { result, model: usedModel } = _writeOut;
       console.log(`[🤖 AI RESULT] model used: ${usedModel}`);
       console.log(`[🤖 AI RESULT] versions: ${result?.versions?.length || 0}`);
@@ -2484,24 +2474,13 @@ ${_timelineFlowGuidance}
 
       console.log(`[Mix-Service] Prompt length: ${mixPrompt.length}ch`);
 
-      let result, usedModel;
-      try {
-        // ★ 16 ก.ค. 69 (B4): เพิ่มเพดานเวลาชั้นใน 180s (เดิมไม่มี — พึ่ง outer อย่างเดียว)
-        const smartResult = await withTimeoutSignal(
-          (requestSignal) => callSmartAI('write', { prompt: mixPrompt, temperature: 0.7, maxTokens: 8000, signal: requestSignal }),
-          180000, 'mix_inner', signal
-        );
-        result = smartResult.result;
-        usedModel = smartResult.model;
-      } catch (err) {
-        rethrowPipelineDeadline(err, 'mix_inner');
-        console.warn(`[Mix-Service] SmartAI failed (${err.message}), falling back to ${MODEL_NEWS_ANALYSIS}`);
-        result = await withTimeoutSignal(
-          (requestSignal) => callAI({ prompt: mixPrompt, temperature: 0.7, maxTokens: 8000, signal: requestSignal }),
-          90000, 'mix_fallback', signal
-        );
-        usedModel = (result && result._modelUsed) || MODEL_NEWS_ANALYSIS; // ★ B1: log โมเดลจริง ไม่ hardcode
-      }
+      // โซ่นักเขียนมี fallback ครบใน Router แล้ว จึงไม่เริ่ม GPT รอบสองเมื่อทั้งโซ่ล้ม
+      const smartResult = await withTimeoutSignal(
+        (requestSignal) => callSmartAI('write', { prompt: mixPrompt, temperature: 0.7, maxTokens: 8000, signal: requestSignal }),
+        270000, 'mix_inner', signal
+      );
+      const result = smartResult.result;
+      const usedModel = smartResult.model;
 
       if (result && typeof result === 'object') {
         let versions = result.versions || [];

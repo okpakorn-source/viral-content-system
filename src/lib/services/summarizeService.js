@@ -1476,7 +1476,7 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
     console.log(`📦 ${'─'.repeat(50)}\n`);
 
     try {
-      console.log(`[🤖 AI CALL] mode=write | calling SmartAI (Claude > GPT-4o)...`);
+      console.log(`[🤖 AI CALL] mode=write | calling SmartAI (Opus 4.8 > Fable 5 > GPT-5.6 Sol)...`);
       const { result, model: usedModel } = await callSmartAI('write', { prompt: multiPrompt, temperature: 0.7, maxTokens: 6000 }); // ★ 6000 (was 10000) — perf: 2 versions × ~500-600w = ~3000t + buffer
       console.log(`[🤖 AI RESULT] model used: ${usedModel}`);
       console.log(`[🤖 AI RESULT] versions: ${result?.versions?.length || 0}`);
@@ -1961,16 +1961,10 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
 
       console.log(`[Mix-Service] Prompt length: ${mixPrompt.length}ch`);
 
-      let result, usedModel;
-      try {
-        const smartResult = await callSmartAI('write', { prompt: mixPrompt, temperature: 0.7, maxTokens: 8000 });
-        result = smartResult.result;
-        usedModel = smartResult.model;
-      } catch (err) {
-        console.warn(`[Mix-Service] SmartAI failed (${err.message}), falling back to GPT-4o`);
-        result = await callAI({ prompt: mixPrompt, temperature: 0.7, maxTokens: 8000 });
-        usedModel = MODEL_PRIMARY;
-      }
+      // โซ่นักเขียนมี fallback ครบใน Router แล้ว จึงไม่เริ่ม GPT รอบสองเมื่อทั้งโซ่ล้ม
+      const smartResult = await callSmartAI('write', { prompt: mixPrompt, temperature: 0.7, maxTokens: 8000 });
+      const result = smartResult.result;
+      const usedModel = smartResult.model;
 
       if (result && typeof result === 'object') {
         let versions = result.versions || [];

@@ -27,7 +27,7 @@ export function getOpenAIClient() {
  * เรียก AI — Single prompt system
  * callAI({ prompt: "..." }) — prompt เดียวครบ
  */
-export async function callAI({ prompt, systemPrompt, userPrompt, imageContents, model = MODEL_PRIMARY, temperature = 0.7, maxTokens = 4000, signal }) {
+export async function callAI({ prompt, systemPrompt, userPrompt, imageContents, model = MODEL_PRIMARY, temperature = 0.7, maxTokens = 4000, signal, allowModelFallback = true, maxRetries }) {
   const client = getOpenAIClient();
 
   if (!client) {
@@ -176,17 +176,17 @@ ${_p}
   const modelsToTry = [model];
   // ★ 1 ส.ค. 69 (เจ้าของสั่งโล๊ะ <5.6): โซ่ไม้สองยกชุดเป็นตระกูล 5.6 — sol↔terra, luna→terra
   //   (เดิมทุกเส้นตกไป gpt-4o ซึ่งตาย 400 ทุกครั้งเพราะรับ completion ได้แค่ 16384)
-  if (model === 'gpt-5.6-sol') {
+  if (allowModelFallback && model === 'gpt-5.6-sol') {
     modelsToTry.push('gpt-5.6-terra');
-  } else if (model === 'gpt-5.6-terra') {
+  } else if (allowModelFallback && model === 'gpt-5.6-terra') {
     modelsToTry.push('gpt-5.6-sol');
-  } else if (model === 'gpt-5.6-luna') {
+  } else if (allowModelFallback && model === 'gpt-5.6-luna') {
     modelsToTry.push('gpt-5.6-terra');
-  } else if (model === 'gpt-5.5') {
+  } else if (allowModelFallback && model === 'gpt-5.5') {
     modelsToTry.push('gpt-5.6-terra');
-  } else if (model === 'gpt-5.4-mini') {
+  } else if (allowModelFallback && model === 'gpt-5.4-mini') {
     modelsToTry.push('gpt-5.6-luna');
-  } else if (model !== 'gpt-5.6-terra') {
+  } else if (allowModelFallback && model !== 'gpt-5.6-terra') {
     modelsToTry.push('gpt-5.6-terra');
   }
 
@@ -201,6 +201,10 @@ ${_p}
       const _legacyCap = (currentModel === 'gpt-4o' || currentModel === 'gpt-4o-mini') ? 16384 : null;
       const _maxTokens = _legacyCap ? Math.min(maxTokens, _legacyCap) : maxTokens;
 
+      const _requestOptions = {
+        ...(requestSignal ? { signal: requestSignal } : {}),
+        ...(Number.isInteger(maxRetries) && maxRetries >= 0 ? { maxRetries } : {}),
+      };
       const response = await client.chat.completions.create({
         model: currentModel,
         messages,
@@ -211,7 +215,7 @@ ${_p}
           : { max_tokens: _maxTokens }),
         response_format: { type: 'json_object' },
       // ★ 16 ก.ค. 69 (B4): รับ AbortSignal จาก withTimeoutSignal — timeout แล้วยกเลิก HTTP จริง ตัดจ่ายซ้อน
-      }, requestSignal ? { signal: requestSignal } : undefined);
+      }, Object.keys(_requestOptions).length ? _requestOptions : undefined);
 
       const content = response.choices[0]?.message?.content;
       if (!content) {

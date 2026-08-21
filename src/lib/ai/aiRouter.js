@@ -7,14 +7,28 @@
  * Strategy:
  *   Extraction → Gemini Flash (เร็ว + ถูก)
  *   Breakdown  → GPT-4o (คิดลึก + structured)
- *   Writing    → Claude Sonnet (เขียนไทยดี)
- *   Fallback   → GPT-4o (ถ้าไม่มี API key)
+ *   Writing    → Claude Opus 4.8 → Claude Fable 5
+ *   Fallback   → GPT-5.6 Sol (ถ้า Claude ใช้งานไม่ได้)
  */
 import { callAI } from './openai.js';
 import { callClaude, isClaudeAvailable } from './claudeClient.js';
 import { callGemini, isGeminiAvailable } from './geminiClient.js';
 import { MODEL_PRIMARY } from './modelConfig.js';
 import { rethrowPipelineDeadline } from '../utils/pipelineDeadline.js';
+import { withTimeoutSignal } from '../utils/withTimeout.js';
+
+const WRITER_ATTEMPT_TIMEOUT_MS = Object.freeze({
+  opus: 90_000,
+  fable: 75_000,
+  sol: 90_000,
+});
+
+function runWriterAttempt(factory, timeoutMs, step, parentSignal) {
+  // บังคับให้ withTimeoutSignal ยกเลิก HTTP จริงแม้ caller เก่าไม่ได้ส่ง signal มา
+  const abortableParent = parentSignal
+    || (typeof AbortController !== 'undefined' ? new AbortController().signal : undefined);
+  return withTimeoutSignal(factory, timeoutMs, step, abortableParent);
+}
 
 /**
  * เลือก model + เรียก AI อัตโนมัติ
@@ -48,6 +62,7 @@ export async function callSmartAI(task, options) {
       return { result, model: (result && result._modelUsed) || modelName };
     } catch (err) {
       rethrowPipelineDeadline(err, `smart_ai:${modelName}`);
+      if (signal?.aborted) throw err;
       console.warn(`[SmartAI] ⚠️ Model '${modelName}' failed: ${err.message}`);
       errors.push(`${modelName}: ${err.message}`);
     }
@@ -80,14 +95,13 @@ function getStrategy(task) {
       break;
 
     case 'write':
-      // Content Writing: ใช้ Claude -> GPT-4o
-      // ★ 15 ส.ค. 69 (เจ้าของเคาะหลังศึกดวล 2 รอบ: fable ชนะ 18/18 + 17-4): นักเขียนหลัก → claude-fable-5
-      //   ผ่าน token ใหม่ 'claude-write' (โซ่ถอยในตัว: fable → opus-4.8 → gpt เดิม) — แตะเฉพาะสายเขียน
+      // Content Writing: Opus 4.8 -> Fable 5 -> GPT-5.6 Sol (ครั้งละ 1 request)
+      // ★ 21 ส.ค. 69 (เจ้าของเลือกจากศึกตาบอด R118): นักเขียนหลัก → claude-opus-4-8
+      //   ผ่าน token เฉพาะสายเขียน เพื่อไม่ให้ fallback Sol→Terra / SDK retry ของงานอื่นเปลี่ยนตาม
       //   case 'claude' เดิมคงไว้ทุกไบต์ให้ breakdown/ผู้ใช้อื่น (แผน Fable: ห้ามแก้ DEFAULT_WRITE_MODEL กลาง กันลาม fabricationGate)
       //   ของเดิม: if (isClaudeAvailable()) chain.push('claude');
-      //   ถอยกลับระบบเดิมเป๊ะ: ตั้ง env CLAUDE_WRITE_MODEL=claude-opus-4-8 (primary=fallback → เรียกครั้งเดียวเหมือนเดิม)
       if (isClaudeAvailable()) chain.push('claude-write');
-      chain.push('gpt4o');
+      chain.push('writer-sol');
       defaultTemp = 0.7;
       defaultMaxTokens = 16000;
       break;
@@ -113,29 +127,43 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
     case 'claude':
       return callClaude({ prompt, temperature, maxTokens, systemPrompt, signal });
 
-    // ★ 15 ส.ค. 69 (เจ้าของเคาะ · แผน Fable+Sol · แล็บพิสูจน์ ladder 5 เคส): สายนักเขียนโดยเฉพาะ
-    //   fable-5 ล้ม (refusal/HTTP/เนื้อว่าง/JSON พัง — โยนเป็น error จาก callClaude ทั้งหมด) → ถอย opus-4.8
-    //   ไม่ถอยเมื่อ: งบเวลาหมด (signal.aborted — ชั้นนอกตัดแล้ว) · ตั้ง fallback=off · primary=fallback (โหมดถอยกลับระบบเดิม)
-    //   opus-4.8 ล้มซ้ำ → โยนต่อเข้าโซ่ chain เดิม (gpt4o) — โซ่ GPT เดิมไม่ถูกลบ (กฎ AGENTS.md)
+    // ★ 21 ส.ค. 69 (เจ้าของเคาะจากศึกตาบอด R118): สายนักเขียนโดยเฉพาะ
+    //   opus-4.8 ล้ม (refusal/HTTP/เนื้อว่าง/JSON พัง — โยนเป็น error จาก callClaude ทั้งหมด) → ถอย fable-5
+    //   ไม่ถอยเมื่อ: งบเวลาหมด (signal.aborted — ชั้นนอกตัดแล้ว)
+    //   fable-5 ล้มซ้ำ → โยนต่อให้ writer-sol หนึ่งครั้ง แล้วจบ (ไม่มี Terra/ไม่มี Sol รอบสอง)
     case 'claude-write': {
-      // 🔴 ห้ามตั้ง env CLAUDE_WRITE_MODEL=claude-fable-5 เด็ดขาด (ปล่อยว่าง = fable อยู่แล้ว) —
-      //    env ตัวนี้ป้อน DEFAULT_WRITE_MODEL ใน claudeClient ด้วย ตั้งแล้วจะลาก fabricationGate + โซ่สำรอง breakdown
-      //    ไป fable ทั้งคู่ (จ่ายแพง 2 เท่าผิดจุด) — ใช้ env นี้ทางเดียว: =claude-opus-4-8 เพื่อถอยกลับระบบเดิม
-      // ★ ผู้ตรวจก่อน push: strip เครื่องหมายคำพูด/ช่องว่าง (กับดัก vercel env ใน memory) + off เทียบแบบไม่สนตัวพิมพ์
-      const _clean = (v) => String(v || '').trim().replace(/^["']|["']$/g, '');
-      const _primary = _clean(process.env.CLAUDE_WRITE_MODEL) || 'claude-fable-5';
-      const _fbRaw = _clean(process.env.CLAUDE_WRITE_FALLBACK_MODEL);
-      const _fb = _fbRaw || 'claude-opus-4-8';
+      // ล็อกในโค้ดเพื่อไม่ให้ค่า CLAUDE_WRITE_MODEL เก่าบน Vercel ทับผลศึกตาบอดของเจ้าของ
+      const _primary = 'claude-opus-4-8';
+      const _fb = 'claude-fable-5';
       try {
-        return await callClaude({ prompt, temperature, maxTokens, systemPrompt, signal, model: _primary });
+        return await runWriterAttempt(
+          (requestSignal) => callClaude({
+            prompt, temperature, maxTokens, systemPrompt, signal: requestSignal, model: _primary,
+            maxRetries: 0, retryWithoutEffort: false,
+          }),
+          WRITER_ATTEMPT_TIMEOUT_MS.opus, 'writer_opus', signal
+        );
       } catch (wErr) {
         rethrowPipelineDeadline(wErr, `claude-write:${_primary}`);
-        const _noRetry = signal?.aborted || _fb.toLowerCase() === 'off' || _fb === _primary;
-        if (_noRetry) throw wErr;
+        if (signal?.aborted) throw wErr;
         console.warn(`[aiRouter] ⚠️ นักเขียนหลัก ${_primary} ล้ม (${String(wErr.message || '').slice(0, 90)}) → ถอยตัวสำรอง ${_fb}`);
-        return await callClaude({ prompt, temperature, maxTokens, systemPrompt, signal, model: _fb });
+        return await runWriterAttempt(
+          (requestSignal) => callClaude({
+            prompt, temperature, maxTokens, systemPrompt, signal: requestSignal, model: _fb,
+            maxRetries: 0, retryWithoutEffort: false,
+          }),
+          WRITER_ATTEMPT_TIMEOUT_MS.fable, 'writer_fable', signal
+        );
       }
     }
+    case 'writer-sol':
+      return runWriterAttempt(
+        (requestSignal) => callAI({
+          prompt, temperature, maxTokens, model: MODEL_PRIMARY, signal: requestSignal,
+          allowModelFallback: false, maxRetries: 0,
+        }),
+        WRITER_ATTEMPT_TIMEOUT_MS.sol, 'writer_sol', signal
+      );
     case 'gemini':
       // callGemini มี timeout 15s ในตัว — ไม่ต้องส่ง signal
       return callGemini({ prompt, temperature, maxTokens, signal });
