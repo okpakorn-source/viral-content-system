@@ -1,99 +1,337 @@
+import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { NextResponse } from 'next/server';
 import { createStore } from '@/lib/persistStore';
+import { getSupabase, isSupabaseReady } from '@/lib/supabase';
 
 /**
- * Clip Worker bridge (24 มิ.ย.) — ให้ "clip-worker บนเครื่องทีม" ดึงงาน + รายงานผล
- *   GET  → ดึงงาน pending ที่เก่าสุด 1 ชิ้น แล้วมาร์ค processing (atomic-ish) → คืน job
- *   POST → รายงานผล { id, status:'done'|'error', result?, error? } → อัปเดต job
- * ★ คิวแยก 'clip-jobs' — ไม่แตะ job_queue/ระบบทำข่าวอัตโนมัติ
+ * Clip Worker bridge — ให้เครื่องทีมดึงงานและรายงานผลผ่าน lease เดียวต่อหนึ่งงาน
+ * GET  → claim งานแบบ conditional update แล้วคืน claimToken
+ * POST → heartbeat/done/error/retry ต้องถือ claimToken ปัจจุบันเท่านั้น
+ * คิวนี้แยกเป็น clip-jobs และไม่แตะ job_queue ของระบบข่าว
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+const STORE_NAME = 'clip-jobs';
+const TABLE = 'store_items';
+const WORKER_PROTOCOL = 'clip-lease-v1';
+const WORKER_PROTOCOL_HEADER = 'x-clip-worker-version';
+const WORKER_SECRET_HEADER = 'x-clip-worker-secret';
+const LEASE_MS = 20 * 60 * 1000; // ยาวกว่า processJob watchdog 16 นาที
+
+const RETRY_DELAY_MS = 3 * 60 * 1000;
+const MAX_ATTEMPTS = 80;
+
+function protocolAccepted(request) {
+  return request?.headers?.get?.(WORKER_PROTOCOL_HEADER) === WORKER_PROTOCOL;
+}
+
+function secretDigest(value) {
+  return createHash('sha256').update(String(value || ''), 'utf8').digest();
+}
+
+function workerAuthorizationResponse(request) {
+  const expected = process.env.CLIP_WORKER_SECRET || process.env.DISCORD_API_SECRET || '';
+  if (!expected) {
+    return NextResponse.json({
+      success: false,
+      errorType: 'CLIP_WORKER_SECRET_UNAVAILABLE',
+      error: 'ยังไม่ได้ตั้ง secret สำหรับ clip worker ระบบจึงหยุดคิวไว้ก่อน',
+    }, { status: 503 });
+  }
+
+  const provided = request?.headers?.get?.(WORKER_SECRET_HEADER) || '';
+  const authorized = provided.length > 0
+    && timingSafeEqual(secretDigest(provided), secretDigest(expected));
+  if (authorized) return null;
+
+  return NextResponse.json({
+    success: false,
+    errorType: 'CLIP_WORKER_UNAUTHORIZED',
+    error: 'ไม่มีสิทธิ์ใช้งาน clip worker',
+  }, { status: 401 });
+}
+
+function timestamp(value) {
+  const parsed = new Date(value || 0).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function claimKind(job, nowMs) {
+  if (job?.status === 'pending') return 'pending';
+  if (job?.status === 'retry_wait' && timestamp(job.nextRetryAt) <= nowMs) return 'retry';
+  if (job?.status !== 'processing') return null;
+
+  if (job.leaseExpiresAt) {
+    return timestamp(job.leaseExpiresAt) <= nowMs ? 'expired' : null;
+  }
+
+  // งานจาก worker รุ่นเก่าที่ไม่มี lease: รอเต็ม 20 นาที ไม่กู้ที่ 8 นาทีอีกแล้ว
+  return timestamp(job.startedAt) <= nowMs - LEASE_MS ? 'legacy-expired' : null;
+}
+
+function transitionForClaim(candidate, kind, nowIso) {
+  const reclaimed = kind === 'expired' || kind === 'legacy-expired';
+  const reclaims = (candidate.reclaims || 0) + (reclaimed ? 1 : 0);
+
+  if (reclaimed) {
+    return {
+      terminal: true,
+      data: {
+        ...candidate,
+        status: 'error',
+        startedAt: null,
+        reclaims,
+        claimToken: null,
+        leaseExpiresAt: null,
+        lastHeartbeatAt: null,
+        statusNote: '',
+        error: 'งานเดิมหมดเวลายืนยันเจ้าของ โดยยังไม่ทราบว่ารอบเดิมจบหรือไม่ ระบบจึงหยุดไว้เพื่อกันเสียค่า API ซ้ำ · ตรวจผลเดิมก่อนแล้วค่อยส่งใหม่',
+        doneAt: nowIso,
+        updatedAt: nowIso,
+      },
+    };
+  }
+
+  const claimToken = randomUUID();
+  return {
+    terminal: false,
+    data: {
+      ...candidate,
+      status: 'processing',
+      startedAt: nowIso,
+      reclaims,
+      claimToken,
+      claimCount: (candidate.claimCount || 0) + 1,
+      leaseExpiresAt: new Date(new Date(nowIso).getTime() + LEASE_MS).toISOString(),
+      lastHeartbeatAt: nowIso,
+      nextRetryAt: null,
+      statusNote: '',
+      updatedAt: nowIso,
+    },
+  };
+}
+
+function applyClaimFilters(query, candidate, kind) {
+  let filtered = query.filter('data->>status', 'eq', candidate.status);
+  if (kind === 'retry') {
+    filtered = filtered.filter('data->>nextRetryAt', 'eq', candidate.nextRetryAt);
+  } else if (kind === 'expired') {
+    filtered = filtered
+      .filter('data->>claimToken', 'eq', candidate.claimToken)
+      .filter('data->>leaseExpiresAt', 'eq', candidate.leaseExpiresAt);
+  } else if (kind === 'legacy-expired') {
+    filtered = filtered
+      .is('data->>claimToken', null)
+      .is('data->>leaseExpiresAt', null)
+      .filter('data->>startedAt', 'eq', candidate.startedAt);
+  }
+  return filtered;
+}
+
+async function claimSupabase(candidate, kind, transition, nowIso) {
+  const sb = getSupabase();
+  let query = sb
+    .from(TABLE)
+    .update({ data: transition.data, updated_at: nowIso })
+    .eq('id', candidate.id)
+    .eq('store_name', STORE_NAME);
+  query = applyClaimFilters(query, candidate, kind);
+  const { data, error } = await query.select('data');
+  if (error) throw new Error(`claim งานถอดคลิปแบบ atomic ไม่สำเร็จ: ${error.message}`);
+  return Array.isArray(data) && data.length === 1 ? data[0].data : null;
+}
+
+async function claimCandidate(candidate, kind, nowIso) {
+  const transition = transitionForClaim(candidate, kind, nowIso);
+  const updated = await claimSupabase(candidate, kind, transition, nowIso);
+  if (!updated) return null;
+  return transition.terminal ? { terminal: true } : { terminal: false, job: updated };
+}
+
+async function readSupabaseJob(id) {
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('data')
+    .eq('id', id)
+    .eq('store_name', STORE_NAME)
+    .single();
+  if (error || !data?.data) return null;
+  return data.data;
+}
+
+async function updateOwnedSupabase(id, claimToken, mutate, { requireActiveLease = false } = {}) {
+  const current = await readSupabaseJob(id);
+  if (!current || current.status !== 'processing' || current.claimToken !== claimToken) return null;
+
+  const nowIso = new Date().toISOString();
+  if (requireActiveLease && timestamp(current.leaseExpiresAt) <= timestamp(nowIso)) return null;
+
+  const updated = { ...mutate(current, nowIso), updatedAt: nowIso };
+  let query = getSupabase()
+    .from(TABLE)
+    .update({ data: updated, updated_at: nowIso })
+    .eq('id', id)
+    .eq('store_name', STORE_NAME)
+    .filter('data->>status', 'eq', 'processing')
+    .filter('data->>claimToken', 'eq', claimToken);
+  if (requireActiveLease) {
+    query = query
+      .filter('data->>leaseExpiresAt', 'eq', current.leaseExpiresAt)
+      .filter('data->>leaseExpiresAt', 'gt', nowIso);
+  }
+  const { data, error } = await query.select('data');
+  if (error) throw new Error(`บันทึกสถานะงานถอดคลิปไม่สำเร็จ: ${error.message}`);
+  return Array.isArray(data) && data.length === 1 ? data[0].data : null;
+}
+
+function clearLease(job) {
+  return {
+    ...job,
+    claimToken: null,
+    leaseExpiresAt: null,
+    lastHeartbeatAt: null,
+    startedAt: null,
+  };
+}
+
+function claimLostResponse() {
+  return NextResponse.json({
+    success: false,
+    errorType: 'CLAIM_LOST',
+    error: 'สิทธิ์งานนี้หมดอายุหรือถูก worker อื่นรับช่วงแล้ว',
+  }, { status: 409 });
+}
+
+function primaryUnavailableResponse() {
+  return NextResponse.json({
+    success: false,
+    errorType: 'CLIP_QUEUE_PRIMARY_UNAVAILABLE',
+    error: 'ฐานคิวหลักไม่พร้อม ระบบหยุด worker ไว้เพื่อกันหยิบงานซ้ำข้ามเครื่อง',
+  }, { status: 503 });
+}
+
+export async function GET(request) {
+  const authorizationError = workerAuthorizationResponse(request);
+  if (authorizationError) return authorizationError;
+  if (!protocolAccepted(request)) {
+    return NextResponse.json({
+      success: false,
+      errorType: 'WORKER_UPGRADE_REQUIRED',
+      error: 'clip-worker รุ่นเก่าไม่รองรับ lease กรุณารีสตาร์ท worker รุ่นล่าสุด',
+    }, { status: 426 });
+  }
+  if (!isSupabaseReady()) return primaryUnavailableResponse();
+
   try {
-    const store = createStore('clip-jobs');
-    const all = await store.getAll();
-    const now = Date.now();
-    // ★ กู้งานค้าง: processing ค้างเกิน 8 นาที → คืนเป็น pending (เครื่องทีมหลุด/รีสตาร์ท)
-    //   🔴 24 ก.ค. แก้บัค (auditor #5): นับ reclaims — งานที่ถูกกู้ซ้ำเกิน 5 ครั้ง (worker พัง/หมดแรงทุกครั้งที่หยิบ
-    //      เช่นคลิปใหญ่ OOM) → มาร์ค error แทนวนไม่จบ (เดิม reset โดยไม่นับ = งานพิษวนไม่มีวันชน MAX_ATTEMPTS)
-    const stuckCut = now - 8 * 60 * 1000;
-    const MAX_RECLAIMS = 5;
-    for (const j of all) {
-      if (j.status === 'processing' && new Date(j.startedAt || 0).getTime() < stuckCut) {
-        const reclaims = (j.reclaims || 0) + 1;
-        if (reclaims >= MAX_RECLAIMS) {
-          await store.update(j.id, ex => ({ ...ex, status: 'error', startedAt: null, reclaims,
-            error: `งานค้างซ้ำ ${reclaims} ครั้ง — worker น่าจะพัง/หมดแรงทุกครั้งที่หยิบงานนี้ (เช่น คลิปใหญ่เกิน/OOM) จึงข้ามถาวร · ลองส่งใหม่หรือตรวจลิงก์`,
-            doneAt: new Date().toISOString() })).catch(() => {});
-        } else {
-          await store.update(j.id, ex => ({ ...ex, status: 'pending', startedAt: null, reclaims })).catch(() => {});
-        }
-      }
+    const store = createStore(STORE_NAME);
+    // production ห้าม fallback ไปอ่านไฟล์ cache เก่า เพราะอาจทำให้หยิบงานซ้ำข้ามเครื่อง
+    const all = await store.getAll({ authoritative: true });
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    const candidates = all
+      .map(job => ({ job, kind: claimKind(job, nowMs) }))
+      .filter(item => item.kind)
+      .sort((a, b) => timestamp(a.job.createdAt) - timestamp(b.job.createdAt));
+
+    for (const candidate of candidates) {
+      // conditional update อาจแพ้ worker อีกตัว จึงลองแถวถัดไปโดยไม่เริ่มถอดซ้ำ
+      // eslint-disable-next-line no-await-in-loop
+      const claim = await claimCandidate(candidate.job, candidate.kind, nowIso);
+      if (!claim || claim.terminal) continue;
+      const job = claim.job;
+      return NextResponse.json({
+        success: true,
+        job: {
+          id: job.id,
+          url: job.url,
+          kind: job.kind,
+          tidy: job.tidy,
+          platform: job.platform,
+          user: job.user || '',
+          model: job.model || '',
+          claimToken: job.claimToken,
+          leaseExpiresAt: job.leaseExpiresAt,
+        },
+      });
     }
-    // ★ 26 มิ.ย.: หยิบงาน pending + งาน retry_wait ที่ถึงเวลาลองใหม่แล้ว (Gemini แน่น → รอครบเวลา → ลองอีก)
-    const claimable = all.filter(j =>
-      j.status === 'pending' ||
-      (j.status === 'retry_wait' && new Date(j.nextRetryAt || 0).getTime() <= now)
-    ).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-    if (claimable.length === 0) return NextResponse.json({ success: true, job: null });
-    const next = claimable[0];
-    await store.update(next.id, ex => ({ ...ex, status: 'processing', startedAt: new Date().toISOString() }));
-    // ★ 8 ก.ค.: ส่ง user (ใครส่งงาน) ไปด้วย — worker ส่งต่อให้ insight API เก็บเป็น metadata คลัง
-    //   (★ 14 ส.ค. 69: ถอดฟิลด์ smooth — ระบบแบบการเล่าถูกลบทั้งชุด กลับพรอมต์ยุคนิ่งตัวเดียว)
-    // ★ 14 ส.ค. 69: ส่ง model (ใบงานเทสสองโมเดล) ต่อให้เครื่องทีม — ใบงานปกติไม่มีฟิลด์นี้ = ''
-    return NextResponse.json({ success: true, job: { id: next.id, url: next.url, kind: next.kind, tidy: next.tidy, platform: next.platform, user: next.user || '', model: next.model || '' } });
+
+    return NextResponse.json({ success: true, job: null });
   } catch (error) {
     console.error('[ClipWorker:GET]', error.message);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
-// ★ 26 มิ.ย.: auto-retry ตอน Gemini แน่น — ลองใหม่ทุก ~3 นาที จนได้ผล (สูงสุด ~4 ชม.)
-//   ขยาย 2→4 ชม. (ผู้ใช้สั่ง): บางวัน Gemini แน่นยาว — ให้คิวรอจน Gemini ว่างแล้วรันเอง ไม่ทิ้งงานเร็วเกิน
-const RETRY_DELAY_MS = 3 * 60 * 1000; // รอ 3 นาที/ครั้ง
-const MAX_ATTEMPTS = 80;              // ~4 ชม. แล้วเลิก
-
 export async function POST(request) {
-  try {
-    const { id, status, result = null, error = '' } = await request.json();
-    if (!id || !['done', 'error', 'retry'].includes(status)) {
-      return NextResponse.json({ success: false, error: 'ต้องระบุ id + status (done|error|retry)' }, { status: 400 });
-    }
-    const store = createStore('clip-jobs');
+  const authorizationError = workerAuthorizationResponse(request);
+  if (authorizationError) return authorizationError;
+  if (!protocolAccepted(request)) {
+    return NextResponse.json({
+      success: false,
+      errorType: 'WORKER_UPGRADE_REQUIRED',
+      error: 'clip-worker รุ่นเก่าไม่รองรับ lease กรุณารีสตาร์ท worker รุ่นล่าสุด',
+    }, { status: 426 });
+  }
+  if (!isSupabaseReady()) return primaryUnavailableResponse();
 
-    // ★ retry = Gemini แน่นชั่วคราว → ไม่ fail · ตั้งเวลารอแล้วให้ worker หยิบทำใหม่อัตโนมัติ
+  try {
+    const { id, status, claimToken, result = null, error = '' } = await request.json();
+    if (!id || !claimToken || !['heartbeat', 'done', 'error', 'retry'].includes(status)) {
+      return NextResponse.json({
+        success: false,
+        error: 'ต้องระบุ id + claimToken + status (heartbeat|done|error|retry)',
+      }, { status: 400 });
+    }
+
+    let updated;
+
+    if (status === 'heartbeat') {
+      updated = await updateOwnedSupabase(id, claimToken, (current, nowIso) => ({
+        ...current,
+        leaseExpiresAt: new Date(new Date(nowIso).getTime() + LEASE_MS).toISOString(),
+        lastHeartbeatAt: nowIso,
+      }), { requireActiveLease: true });
+      if (!updated) return claimLostResponse();
+      return NextResponse.json({ success: true, leaseExpiresAt: updated.leaseExpiresAt });
+    }
+
     if (status === 'retry') {
-      await store.update(id, ex => {
-        const attempts = (ex.attempts || 0) + 1;
+      updated = await updateOwnedSupabase(id, claimToken, (current, nowIso) => {
+        const attempts = (current.attempts || 0) + 1;
         if (attempts >= MAX_ATTEMPTS) {
-          // ★ Batch B (18 ก.ค.): แจ้งสาเหตุจริงจาก lastError แทนเหมารวมว่า "Gemini แน่น" เสมอ
-          //   (ดาวน์โหลดล้มถูกจับเป็นถาวรก่อนถึงจุดนี้แล้วโดย isTransient — ที่มาถึง = ชั่วคราวจริงแต่ยาวเกิน)
-          const lastErr = String(ex.lastError || error || '').slice(0, 160);
+          const lastErr = String(current.lastError || error || '').slice(0, 160);
           return {
-            ...ex, status: 'error', attempts, startedAt: null, statusNote: '',
+            ...clearLease(current),
+            status: 'error',
+            attempts,
+            statusNote: '',
             error: `ถอดคลิปไม่สำเร็จหลังลองอัตโนมัติ ${attempts} ครั้ง (~${Math.round(attempts * RETRY_DELAY_MS / 60000)} นาที)${lastErr ? ` — สาเหตุล่าสุด: ${lastErr}` : ' — ลองส่งใหม่ภายหลัง'}`,
-            doneAt: new Date().toISOString(),
+            doneAt: nowIso,
           };
         }
         return {
-          ...ex, status: 'retry_wait', attempts, startedAt: null,
-          nextRetryAt: new Date(Date.now() + RETRY_DELAY_MS).toISOString(),
+          ...clearLease(current),
+          status: 'retry_wait',
+          attempts,
+          nextRetryAt: new Date(new Date(nowIso).getTime() + RETRY_DELAY_MS).toISOString(),
           statusNote: `⏳ Gemini แน่น — อยู่ในคิว ระบบลองใหม่ให้เองทุก ~3 นาที จน Gemini ว่าง (ลองไปแล้ว ${attempts} ครั้ง) · ปิดหน้าได้ ผลจะเข้าคลังอัตโนมัติ`,
           lastError: String(error).slice(0, 200),
         };
-      });
-      return NextResponse.json({ success: true, retrying: true });
+      }, { requireActiveLease: true });
+      if (!updated) return claimLostResponse();
+      return NextResponse.json({ success: true, retrying: updated.status === 'retry_wait' });
     }
 
-    // (★ 14 ส.ค. 69: ถอดด่านเทียบ "แบบการเล่า" (styleMismatch) ออก — ระบบแบบถูกลบทั้งชุด ใบงานไม่มีฟิลด์ smooth แล้ว)
-    await store.update(id, ex => ({
-      ...ex, status,
+    updated = await updateOwnedSupabase(id, claimToken, (current, nowIso) => ({
+      ...clearLease(current),
+      status,
       result: status === 'done' ? result : null,
       error: status === 'error' ? String(error).slice(0, 300) : '',
-      statusNote: '', doneAt: new Date().toISOString(),
+      statusNote: '',
+      doneAt: nowIso,
     }));
+    if (!updated) return claimLostResponse();
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('[ClipWorker:POST]', error.message);

@@ -10,9 +10,23 @@
  *
  * 🔴 แตะเฉพาะคิวคลิป (clip-jobs) — ไม่เกี่ยวกับระบบทำข่าวอัตโนมัติเลย
  */
+try {
+  process.loadEnvFile?.('.env.local');
+} catch (error) {
+  if (error?.code !== 'ENOENT') {
+    console.warn('[clip-worker] โหลด .env.local ไม่สำเร็จ:', error.message);
+  }
+}
+
 const BASE = process.env.CLIP_WORKER_BASE || 'http://localhost:3000';
 const IDLE_MS = Number(process.env.CLIP_WORKER_IDLE_MS) || 5000;   // ว่าง → เช็กใหม่ทุก 5 วิ
 const ERR_MS = 8000;
+const WORKER_PROTOCOL = 'clip-lease-v1';
+const WORKER_SECRET = process.env.CLIP_WORKER_SECRET || process.env.DISCORD_API_SECRET || '';
+const HEARTBEAT_MS = Number(process.env.CLIP_WORKER_HEARTBEAT_MS) || 60_000;
+const REPORT_TIMEOUT_MS = 12_000;
+const REPORT_MAX_ATTEMPTS = 3;
+const PROCESS_TIMEOUT_MS = 16 * 60 * 1000;
 
 // ★ 26 มิ.ย.: คลิปยาว/FB reel (โหลด+อัป Gemini+ดู) ใช้เวลา >5 นาทีได้ — แต่ fetch ของ Node (undici)
 //   ตัดที่ headersTimeout 5 นาทีโดยปริยาย → "fetch failed" ทั้งที่ insight ยังทำอยู่ → เข้าใจผิดว่าล้ม
@@ -25,14 +39,40 @@ try {
 
 const log = (...a) => console.log(`[clip-worker ${new Date().toLocaleTimeString('th-TH')}]`, ...a);
 
+function workerHeaders(contentType = false) {
+  if (!WORKER_SECRET) {
+    const error = new Error('ยังไม่ได้ตั้ง CLIP_WORKER_SECRET หรือ DISCORD_API_SECRET — หยุด worker เพื่อไม่ให้เปิดคิวโดยไม่มีสิทธิ์');
+    error.code = 'CLIP_WORKER_SECRET_MISSING';
+    throw error;
+  }
+  return {
+    'X-Clip-Worker-Version': WORKER_PROTOCOL,
+    'X-Clip-Worker-Secret': WORKER_SECRET,
+    ...(contentType ? { 'Content-Type': 'application/json' } : {}),
+  };
+}
+
+function httpError(response, data, fallback) {
+  const error = new Error(data?.error || `${fallback} (HTTP ${response.status})`);
+  error.status = response.status;
+  error.code = data?.errorType || '';
+  return error;
+}
+
 async function pullJob() {
   // ★ 26 มิ.ย.: timeout 12 วิ — poll ต้องเร็ว (<2 วิ) ถ้าค้าง = connection เก่าตาย (server รีสตาร์ท) → ตัดทิ้ง เปิดใหม่
-  const r = await fetch(`${BASE}/api/clip-transcript/worker`, { method: 'GET', signal: AbortSignal.timeout(12000) });
+  const r = await fetch(`${BASE}/api/clip-transcript/worker`, {
+    method: 'GET',
+    headers: workerHeaders(),
+    signal: AbortSignal.timeout(12_000),
+  });
   const d = await r.json().catch(() => ({}));
+  if (!r.ok || d?.success === false) throw httpError(r, d, 'ดึงคิวไม่สำเร็จ');
+  if (d?.job && !d.job.claimToken) throw new Error('เซิร์ฟเวอร์คืนงานโดยไม่มี claimToken — หยุดก่อนเพื่อไม่ให้ถอดซ้ำ');
   return d?.job || null;
 }
 
-async function processJob(job) {
+async function processJob(job, { signal } = {}) {
   // transcript → /api/clip-transcript | insight → /api/clip-transcript/insight
   // ★ 8 ก.ค.: เพิ่ม kind 'hunt' (ถอด+ค้นข่าวคล้าย) + ส่ง user เก็บเป็น metadata คลัง
   const endpoint = job.kind === 'transcript' ? '/api/clip-transcript'
@@ -43,16 +83,42 @@ async function processJob(job) {
     // (★ 14 ส.ค. 69: ถอด smooth ออก · ส่ง model ต่อเมื่อเป็นใบงานเทสสองโมเดล — ใบงานปกติไม่มีฟิลด์นี้)
     : { url: job.url, user: job.user || '', ...(job.model ? { model: job.model, force: true } : {}) };
   const r = await fetch(`${BASE}${endpoint}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal,
     ...(longDispatcher ? { dispatcher: longDispatcher } : {}), // ★ timeout ยาว — กัน fetch failed ที่ 5 นาที
   });
-  const d = await r.json().catch(() => ({}));
-  if (d?.success) return { ok: true, result: d.data };
-  return { ok: false, error: d?.error || `HTTP ${r.status}`, errorType: d?.errorType || '' };
+  let d;
+  try {
+    d = await r.json();
+  } catch (cause) {
+    // HTTP response มาถึงแล้วแต่ body ขาด อาจเป็นงานที่ AI ทำเสร็จแล้ว ห้ามตีเป็น transient แล้วเสียเงินซ้ำ
+    const error = new Error(`อ่านผลถอดคลิปจาก HTTP ${r.status} ไม่ครบ: ${cause.message}`);
+    error.code = 'AMBIGUOUS_RESPONSE_BODY';
+    throw error;
+  }
+  if (!r.ok && d?.success === true) {
+    // HTTP บอกว่าล้ม แต่ body บอกว่างานสำเร็จ: อาจจ่าย AI และได้ผลแล้ว ห้ามทิ้งผลแล้ววนถอดใหม่
+    const error = new Error(`HTTP ${r.status} ขัดกับผล success:true จึงหยุดไว้เพื่อกันถอดซ้ำ`);
+    error.code = 'AMBIGUOUS_RESPONSE_BODY';
+    throw error;
+  }
+  if (r.ok && typeof d?.success !== 'boolean') {
+    // 2xx แต่ไม่มีผลสำเร็จ/ล้มเหลวชัดเจน ก็ไม่รู้ว่า AI ถูกคิดเงินไปแล้วหรือไม่
+    const error = new Error(`ผลถอดคลิปจาก HTTP ${r.status} ไม่มีสถานะ success ที่ชัดเจน`);
+    error.code = 'AMBIGUOUS_RESPONSE_BODY';
+    throw error;
+  }
+  if (r.ok && d?.success) return { ok: true, result: d.data };
+  return {
+    ok: false,
+    error: d?.error || `HTTP ${r.status}`,
+    errorType: d?.errorType || '',
+    retrySafe: d?.retrySafe === true,
+  };
 }
 
-// ★ 26 มิ.ย. (เปิด auto-retry แบบ "เห็นชัด"): แยก "Gemini แน่นชั่วคราว" (รอลองใหม่เอง) ออกจาก "ดูคลิปไม่ได้จริง" (error เลย)
-//   - แน่น/503/timeout/เน็ตสะดุด → report 'retry' → เข้า retry_wait → worker หยิบทำใหม่เองทุก ~3 นาที จน Gemini ว่าง
+// ★ แยก server ตอบว่า "Gemini แน่นชั่วคราว" ออกจาก "ดูคลิปไม่ได้จริง" และ network ambiguity
+//   - server ตอบชัดว่า 503/429/แน่น → report 'retry' → เข้า retry_wait แล้วลองใหม่
+//   - fetch/timeout ไม่มี response → report 'error' ให้คนตรวจเอง เพราะ server อาจยังทำ AI อยู่
 //   - คลิปส่วนตัว/ดูไม่ได้/ลิงก์ไม่รองรับ → report 'error' ทันที (วนใหม่ก็ไม่ช่วย)
 //   ต่างจากเดิม: ผู้ใช้เห็นสถานะ "อยู่ในคิว ลองครั้งที่ N" ตลอด — ไม่ใช่ retry เงียบ
 function isTransient(error = '', errorType = '') {
@@ -71,15 +137,108 @@ function isTransient(error = '', errorType = '') {
   return true;
 }
 
-async function report(id, status, payload) { // status: 'done' | 'error' | 'retry'
-  const body = status === 'done' ? { id, status, result: payload } : { id, status, error: payload };
-  await fetch(`${BASE}/api/clip-transcript/worker`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+function reportStatusForFailure(error = '', errorType = '', { serverResponded = false } = {}) {
+  // ถ้าไม่มี HTTP response เราไม่รู้ว่า AI ฝั่งเซิร์ฟเวอร์ยังทำต่อหรือไม่ จึงห้ามเริ่มรอบใหม่อัตโนมัติ
+  if (!serverResponded) return 'error';
+  return isTransient(error, errorType) ? 'retry' : 'error';
+}
+
+function reportStatusForProcessResult(result) {
+  if (result?.ok) return 'done';
+  // ห้ามเดาจาก 429/503/timeout ว่า AI ยังไม่เริ่ม เพราะ error อาจเกิดหลังจ่ายค่า inference แล้ว
+  // retry ได้เฉพาะ processing endpoint ที่ยืนยันเองว่าเป็น pre-provider failure เท่านั้น
+  if (result?.retrySafe === true) {
+    return reportStatusForFailure(result?.error, result?.errorType, { serverResponded: true });
+  }
+  return 'error';
+}
+
+async function postWorkerState(id, status, payload, claimToken) {
+  const body = status === 'done'
+    ? { id, status, claimToken, result: payload }
+    : status === 'heartbeat'
+      ? { id, status, claimToken }
+      : { id, status, claimToken, error: payload };
+  const response = await fetch(`${BASE}/api/clip-transcript/worker`, {
+    method: 'POST',
+    headers: workerHeaders(true),
     body: JSON.stringify(body),
-  }).catch((e) => log('report ล้ม:', e.message));
+    signal: AbortSignal.timeout(REPORT_TIMEOUT_MS),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data?.success === false) throw httpError(response, data, 'รายงานสถานะไม่สำเร็จ');
+  return data;
+}
+
+async function report(id, status, payload, claimToken, { maxAttempts = REPORT_MAX_ATTEMPTS } = {}) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      // eslint-disable-next-line no-await-in-loop -- retry ต้องเรียงลำดับและมีเพดาน
+      return await postWorkerState(id, status, payload, claimToken);
+    } catch (error) {
+      lastError = error;
+      if (error.code === 'CLAIM_LOST' || (error.status && error.status < 500 && error.status !== 429)) throw error;
+      if (attempt < maxAttempts) {
+        // eslint-disable-next-line no-await-in-loop -- backoff แบบ bounded
+        await sleep(500 * (2 ** (attempt - 1)));
+      }
+    }
+  }
+  throw lastError || new Error('รายงานสถานะไม่สำเร็จ');
+}
+
+function startHeartbeat(job, processController) {
+  let stopped = false;
+  let timer = null;
+  let active = Promise.resolve();
+  let ownershipError = null;
+  let confirmedLeaseMs = new Date(job.leaseExpiresAt || 0).getTime();
+
+  const schedule = () => {
+    if (stopped || ownershipError) return;
+    timer = setTimeout(() => {
+      active = (async () => {
+        try {
+          const data = await report(job.id, 'heartbeat', null, job.claimToken, { maxAttempts: 1 });
+          confirmedLeaseMs = new Date(data.leaseExpiresAt || confirmedLeaseMs).getTime();
+        } catch (error) {
+          if (error.code === 'CLAIM_LOST') {
+            ownershipError = error;
+            processController.abort(error);
+            return;
+          }
+          log(`⚠️ heartbeat ${job.id.slice(0, 8)} ล้มชั่วคราว: ${error.message}`);
+          if (Number.isFinite(confirmedLeaseMs) && Date.now() >= confirmedLeaseMs - 30_000) {
+            ownershipError = new Error('ยืนยัน lease ไม่ได้ก่อนหมดเวลา — หยุดงานเพื่อกันถอดซ้ำ');
+            ownershipError.code = 'LEASE_HEARTBEAT_EXPIRED';
+            processController.abort(ownershipError);
+            return;
+          }
+        } finally {
+          schedule();
+        }
+      })();
+    }, HEARTBEAT_MS);
+  };
+
+  schedule();
+  return {
+    get ownershipError() { return ownershipError; },
+    async stop() {
+      stopped = true;
+      clearTimeout(timer);
+      await active.catch(() => {});
+    },
+  };
 }
 
 async function loop() {
+  if (!WORKER_SECRET) {
+    const error = new Error('ยังไม่ได้ตั้ง CLIP_WORKER_SECRET หรือ DISCORD_API_SECRET — ไม่เริ่มดึงคิว');
+    error.code = 'CLIP_WORKER_SECRET_MISSING';
+    throw error;
+  }
   log(`เริ่มทำงาน — เช็กคิวที่ ${BASE}/api/clip-transcript/worker`);
   for (;;) {
     let job = null;
@@ -91,19 +250,60 @@ async function loop() {
     const tag = job.id.slice(0, 8);
     const tries = (job.attempts || 0) + 1;
     log(`▶️ ทำงาน [${job.platform}/${job.kind}] ครั้งที่ ${tries}: ${String(job.url).slice(0, 55)}`);
+    const processController = new AbortController();
+    const processTimeout = setTimeout(() => {
+      const error = new Error('processJob timeout 16 นาที — ไม่ยืนยันว่า server หยุด AI แล้ว จึงหยุดไว้ไม่ลองซ้ำ');
+      error.code = 'PROCESS_TIMEOUT';
+      processController.abort(error);
+    }, PROCESS_TIMEOUT_MS);
+    const heartbeat = startHeartbeat(job, processController);
+    let finalStatus = '';
+    let finalPayload = null;
+    let finalLog = '';
     try {
-      // ★ 26 มิ.ย.: กัน worker ค้าง — ถ้า processJob ค้างเกิน 16 นาที (เช่น server รีสตาร์ท → fetch ค้าง) → ข้ามไปลองใหม่ ไม่บล็อกคิว
-      const res = await Promise.race([
-        processJob(job),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('processJob timeout 16 นาที — server อาจรีสตาร์ท ข้ามไปลองใหม่')), 16 * 60 * 1000)),
-      ]);
-      if (res.ok) { await report(job.id, 'done', res.result); log(`✅ เสร็จ: ${tag}`); }
-      else if (isTransient(res.error, res.errorType)) { await report(job.id, 'retry', res.error); log(`⏳ Gemini แน่น → เข้าคิวรอลองใหม่เองใน ~3 นาที (${tag}): ${res.error?.slice(0, 70)}`); }
-      else { await report(job.id, 'error', res.error); log(`❌ ถอดไม่ได้จริง (กดใหม่ไม่ช่วย) ${tag}: ${res.error?.slice(0, 70)}`); }
+      const res = await processJob(job, { signal: processController.signal });
+      const resultStatus = reportStatusForProcessResult(res);
+      if (resultStatus === 'done') {
+        finalStatus = 'done';
+        finalPayload = res.result;
+        finalLog = `✅ เสร็จ: ${tag}`;
+      } else if (resultStatus === 'retry') {
+        finalStatus = 'retry';
+        finalPayload = res.error;
+        finalLog = `⏳ สะดุดชั่วคราว → เข้าคิวรอลองใหม่เองใน ~3 นาที (${tag}): ${res.error?.slice(0, 70)}`;
+      } else {
+        finalStatus = 'error';
+        finalPayload = res.error;
+        finalLog = `❌ ถอดไม่ได้จริง (กดใหม่ไม่ช่วย) ${tag}: ${res.error?.slice(0, 70)}`;
+      }
     } catch (e) {
-      // exception ระดับเครือข่าย/โค้ด = ชั่วคราว → รอลองใหม่ (ไม่ทิ้งงาน)
-      if (isTransient(e.message, '')) { await report(job.id, 'retry', e.message); log(`⏳ สะดุด → รอลองใหม่เอง (${tag}): ${e.message?.slice(0, 70)}`); }
-      else { await report(job.id, 'error', e.message); log(`❌ error (${tag}): ${e.message?.slice(0, 70)}`); }
+      if (e.code !== 'CLAIM_LOST') {
+        // fetch/timeout ไม่ยืนยันว่าฝั่งเซิร์ฟเวอร์หยุด AI แล้ว จึงห้าม retry อัตโนมัติซ้อนรอบเดิม
+        finalStatus = 'error';
+        finalPayload = `${e.message} · ระบบหยุดไว้เพื่อกันเสียค่า API ซ้ำ กรุณาตรวจแล้วส่งใหม่ด้วยตนเอง`;
+        finalLog = `❌ การเชื่อมต่อไม่ยืนยันผล จึงไม่ลองซ้ำอัตโนมัติ (${tag}): ${e.message?.slice(0, 70)}`;
+      }
+    } finally {
+      clearTimeout(processTimeout);
+      await heartbeat.stop();
+    }
+
+    if (heartbeat.ownershipError?.code === 'CLAIM_LOST') {
+      log(`🛑 หยุด ${tag}: งานถูก worker อื่นรับช่วงแล้ว จึงไม่ส่งผลเก่าทับ`);
+      continue;
+    }
+    if (!finalStatus) continue;
+
+    try {
+      await report(job.id, finalStatus, finalPayload, job.claimToken);
+      log(finalLog);
+    } catch (error) {
+      if (error.code === 'CLAIM_LOST') {
+        log(`🛑 ไม่ส่งผล ${tag}: lease เปลี่ยนเจ้าของแล้ว`);
+      } else {
+        // ห้ามเปลี่ยนงานที่ทำสำเร็จเป็น retry เพียงเพราะรายงานสะดุด มิฉะนั้นจะเสียค่า AI ซ้ำทันที
+        log(`⚠️ รายงานผล ${tag} ไม่สำเร็จหลังลอง ${REPORT_MAX_ATTEMPTS} ครั้ง: ${error.message} — เมื่อ lease หมดระบบจะหยุดงานนี้ ไม่ถอดใหม่อัตโนมัติ`);
+      }
     }
   }
 }
