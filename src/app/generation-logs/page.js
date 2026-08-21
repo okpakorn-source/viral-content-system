@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import EvaluationDashboard from './EvaluationDashboard';
 import NicknameGate from '@/components/NicknameGate';
+import { getPublishablePostText } from '@/lib/utils/publishablePostText';
 
 /**
  * Generation Log — คลังผลงานเขียน (redesign 11 มิ.ย. 69)
@@ -210,7 +211,7 @@ function GenerationLogsView() {
       const d = await getDetail(caseId);
       const v = d.versions?.[0];
       if (!v) { showToast('⚠️ เคสนี้ไม่มีเวอร์ชัน'); return; }
-      copyText(`${v.title ? v.title + '\n\n' : ''}${v.content || ''}`, `คัดลอก #${caseId} ว.1 แล้ว`);
+      copyText(getPublishablePostText(v), `คัดลอก #${caseId} ว.1 แล้ว`);
     } catch (e) {
       showToast(`⚠️ ${e.message}`);
     }
@@ -461,7 +462,7 @@ function GenerationLogsView() {
                         {detail.sourceUrl && (
                           <a href={detail.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ ...btnStyle, textDecoration: 'none' }}>🔗 ข่าวต้นทาง</a>
                         )}
-                        <button onClick={() => copyText((detail.versions || []).map((v, i) => `── เวอร์ชัน ${i + 1}: ${v.style || ''} ──\n${v.title ? v.title + '\n\n' : ''}${v.content || ''}`).join('\n\n\n'), 'คัดลอกทุกเวอร์ชันแล้ว')} style={btnStyle}>
+                        <button onClick={() => copyText((detail.versions || []).map((v, i) => `── เวอร์ชัน ${i + 1}: ${v.style || ''} ──\n${getPublishablePostText(v)}`).join('\n\n\n'), 'คัดลอกทุกเวอร์ชันแล้ว')} style={btnStyle}>
                           📋 คัดลอกทุกเวอร์ชัน
                         </button>
                         <button onClick={() => setEvalDashboard({ caseId: detail.caseId, newsTitle: detail.newsTitle, versions: detail.versions, sourceText: detail.sourceText })} style={btnStyle}>
@@ -529,10 +530,9 @@ function GenerationLogsView() {
                             <span style={{ fontWeight: 800, fontSize: 13, color: 'var(--desk-blue)' }}>เวอร์ชัน {i + 1}{v.style ? ` — ${v.style}` : ''}</span>
                             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{(v.content || '').length.toLocaleString()} ตัวอักษร</span>
                             <div style={{ flex: 1 }} />
-                            <button onClick={() => copyText(`${v.title ? v.title + '\n\n' : ''}${v.content || ''}`, `คัดลอก ว.${i + 1} แล้ว`)} style={btnStyle}>📋 คัดลอก</button>
+                            <button onClick={() => copyText(getPublishablePostText(v), `คัดลอก ว.${i + 1} แล้ว`)} style={btnStyle}>📋 คัดลอก</button>
                           </div>
-                          {v.title && <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>{v.title}</div>}
-                          <div style={{ fontSize: 14, lineHeight: 1.8, whiteSpace: 'pre-wrap', color: 'var(--text-primary)' }}>{v.content}</div>
+                          <div style={{ fontSize: 14, lineHeight: 1.8, whiteSpace: 'pre-wrap', color: 'var(--text-primary)' }}>{getPublishablePostText(v)}</div>
                         </div>
                       ))}
 

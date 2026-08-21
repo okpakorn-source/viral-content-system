@@ -3,14 +3,25 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const VIEW_PATH = new URL('../src/components/content/ResultVersions.js', import.meta.url);
+const LOG_VIEW_PATH = new URL('../src/app/generation-logs/page.js', import.meta.url);
+const MOBILE_VIEW_PATH = new URL('../src/app/m/page.js', import.meta.url);
 const WRITER_PATH = new URL('../src/lib/services/summarizeServiceText.js', import.meta.url);
+const POST_TEXT_PATH = new URL('../src/lib/utils/publishablePostText.js', import.meta.url);
+
+function makePublishablePostText(source = readFileSync(POST_TEXT_PATH, 'utf8')) {
+  const start = source.indexOf('export function getPublishablePostText(');
+  const end = source.indexOf('\n}', start);
+  assert.ok(start >= 0 && end > start, 'ต้องพบ getPublishablePostText ตัวจริง');
+  const declaration = source.slice(start, end + 2).replace('export function', 'function');
+  return new Function(`${declaration}; return getPublishablePostText;`)();
+}
 
 function makeBuildPostText(source = readFileSync(VIEW_PATH, 'utf8')) {
   const start = source.indexOf('export function buildPostText(');
   const end = source.indexOf('\n}', start);
   assert.ok(start >= 0 && end > start, 'ต้องพบ buildPostText ตัวจริง');
   const declaration = source.slice(start, end + 2).replace('export function', 'function');
-  return new Function(`${declaration}; return buildPostText;`)();
+  return new Function('getPublishablePostText', `${declaration}; return buildPostText;`)(makePublishablePostText());
 }
 
 test('ข้อความคัดลอกมีเฉพาะเนื้อพร้อมโพสต์ ไม่แปะ title/hook/closing แยก', () => {
@@ -36,6 +47,19 @@ test('หน้าแสดงผลใช้ post text เดียวกับ
   assert.doesNotMatch(source, /\{v\.closing && <div/u);
 });
 
+test('Generation Logs และมือถือแสดง/คัดลอกเฉพาะ publishable content เดียวกัน', () => {
+  const logSource = readFileSync(LOG_VIEW_PATH, 'utf8');
+  const mobileSource = readFileSync(MOBILE_VIEW_PATH, 'utf8');
+  assert.match(logSource, /copyText\(getPublishablePostText\(v\)/u);
+  assert.match(logSource, /\{getPublishablePostText\(v\)\}/u);
+  assert.doesNotMatch(logSource, /v\.title \? v\.title \+ '\\n\\n'/u);
+  assert.doesNotMatch(logSource, /\{v\.title && <div/u);
+  assert.match(mobileSource, /copyText\(getPublishablePostText\(cur\)/u);
+  assert.match(mobileSource, /copyText\(getPublishablePostText\(v\)/u);
+  assert.doesNotMatch(mobileSource, /\{cur\.title && <p/u);
+  assert.doesNotMatch(mobileSource, /\{v\.title && <p/u);
+});
+
 test('นักเขียนถูกสั่งให้ content ยืนได้เองและรวมจุดขายโดยไม่วางพาดหัวซ้ำ', () => {
   const source = readFileSync(WRITER_PATH, 'utf8');
   assert.match(source, /เนื้อหาเป็นข้อความที่พนักงานนำไปโพสต์โดยตรงและจะไม่แสดง title แยก/u);
@@ -45,13 +69,13 @@ test('นักเขียนถูกสั่งให้ content ยืน�
 });
 
 test('mutation: คืนพาดหัวเข้า clipboard หรือถอดกฎ standalone แล้ว oracle ต้องแดง', () => {
-  const viewSource = readFileSync(VIEW_PATH, 'utf8');
-  const copiedTitle = viewSource.replace(
-    'return String(version?.content || \'\').trim();',
+  const postTextSource = readFileSync(POST_TEXT_PATH, 'utf8');
+  const copiedTitle = postTextSource.replace(
+    "return String(version?.content || '').trim();",
     "return (version?.title ? version.title + '\\n\\n' : '') + String(version?.content || '').trim();",
   );
-  assert.notEqual(copiedTitle, viewSource);
-  assert.match(makeBuildPostText(copiedTitle)({ title: 'หัว', content: 'เนื้อ' }), /^หัว/u);
+  assert.notEqual(copiedTitle, postTextSource);
+  assert.match(makePublishablePostText(copiedTitle)({ title: 'หัว', content: 'เนื้อ' }), /^หัว/u);
 
   const writerSource = readFileSync(WRITER_PATH, 'utf8');
   const noStandalone = writerSource.replace('ย่อหน้าแรกต้องยืนได้เอง', 'ย่อหน้าแรกเขียนอะไรก็ได้');

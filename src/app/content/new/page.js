@@ -8,6 +8,7 @@ import UniversalInputBox from '@/components/UniversalInputBox';
 import InputSection from '@/components/content/InputSection';
 import ExtractedView from '@/components/content/ExtractedView';
 import ResultVersions from '@/components/content/ResultVersions';
+import { getPublishablePostText } from '@/lib/utils/publishablePostText';
 
 // Client-side image resize — ป้องกัน 413 Request Too Large
 function resizeImage(file, maxPx = 800, quality = 0.72) {
@@ -920,21 +921,24 @@ function NewContentPageInner() {
     setSendingReview(index);
     try {
       const angles = breakdownData?.possible_angles?.map(a => a.angle_name) || [];
+      const publishableContent = getPublishablePostText(version);
+      const reviewTitle = publishableContent.split(/\r?\n/u).find(line => line.trim())?.trim().slice(0, 160)
+        || 'เนื้อข่าวรอตรวจ';
       const res = await fetch('/api/review', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: version.title || newsData?.newsTitle || 'ไม่มีหัวข้อ',
-          content: version.content || '',
-          hook: version.hook || '',
-          closing: version.closing || '',
+          title: reviewTitle,
+          content: publishableContent,
+          hook: '',
+          closing: '',
           style: version.style || '',
           tone: version.tone || '',
           target: version.target || '',
           sourceType,
           presetLabel: analysisResult?.usedPreset?.name || analysisResult?.usedPreset?.id || '🏛️ Library',
           contentLength,
-          wordCount: version.content?.split(/\s+/).length || 0,
+          wordCount: publishableContent ? publishableContent.split(/\s+/u).length : 0,
           angles,
           newsTitle: newsData?.newsTitle || '',
           newsSource: url || '',

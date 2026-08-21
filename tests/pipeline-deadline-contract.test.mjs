@@ -282,7 +282,7 @@ test('Gemini request options ส่ง timeout และ signal เป็นอ�
   assert.deepEqual(buildGeminiRequestOptions(), { timeout: 15000 });
 });
 
-test('production wiring ส่ง deadline จาก worker ถึง route/AI และ raw audit สองรอบ', () => {
+test('production wiring ส่ง deadline จาก worker ถึง route/AI, Sol audit สองรอบ และ editor หนึ่งครั้ง', () => {
   const worker = read('src/app/api/queue/worker/route.js');
   const route = read('src/app/api/auto/process/route.js');
   const rawGate = read('src/lib/services/rawFactCompletenessGate.js');
@@ -292,8 +292,9 @@ test('production wiring ส่ง deadline จาก worker ถึง route/AI �
   assert.match(route, /runWithPipelineDeadline\(\s*deadline/u);
   assert.match(route, /status: deadlineFailure \? 504 : 500/u);
   assert.match(rawGate, /assertCanStart\('raw_fact_audit_initial', 180_000\)/u);
-  assert.match(rawGate, /assertCanStart\('factual_regeneration', 320_000\)/u);
+  assert.match(rawGate, /assertCanStart\('raw_fact_editor', 180_000\)/u);
   assert.match(rawGate, /assertCanStart\('raw_fact_audit_final', 180_000\)/u);
+  assert.equal((rawGate.match(/await repairBatch\(/gu) || []).length, 1);
   assert.match(autoFlow, /throwIfExpired\('final_workflow_persist'\)/u);
   assert.doesNotMatch(autoFlow, /throwIfExpired\('final_success_log'\)/u,
     'หลัง authoritative save แล้ว final telemetry ห้ามเปลี่ยนข่าวสำเร็จเป็น deadline failure');

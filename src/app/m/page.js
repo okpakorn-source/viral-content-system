@@ -11,6 +11,7 @@ import dynamic from 'next/dynamic';
 import { HARVEST_MODES, LIBRARIES, isClip, enrichDeskItem } from '@/lib/services/newsDeskShared/taxonomy';
 // ★ 28 ก.ค. 69 (แก้บั๊ก "มือถือค้างบันเดิลรุ่นเก่า"): เทียบรุ่นแอพนี้กับ mRev ที่ /api/m/cover ตอบมา — ต่างกันเตือนแตะรีโหลด
 import { M_APP_REV } from '@/lib/mAppRev';
+import { getPublishablePostText } from '@/lib/utils/publishablePostText';
 
 // เครื่องมือแต่งปกแมนวล — โหลดเฉพาะตอนเปิดแท็บ (ไฟล์หนัก ไม่ถ่วงจอแรก)
 const CoverEditor = dynamic(() => import('./CoverEditor'), {
@@ -1349,17 +1350,16 @@ export default function MobileApp() {
           <p className="sub">{result.title || 'อ่านเทียบแล้วเลือกเวอร์ชันที่ใช่'}</p>
           {V.length > 1 && <div className="seg">{V.map((v, i) => <button key={i} className={i === vIdx ? 'on' : ''} onClick={() => setVIdx(i)}>เวอร์ชัน {i + 1}{v._sourceLabel ? ` · ${String(v._sourceLabel).slice(0, 14)}` : ''}</button>)}</div>}
           {cur && <div className="reader">
-            {cur.title && <p style={{ fontWeight: 800, fontSize: 15.5, marginBottom: 9 }}>{cur.title}</p>}
-            <div className="bd">{cur.content || cur.text || ''}</div>
+            <div className="bd">{getPublishablePostText(cur) || cur.text || ''}</div>
             <div className="ft">
               {result.prompt?.promptName && <span className="chip cpk">การ์ด: {String(result.prompt.promptName).slice(0, 26)}</span>}
               {typeof result.prompt?.matchScore === 'number' && <span className="chip cpk">{result.prompt.matchType || ''} {result.prompt.matchScore}</span>}
               {result.research > 0 && <span className="chip cmu">รีเสิร์ช {result.research} แหล่ง</span>}
-              <span className="chip cmu">{(cur.content || '').length} ตัวอักษร</span>
+              <span className="chip cmu">{getPublishablePostText(cur).length} ตัวอักษร</span>
             </div>
           </div>}
           <div className="row" style={{ margin: '11px 0 9px' }}>
-            <button className="gh" onClick={() => copyText(cur?.content || '', result.caseId || jobId)}>คัดลอกเวอร์ชันนี้</button>
+            <button className="gh" onClick={() => copyText(getPublishablePostText(cur), result.caseId || jobId)}>คัดลอกเวอร์ชันนี้</button>
             {/* 🛑 18 ส.ค. 69 — ซ่อนปุ่ม "เจนใหม่" (ดูเหตุผล+วิธีถอยที่ WEB_NEWS_GEN_ON บนสุดของ component) · ปุ่มคัดลอกยังอยู่ */}
             {WEB_NEWS_GEN_ON && <button className="gh" onClick={() => submitNews(text || cur?.content || '', { forceNew: true })}>เจนใหม่</button>}
           </div>
@@ -1864,11 +1864,10 @@ export default function MobileApp() {
           {(caseDetail.versions || []).map((v, i) => (
             <div key={i} className="reader" style={{ marginBottom: 10 }}>
               <p style={{ fontWeight: 800, fontSize: 14, marginBottom: 8, color: 'var(--pink)' }}>เวอร์ชัน {i + 1}{v._sourceLabel ? ` · ${v._sourceLabel}` : ''}</p>
-              {v.title && <p style={{ fontWeight: 700, fontSize: 14.5, marginBottom: 8 }}>{v.title}</p>}
-              <div className="bd">{v.content || ''}</div>
+              <div className="bd">{getPublishablePostText(v)}</div>
               <div className="ft">
-                <span className="chip cmu">{(v.content || '').length} ตัวอักษร</span>
-                <button className="gh" style={{ width: 'auto', padding: '5px 14px', fontSize: 12.5 }} onClick={() => copyText(v.content || '', caseDetail.caseId)}>คัดลอก</button>
+                <span className="chip cmu">{getPublishablePostText(v).length} ตัวอักษร</span>
+                <button className="gh" style={{ width: 'auto', padding: '5px 14px', fontSize: 12.5 }} onClick={() => copyText(getPublishablePostText(v), caseDetail.caseId)}>คัดลอก</button>
               </div>
             </div>
           ))}

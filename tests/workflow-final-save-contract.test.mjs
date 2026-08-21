@@ -5,6 +5,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildPublishableAnalysisResult } from '../src/lib/utils/publishablePostText.js';
 
 const TESTS = fileURLToPath(new URL('.', import.meta.url));
 const ROOT = join(TESTS, '..');
@@ -23,18 +24,18 @@ function makeFinalSnapshotRunner(source = autoFlowSource) {
     'primaryResult', 'aggregateUsedModel', 'usedModels', 'finalVersions', 'allVersions',
     'totalResearchItems', 'diversityWarning', 'pipelineQualityWarnings', 'factualGateSummary',
     'usedPreset', 'anglePrompts', '_autoWorkflowId',
-    'saveAnalysis', 'throwStep', 'addLog', 'getActivePipelineDeadline', 'rethrowPipelineDeadline',
+    'buildPublishableAnalysisResult', 'saveAnalysis', 'throwStep', 'addLog', 'getActivePipelineDeadline', 'rethrowPipelineDeadline',
     `${block}\nreturn { analysisResult, finalPresetId, finalWorkflowSave };`,
   );
 }
 
 function assertFinalSnapshotOrder(source = autoFlowSource) {
-  assert.match(source, /import \{ saveAnalysis \} from '@\/lib\/workflow\/workflowEngine';/);
+  assert.match(source, /import \{ saveAnalysis, saveFactualReview \} from '@\/lib\/workflow\/workflowEngine';/);
   const correction = source.indexOf('  // === POST-GENERATION CORRECTION PIPELINE ===');
   const grounding = source.indexOf('  let grounding = assessRawTextSafety(', correction);
   const diversity = source.indexOf('  const diversity = assessVersionDiversity(finalVersions);', grounding);
   const snapshot = source.indexOf('  // === WORKFLOW FINAL SNAPSHOT ===', diversity);
-  const analysisDeclaration = source.indexOf('  const analysisResult = {', snapshot);
+  const analysisDeclaration = source.indexOf('  const analysisResult = buildPublishableAnalysisResult({', snapshot);
   const save = source.indexOf('finalWorkflowSave = await saveAnalysis(', snapshot);
   const generationLog = source.indexOf('const generationLogAttempt =', snapshot);
   const response = source.indexOf('  return {', generationLog);
@@ -55,7 +56,7 @@ function assertFinalSnapshotOrder(source = autoFlowSource) {
 
 function makeActualSaveAnalysis(prisma, source = workflowSource) {
   const start = source.indexOf('export async function saveAnalysis(');
-  const end = source.indexOf('/**', start);
+  const end = source.indexOf('export async function saveFactualReview(', start);
   assert.ok(start >= 0 && end > start, 'ต้องพบ saveAnalysis ตัวจริง');
   const declaration = source.slice(start, end).replace('export async function', 'async function');
   return new Function('prisma', `${declaration}; return saveAnalysis;`)(prisma);
@@ -67,8 +68,8 @@ function makeInputs(overrides = {}) {
     aggregateUsedModel: 'mixed',
     usedModels: ['claude-fable-5', 'gpt-5.6-sol'],
     finalVersions: [
-      { title: 'FINAL A', usedModel: 'claude-fable-5' },
-      { title: 'FINAL B', usedModel: 'gpt-5.6-sol' },
+      { title: 'FINAL A', content: 'FINAL CONTENT A', usedModel: 'claude-fable-5' },
+      { title: 'FINAL B', content: 'FINAL CONTENT B', usedModel: 'gpt-5.6-sol' },
     ],
     allVersions: [{ title: 'STALE A' }, { title: 'STALE B' }],
     totalResearchItems: [{ id: 'r1' }, { id: 'r2' }],
@@ -110,7 +111,7 @@ async function executeFinalSnapshot(source = autoFlowSource, overrides = {}) {
     values.finalVersions, values.allVersions, values.totalResearchItems,
     values.diversityWarning, values.pipelineQualityWarnings, values.factualGateSummary,
     values.usedPreset, values.anglePrompts, values.workflowId,
-    saveAnalysis, throwStep, (...args) => logs.push(args), getActivePipelineDeadline,
+    buildPublishableAnalysisResult, saveAnalysis, throwStep, (...args) => logs.push(args), getActivePipelineDeadline,
     rethrowPipelineDeadline,
   );
   return { result, saves, logs, values, deadlineChecks };

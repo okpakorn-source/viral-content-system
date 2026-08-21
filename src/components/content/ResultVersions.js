@@ -1,9 +1,10 @@
 'use client';
 import React from 'react';
+import { getPublishablePostText } from '@/lib/utils/publishablePostText';
 
 /** ข้อความพร้อมโพสต์: title/hook/closing เป็น metadata หลังบ้าน เนื้อจริงต้องยืนได้เอง */
 export function buildPostText(version) {
-  return String(version?.content || '').trim();
+  return getPublishablePostText(version);
 }
 
 export default function ResultVersions({ states, handlers }) {
@@ -257,6 +258,11 @@ export default function ResultVersions({ states, handlers }) {
             )}
 
             {/* แสดงแต่ละ Version */}
+            {Array.isArray(analysisResult.qualityWarnings) && analysisResult.qualityWarnings.length > 0 && (
+              <div style={{ fontSize: 12, color: 'var(--warning)', marginBottom: 12 }}>
+                ⚠️ {analysisResult.qualityWarnings.join(' · ')}
+              </div>
+            )}
             {analysisResult.versions?.map((v, i) => (
               <div key={i} style={{ background: 'var(--bg-primary)', padding: 20, borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--border)', borderLeft: `4px solid hsl(${i * 60}, 70%, 50%)` }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -285,7 +291,7 @@ export default function ResultVersions({ states, handlers }) {
                     ⚠️ {v._diversityWarning}
                   </div>
                 )}
-                <div style={{ fontSize: 14, lineHeight: 2, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{v.content}</div>
+                <div style={{ fontSize: 14, lineHeight: 2, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{buildPostText(v)}</div>
                 
                 {/* 🔗 แสดงอ้างอิงตรงนี้เลย เพื่อให้ UI ชัดเจน */}
                 {(researchItems.length > 0 || newsData?.sourceUrl) && (

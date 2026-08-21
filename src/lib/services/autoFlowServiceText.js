@@ -12,8 +12,18 @@ import { logPipeline } from '@/lib/pipelineLogger';
 import { createLogger } from '@/lib/logger';
 import { withTimeout, withTimeoutSignal } from '@/lib/utils/withTimeout';
 import { runCorrectionPipeline } from '@/lib/correction/correctionPipeline';
-import { enforceRawFactCompleteness, formatRawFactRegenerationInstruction, isRawFactCompletenessGateEnabled } from '@/lib/services/rawFactCompletenessGate';
-import { saveAnalysis } from '@/lib/workflow/workflowEngine';
+import {
+  enforceRawFactCompleteness,
+  isRawFactCompletenessGateEnabled,
+  persistFactualReviewOrThrow,
+} from '@/lib/services/rawFactCompletenessGate';
+import { saveAnalysis, saveFactualReview } from '@/lib/workflow/workflowEngine';
+import {
+  buildPublishableAnalysisResult,
+  countFinalVersionSources,
+  getPublishablePostText,
+  resolveFinalUsedPreset,
+} from '@/lib/utils/publishablePostText';
 import { getBuiltinFallbackPrompt } from '@/lib/ai/builtinFallbackPrompt';
 // ★ 19 ส.ค. 69 รอบ 3 (ANGLE_CLOSING_SPLIT): กติกาจับคู่แผนจบ+เงื่อนไขทุบท้าย อยู่ที่เดียวใน narrativePayloadText
 //   (ปลายทาง dependency — ไม่เกิด circular import) เพื่อให้ log ฝั่งนี้ตรงกับที่ฝั่งเขียนใช้จริงเสมอ
@@ -648,12 +658,13 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     }
   }
   
-  let allVersions = [];
+  const allVersions = [];
   let primaryResult = null;
   let classicVersionCount = 0;
   let enhancedVersionCount = 0;
-  let totalResearchItems = [];
+  const totalResearchItems = [];
   const angleFailures = [];
+  const usedPresetByPromptId = new Map();
 
   genResults.forEach((res, angleIndex) => {
     const expectedAngle = finalAngleNames[angleIndex] || `มุม ${angleIndex + 1}`;
@@ -690,6 +701,9 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     }
 
     if (!primaryResult) primaryResult = data;
+    if (data.usedPreset && typeof data.usedPreset === 'object') {
+      usedPresetByPromptId.set(promptId, data.usedPreset);
+    }
     const researchItems = Array.isArray(res.value._researchItems) ? res.value._researchItems : [];
     const hasResearch = researchItems.length > 0;
     totalResearchItems.push(...researchItems);
@@ -715,7 +729,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   if (blueprint) addLog('Summary', `🧬 Blueprint: ${blueprint.core_emotion}`);
   if (totalResearchItems.length) addLog('Summary', `🔍 Research: ${totalResearchItems.length} แหล่งข้อมูล`);
 
-  const usedPreset = primaryResult.usedPreset || null;
+  let usedPreset = primaryResult.usedPreset || null;
   // ★ 16 ก.ค. 69 (B4): พอร์ต FIX จากสาย URL (autoFlowService.js:504) — breakdownData.primaryCategory มักมีค่าเสมอ
   //   ส่วน debug.newsTypeDetected ว่างเมื่อใช้ presetPrompt (Stage 1 ถูกข้าม = flow ปกติของคิว) → newsType เคยว่างทุกงาน
   const newsType = breakdownData?.primaryCategory || primaryResult.debug?.newsTypeDetected || '';
@@ -813,102 +827,86 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   }
 
   // === FULL-RAW FACTUAL GATE (plain text only) ===
-  // ทุกขั้นตอนเดิมยังอยู่ครบ ด่านนี้เห็น immutable raw เต็มและผลลัพธ์สุดท้ายทุกฉบับ
-  // หากพบข้ออ้างเกิน/สาระสำคัญหาย ให้ writer เดิมเขียนเฉพาะฉบับนั้นใหม่หนึ่งครั้ง
-  // ด้วยมุม การ์ด Blueprint Research และกฎเดิม แล้ว Sol ตรวจซ้ำก่อน save/log
+  // ตรวจเฉพาะ content ที่พนักงานโพสต์จริง หากผิดให้ Sol แก้ทุกฉบับพร้อมกันหนึ่งครั้ง
+  // ห้ามเรียก writer/Fable ซ้ำและห้ามวนซ่อม เพื่อจำกัดค่า API แบบพิสูจน์ call-count ได้
   let factualGateSummary = null;
   if ((detectedType === 'text' || detectedType === 'plain_text') && isRawFactCompletenessGateEnabled()) {
-    const regenerateFactualVersion = async ({ versionIndex, original, issues, missingFacts }) => {
-      const angleIndex = finalAngleNames.findIndex(name => name === String(original?._sourceLabel || '').trim());
-      const angleObj = anglesToUse[angleIndex];
-      const originalPromptId = String(original?.promptId || '').trim();
-      const topPrompt = findPromptCandidateById(anglePromptCandidates[angleIndex], originalPromptId);
-      if (angleIndex < 0 || !angleObj || !originalPromptId || !topPrompt) {
-        throw new Error(`หาแผนเดิมสำหรับ factual regeneration V${versionIndex + 1} ไม่พบ`);
-      }
-      const cardHook = Number(topPrompt._matchScore) >= 60 && topPrompt.hookStyle
-        ? String(topPrompt.hookStyle) : '';
-      const reservedAngles = anglesToUse.slice(0, angleIndex)
-        .map(item => `${item?.angle_name || ''}: ${item?.description || ''}`.trim())
-        .filter(Boolean);
-      const openingContract = buildAngleOpeningContract(angleIndex, cardHook, reservedAngles, _caR6Tail);
-      const factualInstruction = formatRawFactRegenerationInstruction(issues, missingFacts);
-      const focusAngle = `${angleObj.angle_name}: ${angleObj.description}
-สไตล์เปิดเรื่องบังคับของเวอร์ชันนี้: ${openingContract}
-
-${factualInstruction}`;
-      const researchItems = Array.isArray(genResults[angleIndex]?.value?._researchItems)
-        ? genResults[angleIndex].value._researchItems : [];
-      const rewriteResult = await withTimeoutSignal((stageSignal) => performSummarize({
-        text: newsData.newsBody,
-        rawSourceText: writerRawSourceText,
-        newsTitle: newsData.newsTitle,
-        breakdownData,
-        sourceType: detectedType,
-        mode: 'analyze',
-        contentLength: selectedLength,
-        presetPrompt: topPrompt,
-        targetCount: 1,
-        emotionalBlueprint: blueprintPlansForRepair[angleIndex] || blueprint,
-        researchData: researchItems.length > 0 ? { items: researchItems } : null,
-        factPool,
-        focusAngle,
-        workflowId: _autoWorkflowId,
-        deferAnalysisPersistence: true,
-        user: _user,
-        signal: stageSignal,
-      }), 320000, `factual_regeneration_V${versionIndex + 1}`);
-      const rewriteData = rewriteResult?.data;
-      const writerModel = typeof rewriteData?.usedModel === 'string' ? rewriteData.usedModel.trim() : '';
-      const rawVersion = Array.isArray(rewriteData?.versions) && rewriteData.versions.length === 1
-        ? rewriteData.versions[0] : null;
-      if (!rewriteResult?.success || !rawVersion || !writerModel
-          || typeof rawVersion.title !== 'string' || !rawVersion.title.trim()
-          || typeof rawVersion.content !== 'string' || !rawVersion.content.trim()) {
-        throw new Error(`ผล factual regeneration V${versionIndex + 1} ไม่ครบ`);
-      }
-      const candidate = {
-        ...stampWriterModel(rawVersion, writerModel),
-        _source: original._source,
-        _sourceLabel: original._sourceLabel,
-        promptId: String(topPrompt.id || original.promptId),
-        style: rawVersion.style ? `[A${angleIndex + 1}] ${rawVersion.style}` : original.style,
-        _factualRegenerated: true,
-      };
-      let corrected;
-      try {
-        corrected = await runCorrectionPipeline(
-          [candidate],
-          newsData,
-          breakdownData,
-          correctionResearchFacts,
-          groundingSourceText,
-        );
-      } catch (error) {
-        rethrowPipelineDeadline(error, `factual_correction_V${versionIndex + 1}`);
-        corrected = [{ ...candidate, _correctionError: error?.message || String(error) }];
-      }
-      const outcome = applyCorrectionFallback(corrected, [candidate], 'Correction หลัง factual regeneration');
-      pipelineQualityWarnings.push(...outcome.warnings);
-      return { ...outcome.versions[0], _factualRegenerated: true };
-    };
-
     try {
       const factOutcome = await enforceRawFactCompleteness({
         rawText,
         versions: finalVersions,
-        regenerate: regenerateFactualVersion,
       });
-      finalVersions = factOutcome.versions;
+      const failingIndexes = factOutcome.finalAudit.failingVersionIndexes;
+      const issueDiagnostics = factOutcome.finalAudit.issues.map(issue => ({
+        version: issue.versionIndex + 1,
+        scope: issue.scope,
+        reasonCode: issue.reasonCode,
+      }));
+      const missingDiagnostics = factOutcome.finalAudit.missingFacts.map(item => ({
+        version: item.versionIndex + 1,
+        reasonCode: 'MISSING_FACT',
+      }));
+      if (failingIndexes.length > 0) {
+        // ข้อความจริงเก็บเฉพาะใน secure runtime log เพื่อให้ตรวจเหตุผลได้ ไม่เปิดผ่าน workflow API
+        console.warn('[FactGate] final rejected claims', JSON.stringify({
+          workflowId: _autoWorkflowId,
+          issues: factOutcome.finalAudit.issues.map(issue => ({
+            version: issue.versionIndex + 1,
+            scope: issue.scope,
+            reasonCode: issue.reasonCode,
+            original: issue.original,
+            reason: issue.reason,
+          })),
+          missingFacts: factOutcome.finalAudit.missingFacts.map(item => ({
+            version: item.versionIndex + 1,
+            rawExcerpt: item.rawExcerpt,
+            reason: item.reason,
+          })),
+        }));
+      }
       factualGateSummary = {
+        status: failingIndexes.length > 0 ? 'partial' : 'passed',
         model: factOutcome.finalAudit.model,
-        regeneratedVersions: factOutcome.regeneratedIndexes.map(index => index + 1),
+        contextHash: factOutcome.finalAudit.contextHash,
+        editorModel: factOutcome.repairedIndexes.length > 0 ? 'gpt-5.6-sol' : null,
+        repairedVersions: factOutcome.repairedIndexes.map(index => index + 1),
+        quarantinedVersions: failingIndexes.map(index => index + 1),
+        diagnostics: [...issueDiagnostics, ...missingDiagnostics],
       };
-      if (factOutcome.regeneratedIndexes.length > 0) {
-        addLog('FactGate', `🔁 เขียนใหม่ ${factOutcome.regeneratedIndexes.map(index => `V${index + 1}`).join(', ')} และ Sol ตรวจ RAW ซ้ำผ่าน`);
+      if (factOutcome.passingVersions.length === 0) {
+        const reviewDiagnostic = {
+          ...factualGateSummary,
+          status: 'factual_review',
+          publishable: false,
+          contextHash: factOutcome.finalAudit.contextHash,
+        };
+        await persistFactualReviewOrThrow({
+          workflowId: _autoWorkflowId,
+          diagnostic: reviewDiagnostic,
+          save: saveFactualReview,
+        });
+        const reviewError = new Error('ไม่มีฉบับที่ผ่านด่านข้อเท็จจริง เนื้อข่าวถูกกักไว้ให้ตรวจและไม่ถูกส่งออก');
+        reviewError.code = 'FACTUAL_REVIEW_REQUIRED';
+        reviewError.errorType = 'FACTUAL_REVIEW_REQUIRED';
+        reviewError.failedStep = 'auto_factual_gate';
+        throw reviewError;
+      }
+
+      finalVersions = factOutcome.passingVersions;
+      if (failingIndexes.length > 0) {
+        const warning = `Sol กักฉบับที่ไม่ผ่านข้อเท็จจริง ${failingIndexes.map(index => `V${index + 1}`).join(', ')} · ส่งให้พนักงานเฉพาะ ${finalVersions.length} ฉบับที่ผ่าน`;
+        pipelineQualityWarnings.push(warning);
+        addLog('FactGate', `⚠️ ${warning}`);
+      } else if (factOutcome.repairedIndexes.length > 0) {
+        addLog('FactGate', `🛠️ Sol แก้ content แบบก้อนเดียว ${factOutcome.repairedIndexes.map(index => `V${index + 1}`).join(', ')} และตรวจ RAW ซ้ำผ่าน`);
+      } else {
+        addLog('FactGate', '✅ Sol ตรวจเนื้อโพสต์ทุกย่อหน้ากับ RAW เต็มผ่านทุกฉบับ');
+      }
+
+      if (factOutcome.repairedIndexes.length > 0) {
         grounding = assessRawTextSafety(finalVersions, rawText);
         if (!grounding.ok) {
-          throwStep('auto_grounding', `ข่าวหลัง factual regeneration ไม่ผ่านด่าน RAW แบบกำหนดกฎ — ${grounding.issues.slice(0, 3).join(' | ')}`);
+          throwStep('auto_grounding', `ข่าวหลัง factual editor ไม่ผ่านด่าน RAW แบบกำหนดกฎ — ${grounding.issues.slice(0, 3).join(' | ')}`);
         }
 
         const postFactDiversity = assessVersionDiversity(finalVersions);
@@ -923,21 +921,22 @@ ${factualInstruction}`;
           ({ versions: finalVersions, warning: diversityWarning } = annotateDiversityWarning(
             finalVersions,
             postFactDiversity,
-            '2 เวอร์ชันหลัง factual regeneration',
+            `${finalVersions.length} เวอร์ชันหลัง factual editor`,
           ));
           pipelineQualityWarnings.push(diversityWarning);
           addLog('Quality', `⚠️ ${diversityWarning}`);
         }
-      } else {
-        addLog('FactGate', '✅ Sol ตรวจ title และทุกย่อหน้ากับ RAW เต็มผ่านทุกฉบับ');
       }
     } catch (factError) {
-      if (factError?.failedStep) throw factError;
+      if (factError?.failedStep || factError?.errorType === 'FACTUAL_REVIEW_REQUIRED') throw factError;
       throwStep('auto_factual_gate', `ด่านตรวจ RAW เต็มไม่ผ่าน: ${factError?.message || factError}`);
     }
   } else if (detectedType === 'text' || detectedType === 'plain_text') {
     addLog('FactGate', '⏭️ ปิดด่าน Sol ตรวจ RAW ชั่วคราวด้วย RAW_FACT_COMPLETENESS_GATE=0');
   }
+
+  ({ classic: classicVersionCount, enhanced: enhancedVersionCount } = countFinalVersionSources(finalVersions));
+  usedPreset = resolveFinalUsedPreset(finalVersions, usedPresetByPromptId, usedPreset);
 
   const usedModels = [...new Set(finalVersions.map(version => version.usedModel).filter(Boolean))];
   if (usedModels.length === 0) {
@@ -949,16 +948,18 @@ ${factualInstruction}`;
   // === WORKFLOW FINAL SNAPSHOT ===
   // AutoFlow ปิดการบันทึกร่างชั่วคราวของ writer ทุกสายไว้
   // จุดนี้เป็นผู้มีอำนาจสุดท้ายเพียงครั้งเดียว: เก็บทุกฉบับหลัง correction/grounding/diversity/factual audit ผ่านแล้ว
-  const analysisResult = {
-    ...primaryResult,
+  const analysisResult = buildPublishableAnalysisResult({
+    primaryResult,
+    usedPreset,
     usedModel: aggregateUsedModel,
     usedModels,
     versions: finalVersions,
     researchItems: totalResearchItems,
     qualityWarnings: [...new Set(pipelineQualityWarnings.filter(Boolean))],
     factualGate: factualGateSummary,
-  };
-  const finalPresetId = usedPreset?.promptId || anglePrompts[0]?.id || usedPreset?.id || 'library';
+  });
+  const finalPresetId = usedPreset?.promptId || finalVersions[0]?.promptId
+    || anglePrompts[0]?.id || usedPreset?.id || 'library';
   getActivePipelineDeadline()?.throwIfExpired('final_workflow_persist');
   let finalWorkflowSave;
   try {
@@ -1098,6 +1099,7 @@ export function stampWriterModel(version, model) {
     usedModel: typeof model === 'string' ? model : '',
   };
 }
+
 
 /**
  * กำหนดตระกูลบทเปิดไม่ซ้ำต่อมุม โดยให้ hook จากการ์ดเป็นเทคนิครองเท่านั้น
@@ -1784,7 +1786,7 @@ export function assessRawTextSafety(versions, sourceText) {
     sourceHealthAuthority.set(claimKey, authority);
   }
   list.forEach((version, index) => {
-    const combined = `${version?.title || ''}\n${version?.content || ''}`;
+    const combined = getPublishablePostText(version);
     const imagined = combined.match(witnessFrame);
     if (imagined && !source.includes(imagined[0])) {
       issues.push(`V${index + 1}: สร้างภาพเหตุการณ์แทนข้อความดิบ`);
@@ -1794,10 +1796,7 @@ export function assessRawTextSafety(versions, sourceText) {
     if (unsupportedFrequencies.length > 0) {
       issues.push(`V${index + 1}: เพิ่มความถี่ที่ต้นฉบับไม่ได้ระบุ (${unsupportedFrequencies.join(', ')})`);
     }
-    const unsupportedConsumableQuantities = [
-      ...consumableQuantities(version?.title || ''),
-      ...consumableQuantities(version?.content || ''),
-    ]
+    const unsupportedConsumableQuantities = consumableQuantities(combined)
       .filter(claim => !sourceQuantityKeys.has(claim.key));
     if (unsupportedConsumableQuantities.length > 0) {
       issues.push(`V${index + 1}: เพิ่มปริมาณ/โดสที่ต้นฉบับไม่ได้ระบุ (${unsupportedConsumableQuantities.map(claim => claim.raw).join(', ')})`);
@@ -1823,12 +1822,6 @@ export function assessRawTextSafety(versions, sourceText) {
 //   (สวิตช์แบบ ก + MULTI-ANGLE) เสี่ยงแก้ที่หนึ่งลืมอีกที่ · export เพื่อให้ข้อสอบหน่วยเรียกได้
 export function getGenAnglesCount() {
   return Math.max(1, Math.min(4, parseInt(process.env.GEN_ANGLES || '2', 10) || 2));
-}
-
-export function findPromptCandidateById(candidates, promptId) {
-  const expectedId = String(promptId || '').trim();
-  if (!expectedId || !Array.isArray(candidates)) return null;
-  return candidates.find(prompt => String(prompt?.id || '').trim() === expectedId) || null;
 }
 
 // ★ 19 ส.ค. 69 (ANGLE2_BY_SCORE — สเปคเฟเบิ้ล-สุด): ตัวเลือกมุมแบบอิงคะแนนไวรัล

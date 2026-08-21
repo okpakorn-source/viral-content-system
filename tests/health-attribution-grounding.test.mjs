@@ -3,13 +3,23 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const PATH = new URL('../src/lib/services/autoFlowServiceText.js', import.meta.url);
+const POST_TEXT_PATH = new URL('../src/lib/utils/publishablePostText.js', import.meta.url);
+
+function makePublishablePostText() {
+  const source = readFileSync(POST_TEXT_PATH, 'utf8');
+  const start = source.indexOf('export function getPublishablePostText(');
+  const end = source.indexOf('\n}', start);
+  assert.ok(start >= 0 && end > start, 'ต้องพบ getPublishablePostText ตัวจริง');
+  const declaration = source.slice(start, end + 2).replace('export function', 'function');
+  return new Function(`${declaration}; return getPublishablePostText;`)();
+}
 
 function makeAssess(source = readFileSync(PATH, 'utf8')) {
   const start = source.indexOf('export function assessRawTextSafety(');
   const end = source.indexOf('\n}', start);
   assert.ok(start >= 0 && end > start, 'ต้องพบบล็อก assessRawTextSafety ตัวจริง');
   const declaration = source.slice(start, end + 2).replace('export function', 'function');
-  return new Function(`${declaration}; return assessRawTextSafety;`)();
+  return new Function('getPublishablePostText', `${declaration}; return assessRawTextSafety;`)(makePublishablePostText());
 }
 
 function article(content) {
@@ -95,4 +105,19 @@ test('mutations: ถอดสิทธิ์ RAW ไม่มีที่มา�
   );
   assert.notEqual(crossClaimAuthority, source, 'mutation ต้องทำให้ key ราย claim พังได้จริง');
   assert.throws(() => assertHealthAuthority(makeAssess(crossClaimAuthority)));
+});
+
+test('metadata title ที่ไม่เผยแพร่ห้ามทำให้ข่าวล้ม แต่ข้อความเดียวกันใน content ต้องถูกจับ', () => {
+  const assess = makeAssess();
+  const raw = 'แม่เล่าว่าชอบปลูกผักและแบ่งให้เพื่อนบ้าน';
+  const hiddenTitle = assess([
+    { title: 'แพทย์แนะนำยา 2 เม็ด', content: 'แม่ชอบปลูกผักและแบ่งให้เพื่อนบ้าน' },
+  ], raw);
+  assert.equal(hiddenTitle.ok, true);
+
+  const publishedContent = assess([
+    { title: 'ข้อมูลหลังบ้าน', content: 'แพทย์แนะนำยา 2 เม็ด' },
+  ], raw);
+  assert.equal(publishedContent.ok, false);
+  assert.match(publishedContent.issues.join('\n'), /ปริมาณ\/โดส/u);
 });

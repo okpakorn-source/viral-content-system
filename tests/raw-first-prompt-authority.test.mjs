@@ -103,13 +103,13 @@ function assertProductionWiring(autoFlow = autoFlowSource, summarize = summarize
     autoFlow,
     /const writerRawSourceText = \(detectedType === 'text' \|\| detectedType === 'plain_text'\)[\s\S]*?\? rawText[\s\S]*?: undefined;/,
   );
-  assert.equal((autoFlow.match(/rawSourceText:\s*writerRawSourceText,/g) || []).length, 2,
-    'ต้องส่ง immutable raw ครบ writer ปกติ + factual regeneration โดยไม่มี diversity rewrite');
-  assert.equal((autoFlow.match(/deferAnalysisPersistence:\s*true,/g) || []).length, 2,
-    'writer ปกติ + factual regeneration ต้องห้ามบันทึกร่างชั่วคราว');
-  assert.ok((autoFlow.match(/text:\s*newsData\.newsBody,/g) || []).length >= 2);
+  assert.equal((autoFlow.match(/rawSourceText:\s*writerRawSourceText,/g) || []).length, 1,
+    'ต้องส่ง immutable raw ให้ writer ปกติ และห้ามเรียก writer ซ้ำเพื่อ factual repair');
+  assert.equal((autoFlow.match(/deferAnalysisPersistence:\s*true,/g) || []).length, 1,
+    'writer ปกติต้องห้ามบันทึกร่างชั่วคราว');
+  assert.ok((autoFlow.match(/text:\s*newsData\.newsBody,/g) || []).length >= 1);
   assert.match(summarize, /if \(shouldPersistAnalysis\(workflowId, deferAnalysisPersistence\)\) \{/u);
-  assert.match(autoFlow, /const topPrompt = findPromptCandidateById\(anglePromptCandidates\[angleIndex\], originalPromptId\);/u);
+  assert.doesNotMatch(autoFlow, /regenerateFactualVersion|factual_regeneration_/u);
   assert.doesNotMatch(autoFlow, /repairVersionDiversityOnce|rewriteDiverseVersion|diversity_repair_/u);
   assert.match(
     summarize,
@@ -151,11 +151,11 @@ test('RAW-first finalizer: สายที่ไม่มี immutable raw ต�
   assert.doesNotMatch(finalizePrompt('', existing), /FINAL RAW AUTHORITY/);
 });
 
-test('production wiring: finalizer อยู่หลัง schema ก่อน writer และใช้ rawText ครบทั้ง writer ปกติ/factual regeneration', () => {
+test('production wiring: finalizer อยู่หลัง schema ก่อน writer และ factual repair ไม่เรียก writer ซ้ำ', () => {
   assertProductionWiring();
 });
 
-test('writer ชั่วคราวห้าม save และ factual regeneration ต้องหาการ์ดจาก promptId ของฉบับจริง', () => {
+test('writer ชั่วคราวห้าม save และ factual repair ต้องไม่เรียก writer/การ์ดซ้ำ', () => {
   const shouldPersistAnalysis = makePureHelper(
     summarizeSource,
     'export function shouldPersistAnalysis(',
@@ -165,18 +165,7 @@ test('writer ชั่วคราวห้าม save และ factual regener
   assert.equal(shouldPersistAnalysis('workflow-live', true), false);
   assert.equal(shouldPersistAnalysis('', false), false);
 
-  const findPromptCandidateById = makePureHelper(
-    autoFlowSource,
-    'export function findPromptCandidateById(',
-    'findPromptCandidateById',
-  );
-  const oldCard = { id: 'card-old' };
-  const repairedCard = { id: 'card-repaired' };
-  assert.strictEqual(
-    findPromptCandidateById([oldCard, repairedCard], 'card-repaired'),
-    repairedCard,
-  );
-  assert.equal(findPromptCandidateById([oldCard], 'card-missing'), null);
+  assert.doesNotMatch(autoFlowSource, /findPromptCandidateById|regenerateFactualVersion/u);
 });
 
 test('mutation: ถอด ย้าย หรือมีวัตถุดิบตามหลัง FINAL RAW AUTHORITY แล้ว oracle ต้องแดง', () => {
@@ -239,17 +228,17 @@ test('mutation: ส่ง extracted body แทน immutable raw หรือถ
   assert.throws(() => assertProductionWiring(autoFlowSource, missingSourceTypeGate));
 });
 
-test('mutation: เปิด save ร่างชั่วคราวหรือย้อนใช้การ์ดเดิมแล้ว oracle ต้องแดง', () => {
+test('mutation: เปิด save ร่างชั่วคราวหรือคืน factual writer loop แล้ว oracle ต้องแดง', () => {
   const missingDefer = autoFlowSource.replace(/\n\s*deferAnalysisPersistence:\s*true,/, '');
   assert.notEqual(missingDefer, autoFlowSource);
   assert.throws(() => assertProductionWiring(missingDefer, summarizeSource));
 
-  const oldCardMutation = autoFlowSource.replace(
-    'const topPrompt = findPromptCandidateById(anglePromptCandidates[angleIndex], originalPromptId);',
-    'const topPrompt = anglePrompts[angleIndex];',
+  const factualWriterMutation = autoFlowSource.replace(
+    'const factOutcome = await enforceRawFactCompleteness({',
+    'const regenerateFactualVersion = () => performSummarize({ rawSourceText: writerRawSourceText });\n      const factOutcome = await enforceRawFactCompleteness({',
   );
-  assert.notEqual(oldCardMutation, autoFlowSource);
-  assert.throws(() => assertProductionWiring(oldCardMutation, summarizeSource));
+  assert.notEqual(factualWriterMutation, autoFlowSource);
+  assert.throws(() => assertProductionWiring(factualWriterMutation, summarizeSource));
 
   const persistenceGuardMutation = summarizeSource.replace(
     'if (shouldPersistAnalysis(workflowId, deferAnalysisPersistence)) {',

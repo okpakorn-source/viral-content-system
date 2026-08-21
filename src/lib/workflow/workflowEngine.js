@@ -165,6 +165,22 @@ export async function saveAnalysis(id, analysisResult, presetUsed) {
   });
 }
 
+// ข่าวที่ไม่มีฉบับผ่านด่าน RAW: เก็บเฉพาะสถานะ/diagnostic ที่ไม่เผยร่างผิด
+export async function saveFactualReview(id, diagnostic) {
+  return prisma.workflowRun.update({
+    where: { id },
+    data: {
+      currentStep: 'factual_review',
+      analysisResult: JSON.stringify({
+        publishable: false,
+        versions: [],
+        factualGate: diagnostic,
+      }),
+      presetUsed: null,
+    },
+  });
+}
+
 /**
  * สร้าง Full Context สำหรับส่ง AI
  * รวมข้อมูลจาก Step 2 + Step 3 ทั้งหมด
