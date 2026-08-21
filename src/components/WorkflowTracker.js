@@ -29,12 +29,12 @@ const STEP_META = {
     desc: 'AI อ่านเนื้อเว็บ → สกัด newsTitle + newsBody + category',
   },
   auto_breakdown: {
-    model: 'GPT-5.5',
+    model: 'GPT-5.6 Sol',
     prompt: 'breakdown_analysis prompt',
     api: '/api/summarize?mode=breakdown',
     icon: '🔍',
     color: '#f59e0b',
-    desc: 'AI วิเคราะห์ core story + key points + possible angles',
+    desc: 'AI วิเคราะห์ core story + key points + 4 มุมข่าว',
   },
   auto_blueprint: {
     model: 'GPT-5.5',
@@ -76,7 +76,7 @@ const STEP_META = {
   // ── Manual steps ────────────────────────────────────────────────
   scrape:      { model: null,              prompt: null,                api: '/api/extract',      icon: '📡', color: '#3b82f6', desc: 'ดึงเนื้อหา' },
   ai_extract:  { model: 'Gemini 2.0 Flash',prompt: 'EXTRACT prompt',    api: '/api/summarize',    icon: '📰', color: '#8b5cf6', desc: 'สกัดข่าว' },
-  ai_breakdown:{ model: 'GPT-5.5',         prompt: 'BREAKDOWN prompt',  api: '/api/summarize',    icon: '🔍', color: '#f59e0b', desc: 'วิเคราะห์มุมข่าว' },
+  ai_breakdown:{ model: 'GPT-5.6 Sol',     prompt: 'BREAKDOWN prompt',  api: '/api/summarize',    icon: '🔍', color: '#f59e0b', desc: 'วิเคราะห์ 4 มุมข่าว' },
   lib_check:   { model: 'GPT-5.5',         prompt: 'AI Smart Match',    api: '/api/summarize',    icon: '🏛️', color: '#a3e635', desc: 'จับคู่ Prompt Library' },
   ai_analyze:  { model: 'Claude Sonnet 4', prompt: 'Library prompt',    api: '/api/summarize',    icon: '✍️', color: '#22c55e', desc: 'สร้างเนื้อหา' },
   ai_mix:      { model: 'Claude Sonnet 4', prompt: 'Library (mix)',      api: '/api/summarize',    icon: '🎯', color: '#f59e0b', desc: 'สร้างหลายมุม' },

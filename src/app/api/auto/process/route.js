@@ -6,8 +6,8 @@
  * Body: {
  *   input: string,         — raw input (URL / text)
  *   images: string[],      — base64 images
- *   detection: object,     — from /api/auto/detect (optional, skip detect if present)
- *   route: object,         — route plan (optional)
+ *   detection: object,     — accepted for backward compatibility but recomputed server-side
+ *   route: object,         — accepted for backward compatibility but recomputed server-side
  *   contentLength: string, — 'short'|'medium'|'long'
  *   preset: string,        — style preset
  * }
@@ -15,6 +15,7 @@
  * Returns: same as /api/auto (backward compatible)
  */
 export const maxDuration = 800; // Allow ~13 min for heavy LLM pipeline (pipeline can take 300-480s+)
+import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
 import { detectInputType } from '@/lib/input-engine/detector';
 import { routePipeline }   from '@/lib/input-engine/router';
@@ -32,12 +33,105 @@ import { processAutoFlow } from '@/lib/services/autoFlowService';
 import { processAutoFlowText } from '@/lib/services/autoFlowServiceText';
 import { performOcr }      from '@/lib/services/ocrService';
 import { performSummarize } from '@/lib/services/summarizeService';
-import { createStore }     from '@/lib/persistStore';
-import { callAI }          from '@/lib/ai/openai';
-import { MODEL_FAST }      from '@/lib/ai/modelConfig';
 import { withTimeout }     from '@/lib/utils/withTimeout';
+import { saveNewsArchive } from '@/lib/services/newsArchiveService';
+import { ensureWorkflow } from '@/lib/workflow/workflowEngine';
+import { isSupabaseReady } from '@/lib/supabase';
+import {
+  createPipelineDeadline,
+  getActivePipelineDeadline,
+  isPipelineDeadlineError,
+  resolvePipelineDeadlineAt,
+  runWithPipelineDeadline,
+} from '@/lib/utils/pipelineDeadline';
 
 const rlog = createLogger('AUTO-PROCESS');
+export const runtime = 'nodejs';
+const NEWS_ROUTE_BUDGET_MS = 700_000;
+const DEADLINE_QUEUE_REPORT_MS = 20_000;
+
+// ผลเขียนแต่ละเวอร์ชันต้องบอกโมเดลจากฝั่งโค้ดของ writer เอง
+// ห้ามซ่อมจากค่า aggregate เพราะงานหลายมุมอาจใช้คนละโมเดลและจะตรวจย้อนหลังผิดตัว
+export function validateVersionWriterProvenance(versions, analysisResult = {}) {
+  if (!Array.isArray(versions) || versions.length === 0) {
+    return { ok: false, error: 'ไม่มีเวอร์ชันข่าวให้ตรวจ', models: [] };
+  }
+
+  const versionModels = versions.map(version => (
+    typeof version?.usedModel === 'string' ? version.usedModel.trim() : ''
+  ));
+  const missingIndex = versionModels.findIndex(model => !model);
+  if (missingIndex >= 0) {
+    return { ok: false, error: `version ${missingIndex + 1} ไม่มี usedModel`, models: [] };
+  }
+
+  const models = [...new Set(versionModels)];
+  const declaredModels = Array.isArray(analysisResult?.usedModels)
+    ? [...new Set(analysisResult.usedModels
+      .map(model => (typeof model === 'string' ? model.trim() : ''))
+      .filter(Boolean))]
+    : [];
+  if (declaredModels.length !== models.length
+      || models.some(model => !declaredModels.includes(model))) {
+    return { ok: false, error: 'usedModels ระดับผลรวมไม่ตรงกับรายเวอร์ชัน', models };
+  }
+
+  const expectedAggregate = models.length === 1 ? models[0] : 'mixed';
+  const aggregate = typeof analysisResult?.usedModel === 'string'
+    ? analysisResult.usedModel.trim()
+    : '';
+  if (aggregate !== expectedAggregate) {
+    return { ok: false, error: `usedModel ระดับผลรวมควรเป็น ${expectedAggregate}`, models };
+  }
+
+  return { ok: true, error: '', models, aggregateModel: expectedAggregate };
+}
+
+export function prepareEnhancedAnalysisResult(legacyData = {}) {
+  const versions = legacyData?.analysisResult?.versions;
+  if (!Array.isArray(versions) || versions.length === 0) {
+    return {
+      ok: false,
+      error: 'Enhanced pipeline แจ้งว่าสำเร็จแต่ไม่มีเวอร์ชันข่าว',
+      errorType: 'ANALYSIS_RESULT_MISSING',
+    };
+  }
+
+  const provenance = validateVersionWriterProvenance(versions, legacyData.analysisResult);
+  if (!provenance.ok) {
+    return {
+      ok: false,
+      error: `ผลเขียนขาดหลักฐานโมเดลรายเวอร์ชัน: ${provenance.error}`,
+      errorType: 'VERSION_PROVENANCE_MISSING',
+    };
+  }
+
+  return {
+    ok: true,
+    versions,
+    analysisResult: {
+      ...(legacyData.analysisResult || {}),
+      versions,
+      usedModel: provenance.aggregateModel,
+      usedModels: provenance.models,
+      usedPreset: legacyData.usedPromptInfo || { name: 'Enhanced Auto' },
+      totalVersions: versions.length,
+      pipeline: 'article_pipeline_enhanced',
+    },
+  };
+}
+
+export function compactDelegatedVersions(versions) {
+  return versions.map((version) => {
+    const writerModel = typeof version?.usedModel === 'string' ? version.usedModel.trim() : '';
+    const { _blackbox, _rawModelDraft, ...rest } = version;
+    return {
+      ...rest,
+      // ใส่ซ้ำโดยเจตนา: object-rest จะทำฟิลด์ non-enumerable หายได้
+      usedModel: writerModel,
+    };
+  });
+}
 
 /**
  * Server-side auto-save to news archive.
@@ -51,79 +145,20 @@ async function saveToArchiveServerSide({ newsData, breakdownData, sourceType, so
       return false;
     }
 
-    // ★ Dedup guard: title + body เดียวกันภายใน 10 นาที → ไม่บันทึกซ้ำ
-    try {
-      const dedupStore = createStore('news-archive');
-      const existing = await dedupStore.getAll();
-      const cutoff = Date.now() - 10 * 60 * 1000;
-      const dupe = existing.find(it =>
-        it.title && newsData.newsTitle && it.title === newsData.newsTitle &&
-        String(it.body || '') === String(newsData.newsBody || '') &&
-        new Date(it.archived_at || it.createdAt || 0).getTime() > cutoff
-      );
-      if (dupe) {
-        console.log(`[Archive-Server] ⏭️ Duplicate within 10min — skip: "${newsData.newsTitle.slice(0, 50)}"`);
-        return true;
-      }
-    } catch (dedupErr) {
-      console.warn('[Archive-Server] Dedup check failed (continuing):', dedupErr.message);
-    }
-
-    // AI classify category
-    let category = 'ทั่วไป';
-    let summary = '';
-    let tags = [];
-    try {
-      const aiResult = await callAI({
-        model: MODEL_FAST,
-        temperature: 0.1,
-        maxTokens: 400,
-        // เมื่อ caller รอผล save จริง งานจำแนกที่ไม่ critical ห้ามกินงบ maxDuration
-        signal: AbortSignal.timeout(classifyTimeoutMs),
-        prompt: `วิเคราะห์ข่าวนี้แล้วตอบเป็น JSON\nหัวข้อ: ${newsData.newsTitle || ''}\nเนื้อหา: ${(newsData.newsBody || '').slice(0, 1500)}\nตอบ JSON:\n{\n  "category": "หมวดหมู่ข่าว (เลือก 1: การเมือง|สังคม|อาชญากรรม|อุบัติเหตุ|บันเทิง|กีฬา|เศรษฐกิจ|สุขภาพ|ต่างประเทศ|เทคโนโลยี|สิ่งแวดล้อม|ศาสนา|ทั่วไป)",\n  "summary": "สรุปข่าว 1-2 ประโยค",\n  "tags": ["tag1", "tag2", "tag3"]\n}`,
-      });
-      if (aiResult?.category) category = aiResult.category;
-      if (aiResult?.summary) summary = aiResult.summary;
-      if (aiResult?.tags) tags = aiResult.tags;
-    } catch (e) {
-      console.warn('[Archive-Server] AI classify failed:', e.message);
-    }
-
-    const keyPeople = breakdownData?.key_facts?.people || [];
-    const keyPlaces = breakdownData?.key_facts?.places || [];
-    const viralScore = breakdownData?.possible_angles?.[0]?.facebook_viral_score || null;
-    const wordCount = (newsData.newsBody || '').split(/\s+/).filter(Boolean).length;
-
-    const id = `archive_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const now = new Date().toISOString();
-
-    const item = {
-      id,
-      title: newsData.newsTitle || (newsData.newsBody || '').slice(0, 100) || 'ไม่มีหัวข้อ',
-      body: newsData.newsBody || '',
-      source_url: sourceUrl || '',
-      source_type: sourceType || 'discord',
-      source_name: archivedBy || 'auto-server',
-      category,
-      tags,
-      summary,
-      key_people: keyPeople,
-      key_places: keyPlaces,
-      viral_score: viralScore,
-      word_count: wordCount,
-      used_count: 0,
-      last_used_at: null,
-      cover_image: coverImage || null,
-      archived_by: archivedBy || 'auto-server',
-      archived_at: now,
-      workflow_id: workflowId || null,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    const store = createStore('news-archive');
-    await store.add(item);
-    console.log(`[Archive-Server] ✅ Saved: "${item.title.slice(0, 50)}" [${category}]`);
+    const result = await saveNewsArchive({
+      title: newsData.newsTitle,
+      newsBody: newsData.newsBody,
+      sourceUrl,
+      sourceType: sourceType || 'discord',
+      sourceName: archivedBy || 'auto-server',
+      breakdownData,
+      workflowId,
+      archivedBy: archivedBy || 'auto-server',
+      coverImage,
+      classifyTimeoutMs,
+    });
+    const action = result.deduped ? '⏭️ Reused' : '✅ Saved';
+    console.log(`[Archive-Server] ${action}: "${result.item.title.slice(0, 50)}" [${result.item.category}]`);
     return true;
   } catch (err) {
     console.warn(`[Archive-Server] Save failed (workflow=${workflowId || 'unknown'}, non-critical):`, err.message);
@@ -131,9 +166,11 @@ async function saveToArchiveServerSide({ newsData, breakdownData, sourceType, so
   }
 }
 
-export async function POST(request) {
-  const startTime = Date.now();
+async function handlePost(request, startTime, deadlineState = {}) {
   const log       = [];
+  deadlineState.log = log;
+  let activeQueueJobId = null;
+  let markQueueJob = async () => {};
 
   const addLog = (step, msg) => {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -152,56 +189,186 @@ export async function POST(request) {
     }
 
     const body = await request.json();
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({
+        success: false,
+        error: 'รูปแบบ request ไม่ถูกต้อง',
+        errorType: 'INVALID_REQUEST_BODY',
+        failedStep: 'request_validation',
+      }, { status: 400 });
+    }
     const {
       input          = '',
       images         = [],
-      detection: preDetection = null,
-      route:     preRoute     = null,
       contentLength  = 'medium',
       preset         = '',
       workflowId,
       _queueJobId    = null,
+      _queueAttemptId = null,
     } = body;
+    if (typeof input !== 'string'
+        || !Array.isArray(images) || images.some(image => typeof image !== 'string')
+        || !['short', 'medium', 'long'].includes(contentLength)
+         || typeof preset !== 'string'
+         || (workflowId !== undefined && workflowId !== null
+           && (typeof workflowId !== 'string' || !workflowId || workflowId.trim() !== workflowId))
+         || (_queueJobId !== null && (typeof _queueJobId !== 'string' || !_queueJobId.trim()))
+         || (_queueAttemptId !== null && (typeof _queueAttemptId !== 'string' || !_queueAttemptId.trim()))
+         || (!!_queueJobId !== !!_queueAttemptId)) {
+      return NextResponse.json({
+        success: false,
+        error: 'ชนิดข้อมูล input/images/contentLength/preset/workflowId/_queueJobId/_queueAttemptId ไม่ถูกต้อง',
+        errorType: 'INVALID_REQUEST_FIELDS',
+        failedStep: 'request_validation',
+      }, { status: 400 });
+    }
+
     const isFromQueue = !!_queueJobId; // true = Discord/queue, false = web UI
 
-    const _wfId = workflowId || ('unify_' + Date.now());
+    if (isFromQueue) {
+      const queueService = await import('@/lib/services/queueService');
+      const queueJob = await queueService.getJobStatus(_queueJobId);
+      const queuedInput = queueJob?.payload?.input ?? queueJob?.payload?.url ?? queueJob?.payload?.text ?? '';
+      const queuedImages = Array.isArray(queueJob?.payload?.images) ? queueJob.payload.images : [];
+      const queuedContentLength = queueJob?.payload?.contentLength ?? 'medium';
+      const queuedPreset = queueJob?.payload?.preset ?? '';
+      const queuedUserId = queueJob?.payload?.userId ?? null;
+      const queuedDeskMeta = queueJob?.payload?.deskMeta ?? null;
+      const queuedWorkflowId = queueJob?.payload?.workflowId ?? null;
+      if (!queueJob || queueJob.id !== _queueJobId || queueJob.status !== 'processing'
+          || queueJob.attemptId !== _queueAttemptId
+          || String(queuedInput) !== input
+          || JSON.stringify(queuedImages) !== JSON.stringify(images)
+          || queuedContentLength !== contentLength
+          || queuedPreset !== preset
+          || queuedUserId !== (body.userId ?? null)
+          || JSON.stringify(queuedDeskMeta) !== JSON.stringify(body.deskMeta ?? null)
+          || queuedWorkflowId !== (workflowId ?? null)) {
+        const contextError = new Error('บริบทงานคิวไม่ตรงกับ request ที่กำลังประมวลผล');
+        contextError.errorType = 'QUEUE_CONTEXT_INVALID';
+        contextError.failedStep = 'queue_context';
+        throw contextError;
+      }
+      markQueueJob = async (status, extra = {}, updateOptions = {}) => {
+        const updated = await queueService.updateJobStatus(
+          _queueJobId,
+          status,
+          extra,
+          { expectedAttemptId: _queueAttemptId, ...updateOptions },
+        );
+        if (!updated) {
+          const persistError = new Error('บันทึกสถานะงานกลับคิวไม่สำเร็จ');
+          persistError.errorType = 'QUEUE_STATUS_PERSIST_FAILED';
+          persistError.failedStep = 'queue_status';
+          throw persistError;
+        }
+      };
+      activeQueueJobId = _queueJobId;
+      deadlineState.queueJobId = _queueJobId;
+      deadlineState.queueAttemptId = _queueAttemptId;
+      deadlineState.markQueueJob = markQueueJob;
+    }
+
+    const respond = async (payload, status = 200) => {
+      const response = NextResponse.json(payload, { status });
+      if (isFromQueue) {
+        const completedAt = new Date().toISOString();
+        if (payload.success) {
+          try {
+            await markQueueJob('completed', { result: payload, completedAt });
+          } catch (queuePersistError) {
+            // ข่าวสร้างเสร็จแล้ว: ห้ามแปลงผลสำเร็จเป็น 500 เพียงเพราะ self-report กลับคิวพลาด
+            // worker ที่เป็นเจ้าของ request ยังรับ payload 200 ก้อนเดิมและพยายาม commit ด้วย attempt fence ต่อได้
+            rlog.error('Queue success self-report failed: ' + queuePersistError.message);
+            return NextResponse.json({ ...payload, queueStatusPersisted: false }, { status });
+          }
+        } else {
+          await markQueueJob('failed', {
+            error: payload.error || 'Pipeline failed',
+            errorType: payload.errorType || 'PIPELINE_FAILED',
+            failedStep: payload.failedStep || 'unknown_step',
+            completedAt,
+          });
+        }
+      }
+      return response;
+    };
+
+    // งานคิวเดิมต้องใช้ workflow เดิมทุก attempt; direct request ใช้ UUID กันชนใน millisecond เดียวกัน
+    const _wfId = workflowId
+      || (isFromQueue ? `unify_${_queueJobId}` : `unify_${randomUUID()}`);
     const origin  = new URL(request.url).origin;
 
     await logPipeline({ workflowId: _wfId, step: 'unified-auto', status: 'started', detail: input?.slice(0, 80) }).catch(() => {});
 
     // ─── STEP 0: Detect ───────────────────────────────────────
-    const detection = preDetection || detectInputType(input, images);
-    const route     = preRoute     || routePipeline(detection);
+    const detection = detectInputType(input, images);
+    const route     = routePipeline(detection);
 
     addLog('Detect', `${detection.label} → ${route.pipelineId} (${(detection.confidence * 100).toFixed(0)}% confident)`);
 
     if (detection.inputType === 'empty') {
-      return NextResponse.json({ success: false, error: detection.error || 'ไม่มี input' }, { status: 400 });
+      return respond({
+        success: false,
+        error: detection.error || 'ไม่มี input',
+        errorType: 'EMPTY_INPUT',
+        failedStep: 'detect',
+      }, 400);
     }
 
     // ★ 16 ก.ค. 69: TEXT-ONLY MODE — รับเฉพาะข้อความล้วน ปิดสาย URL/คลิป/รูปทั้งหมด
     //   (ด่านหลักอยู่ /api/queue/add แล้ว — ด่านนี้กันการเรียกตรงข้ามคิว · เปิดคืน: TEXT_ONLY_MODE=0)
     if (process.env.TEXT_ONLY_MODE !== '0' && (detection.hasUrls || detection.hasImage)) {
       addLog('Route', `⛔ TEXT_ONLY_MODE: ปฏิเสธ input ประเภท ${detection.inputType}`);
-      return NextResponse.json({
+      return respond({
         success: false,
         error: 'โหมดข้อความเท่านั้น: ระบบปิดรับการเจนข่าวจากลิงก์/รูปชั่วคราว — กรุณาสรุปเนื้อข่าวเป็นข้อความล้วน (ไม่มีลิงก์) แล้วส่งใหม่',
         errorType: 'TEXT_ONLY_MODE',
         failedStep: 'text_only_gate',
-      }, { status: 400 });
+      }, 400);
     }
 
     // ─── PHASE 3: Delegate single URL to enhanced /api/auto ───────
     if (route.useEnhancedPipeline && (detection.primaryUrl || detection.hasText)) {
       let delegateRes;
+      const isTextDelegate = detection.inputType === 'plain_text'
+        || (!detection.primaryUrl && detection.hasText);
       // ★ ส่งตัวตนคนสั่ง (ai-บก.X / desk-ทีม) + ป้ายโต๊ะข่าวเข้า pipeline — Generation Log ถึงรู้ว่าใครทำ
       //   (เดิมไม่ส่ง → ทุกเคสจากคิวเป็น anonymous หมด)
       const _delegateUser = body.userId ? { userId: body.userId, userName: body.userId } : undefined;
-      if (detection.inputType === 'plain_text' || (!detection.primaryUrl && detection.hasText)) {
+      if (isTextDelegate) {
+        const textDelegateInput = detection.textContent || input;
+        if (!isSupabaseReady()) {
+          return respond({
+            success: false,
+            error: 'ระบบบันทึกสถานะงานข่าวเชื่อมต่อฐานข้อมูลไม่ได้ชั่วคราว — ยังไม่เริ่มเรียก AI กรุณาลองใหม่',
+            errorType: 'WORKFLOW_PERSISTENCE_UNAVAILABLE',
+            failedStep: 'workflow_init',
+          }, 503);
+        }
+        try {
+          await ensureWorkflow(_wfId, {
+            sourceType: 'plain_text',
+            rawInput: textDelegateInput,
+          });
+          getActivePipelineDeadline()?.throwIfExpired('workflow_init');
+          addLog('Workflow', `💾 พร้อมบันทึก workflow ${_wfId}`);
+        } catch (workflowError) {
+          const contextConflict = workflowError?.code === 'WORKFLOW_CONTEXT_CONFLICT';
+          rlog.error(`Workflow init failed (${_wfId}): ${workflowError?.message || workflowError}`);
+          return respond({
+            success: false,
+            error: contextConflict
+              ? 'รหัสงานนี้ถูกใช้กับเนื้อข่าวอื่นแล้ว — หยุดเพื่อไม่ให้ผลสองข่าวเขียนทับกัน'
+              : 'เริ่มบันทึกสถานะงานข่าวไม่สำเร็จ — ยังไม่ได้เรียก AI กรุณาลองใหม่',
+            errorType: contextConflict ? 'WORKFLOW_CONTEXT_CONFLICT' : 'WORKFLOW_INIT_FAILED',
+            failedStep: 'workflow_init',
+          }, contextConflict ? 409 : 503);
+        }
         addLog('Route', `⚡ Delegating to /api/auto (TEXT pipeline)`);
         delegateRes = await processAutoFlowText({
           url:           null,
-          text:          detection.textContent || input,
+          text:          textDelegateInput,
           sourceType:    'plain_text',
           contentLength,
           preset,
@@ -221,18 +388,43 @@ export async function POST(request) {
           deskMeta:      body.deskMeta || null,
         });
       }
+      getActivePipelineDeadline()?.throwIfExpired('delegate_complete');
 
       if (delegateRes.success) {
         // Map /api/auto response to /api/auto/process shape
         const legacyData    = delegateRes.data || {};
-        const versions      = legacyData.analysisResult?.versions || [];
-        const analysisResult = {
-          ...(legacyData.analysisResult || {}),
-          versions,
-          usedPreset:   legacyData.usedPromptInfo || { name: 'Enhanced Auto' },
-          totalVersions:versions.length,
-          pipeline:     'article_pipeline_enhanced',
-        };
+        let versions;
+        let analysisResult;
+        if (isTextDelegate) {
+          const prepared = prepareEnhancedAnalysisResult(legacyData);
+          if (!prepared.ok) {
+            return respond({
+              success: false,
+              error: prepared.error,
+              errorType: prepared.errorType,
+              failedStep: 'u_generate',
+            }, 422);
+          }
+          versions = prepared.versions;
+          analysisResult = prepared.analysisResult;
+        } else {
+          versions = legacyData.analysisResult?.versions || [];
+          if (!Array.isArray(versions) || versions.length === 0) {
+            return respond({
+              success: false,
+              error: 'Enhanced pipeline แจ้งว่าสำเร็จแต่ไม่มีเวอร์ชันข่าว',
+              errorType: 'ANALYSIS_RESULT_MISSING',
+              failedStep: 'u_generate',
+            }, 422);
+          }
+          analysisResult = {
+            ...(legacyData.analysisResult || {}),
+            versions,
+            usedPreset: legacyData.usedPromptInfo || { name: 'Enhanced Auto' },
+            totalVersions: versions.length,
+            pipeline: 'article_pipeline_enhanced',
+          };
+        }
         addLog('Route', `✅ Enhanced pipeline: ${versions.length} versions in ${legacyData.totalTimeSeconds}s`);
 
         // 🛡️ กล่องดำ: เซฟหลักฐานทุกด่านของงานนี้ลงไฟล์ (อ่านย้อนหลังผ่าน GET /api/trace) — ห้ามทำงานจริงพัง
@@ -258,11 +450,25 @@ export async function POST(request) {
 
         // ★ Opus P2-D: ถอดของหนักออกจาก response/คิวหลังเซฟไฟล์แล้ว (~60-90KB/งาน) — หลักฐานเต็มอยู่ในไฟล์กล่องดำ
         try {
-          const _lite = versions.map(({ _blackbox, _rawModelDraft, ...rest }) => rest);
+          const _lite = isTextDelegate
+            ? compactDelegatedVersions(versions)
+            : versions.map(({ _blackbox, _rawModelDraft, ...rest }) => rest);
           versions.length = 0;
           versions.push(..._lite);
           if (analysisResult && Array.isArray(analysisResult.versions)) analysisResult.versions = versions;
         } catch { /* ถอดไม่ได้ก็ส่งของเต็ม ไม่พัง */ }
+
+        if (isTextDelegate) {
+          const compactProvenance = validateVersionWriterProvenance(versions, analysisResult);
+          if (!compactProvenance.ok) {
+            return respond({
+              success: false,
+              error: `ผลเขียนเสียหลักฐานระหว่างเตรียมส่งเข้าคิว: ${compactProvenance.error}`,
+              errorType: 'VERSION_PROVENANCE_MISSING',
+              failedStep: 'u_generate',
+            }, 422);
+          }
+        }
 
         // 🗄️ Auto-save to news archive — server-side ที่เดียว (web/Discord ผ่าน queue ทั้งคู่)
         let archiveSaved = false;
@@ -276,13 +482,15 @@ export async function POST(request) {
             archivedBy: body.userId || 'auto-server',
             coverImage: delegateRes.autoCoverResult?.success ? delegateRes.autoCoverResult.base64 : null,
           });
+          getActivePipelineDeadline()?.throwIfExpired('enhanced_archive');
           if (!archiveSaved) addLog('Archive', '⚠️ Server-side save failed — archiveSaved=false (client fallback remains available)');
         }
 
-        return NextResponse.json({
+        const responsePayload = {
           success:       true,
           archiveSaved, // true เฉพาะเมื่อคลังมีข่าวนี้แล้วหรือบันทึกสำเร็จจริง
-          data:          { ...legacyData, versions, analysisResult },
+          workflowId:    _wfId,
+          data:          { ...legacyData, versions, analysisResult, workflowId: _wfId },
           newsData:      legacyData.newsData,
           breakdownData: legacyData.breakdownData,
           analysisResult,
@@ -301,7 +509,7 @@ export async function POST(request) {
           normalized: {
             title:    legacyData.newsData?.newsTitle || '',
             language: 'th',
-            category: legacyData.breakdownData?.category || 'general',
+            category: legacyData.breakdownData?.primaryCategory || legacyData.breakdownData?.category || 'general',
             keywords: [],
             entities: [],
             imageCount: 0,
@@ -314,7 +522,9 @@ export async function POST(request) {
             pipelineId:      'article_pipeline_enhanced',
             delegatedTo:     '/api/auto',
           },
-        });
+        };
+        getActivePipelineDeadline()?.throwIfExpired('route_success_response');
+        return respond(responsePayload);
       }
       addLog('Route', `⚠️ Enhanced pipeline delegation failed — using local pipeline`);
     }
@@ -486,13 +696,15 @@ export async function POST(request) {
 
     // ─── Check viability ──────────────────────────────────────
     if (!normalizedData?.summary?.isViable) {
-      return NextResponse.json({
+      return respond({
         success:   false,
         error:     'ไม่สามารถดึงเนื้อหาได้เพียงพอ — ลองวางข้อความเพิ่มเติม',
+        errorType: 'CONTENT_NOT_VIABLE',
+        failedStep: 'extract_source',
         detection: { label: detection.label, pipelineId: route.pipelineId },
         normalized: normalizedData,
         log,
-      }, { status: 422 });
+      }, 422);
     }
 
     // ─── STEP 2: Extract (via performSummarize) ─────────────────
@@ -505,12 +717,14 @@ export async function POST(request) {
       user:       body.user || null,
     }), 45000, 'extract');
     if (!extractRes.success || !extractRes.data?.newsBody) {
-      return NextResponse.json({
+      return respond({
         success:    false,
         error:      `Extract failed: ${extractRes.error || 'no content'}`,
+        errorType:  'EXTRACT_FAILED',
+        failedStep: 'u_extract',
         normalized: normalizedData,
         log,
-      }, { status: 422 });
+      }, 422);
     }
     const newsData = extractRes.data;
     addLog('Extract', `✅ "${newsData.newsTitle?.slice(0, 40)}" (${newsData.newsBody?.length}ch)`);
@@ -567,25 +781,43 @@ export async function POST(request) {
     }), 240000, 'generate'); // ★ 240s ให้เท่ากับ enhanced path (เดิม 90s ไม่พอจริง)
 
     const genData        = genRes.data || genRes;
-    const versions       = genData.versions || [];
+    const writerModel = typeof genData.usedModel === 'string' ? genData.usedModel.trim() : '';
+    const promptId = genData.usedPreset?.promptId === null || genData.usedPreset?.promptId === undefined
+      ? ''
+      : String(genData.usedPreset.promptId);
+    const sourceLabel = breakdownData?.possible_angles?.[0]?.angle_name || 'local_pipeline';
+    const versions = Array.isArray(genData.versions)
+      ? genData.versions.map(version => ({
+          ...version,
+          usedModel: writerModel,
+          _source: 'classic',
+          _sourceLabel: sourceLabel,
+          promptId,
+        }))
+      : [];
 
     // Guard: generate ล้มเหลวหรือได้ 0 เวอร์ชัน → ต้องไม่ตอบ success
-    if (!genRes.success || versions.length === 0) {
+    const invalidVersion = versions.findIndex(version => !version || typeof version !== 'object'
+      || typeof version.title !== 'string' || !version.title.trim()
+      || typeof version.content !== 'string' || !version.content.trim());
+    if (!genRes.success || versions.length === 0 || !writerModel || invalidVersion >= 0) {
       addLog('Generate', `❌ Generate failed: ${genRes.error || 'no versions produced'}`);
-      return NextResponse.json({
+      return respond({
         success:   false,
-        error:     `สร้างเนื้อหาไม่สำเร็จ: ${genRes.error || 'AI ไม่ได้สร้างเวอร์ชันใดเลย'}`,
+        error:     `สร้างเนื้อหาไม่สำเร็จ: ${genRes.error || (!writerModel ? 'ไม่มีชื่อโมเดลผู้เขียนจริง' : (invalidVersion >= 0 ? `version ${invalidVersion + 1} ไม่ครบ` : 'AI ไม่ได้สร้างเวอร์ชันใดเลย'))}`,
         errorType: 'GENERATE_FAILED',
         failedStep: 'u_generate',
         newsData,
         breakdownData,
         log,
-      }, { status: 422 });
+      }, 422);
     }
 
     const analysisResult = {
       ...(genData || {}),
       versions,
+      usedModel: writerModel,
+      usedModels: [writerModel],
       usedPreset:   genData.usedPreset || { name: route.pipeline.label },
       totalVersions:versions.length,
       pipeline:     route.pipelineId,
@@ -608,16 +840,16 @@ export async function POST(request) {
         archivedBy: body.userId || 'auto-server',
         coverImage: null,
       });
+      getActivePipelineDeadline()?.throwIfExpired('local_archive');
       if (!archiveSaved) addLog('Archive', '⚠️ Server-side save failed — archiveSaved=false (client fallback remains available)');
     }
 
     // === GENERATION LOG: บันทึกเคสเข้าระบบ ===
-    try {
-      await logGeneration({
+    const generationLogResult = await logGeneration({
         newsTitle: newsData.newsTitle,
         sourceType: detection.inputType || normalizedData.sourceType || 'web',
         sourceUrl: detection.primaryUrl || '',
-        sourceText: (normalizedData.rawText || '').slice(0, 5000),
+        sourceText: normalizedData.rawText || '',
         versions,
         breakdownData,
         // ★ ใครส่งงาน (ai-บก.X / desk-ทีม) + ป้ายโต๊ะข่าว (เลน/หมวด) — Generation Log แยก บก./แนวข่าวได้
@@ -633,18 +865,30 @@ export async function POST(request) {
           promptMatchType: analysisResult.usedPreset?.matchType || (analysisResult.usedPreset?.isBorrowed ? 'BORROWED' : 'MATCHED'),
           promptId: analysisResult.usedPreset?.promptId || '',
           newsType: breakdownData?.primaryCategory || genData.debug?.newsTypeDetected || '',
+          writerModels: [writerModel],
           desk: body.deskMeta || null,
         },
       });
-      addLog('GenLog', `📋 Generation Log saved`);
-    } catch (glErr) {
-      addLog('GenLog', `⚠️ GenLog failed (non-critical): ${glErr.message}`);
+    getActivePipelineDeadline()?.throwIfExpired('route_generation_log');
+    if (!generationLogResult?.success) {
+      return respond({
+        success: false,
+        error: `บันทึก Generation Log ไม่สำเร็จ: ${generationLogResult?.error || 'unknown error'}`,
+        errorType: 'GENERATION_LOG_FAILED',
+        failedStep: 'u_persist',
+        newsData,
+        breakdownData,
+        analysisResult,
+        log,
+      }, 500);
     }
+    addLog('GenLog', `📋 Generation Log saved (${generationLogResult.caseId})`);
 
-    return NextResponse.json({
+    const responsePayload = {
       success:        true,
       archiveSaved, // true เฉพาะเมื่อคลังมีข่าวนี้แล้วหรือบันทึกสำเร็จจริง
-      data:           { ...genData, versions, analysisResult },
+      workflowId:     _wfId,
+      data:           { ...genData, versions, analysisResult, workflowId: _wfId, generationLog: { caseId: generationLogResult.caseId, success: true } },
       newsData,
       breakdownData,
       analysisResult,
@@ -676,17 +920,107 @@ export async function POST(request) {
         provider:    normalizedData.metadata?.provider,
         textLength:  normalizedData.rawText.length,
       },
-    });
+    };
+    getActivePipelineDeadline()?.throwIfExpired('route_success_response');
+    return respond(responsePayload);
 
   } catch (err) {
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
     rlog.error('Universal process error: ' + err.message);
+    let queueStatusError = null;
+    if (activeQueueJobId) {
+      try {
+        await markQueueJob('failed', {
+          error: err.message,
+          errorType: err.errorType || 'UNIVERSAL_PROCESS_ERROR',
+          failedStep: err.failedStep || 'unknown_step',
+          completedAt: new Date().toISOString(),
+        });
+      } catch (markErr) {
+        queueStatusError = markErr;
+        rlog.error('Queue self-report failed: ' + markErr.message);
+      }
+    }
+    const deadlineFailure = isPipelineDeadlineError(err);
     return NextResponse.json({
       success: false,
-      error:   err.message,
+      error:   queueStatusError
+        ? `${err.message} (และบันทึกสถานะกลับคิวไม่สำเร็จ: ${queueStatusError.message})`
+        : err.message,
+      errorType: queueStatusError
+        ? 'QUEUE_STATUS_PERSIST_FAILED'
+        : (err.errorType || 'UNIVERSAL_PROCESS_ERROR'),
       failedStep: err.failedStep || 'unknown_step',
+      ...(err.deadlineStep ? { deadlineStep: err.deadlineStep } : {}),
+      queueStatusPersisted: activeQueueJobId ? !queueStatusError : null,
       log,
       debug: { durationSeconds: parseFloat(totalTime) },
-    }, { status: 500 });
+    }, { status: deadlineFailure ? 504 : 500 });
   }
+}
+
+async function reportHardDeadlineFailure(error, deadlineState) {
+  let queueStatusPersisted = null;
+  let queueStatusError = null;
+  if (typeof deadlineState?.markQueueJob === 'function') {
+    let timeoutId;
+    try {
+      await Promise.race([
+        deadlineState.markQueueJob('failed', {
+          error: error.message,
+          errorType: 'PIPELINE_DEADLINE_EXCEEDED',
+          failedStep: 'pipeline_deadline',
+          completedAt: new Date().toISOString(),
+        }, {
+          // ถ้า completion เริ่มก่อน deadline แล้วชนะ CAS ไปเสี้ยววินาที
+          // deadline ต้องยังแก้ terminal state ของ attempt เดิมเป็น failed ได้
+          expectedStatuses: ['processing', 'completed'],
+        }),
+        new Promise((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error('queue deadline self-report timeout')), DEADLINE_QUEUE_REPORT_MS);
+          timeoutId?.unref?.();
+        }),
+      ]);
+      queueStatusPersisted = true;
+    } catch (markError) {
+      queueStatusPersisted = false;
+      queueStatusError = markError?.message || String(markError);
+      rlog.error('Hard deadline queue self-report failed: ' + queueStatusError);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+  return NextResponse.json({
+    success: false,
+    error: error.message || 'เวลารวมของระบบข่าวครบกำหนด',
+    errorType: 'PIPELINE_DEADLINE_EXCEEDED',
+    failedStep: 'pipeline_deadline',
+    deadlineStep: error.deadlineStep || 'pipeline',
+    queueStatusPersisted,
+    ...(queueStatusError ? { queueStatusError } : {}),
+    log: Array.isArray(deadlineState?.log) ? deadlineState.log : [],
+  }, { status: 504 });
+}
+
+export async function runProcessWithDeadline(request, routeStartedAt, deadline, deadlineState = {}) {
+  try {
+    return await runWithPipelineDeadline(
+      deadline,
+      () => handlePost(request, routeStartedAt, deadlineState),
+    );
+  } catch (error) {
+    if (!isPipelineDeadlineError(error)) throw error;
+    return reportHardDeadlineFailure(error, deadlineState);
+  }
+}
+
+export async function POST(request) {
+  const routeStartedAt = Date.now();
+  const deadlineAt = resolvePipelineDeadlineAt(
+    request.headers.get('x-news-pipeline-deadline-at'),
+    routeStartedAt,
+    NEWS_ROUTE_BUDGET_MS,
+  );
+  const deadline = createPipelineDeadline({ deadlineAt });
+  return runProcessWithDeadline(request, routeStartedAt, deadline, {});
 }

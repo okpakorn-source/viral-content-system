@@ -52,6 +52,36 @@ const getErrorMessage = (error) => {
   return String(error);
 };
 
+function readQueueRecoveryToken(storage) {
+  try {
+    const target = storage || globalThis.localStorage;
+    const token = JSON.parse(target.getItem('vf_last_job') || 'null');
+    return token?.jobId ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+function queueRecoveryTokenMatches(current, expected) {
+  return Boolean(
+    current?.jobId
+      && expected?.jobId
+      && current.jobId === expected.jobId
+      && Number(current.at || 0) === Number(expected.at || 0),
+  );
+}
+
+function clearQueueRecoveryTokenIfOwned(expected, storage) {
+  try {
+    const target = storage || globalThis.localStorage;
+    if (!queueRecoveryTokenMatches(readQueueRecoveryToken(target), expected)) return false;
+    target.removeItem('vf_last_job');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function NewContentPageInner() {
   const [sourceType, setSourceType] = useState('url');
   const [url, setUrl] = useState('');
@@ -77,7 +107,10 @@ function NewContentPageInner() {
   const [researching, setResearching] = useState(false);
   const [contentLength, setContentLength] = useState('short'); // short | medium | long
   const [addedResearchItems, setAddedResearchItems] = useState([]); // เก็บ research ที่เพิ่มแล้ว
-  const [archiveSaved, setArchiveSaved] = useState(false); // ป้องกัน save ซ้ำ
+  const archiveSavedRef = useRef(false); // ป้องกัน save ซ้ำโดยไม่ใช้ state ที่ไม่มีจุดแสดงผล
+  const setArchiveSavedFlag = useCallback((value) => {
+    archiveSavedRef.current = Boolean(value);
+  }, []);
   const [blueprintData, setBlueprintData] = useState(null); // Emotional Blueprint จาก AI
   const [editedBlueprint, setEditedBlueprint] = useState(null); // version ที่ user แก้ไขแล้ว
   const [blueprinting, setBlueprinting] = useState(false); // loading state
@@ -86,6 +119,26 @@ function NewContentPageInner() {
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [tiktokNeedUpload, setTiktokNeedUpload] = useState(false);
+
+  const [autoMode, setAutoMode] = useState(false);
+  const [autoProgress, setAutoProgress] = useState('');
+  const [autoLog, setAutoLog] = useState([]);
+  const [universalDetection, setUniversalDetection] = useState(null); // detection result from /api/auto/process
+  const [liveDetection, setLiveDetection] = useState(null);
+  const [recoveryJob, setRecoveryJob] = useState(null); // { jobId, at, result }
+
+  // Queue system states
+  const [queueJobId, setQueueJobId] = useState(null);
+  const [queuePosition, setQueuePosition] = useState(0);
+  const [queueStatus, setQueueStatus] = useState(null); // 'pending' | 'processing' | 'completed' | 'failed'
+  const [queuePolling, setQueuePolling] = useState(false);
+
+  // Image Composer states
+  const [newsImages, setNewsImages] = useState([]);
+  const [newsImagePreviews, setNewsImagePreviews] = useState([]);
+  const [composingImage, setComposingImage] = useState(false);
+  const [composedImages, setComposedImages] = useState(null);
+  const [imageLayout, setImageLayout] = useState(null);
 
   // === โหลดข้อมูลจากคลังข่าว (ถ้ามี ?archive_id) ===
   const searchParams = useSearchParams();
@@ -101,18 +154,17 @@ function NewContentPageInner() {
           setExtracted({ title: item.title, text: item.body, url: item.source_url || '' });
           setStep('extracted');
           setUrl(item.source_url || '');
-          setArchiveSaved(true); archiveSavedRef.current = true;
+          setArchiveSavedFlag(true);
           console.log('[Archive] ✅ Loaded from archive:', archiveId);
         }
       })
       .catch(() => {});
-  }, [searchParams]);
+  }, [searchParams, setArchiveSavedFlag]);
 
   // === Auto-save เข้าคลังข่าว ===
   // ★ ใช้ ref กัน stale closure — เดิม callback จำค่า archiveSaved เก่า ทำให้ run ที่ 2 ใน session เดียวไม่ถูก save
-  const archiveSavedRef = useRef(false);
-  const autoSaveToArchive = useCallback(async (newsDataArg, breakdownDataArg, coverBase64Arg) => {
-    if (archiveSavedRef.current) return;
+  const autoSaveToArchive = useCallback(async (newsDataArg, breakdownDataArg, coverBase64Arg, metadataOverride = {}) => {
+    if (archiveSavedRef.current && !metadataOverride.forceSave) return true;
     try {
       const res = await fetch('/api/news-archive', {
         method: 'POST',
@@ -121,34 +173,75 @@ function NewContentPageInner() {
           title: newsDataArg?.newsTitle || '',
           newsBody: newsDataArg?.newsBody || '',
           sourceUrl: newsDataArg?.sourceUrl || newsDataArg?.url || '',
-          sourceType: sourceType || 'web',
+          sourceType: metadataOverride.sourceType || sourceType || 'raw',
           breakdownData: breakdownDataArg || null,
-          workflowId,
+          workflowId: metadataOverride.workflowId ?? workflowId,
           archivedBy: 'auto',
           coverImage: coverBase64Arg || null,
         }),
       });
       const data = await res.json();
       if (data.success) {
-        archiveSavedRef.current = true;
-        setArchiveSaved(true);
+        setArchiveSavedFlag(true);
         console.log('[Archive] ✅ Auto-saved:', data.data?.id, '|', data.data?.category, data.deduped ? '(deduped)' : '');
+        return true;
       }
+      console.warn('[Archive] Auto-save rejected:', data.error || `HTTP ${res.status}`);
+      return false;
     } catch (e) {
       console.warn('[Archive] Auto-save failed (non-critical):', e.message);
+      return false;
     }
-  }, [sourceType, workflowId]);
+  }, [sourceType, workflowId, setArchiveSavedFlag]);
+
+  // ข่าวจากคิวจะถือว่า "จบ" ก็ต่อเมื่อคลังบันทึกสำเร็จจริงอย่างน้อยหนึ่งฝั่ง
+  // เก็บ vf_last_job ไว้เมื่อทั้ง server/client ล้ม เพื่อให้ refresh แล้วกู้ผล+ลองบันทึกซ้ำได้
+  const finalizeQueueArchive = useCallback(async (
+    serverArchiveSaved,
+    newsDataArg,
+    breakdownDataArg,
+    coverBase64Arg,
+    metadataOverride = {},
+    recoveryToken = null,
+  ) => {
+    const saved = serverArchiveSaved === true
+      || await autoSaveToArchive(newsDataArg, breakdownDataArg, coverBase64Arg, metadataOverride);
+    if (saved) {
+      setArchiveSavedFlag(true);
+      clearQueueRecoveryTokenIfOwned(recoveryToken, localStorage);
+      return true;
+    }
+    setError('แสดงผลข่าวได้แล้ว แต่บันทึกเข้าคลังยังไม่สำเร็จ — งานยังไม่หาย กรุณารีเฟรชหน้าแล้วกด “ดูผลลัพธ์” เพื่อลองบันทึกอีกครั้ง');
+    return false;
+  }, [autoSaveToArchive, setArchiveSavedFlag]);
+
   // ★ Recovery: นำผลลัพธ์จาก queue job ที่เสร็จแล้วมาแสดง (ใช้ตอน UI หลุดจากการ poll)
-  const applyQueueResult = useCallback((result) => {
-    if (!result) return;
+  const applyQueueResult = useCallback(async (result) => {
+    if (!result || typeof result !== 'object') {
+      setError('ผลลัพธ์ที่กู้คืนไม่ถูกต้อง — ระบบไม่เปิดหน้าข่าวว่าง');
+      return false;
+    }
     const d = result.data || result;
     const nd = result.newsData || d.newsData || null;
     const bd = result.breakdownData || d.breakdownData || null;
     const ar = result.analysisResult || d.analysisResult || null;
-    if (!ar?.versions?.length) return;
+    const recoveredWorkflowId = result.workflowId || d.workflowId || null;
+    const recoveredSourceType = result.detection?.inputType
+      || result.detection?.platform
+      || d.detection?.inputType
+      || d.detection?.platform
+      || result.normalized?.sourceType
+      || d.normalized?.sourceType
+      || 'raw';
+    if (!Array.isArray(ar?.versions) || ar.versions.length === 0) {
+      setError('ผลลัพธ์ที่กู้คืนไม่มีเวอร์ชันข่าว — ระบบไม่เปิดหน้าข่าวว่าง');
+      return false;
+    }
     setNewsData(nd);
     setBreakdownData(bd);
     setAnalysisResult(ar);
+    setWorkflowId(recoveredWorkflowId);
+    setSourceType(recoveredSourceType);
     if (d.blueprint) { setBlueprintData(d.blueprint); setEditedBlueprint(JSON.parse(JSON.stringify(d.blueprint))); }
     if (d.researchItems?.length > 0) setResearchData({ items: d.researchItems, keywords: [] });
     if (d.factPool) setFactPoolData(d.factPool);
@@ -156,55 +249,124 @@ function NewContentPageInner() {
     setStep('analyzed');
     setError('');
     setAutoProgress('');
-  }, []);
+    if (!(result.archiveSaved === true || d.archiveSaved === true)) {
+      const coverBase64 = result.autoCoverResult?.success
+        ? result.autoCoverResult.base64
+        : (d.autoCoverResult?.success ? d.autoCoverResult.base64 : null);
+      const saved = await autoSaveToArchive(nd, bd, coverBase64, {
+        sourceType: recoveredSourceType,
+        workflowId: recoveredWorkflowId,
+        forceSave: true,
+      });
+      if (!saved) {
+        setError('แสดงผลข่าวได้แล้ว แต่บันทึกเข้าคลังยังไม่สำเร็จ — กด “ดูผลลัพธ์” ซ้ำเพื่อลองบันทึกอีกครั้ง');
+        return false;
+      }
+    }
+    return true;
+  }, [autoSaveToArchive, setWorkflowId, setSourceType]);
 
   // ★ Recovery: ตอนเปิดหน้า — เช็คว่ามี job ค้างที่เสร็จแล้วรอให้กู้ไหม
   useEffect(() => {
     let saved = null;
-    try { saved = JSON.parse(localStorage.getItem('vf_last_job') || 'null'); } catch {}
+    saved = readQueueRecoveryToken(localStorage);
     if (!saved?.jobId) return;
-    if (Date.now() - (saved.at || 0) > 60 * 60 * 1000) { // เกิน 1 ชม. — หมดอายุ
-      try { localStorage.removeItem('vf_last_job'); } catch {}
+    const expiresAt = (saved.at || 0) + 60 * 60 * 1000;
+    if (Date.now() >= expiresAt) { // เกิน 1 ชม. — หมดอายุ
+      clearQueueRecoveryTokenIfOwned(saved, localStorage);
       return;
     }
-    fetch(`/api/queue/status?id=${saved.jobId}`, { cache: 'no-store' })
-      .then(r => r.json())
-      .then(st => {
-        if (st.success && st.status === 'completed' && st.result) {
-          setRecoveryJob({ jobId: saved.jobId, result: st.result });
-        } else if (!st.success || st.status === 'failed') {
-          try { localStorage.removeItem('vf_last_job'); } catch {}
+
+    let active = true;
+    let pollTimer = null;
+    let requestController = null;
+    const ownsSavedJob = () => queueRecoveryTokenMatches(
+      readQueueRecoveryToken(localStorage),
+      saved,
+    );
+    const scheduleNext = () => {
+      if (!active || !ownsSavedJob()) {
+        active = false;
+        return;
+      }
+      const remaining = expiresAt - Date.now();
+      if (remaining <= 0) {
+        clearQueueRecoveryTokenIfOwned(saved, localStorage);
+        active = false;
+        return;
+      }
+      pollTimer = setTimeout(() => {
+        pollTimer = null;
+        void pollStatus();
+      }, Math.min(3000, remaining));
+    };
+    async function pollStatus() {
+      if (!active || !ownsSavedJob()) {
+        active = false;
+        return;
+      }
+      const controller = new AbortController();
+      requestController = controller;
+      const requestTimeout = setTimeout(() => controller.abort(), 8000);
+      try {
+        const response = await fetch(`/api/queue/status?id=${saved.jobId}`, {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        const st = await response.json();
+        if (!active || !ownsSavedJob()) {
+          active = false;
+          return;
         }
-        // ถ้ายัง pending/processing — เก็บไว้ให้กู้รอบหน้า
-      })
-      .catch(() => {});
+        if (st.success && st.status === 'completed') {
+          if (!st.result || typeof st.result !== 'object') {
+            setError('งานล่าสุดแจ้งว่าเสร็จแต่ไม่มีผลลัพธ์ — ระบบหยุดกู้เพื่อไม่แสดงข่าวว่าง');
+            clearQueueRecoveryTokenIfOwned(saved, localStorage);
+            active = false;
+            return;
+          }
+          const recoveredData = st.result.data || st.result;
+          const recoveredAnalysis = st.result.analysisResult || recoveredData.analysisResult;
+          if (Array.isArray(recoveredAnalysis?.versions) && recoveredAnalysis.versions.length > 0) {
+            setRecoveryJob({ jobId: saved.jobId, at: saved.at, result: st.result });
+          } else {
+            setError('งานล่าสุดแจ้งว่าเสร็จแต่ไม่มีเวอร์ชันข่าว — ระบบไม่กู้ผลลัพธ์ว่าง');
+            clearQueueRecoveryTokenIfOwned(saved, localStorage);
+          }
+          active = false;
+        } else if (st.success && st.status === 'failed') {
+          setError(st.error || 'งานล่าสุดในคิวประมวลผลไม่สำเร็จ');
+          clearQueueRecoveryTokenIfOwned(saved, localStorage);
+          active = false;
+        } else if (!st.success && (st.errorType === 'JOB_NOT_FOUND' || response.status === 404)) {
+          setError(st.error || 'ไม่พบงานล่าสุดในคิวแล้ว กรุณาส่งข่าวใหม่อีกครั้ง');
+          clearQueueRecoveryTokenIfOwned(saved, localStorage);
+          active = false;
+        } else {
+          // pending/processing และข้อผิดพลาด status ชั่วคราว — เก็บ token แล้วติดตามต่อ
+          scheduleNext();
+        }
+      } catch {
+        // เน็ตสะดุด/คำขอหมดเวลา: เก็บ token และลองใหม่จนกว่าจะครบอายุ
+        if (active) scheduleNext();
+      } finally {
+        clearTimeout(requestTimeout);
+        if (requestController === controller) requestController = null;
+      }
+    }
+
+    void pollStatus();
+    return () => {
+      active = false;
+      if (pollTimer) clearTimeout(pollTimer);
+      requestController?.abort();
+    };
   }, []);
 
   const [videoFile, setVideoFile] = useState(null);
   const [youtubeNeedUpload, setYoutubeNeedUpload] = useState(false);
   const [sentToReview, setSentToReview] = useState({}); // { versionIndex: true }
   const [sendingReview, setSendingReview] = useState(null);
-  const [autoMode, setAutoMode] = useState(false);
-  const [autoProgress, setAutoProgress] = useState('');
-  const [autoLog, setAutoLog] = useState([]);
-  const [universalDetection, setUniversalDetection] = useState(null); // ✅ Phase 6: detection result from /api/auto/process
-  const [liveDetection, setLiveDetection] = useState(null); // ✅ Phase 6: live detection from UniversalInputBox
-
-  // ★ Recovery: งานล่าสุดที่เสร็จแล้วแต่ UI ไม่ได้รับผล (เน็ตหลุด/รีเฟรช/server restart)
-  const [recoveryJob, setRecoveryJob] = useState(null); // { jobId, result }
-
-  // Queue system states
-  const [queueJobId, setQueueJobId] = useState(null);
-  const [queuePosition, setQueuePosition] = useState(0);
-  const [queueStatus, setQueueStatus] = useState(null); // 'pending' | 'processing' | 'completed' | 'failed'
-  const [queuePolling, setQueuePolling] = useState(false);
-
-  // Image Composer states
-  const [newsImages, setNewsImages] = useState([]);         // File[] ที่ user อัปโหลด
-  const [newsImagePreviews, setNewsImagePreviews] = useState([]); // base64 preview
-  const [composingImage, setComposingImage] = useState(false);
-  const [composedImages, setComposedImages] = useState(null); // { layout, text }
-  const [imageLayout, setImageLayout] = useState(null);     // layout JSON จาก AI
 
   // Workflow tracker
   const { startWorkflow, startStep: wfStart, completeStep: wfComplete, failStep: wfFail, finishWorkflow } = useWorkflow();
@@ -224,13 +386,15 @@ function NewContentPageInner() {
 
     const { jobId, position, queuesAhead } = addData;
     const workerUrl = addData._workerUrl; // fallback trigger URL
+    const recoveryToken = { jobId, at: Date.now() };
     setQueueJobId(jobId);
     setQueuePosition(position);
     setQueueStatus('pending');
     setQueuePolling(true);
 
     // ★ Recovery: จำ jobId ไว้ — ถ้า UI หลุด/รีเฟรช/เน็ตสะดุด ระบบกู้ผลลัพธ์คืนได้
-    try { localStorage.setItem('vf_last_job', JSON.stringify({ jobId, at: Date.now() })); } catch {}
+    setRecoveryJob(null);
+    try { localStorage.setItem('vf_last_job', JSON.stringify(recoveryToken)); } catch {}
 
     if (queuesAhead > 0) {
       setAutoProgress(`📋 อยู่ในคิวลำดับที่ ${position} (รอ ${queuesAhead} คิวก่อนหน้า) ประมาณ ${queuesAhead * 3} นาที`);
@@ -259,14 +423,26 @@ function NewContentPageInner() {
         const statusData = await statusRes.json();
 
         if (!statusData.success) {
+          const isJobNotFound = statusData.errorType === 'JOB_NOT_FOUND' || statusRes.status === 404;
+          if (!isJobNotFound) {
+            notFoundCount = 0;
+            consecutiveNetErrors++;
+            console.warn(`[Queue] Status temporarily unavailable (${consecutiveNetErrors} ครั้ง) — preserving job ${jobId.slice(0,8)}`);
+            if (consecutiveNetErrors >= 3) {
+              setAutoProgress(`⚠️ อ่านสถานะคิวไม่ได้ชั่วคราว (พยายามใหม่ครั้งที่ ${consecutiveNetErrors}) — งานยังไม่ถูกลบและระบบกำลังติดตามต่อ`);
+            }
+            continue;
+          }
           notFoundCount++;
           console.warn(`[Queue] Job ${jobId.slice(0,8)} not found (${notFoundCount}/5) — last status: ${lastSeenStatus}`);
-          // ★★ ถ้า job หายไปหลังจากเคยเห็น processing → backend เสร็จแล้วแต่ถูก purge!
+          // ถ้า job หาย ห้ามเดาว่าสำเร็จ เพราะไม่มีผลลัพธ์ให้ตรวจหรือแสดง
           if (notFoundCount >= 5 || (notFoundCount >= 3 && lastSeenStatus === 'processing')) {
-            console.warn('[Queue] Job was purged after completion — treating as success');
             setQueuePolling(false);
-            // Return empty result — handleAutoMode will check and show error
-            return { data: null, _jobPurged: true };
+            clearQueueRecoveryTokenIfOwned(recoveryToken, localStorage);
+            const missingError = new Error('ไม่พบผลลัพธ์ของงานในคิว — ระบบหยุดเพื่อไม่แสดงข่าวว่าง กรุณาลองใหม่');
+            missingError.errorType = 'QUEUE_RESULT_MISSING';
+            missingError.failedStep = 'queue_result';
+            throw missingError;
           }
           continue;
         }
@@ -292,12 +468,22 @@ function NewContentPageInner() {
           setAutoProgress('⚡ กำลังประมวลผล... (อาจใช้เวลา 2-4 นาที)');
         } else if (statusData.status === 'completed') {
           setQueuePolling(false);
-          try { localStorage.removeItem('vf_last_job'); } catch {}
-          return statusData.result; // Return the result data
+          if (!statusData.result || typeof statusData.result !== 'object') {
+            clearQueueRecoveryTokenIfOwned(recoveryToken, localStorage);
+            const missingError = new Error('คิวแจ้งว่าเสร็จแต่ไม่มีผลลัพธ์ — ระบบหยุดเพื่อไม่แสดงข่าวว่าง');
+            missingError.errorType = 'QUEUE_RESULT_MISSING';
+            missingError.failedStep = 'queue_result';
+            throw missingError;
+          }
+          return { result: statusData.result, recoveryToken };
         } else if (statusData.status === 'failed') {
           setQueuePolling(false);
-          try { localStorage.removeItem('vf_last_job'); } catch {}
-          throw new Error(statusData.error || 'คิวประมวลผลไม่สำเร็จ');
+          clearQueueRecoveryTokenIfOwned(recoveryToken, localStorage);
+          const queueError = new Error(statusData.error || 'คิวประมวลผลไม่สำเร็จ');
+          queueError.errorType = statusData.errorType || 'QUEUE_JOB_FAILED';
+          queueError.failedStep = statusData.failedStep || 'queue_process';
+          queueError.isQueueTerminal = true;
+          throw queueError;
         }
       } catch (pollErr) {
         // ★ AbortError/TimeoutError = React lifecycle หรือ 8s timeout → retry ทันที
@@ -305,7 +491,8 @@ function NewContentPageInner() {
           console.warn(`[Queue] Poll ${pollErr.name} — retrying...`);
           continue; // ไม่นับเป็น error จริง — retry loop
         }
-        if (pollErr.message?.includes('คิวประมวลผลไม่สำเร็จ')) throw pollErr;
+        if (pollErr.errorType === 'QUEUE_RESULT_MISSING'
+            || pollErr.isQueueTerminal) throw pollErr;
         // ★ FIX: network error (server restart/เน็ตหลุด) เดิมกลืนเงียบ → UI ค้างตลอดกาล
         //   ตอนนี้โชว์สถานะ + ระบบ recovery จะกู้ผลลัพธ์ให้เมื่อกลับมาเชื่อมต่อได้
         consecutiveNetErrors++;
@@ -331,7 +518,7 @@ function NewContentPageInner() {
     setAutoLog([]);
     setError('');
     setStep('input');
-    setArchiveSaved(false); archiveSavedRef.current = false; // ★ Reset เพื่อให้ save ได้ทุกครั้ง
+    setArchiveSavedFlag(false); // Reset เพื่อให้ save ได้ทุกครั้ง
     setNewsData(null); setBreakdownData(null); setAnalysisResult(null);
     setSourceType(type || 'url');
     setUrl(targetUrl);
@@ -359,7 +546,7 @@ function NewContentPageInner() {
       // Real timings: Scrape 8s | Extract 12s | Breakdown 30-60s | Blueprint+Research 15s | Generate A1 60-120s | Generate A2 60-120s
       const stepTimeline = [
         { at: 8,   fn: () => { wfComplete('auto_scrape', 'ดึงเนื้อหาสำเร็จ'); wfStart('auto_extract', { model: 'Gemini 2.0 Flash', api: '/api/summarize?mode=extract', detail: 'อ่านเนื้อเว็บ → สกัด newsTitle + newsBody...' }); } },
-        { at: 22,  fn: () => { wfComplete('auto_extract', 'สกัดเนื้อข่าวสำเร็จ'); wfStart('auto_breakdown', { model: 'GPT-5.5', api: '/api/summarize?mode=breakdown', detail: 'วิเคราะห์ core story + key points + possible angles...' }); } },
+        { at: 22,  fn: () => { wfComplete('auto_extract', 'สกัดเนื้อข่าวสำเร็จ'); wfStart('auto_breakdown', { model: 'GPT-5.6 Sol', api: '/api/summarize?mode=breakdown', detail: 'วิเคราะห์ core story + key points + 4 มุมข่าว...' }); } },
         { at: 60,  fn: () => { wfComplete('auto_breakdown', 'วิเคราะห์มุมข่าวสำเร็จ'); wfStart('auto_blueprint', { model: 'GPT-5.5', api: '/api/summarize?mode=blueprint', detail: 'วาง emotional arc: hook → twist → CTA...' }); } },
         { at: 78,  fn: () => { wfComplete('auto_blueprint', 'วาง Blueprint สำเร็จ'); wfStart('auto_research', { api: 'Serper Google Search API', detail: 'ค้นหาข้อเท็จจาก Google × angles...' }); } },
         { at: 95,  fn: () => { wfComplete('auto_research', 'ค้นหาข้อมูลสำเร็จ'); wfStart('auto_classic', { model: 'Claude Opus 4.8', api: '/api/summarize?mode=analyze', detail: 'Angle 1: Research → Generate 2 เวอร์ชัน...' }); } },
@@ -377,18 +564,13 @@ function NewContentPageInner() {
       }, 1000);
 
       // === Queue-based submission ===
-      const queueResult = await submitViaQueue({
+      const { result: queueResult, recoveryToken } = await submitViaQueue({
         input: targetUrl,
         url: targetUrl,
         contentLength,
         userId: 'web-user',
       });
       clearInterval(animateTimer); // หยุด animation
-      
-      // ★ ถ้า job ถูก purge ก่อน polling จะเอาผลลัพธ์ → แจ้ง error
-      if (queueResult?._jobPurged) {
-        throw new Error('ประมวลผลเสร็จแล้วแต่ผลลัพธ์หายไป — กรุณาลองใหม่อีกครั้ง');
-      }
       
       const data = { success: true, data: queueResult?.data || queueResult };
 
@@ -420,7 +602,7 @@ function NewContentPageInner() {
       wfComplete('auto_extract', `"${newsTitle.slice(0, 40)}" | ${st.extract || '?'}s`);
       await delay(200);
 
-      wfStart('auto_breakdown', { api: '/api/auto → GPT-5.5', detail: 'BREAKDOWN prompt → วิเคราะห์มุมข่าว' });
+      wfStart('auto_breakdown', { api: '/api/auto → GPT-5.6 Sol', detail: 'BREAKDOWN prompt → วิเคราะห์ 4 มุมข่าว' });
       await delay(280);
       wfComplete('auto_breakdown', `${anglesCount} มุมข่าว | ${st.breakdown || '?'}s`);
       await delay(200);
@@ -490,7 +672,7 @@ function NewContentPageInner() {
             body: JSON.stringify({
               images: newsImagePreviews,
               newsTitle: data.data.newsData?.newsTitle || '',
-              newsType: data.data.breakdownData?.category || '',
+              newsType: data.data.breakdownData?.primaryCategory || data.data.breakdownData?.category || '',
             }),
           });
           const analyzeData = await analyzeRes.json();
@@ -518,13 +700,19 @@ function NewContentPageInner() {
       }
       setStep('analyzed');
       setAutoProgress('');
-      // 📦 Auto-save เข้าคลังข่าว — ข้ามถ้า server (queue) บันทึกให้แล้ว
-      if (!queueResult?.archiveSaved) {
-        const coverBase64 = data.data?.autoCoverResult?.success ? data.data.autoCoverResult.base64 : null;
-        autoSaveToArchive(data.data.newsData, data.data.breakdownData, coverBase64).catch((e) => console.warn('[Archive] Auto-save failed:', e.message));
-      } else {
-        console.log('[Archive] ⏭️ Server-side archived — client skip');
-      }
+      // 📦 รอผลบันทึกจริงก่อนล้าง recovery token; ถ้าทั้งสองฝั่งล้ม ข่าวยังแสดงและลองบันทึกซ้ำได้
+      const coverBase64 = data.data?.autoCoverResult?.success ? data.data.autoCoverResult.base64 : null;
+      await finalizeQueueArchive(
+        queueResult?.archiveSaved === true,
+        data.data.newsData,
+        data.data.breakdownData,
+        coverBase64,
+        {
+          sourceType: data.data.detection?.inputType || data.data.detection?.platform || 'raw',
+          workflowId: data.data.workflowId || null,
+        },
+        recoveryToken,
+      );
     } catch (err) {
       const failStep = err.failedStep || 'auto_scrape';
       wfFail(failStep, err.message);
@@ -547,8 +735,8 @@ function NewContentPageInner() {
     const textOnly = inputText.replace(/https?:\/\/\S+/g, '').trim();
     const hasText  = textOnly.length > 20;
 
-    // ถ้าเป็น URL เดียว ไม่มีรูป → ใช้ /api/auto เดิม (full enhanced pipeline)
-    if (hasUrl && !hasImg) {
+    // ถ้าเป็น URL ล้วน ไม่มีรูป → ใช้ /api/auto เดิม; ถ้ามีข้อความประกอบห้ามทิ้งข้อความทั้งก้อน
+    if (hasUrl && !hasImg && !hasText) {
       const urlMatch = inputText.match(/https?:\/\/\S+/);
       if (urlMatch) {
         setUrl(urlMatch[0]);
@@ -565,7 +753,7 @@ function NewContentPageInner() {
     setAutoLog([]);
     setError('');
     setStep('input');
-    setArchiveSaved(false); archiveSavedRef.current = false; // ★ Reset เพื่อให้ save ได้ทุกครั้ง
+    setArchiveSavedFlag(false); // Reset เพื่อให้ save ได้ทุกครั้ง
     setNewsData(null); setBreakdownData(null); setAnalysisResult(null);
 
     const inputLabel = hasImg ? `รูปภาพ ${inputImages.length} ใบ` : textOnly.slice(0, 30) || 'input';
@@ -591,7 +779,7 @@ function NewContentPageInner() {
       const stepTimeline = [
         { at: 3,   fn: () => { wfComplete('auto_detect', `✅ ${pipelineType}`); wfStart('auto_scrape', { detail: 'ดึงเนื้อหา...' }); } },
         { at: 8,   fn: () => { wfComplete('auto_scrape', 'ดึงเนื้อหาสำเร็จ'); wfStart('auto_extract', { model: 'Gemini 2.0 Flash', api: '/api/summarize?mode=extract', detail: 'อ่านเนื้อเว็บ → สกัด newsTitle + newsBody...' }); } },
-        { at: 22,  fn: () => { wfComplete('auto_extract', 'สกัดเนื้อข่าวสำเร็จ'); wfStart('auto_breakdown', { model: 'GPT-5.5', api: '/api/summarize?mode=breakdown', detail: 'วิเคราะห์ core story + key points + possible angles...' }); } },
+        { at: 22,  fn: () => { wfComplete('auto_extract', 'สกัดเนื้อข่าวสำเร็จ'); wfStart('auto_breakdown', { model: 'GPT-5.6 Sol', api: '/api/summarize?mode=breakdown', detail: 'วิเคราะห์ core story + key points + 4 มุมข่าว...' }); } },
         { at: 60,  fn: () => { wfComplete('auto_breakdown', 'วิเคราะห์มุมข่าวสำเร็จ'); wfStart('auto_blueprint', { model: 'GPT-5.5', api: '/api/summarize?mode=blueprint', detail: 'วาง emotional arc: hook → twist → CTA...' }); } },
         { at: 78,  fn: () => { wfComplete('auto_blueprint', 'วาง Blueprint สำเร็จ'); wfStart('auto_research', { api: 'Serper Google Search API', detail: 'ค้นหาข้อเท็จจาก Google × angles...' }); } },
         { at: 95,  fn: () => { wfComplete('auto_research', 'ค้นหาข้อมูลสำเร็จ'); wfStart('auto_classic', { model: 'Claude Opus 4.8', api: '/api/summarize?mode=analyze', detail: 'Multi-Angle generate × 3 angles ทำพร้อมกัน...' }); } },
@@ -609,7 +797,7 @@ function NewContentPageInner() {
       }, 1000);
 
       // === Queue-based submission ===
-      const queueResult = await submitViaQueue({
+      const { result: queueResult, recoveryToken } = await submitViaQueue({
         input: inputText,
         images: inputImages,
         contentLength,
@@ -623,6 +811,16 @@ function NewContentPageInner() {
         const errorWithStep = new Error(errMsg);
         errorWithStep.failedStep = data.failedStep || 'auto_extract';
         throw errorWithStep;
+      }
+
+      const resolvedAnalysis = data.analysisResult
+        || data.data?.analysisResult
+        || (Array.isArray(data.data?.versions) ? { versions: data.data.versions } : null);
+      if (!Array.isArray(resolvedAnalysis?.versions) || resolvedAnalysis.versions.length === 0) {
+        const missingResultError = new Error('ระบบประมวลผลเสร็จแต่ไม่มีเวอร์ชันข่าว — หยุดเพื่อไม่แสดงผลลัพธ์ว่าง');
+        missingResultError.errorType = 'ANALYSIS_RESULT_MISSING';
+        missingResultError.failedStep = 'auto_analyze';
+        throw missingResultError;
       }
 
       // ─── Finalize steps กับข้อมูลจริงจาก API ───
@@ -666,24 +864,28 @@ function NewContentPageInner() {
       // ✅ Phase 3: use data.analysisResult directly (top-level from process route)
       setNewsData(data.newsData);
       setBreakdownData(data.breakdownData);
-      setAnalysisResult(data.analysisResult || {
-        versions:  data.data?.versions || [],
-        usedPreset:{ name: data.detection?.pipelineLabel },
-      });
-      setSourceType(data.detection?.platform || 'universal');
+      setAnalysisResult(resolvedAnalysis);
+      setWorkflowId(data.workflowId || data.data?.workflowId || null);
+      setSourceType(data.detection?.inputType || data.detection?.platform || 'raw');
       setAutoLog(data.debug?.log || []);
 
       // ✅ Phase 3: set url from response for result display
       const sourceUrl = data.newsData?.sourceUrl || data.normalized?.title && data.detection?.primaryUrl;
       if (sourceUrl) setUrl(sourceUrl);
 
-      // ★ ข้าม save ถ้า server (queue) บันทึกให้แล้ว
-      if (!data.archiveSaved) {
-        const coverBase64 = data.autoCoverResult?.success ? data.autoCoverResult.base64 : null;
-        autoSaveToArchive(data.newsData || data.data?.newsData, data.breakdownData || data.data?.breakdownData, coverBase64).catch((e) => console.warn('[Archive] Auto-save failed:', e.message));
-      } else {
-        console.log('[Archive] ⏭️ Server-side archived — client skip');
-      }
+      // ★ รอผลบันทึกจริงก่อนล้าง recovery token; ถ้าทั้งสองฝั่งล้ม ข่าวยังแสดงและลองบันทึกซ้ำได้
+      const coverBase64 = data.autoCoverResult?.success ? data.autoCoverResult.base64 : null;
+      await finalizeQueueArchive(
+        data.archiveSaved === true,
+        data.newsData || data.data?.newsData,
+        data.breakdownData || data.data?.breakdownData,
+        coverBase64,
+        {
+          sourceType: data.detection?.inputType || data.detection?.platform || 'raw',
+          workflowId: data.workflowId || data.data?.workflowId || null,
+        },
+        recoveryToken,
+      );
       if (data.simulatedComments?.length > 0) {
         setSimulatedComments(data.simulatedComments);
       }
@@ -1226,7 +1428,7 @@ function NewContentPageInner() {
     setSimulatedComments([]);
     setFactPoolData(null);
     // W12 fix: clear state ที่เคยขาด
-    setArchiveSaved(false);
+    setArchiveSavedFlag(false);
     setBlueprintData(null); setEditedBlueprint(null); setBlueprinting(false);
     setComposedImages(null); setComposingImage(false);
     setNewsImages([]); setNewsImagePreviews([]);
@@ -1264,22 +1466,34 @@ function NewContentPageInner() {
         )}
 
         {/* ★ Recovery Banner — งานล่าสุดเสร็จแล้วแต่ UI ไม่ได้รับผล (เน็ตหลุด/รีเฟรช/server restart) */}
-        {recoveryJob && step === 'input' && !autoMode && (
+        {recoveryJob && !autoMode && (
           <div style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid #10b981', borderRadius: 'var(--radius-md)', padding: '14px 20px', marginBottom: 20, fontSize: 13, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 20 }}>🧭</span>
             <div style={{ flex: 1, minWidth: 200 }}>
               <div style={{ fontWeight: 700, color: '#10b981' }}>พบงานล่าสุดที่ประมวลผลเสร็จแล้ว</div>
               <div style={{ color: 'var(--text-muted)', marginTop: 2 }}>
-                "{(recoveryJob.result?.newsData?.newsTitle || recoveryJob.result?.data?.newsData?.newsTitle || 'ข่าวที่สร้างเสร็จ').slice(0, 60)}" — {(recoveryJob.result?.analysisResult?.versions || recoveryJob.result?.data?.analysisResult?.versions || []).length} เวอร์ชัน
+                “{(recoveryJob.result?.newsData?.newsTitle || recoveryJob.result?.data?.newsData?.newsTitle || 'ข่าวที่สร้างเสร็จ').slice(0, 60)}” — {(recoveryJob.result?.analysisResult?.versions || recoveryJob.result?.data?.analysisResult?.versions || []).length} เวอร์ชัน
               </div>
             </div>
             <button
-              onClick={() => { applyQueueResult(recoveryJob.result); setRecoveryJob(null); try { localStorage.removeItem('vf_last_job'); } catch {} }}
+              onClick={async () => {
+                if (!queueRecoveryTokenMatches(readQueueRecoveryToken(localStorage), recoveryJob)) {
+                  setRecoveryJob(null);
+                  return;
+                }
+                if (await applyQueueResult(recoveryJob.result)) {
+                  clearQueueRecoveryTokenIfOwned(recoveryJob, localStorage);
+                  setRecoveryJob(null);
+                }
+              }}
               className="btn btn-sm"
               style={{ background: '#10b981', color: '#fff', border: 'none', fontWeight: 700 }}
             >📥 ดูผลลัพธ์</button>
             <button
-              onClick={() => { setRecoveryJob(null); try { localStorage.removeItem('vf_last_job'); } catch {} }}
+              onClick={() => {
+                clearQueueRecoveryTokenIfOwned(recoveryJob, localStorage);
+                setRecoveryJob(null);
+              }}
               className="btn btn-ghost btn-sm"
             >ปิด</button>
           </div>

@@ -20,7 +20,7 @@ const FORBIDDEN_WORDS = [
   { pattern: /ฆาตกรรม/g, type: 'forbidden_word', severity: 'high', suggestion: 'คดีร้ายแรง' },
   { pattern: /ฆ่าตัวตาย/g, type: 'forbidden_word', severity: 'high', suggestion: 'จากไปอย่างเงียบๆ' },
   { pattern: /ศพ/g, type: 'forbidden_word', severity: 'high', suggestion: 'ร่างผู้เสียหาย' },
-  { pattern: /(?<!เสีย)ตาย(?!ตัว|ด้าน|แล้ว)/g, type: 'forbidden_word', severity: 'high', suggestion: 'จากไป' },
+  { pattern: /(?<!เสีย|ปิด)ตาย(?!ตัว|ด้าน|แล้ว)/g, type: 'forbidden_word', severity: 'high', suggestion: 'จากไป' },
   { pattern: /ชำแหละ/g, type: 'forbidden_word', severity: 'high', suggestion: 'เหตุรุนแรงอย่างยิ่ง' },
   { pattern: /หมกศพ/g, type: 'forbidden_word', severity: 'high', suggestion: 'ซุกซ่อนร่าง' },
   { pattern: /ข่มขืน/g, type: 'forbidden_word', severity: 'high', suggestion: 'ล่วงละเมิดทางเพศ' },

@@ -3,6 +3,7 @@ import { logApiUsage } from './usageLogger';
 import { sanitizeOutput } from './safetyFilter';
 import { MODEL_PRIMARY } from './modelConfig.js';
 import { ironRule5LengthLine, legacyLengthRule } from './legacyLengthRules.js'; // 🗑️ กฎที่ 5 ยุคแรก (ถอด 17 ส.ค. 69 · ถอยคืน LEGACY_LENGTH_RULES=1)
+import { preparePipelineSignal, rethrowPipelineDeadline } from '../utils/pipelineDeadline.js';
 
 
 // ★ 18 ส.ค. 69 เจ้าของสั่ง "เก็บ log 100% ทุกขั้นตอน ทุกคำสั่ง" — สวิตช์ LOG_FULL_PROMPT=1
@@ -193,6 +194,7 @@ ${_p}
   for (const currentModel of modelsToTry) {
     try {
       console.log(`[callAI] Trying model=${currentModel}`);
+      const requestSignal = preparePipelineSignal(signal, `openai:${currentModel}`, 15_000);
       const isNewModel = currentModel.startsWith('gpt-5') || currentModel.startsWith('o1') || currentModel.startsWith('o3');
 
       // ★ 1 ส.ค. 69 (ออดิต): gpt-4o/gpt-4o-mini รับ completion สูงสุด 16384 — ส่งเพดานดิบ (เช่น 24000) ทำไม้สองตาย 400 ทุกครั้ง
@@ -209,7 +211,7 @@ ${_p}
           : { max_tokens: _maxTokens }),
         response_format: { type: 'json_object' },
       // ★ 16 ก.ค. 69 (B4): รับ AbortSignal จาก withTimeoutSignal — timeout แล้วยกเลิก HTTP จริง ตัดจ่ายซ้อน
-      }, signal ? { signal } : undefined);
+      }, requestSignal ? { signal: requestSignal } : undefined);
 
       const content = response.choices[0]?.message?.content;
       if (!content) {
@@ -249,6 +251,7 @@ ${content}
       try { Object.defineProperty(_safe, '_modelUsed', { value: currentModel, enumerable: false }); } catch {}
       return _safe;
     } catch (err) {
+      rethrowPipelineDeadline(err, `openai:${currentModel}`);
       console.warn(`[callAI] ⚠️ Model '${currentModel}' failed: ${err.message}`);
       lastError = err;
     }

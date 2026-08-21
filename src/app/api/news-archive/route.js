@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createStore } from '@/lib/persistStore';
-import { callAI } from '@/lib/ai/openai';
-import { MODEL_FAST } from '@/lib/ai/modelConfig';
 import { getSupabase, isSupabaseReady } from '@/lib/supabase';
+import { saveNewsArchive } from '@/lib/services/newsArchiveService';
 
 const STORE = 'news-archive';
 const TABLE = 'store_items';
@@ -91,97 +90,22 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'ต้องมี title หรือ newsBody' }, { status: 400 });
     }
 
-    // ★ Dedup guard: title เดียวกันภายใน 10 นาที → ไม่สร้างซ้ำ (กัน archive ซ้ำจาก server+client)
-    try {
-      const dedupStore = createStore(STORE);
-      const existing = await dedupStore.getAll();
-      const cutoff = Date.now() - 10 * 60 * 1000;
-      const dupe = existing.find(it =>
-        it.title && title && it.title === title &&
-        new Date(it.archived_at || it.createdAt || 0).getTime() > cutoff
-      );
-      if (dupe) {
-        console.log(`[Archive] ⏭️ Duplicate within 10min — skip save: "${String(title).slice(0, 50)}"`);
-        return NextResponse.json({ success: true, data: dupe, deduped: true });
-      }
-    } catch (dedupErr) {
-      console.warn('[Archive] Dedup check failed (continuing):', dedupErr.message);
+    const result = await saveNewsArchive({
+      title,
+      newsBody,
+      sourceUrl,
+      sourceType,
+      breakdownData,
+      workflowId,
+      archivedBy,
+      coverImage,
+    });
+    if (result.deduped) {
+      console.log(`[Archive] ⏭️ Exact duplicate — reuse: "${result.item.title.slice(0, 50)}"`);
+    } else {
+      console.log(`[Archive] ✅ Saved: "${result.item.title.slice(0, 50)}" [${result.item.category}]`);
     }
-
-    // === AI ตรวจจับ category อัตโนมัติ ===
-    let category = 'ทั่วไป';
-    let summary = '';
-    let tags = [];
-    try {
-      const aiResult = await callAI({
-        model: MODEL_FAST,
-        temperature: 0.1,
-        maxTokens: 400,
-        prompt: `วิเคราะห์ข่าวนี้แล้วตอบเป็น JSON
-
-หัวข้อ: ${title || ''}
-เนื้อหา: ${(newsBody || '').slice(0, 1500)}
-
-ตอบ JSON:
-{
-  "category": "หมวดหมู่ข่าว (เลือก 1: การเมือง|สังคม|อาชญากรรม|อุบัติเหตุ|บันเทิง|กีฬา|เศรษฐกิจ|สุขภาพ|ต่างประเทศ|เทคโนโลยี|สิ่งแวดล้อม|ศาสนา|ทั่วไป)",
-  "summary": "สรุปข่าว 1-2 ประโยค (ไม่เกิน 100 คำ)",
-  "tags": ["tag1", "tag2", "tag3"]
-}`,
-      });
-      if (aiResult?.category) category = aiResult.category;
-      if (aiResult?.summary) summary = aiResult.summary;
-      if (aiResult?.tags) tags = aiResult.tags;
-    } catch (e) {
-      console.warn('[Archive] AI classify failed:', e.message);
-    }
-
-    // สกัดข้อมูลจาก breakdown
-    const keyPeople = breakdownData?.key_facts?.people || [];
-    const keyPlaces = breakdownData?.key_facts?.places || [];
-    const viralScore = breakdownData?.possible_angles?.[0]?.facebook_viral_score || null;
-    const wordCount = (newsBody || '').split(/\s+/).filter(Boolean).length;
-    let sourceDomain = '';
-    if (sourceUrl) {
-      try {
-        sourceDomain = new URL(sourceUrl).hostname.replace('www.', '');
-      } catch (_urlErr) {
-        // Invalid URL — leave sourceDomain as empty string
-      }
-    }
-
-    const id = `archive_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const now = new Date().toISOString();
-
-    const item = {
-      id,
-      title: title || newsBody?.slice(0, 100) || 'ไม่มีหัวข้อ',
-      body: newsBody || '',
-      source_url: sourceUrl || '',
-      source_type: sourceType || 'web',
-      source_name: sourceDomain,
-      category,
-      tags,
-      summary,
-      key_people: keyPeople,
-      key_places: keyPlaces,
-      viral_score: viralScore,
-      word_count: wordCount,
-      used_count: 0,
-      last_used_at: null,
-      archived_by: archivedBy || 'system',
-      archived_at: now,
-      workflow_id: workflowId || null,
-      cover_image: coverImage || null,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    const store = createStore(STORE);
-    await store.add(item);
-
-    console.log(`[Archive] ✅ Saved: "${item.title.slice(0, 50)}" [${category}]`);
-    return NextResponse.json({ success: true, data: item });
+    return NextResponse.json({ success: true, data: result.item, ...(result.deduped ? { deduped: true } : {}) });
 
   } catch (err) {
     console.error('[Archive] POST error:', err.message);

@@ -28,7 +28,13 @@ const memoryLogs = [];
  * @param {string} entry.detail - รายละเอียดเพิ่มเติม
  * @param {object} entry.metadata - ข้อมูลเพิ่มเติม (JSON)
  */
-export async function logPipeline(entry) {
+export async function logPipeline(entry, { signal } = {}) {
+  const throwIfAborted = () => {
+    if (signal?.aborted) throw signal.reason instanceof Error
+      ? signal.reason
+      : new DOMException('Pipeline log aborted', 'AbortError');
+  };
+  throwIfAborted();
   const logEntry = {
     id: uuidv4(),
     workflow_id: entry.workflowId || null,
@@ -67,13 +73,18 @@ export async function logPipeline(entry) {
   if (isSupabaseReady()) {
     try {
       const sb = getSupabase();
-      await sb.from('pipeline_logs').insert(logEntry);
+      let query = sb.from('pipeline_logs').insert(logEntry);
+      if (signal && typeof query?.abortSignal === 'function') query = query.abortSignal(signal);
+      await query;
+      throwIfAborted();
     } catch (e) {
+      throwIfAborted();
       console.warn('[PipelineLog] Supabase save failed:', e.message);
     }
   }
 
   // Always keep in memory too (last 200)
+  throwIfAborted();
   memoryLogs.unshift(logEntry);
   if (memoryLogs.length > 200) memoryLogs.length = 200;
 

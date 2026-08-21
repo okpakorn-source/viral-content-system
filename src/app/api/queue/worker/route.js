@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { Agent } from 'undici';
 import { getNextPendingJobs, updateJobStatus, cleanupStaleJobs } from '@/lib/services/queueService';
 import { createLogger } from '@/lib/logger';
+import { resolveNewsQueueTiming } from '@/lib/utils/pipelineDeadline';
 
 const logger = createLogger('QUEUE_WORKER');
 
@@ -12,11 +13,10 @@ const logger = createLogger('QUEUE_WORKER');
 //   แพตเทิร์นเดียวกับที่ระบบเคยแก้โรคนี้ที่ quick-test/route.js:16,75 (REF_LONG_AGENT)
 //   ⚠️ ใช้เฉพาะ "งานข่าว" — ปก/mineclip คงเส้นเดิมทุกไบต์ (มี self-report + เส้นผ่อนผันของตัวเอง)
 //   ถอยกลับ: QUEUE_FETCH_LONG_AGENT=0 (กลับพฤติกรรมเดิมทันที) · ปรับเพดาน: QUEUE_NEWS_DEADLINE_MS
-const NEWS_DEADLINE_MS = (() => {
-  const v = Number(String(process.env.QUEUE_NEWS_DEADLINE_MS || '').trim().replace(/^["']|["']$/g, ''));
-  // ต้องต่ำกว่า maxDuration=800s เสมอ (worker เองตายก่อน) — ของเดิมตั้ง 900s ซึ่งไม่มีวันได้ใช้จริง
-  return Number.isFinite(v) && v > 0 && v < 800_000 ? v : 770_000;
-})();
+const {
+  workerDeadlineMs: NEWS_DEADLINE_MS,
+  pipelineBudgetMs: NEWS_PIPELINE_BUDGET_MS,
+} = resolveNewsQueueTiming(process.env.QUEUE_NEWS_DEADLINE_MS);
 let _newsAgent = null;
 function getNewsAgent() {
   if (process.env.QUEUE_FETCH_LONG_AGENT === '0') return undefined; // สวิตช์ถอย = ไม่ส่ง dispatcher (พฤติกรรมเดิม)
@@ -28,6 +28,15 @@ function getNewsAgent() {
     });
   }
   return _newsAgent;
+}
+
+function classifyQueueFetchFailure(error) {
+  const causeCode = String(error?.cause?.code || error?.code || '').toUpperCase();
+  const definitelyNotStarted = /^(ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|UND_ERR_CONNECT_TIMEOUT|ERR_INVALID_URL)$/.test(causeCode);
+  // เฉพาะ error ที่เกิดจาก fetch/อ่าน response จริงเท่านั้นที่อาจหมายถึง route ยังทำต่ออยู่
+  // API ตอบ error ที่มีคำว่า timeout ต้องไม่ถูก rescue เพราะ route จบและรายงานผลแล้ว
+  const routeMayStillBeRunning = error?.queueFetchOrigin === true && !definitelyNotStarted;
+  return { causeCode, definitelyNotStarted, routeMayStillBeRunning };
 }
 
 export const runtime = 'nodejs';
@@ -87,10 +96,24 @@ export async function POST(req) {
     
     // 3. Process jobs ONE AT A TIME (sequential, not concurrent)
     for (const job of jobs) {
+      const isCoverJob = job.payload?.jobType === 'cover';
+      const isMineClipJob = job.payload?.jobType === 'mineclip';
+      const _isNewsJob = !isCoverJob && !isMineClipJob;
+      const updateOwnedJob = async (status, extra) => {
+        if (!_isNewsJob) return updateJobStatus(job.id, status, extra);
+        try {
+          return await updateJobStatus(job.id, status, extra, { expectedAttemptId: job.attemptId });
+        } catch (statusError) {
+          if (statusError?.code === 'STALE_QUEUE_ATTEMPT'
+              || statusError?.errorType === 'STALE_QUEUE_ATTEMPT') {
+            logger.info(`[Queue Worker] ⏭️ Job ${job.id.slice(0, 8)} เปลี่ยนรอบหรือ route รายงานผลแล้ว — ไม่เขียนทับ`);
+            return null;
+          }
+          throw statusError;
+        }
+      };
       try {
         // ★ Routing ตามชนิดงาน: cover → auto-cover | mineclip → ขุดนาทีทอง | อื่นๆ → /api/auto/process
-        const isCoverJob = job.payload?.jobType === 'cover';
-        const isMineClipJob = job.payload?.jobType === 'mineclip';
         // 🏭 8 ก.ค.: auto-cover-v3 ถอดทิ้ง (ผู้ใช้สั่ง) — งานปก MEGA (composer:'mega') → โรงประกอบใหม่ · อื่นๆ → โรงเดิม v1
         const coverPath = job.payload?.composer === 'mega' ? '/api/mega/compose' : '/api/auto-cover';
         const processUrl = isCoverJob ? `${baseUrl}${coverPath}`
@@ -101,8 +124,8 @@ export async function POST(req) {
         // AbortController: pipeline ใช้เวลา >12min — timeout ต้องมากกว่านั้น
         // ★ 15 ส.ค. 69: งานข่าวใช้ deadline 770s (ต่ำกว่า maxDuration 800 — ของเดิม 900s ไม่มีวันได้ใช้จริง)
         //   ปก/mineclip คงของเดิม 900s ทุกไบต์ · ของเดิม: setTimeout(() => controller.abort(), 900_000)
-        const _isNewsJob = !isCoverJob && !isMineClipJob;
         const controller = new AbortController();
+        const workerFetchStartedAt = Date.now();
         const timeout = setTimeout(() => controller.abort(), _isNewsJob ? NEWS_DEADLINE_MS : 900_000);
 
         let res;
@@ -111,10 +134,13 @@ export async function POST(req) {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
+              ...(_isNewsJob ? {
+                'x-news-pipeline-deadline-at': String(workerFetchStartedAt + NEWS_PIPELINE_BUDGET_MS),
+              } : {}),
               // ชั้นกันที่สอง: ถ้าตั้ง bypass secret ไว้ใน Vercel จะทะลุ Deployment Protection ได้เสมอ (ไม่ตั้ง = header ไม่ถูกส่ง)
               ...(process.env.VERCEL_AUTOMATION_BYPASS_SECRET ? { 'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET } : {}),
             },
-            body: JSON.stringify({ ...job.payload, _queueJobId: job.id }),
+            body: JSON.stringify({ ...job.payload, _queueJobId: job.id, _queueAttemptId: job.attemptId }),
             signal: controller.signal,
             // ★ dispatcher เฉพาะงานข่าว — ยกเพดาน transport ที่ AbortSignal คุมไม่ถึง (ปก/mineclip ไม่ส่ง = เส้นเดิม)
             ...(_isNewsJob && getNewsAgent() ? { dispatcher: getNewsAgent() } : {}),
@@ -122,45 +148,53 @@ export async function POST(req) {
         } catch (fetchErr) {
           // ★ Sol: log ให้ชี้ตัวได้ทันทีว่าเป็นเพดาน transport หรือ deadline ของแอป (ห้าม log payload/secret)
           logger.warn(`[Queue Worker] fetch ล้ม job=${job.id.slice(0, 8)} type=${job.payload?.jobType || 'news'} name=${fetchErr?.name} code=${fetchErr?.cause?.code || '-'}`);
+          fetchErr.queueFetchOrigin = true;
           throw fetchErr;
         } finally {
           // ★ Sol: ย้าย clearTimeout มา finally — เดิมถ้า fetch โยน error timer ค้าง
           clearTimeout(timeout);
         }
 
-        // Guard: ถ้า HTTP error ให้ throw เข้า catch block เพื่อ mark failed
-        if (!res.ok) {
-          const errText = await res.text().catch(() => `HTTP ${res.status}`);
-          throw new Error(`process API failed: ${res.status} — ${errText.substring(0, 200)}`);
-        }
-
         // ★ 26 มิ.ย.: route อาจคืนหน้า HTML (timeout/crash ระดับ platform) แทน JSON
         //   เดิม res.json() พังเป็น "Unexpected token '<'" → job.error เก็บข้อความดิบ → โชว์ให้ผู้ใช้
         //   parse แบบปลอดภัย: ถ้าได้ HTML แปลงเป็นข้อความสะอาดอ่านออก
         let data;
-        {
-          const rawText = await res.text();
-          try {
-            data = JSON.parse(rawText);
-          } catch {
-            const looksHtml = /<!DOCTYPE|<html|FUNCTION_INVOCATION|error occurred|deadline|timed? ?out/i.test(rawText);
-            throw new Error(looksHtml
-              ? 'เซิร์ฟเวอร์ทำปกใช้เวลานานเกิน/ขัดข้องชั่วคราว — ลองสร้างปกใหม่อีกครั้ง (ถ้าใส่ลิงก์แหล่งรูปเป็นคลิป FB/วิดีโอ ลองเอาออกก่อน)'
-              : `เซิร์ฟเวอร์ตอบกลับผิดรูปแบบ (${res.status}) — ลองใหม่อีกครั้ง`);
-          }
+        let rawText;
+        try {
+          rawText = await res.text();
+        } catch (bodyReadError) {
+          bodyReadError.queueFetchOrigin = true;
+          throw bodyReadError;
+        }
+        try {
+          data = JSON.parse(rawText);
+        } catch {
+          const looksHtml = /<!DOCTYPE|<html|FUNCTION_INVOCATION|error occurred|deadline|timed? ?out/i.test(rawText);
+          throw new Error(looksHtml
+            ? 'เซิร์ฟเวอร์ทำปกใช้เวลานานเกิน/ขัดข้องชั่วคราว — ลองสร้างปกใหม่อีกครั้ง (ถ้าใส่ลิงก์แหล่งรูปเป็นคลิป FB/วิดีโอ ลองเอาออกก่อน)'
+            : `เซิร์ฟเวอร์ตอบกลับผิดรูปแบบ (${res.status}) — ลองใหม่อีกครั้ง`);
+        }
+
+        if (!res.ok) {
+          const apiError = new Error(data?.error || `process API failed: ${res.status}`);
+          apiError.errorType = data?.errorType || 'PROCESS_API_FAILED';
+          apiError.failedStep = data?.failedStep || 'queue_process';
+          throw apiError;
         }
 
         // ★ Cover ที่ render สำเร็จแต่ติด save-gate (success:false + base64) ก็นับเป็น completed
         //   — เก็บ result เต็มให้ client ตัดสินใจแสดง warning เอง (เทียบเท่า sync path ที่ได้ JSON เต็ม)
         if (res.ok && (data.success || (isCoverJob && data.base64))) {
-          await updateJobStatus(job.id, 'completed', {
+          await updateOwnedJob('completed', {
             result: data,
             completedAt: new Date().toISOString()
           });
           logger.info(`[Queue Worker] ✅ Job ${job.id.slice(0, 8)} completed successfully.`);
         } else {
-          await updateJobStatus(job.id, 'failed', {
+          await updateOwnedJob('failed', {
             error: data.error || data.manualReviewReason || 'Unknown API Error',
+            errorType: data.errorType || 'PROCESS_API_FAILED',
+            failedStep: data.failedStep || 'queue_process',
             completedAt: new Date().toISOString()
           });
           logger.error(`[Queue Worker] ❌ Job ${job.id.slice(0, 8)} failed: ${data.error}`);
@@ -174,16 +208,20 @@ export async function POST(req) {
         //   แต่ชั้นเชื่อมต่อตายก่อน กลับถูกตีตรา ❌ → ทีมเห็นล้มแล้วส่งซ้ำ = จ่ายซ้ำ + ข่าวซ้ำในคลัง
         //   ทุกงานที่ตายด้วยอาการ timeout จะรอ route รายงานสถานะเอง (มี cleanupStaleJobs กันค้างอยู่แล้ว)
         //   ถอยกลับพฤติกรรมเดิม (กู้เฉพาะงานปก): QUEUE_TIMEOUT_RESCUE=cover-only
-        const isTimeoutish = /fetch failed|UND_ERR|HeadersTimeout|aborted|timeout/i.test(err.message || '');
+        // Rescue ได้เฉพาะอาการที่ request อาจถึง route แล้วและ route ยังทำงานต่ออยู่จริง
+        // generic "fetch failed" หรือ connect/DNS failure ห้าม rescue เพราะไม่มี route ใดมารายงานผลภายหลัง
+        const { definitelyNotStarted, routeMayStillBeRunning } = classifyQueueFetchFailure(err);
         const _rescueMode = String(process.env.QUEUE_TIMEOUT_RESCUE || '').trim().toLowerCase().replace(/^["']|["']$/g, '');
         const _rescueOn = _rescueMode === 'cover-only'
           ? job.payload?.jobType === 'cover'
           : _rescueMode !== 'off';
-        if (_rescueOn && isTimeoutish) {
+        if (_rescueOn && routeMayStillBeRunning) {
           logger.info(`[Queue Worker] ⏳ Job ${job.id.slice(0, 8)} (${job.payload?.jobType || 'news'}) fetch died (${err.message?.slice(0, 50)}) — pipeline ยังวิ่งต่อ รอ self-report จาก route`);
         } else {
-          await updateJobStatus(job.id, 'failed', {
+          await updateOwnedJob('failed', {
             error: err.message,
+            errorType: err.errorType || (definitelyNotStarted ? 'QUEUE_UPSTREAM_UNREACHABLE' : 'QUEUE_WORKER_ERROR'),
+            failedStep: err.failedStep || (definitelyNotStarted ? 'queue_connect' : 'queue_worker'),
             completedAt: new Date().toISOString()
           });
           logger.error(`[Queue Worker] ❌ Job ${job.id.slice(0, 8)} threw error: ${err.message}`);

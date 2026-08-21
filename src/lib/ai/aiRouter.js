@@ -14,6 +14,7 @@ import { callAI } from './openai.js';
 import { callClaude, isClaudeAvailable } from './claudeClient.js';
 import { callGemini, isGeminiAvailable } from './geminiClient.js';
 import { MODEL_PRIMARY } from './modelConfig.js';
+import { rethrowPipelineDeadline } from '../utils/pipelineDeadline.js';
 
 /**
  * เลือก model + เรียก AI อัตโนมัติ
@@ -46,6 +47,7 @@ export async function callSmartAI(task, options) {
       //   (ไม่มีโค้ดไหน branch ตามค่านี้ — ใช้แสดงผล/logPipeline เท่านั้น, grep ยืนยัน 16 ก.ค.)
       return { result, model: (result && result._modelUsed) || modelName };
     } catch (err) {
+      rethrowPipelineDeadline(err, `smart_ai:${modelName}`);
       console.warn(`[SmartAI] ⚠️ Model '${modelName}' failed: ${err.message}`);
       errors.push(`${modelName}: ${err.message}`);
     }
@@ -127,6 +129,7 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
       try {
         return await callClaude({ prompt, temperature, maxTokens, systemPrompt, signal, model: _primary });
       } catch (wErr) {
+        rethrowPipelineDeadline(wErr, `claude-write:${_primary}`);
         const _noRetry = signal?.aborted || _fb.toLowerCase() === 'off' || _fb === _primary;
         if (_noRetry) throw wErr;
         console.warn(`[aiRouter] ⚠️ นักเขียนหลัก ${_primary} ล้ม (${String(wErr.message || '').slice(0, 90)}) → ถอยตัวสำรอง ${_fb}`);
@@ -135,7 +138,7 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
     }
     case 'gemini':
       // callGemini มี timeout 15s ในตัว — ไม่ต้องส่ง signal
-      return callGemini({ prompt, temperature, maxTokens });
+      return callGemini({ prompt, temperature, maxTokens, signal });
     case 'gpt4o':
     default:
       return callAI({ prompt, temperature, maxTokens, model: MODEL_PRIMARY, signal });

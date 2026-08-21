@@ -63,6 +63,8 @@ export async function GET(req) {
       queuesAhead: jobStatus.queuesAhead,
       result: jobStatus.result,
       error: jobStatus.error,
+      errorType: jobStatus.errorType || null,
+      failedStep: jobStatus.failedStep || null,
       startedAt: jobStatus.startedAt,
       completedAt: jobStatus.completedAt
     });

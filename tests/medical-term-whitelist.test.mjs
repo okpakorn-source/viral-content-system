@@ -23,6 +23,14 @@ const t = (name, cond) => { if (cond) { pass++; console.log('✅ ' + name); } el
 // ดึงเฉพาะ issue คำต้องห้ามที่ "ตัวแมช" มีคำว่า เลือด (กัน false-pass จากกฎอื่นในประโยคเทส)
 const bloodIssues = async (content) =>
   (await auditOutput({ content })).issues.filter((i) => i.type === 'forbidden_word' && String(i.text).includes('เลือด'));
+const deathIssues = async (content) =>
+  (await auditOutput({ content })).issues.filter((i) => i.type === 'forbidden_word' && i.text === 'ตาย');
+
+// เคสจริง #04533: “ไม่ปิดตาย” เป็นสำนวนว่ากติกายืดหยุ่น ไม่ใช่การเสียชีวิต
+{
+  t('สำนวน “ไม่ปิดตาย” ต้องไม่ถูกส่งไป rewrite ทั้งบท', (await deathIssues('เข้มแต่ไม่ปิดตาย ยังมีวันเสาร์ให้ลูกเลือกกิจกรรมเอง')).length === 0);
+  t('คำว่า “ตาย” ที่หมายถึงเสียชีวิตจริงยังต้องถูกจับ', (await deathIssues('ชายคนนั้นตายในที่เกิดเหตุ')).length === 1);
+}
 
 // ── ① Safe cases (Sol ข้อ 2): ศัพท์แพทย์ 10 แบบ ต้องไม่ถูกชี้เลย ──
 const SAFE = ['โรคหลอดเลือดสมอง', 'โรคหลอดเลือดในสมอง', 'เส้นเลือดในสมอง', 'ลิ่มเลือด', 'เม็ดเลือด',

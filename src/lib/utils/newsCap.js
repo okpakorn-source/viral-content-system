@@ -30,7 +30,7 @@ export const NEWS_CAPS = {
   RESEARCH:  { env: 'NEWS_CAP_RESEARCH',  was: 2000, desc: 'สกัดคีย์เวิร์ดไปค้นข้อมูลเสริม' },
   FORMAL:    { env: 'NEWS_CAP_FORMAL',    was: 1500, desc: 'ตรวจว่าเป็นข่าวราชพิธี/ทางการหรือไม่' },
   VIRAL_MATCH:{ env: 'NEWS_CAP_VIRAL_MATCH', was: 900,  desc: 'ตัวจับคู่ครูไวรัล (ทำงานเมื่อ VIRAL_MATCH_MODE=ai)' },
-  WRITER:    { env: 'WRITER_SOURCE_CHARS', was: 3000, desc: 'เนื้อต้นฉบับที่นักเขียนได้อ่าน', fallback: 12000 },
+  WRITER:    { env: 'WRITER_SOURCE_CHARS', was: 3000, desc: 'เนื้อต้นฉบับที่นักเขียนได้อ่าน', fallback: 0 },
 };
 
 /**
@@ -47,7 +47,7 @@ export function newsForStage(stage, body, opts = {}) {
 
   const raw = String(process.env[cfg.env] ?? '').trim().replace(/^["']|["']$/g, '');
   const n = Number(raw);
-  // ตั้งค่าไว้ = ใช้ค่านั้น · ไม่ตั้ง = ใช้ fallback ถ้ามี (WRITER) ไม่งั้น 0 = ไม่จำกัด
+  // ตั้งค่าไว้ = ใช้ค่านั้น · ไม่ตั้ง = 0 (ไม่จำกัด) ทุกด่าน รวมถึง WRITER
   const cap = (raw !== '' && Number.isFinite(n)) ? n : (cfg.fallback || 0);
 
   if (cap > 0 && clean.length > cap) {

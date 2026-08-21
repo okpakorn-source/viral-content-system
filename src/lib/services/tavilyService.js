@@ -29,6 +29,7 @@ export async function tavilySearch(query, options = {}) {
     includeAnswer = true,
     includeImages = false,
     topic = 'news',            // 'general' | 'news'
+    signal,
   } = options;
 
   try {
@@ -46,6 +47,7 @@ export async function tavilySearch(query, options = {}) {
         include_images: includeImages,
         topic,
       }),
+      ...(signal ? { signal } : {}),
     });
 
     if (!res.ok) {
@@ -72,6 +74,7 @@ export async function tavilySearch(query, options = {}) {
       images: data.images || [],
     };
   } catch (err) {
+    if (signal?.aborted) throw (signal.reason || err);
     console.error(`[Tavily] ❌ Error: ${err.message}`);
     return { results: [], answer: '' };
   }

@@ -5,6 +5,11 @@
  * ครอบ Promise ด้วย timeout — ถ้าเกินเวลาจะ reject ทันที
  * ป้องกัน 504 จาก AI calls ที่ค้างนานเกินไป
  */
+import {
+  composeAbortSignals,
+  getActivePipelineDeadline,
+  PipelineDeadlineError,
+} from './pipelineDeadline.js';
 
 /**
  * ครอบ promise ด้วย timeout
@@ -37,8 +42,11 @@ export function withTimeout(promise, ms, stepName = 'unknown') {
  * @param {number} ms
  * @param {string} stepName
  */
-export function withTimeoutSignal(factory, ms, stepName = 'unknown') {
-  const abortOn = process.env.WITHTIMEOUT_ABORT === '1' && typeof AbortController !== 'undefined';
+export function withTimeoutSignal(factory, ms, stepName = 'unknown', parentSignal) {
+  const pipelineDeadline = getActivePipelineDeadline();
+  pipelineDeadline?.assertCanStart(stepName, ms);
+  const abortOn = (pipelineDeadline || parentSignal || process.env.WITHTIMEOUT_ABORT === '1')
+    && typeof AbortController !== 'undefined';
   if (!abortOn) {
     return withTimeout(factory(undefined), ms, stepName);
   }
@@ -48,12 +56,35 @@ export function withTimeoutSignal(factory, ms, stepName = 'unknown') {
     timeoutId = setTimeout(() => {
       const err = new Error(`TIMEOUT: ${stepName} ใช้เวลาเกิน ${Math.round(ms / 1000)}s (ยกเลิก request จริงแล้ว)`);
       err.failedStep = stepName;
-      try { ctrl.abort(); } catch {}
+      try { ctrl.abort(err); } catch {}
       reject(err);
     }, ms);
   });
-  return Promise.race([factory(ctrl.signal), timeoutPromise]).finally(() => {
+  const linkedSignal = composeAbortSignals(ctrl.signal, parentSignal, pipelineDeadline?.signal);
+  let linkedAbortHandler = null;
+  const linkedAbort = linkedSignal
+    ? new Promise((_, reject) => {
+      const rejectAbort = () => reject(
+        linkedSignal.reason instanceof Error
+          ? linkedSignal.reason
+          : new PipelineDeadlineError(stepName)
+      );
+      if (linkedSignal.aborted) rejectAbort();
+      else {
+        linkedAbortHandler = rejectAbort;
+        linkedSignal.addEventListener('abort', linkedAbortHandler, { once: true });
+      }
+    })
+    : null;
+  return Promise.race([
+    factory(linkedSignal),
+    timeoutPromise,
+    ...(linkedAbort ? [linkedAbort] : []),
+  ]).finally(() => {
     clearTimeout(timeoutId);
+    if (linkedAbortHandler) {
+      linkedSignal.removeEventListener('abort', linkedAbortHandler);
+    }
   });
 }
 

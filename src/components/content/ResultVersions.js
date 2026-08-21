@@ -1,6 +1,11 @@
 'use client';
 import React from 'react';
 
+/** ข้อความพร้อมโพสต์: title/hook/closing เป็น metadata หลังบ้าน เนื้อจริงต้องยืนได้เอง */
+export function buildPostText(version) {
+  return String(version?.content || '').trim();
+}
+
 export default function ResultVersions({ states, handlers }) {
   const { analysisResult, composedImages, composingImage, imageLayout, newsData, copied, sentToReview, sendingReview, simulatedComments, loading, researchData, factPoolData } = states;
   const { copyText, handleSendToReview, setCopied, handleAnalyze, handleReset } = handlers;
@@ -213,7 +218,7 @@ export default function ResultVersions({ states, handlers }) {
               <div style={{ marginBottom: 16, padding: 14, background: 'linear-gradient(135deg, rgba(56,189,248,0.08), rgba(168,85,247,0.08))', borderRadius: 10, border: '1px solid rgba(56,189,248,0.25)' }}>
                 <div style={{ fontWeight: 700, marginBottom: 8, color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
                   <span style={{ fontSize: 16 }}>🧠</span>
-                  Smart Research — ข้อเท็จจริงที่ค้นพบเกี่ยวกับ "{factPoolData.entityName || 'บุคคลในข่าว'}"
+                  Smart Research — ข้อเท็จจริงที่ค้นพบเกี่ยวกับ “{factPoolData.entityName || 'บุคคลในข่าว'}”
                 </div>
                 {factPoolData.entitySummary && (
                   <div style={{ marginBottom: 10, padding: '8px 10px', background: 'rgba(255,255,255,0.04)', borderRadius: 8, color: '#cbd5e1', fontSize: 11, lineHeight: 1.6 }}>
@@ -271,14 +276,16 @@ export default function ResultVersions({ states, handlers }) {
                     {v.target && <span style={{ fontSize: 9, padding: '2px 8px', background: 'var(--success-bg)', color: 'var(--success)', borderRadius: 10 }}>👤 {v.target}</span>}
                   </div>
                   <button className="btn btn-ghost btn-sm" style={{ fontSize: 10 }}
-                    onClick={() => copyText((v.title ? v.title + '\n\n' : '') + v.content, `v${i}`)}>
+                    onClick={() => copyText(buildPostText(v), `v${i}`)}>
                     {copied === `v${i}` ? '✅ คัดลอกแล้ว' : '📋 คัดลอก'}
                   </button>
                 </div>
-                {v.title && <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent-light)', marginBottom: 8 }}>{v.title}</div>}
-                {v.hook && <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--warning)', marginBottom: 8, fontStyle: 'italic' }}>🪝 {v.hook}</div>}
+                {v._diversityWarning && (
+                  <div style={{ fontSize: 11, color: 'var(--warning)', marginBottom: 8 }}>
+                    ⚠️ {v._diversityWarning}
+                  </div>
+                )}
                 <div style={{ fontSize: 14, lineHeight: 2, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{v.content}</div>
-                {v.closing && <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--success)', marginTop: 10, fontStyle: 'italic' }}>💬 {v.closing}</div>}
                 
                 {/* 🔗 แสดงอ้างอิงตรงนี้เลย เพื่อให้ UI ชัดเจน */}
                 {(researchItems.length > 0 || newsData?.sourceUrl) && (

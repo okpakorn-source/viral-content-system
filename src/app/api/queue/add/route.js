@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { enqueueJob } from '@/lib/services/queueService';
 import { createStore } from '@/lib/persistStore';
 import { createLogger } from '@/lib/logger';
+import { isSupabaseReady } from '@/lib/supabase';
 
 const logger = createLogger('QUEUE_ADD');
 
@@ -57,6 +58,12 @@ export async function POST(req) {
       return NextResponse.json({ success: false, error: 'Missing input/url/text in payload' }, { status: 400 });
     }
 
+    // ทำให้ alias เก่ากลายเป็นสัญญาเดียวก่อน fingerprint/worker/context gate
+    // มิฉะนั้นงานที่ส่ง { text } ผ่านด่านรับคิว แต่ /api/auto/process อ่าน input='' แล้วปฏิเสธงานตัวเอง
+    if (!isCoverJob && !payload.input) {
+      payload.input = payload.url || payload.text;
+    }
+
     // ★ Garbage-input guard: input ที่ encoding พัง (เต็มไปด้วย "?") จะทำให้ AI แต่งข่าวมั่วทั้งเรื่อง
     const _rawInput = String(payload.input || payload.text || '');
     if (_rawInput.length > 30) {
@@ -86,6 +93,17 @@ export async function POST(req) {
           errorType: 'TEXT_ONLY_MODE',
         }, { status: 400 });
       }
+    }
+
+    // งานข่าวต้องมีฐานคิวกลางที่ทำ conditional claim ได้จริง
+    // file fallback ล็อกได้เฉพาะใน Node process เดียว จึงห้ามรับข่าวแล้วเสี่ยงให้หลาย worker เจนซ้ำ
+    if (_isNewsGenJob && !isSupabaseReady()) {
+      return NextResponse.json({
+        success: false,
+        error: 'ระบบคิวข่าวเชื่อมต่อฐานข้อมูลไม่ได้ชั่วคราว — ยังไม่รับงานเพื่อป้องกันข่าวซ้ำ กรุณาลองใหม่อีกครั้ง',
+        errorType: 'QUEUE_PERSISTENCE_UNAVAILABLE',
+        failedStep: 'queue_persistence',
+      }, { status: 503 });
     }
     
     // ★ 25 มิ.ย. (สืบบอทซ้ำ): บันทึก ping — ใคร (instance) ยิงข้อความไหน (msgId) เข้าคิว · เก็บ 30 ล่าสุด

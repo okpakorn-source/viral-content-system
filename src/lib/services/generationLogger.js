@@ -10,12 +10,98 @@
  */
 
 import { getSupabase, isSupabaseReady } from '../supabase.js';
-import { readFile, writeFile, mkdir } from 'fs/promises';
+import { readFile, writeFile, mkdir, rename, unlink, open, stat } from 'fs/promises';
 import { join } from 'path';
 
 const LOCAL_DIR = join(process.cwd(), 'data');
 const LOCAL_FILE = join(LOCAL_DIR, 'generation-logs.json');
+const LOCAL_LOCK_FILE = `${LOCAL_FILE}.lock`;
 const TABLE = 'generation_logs';
+const LOCAL_LOCK_STALE_MS = 60_000;
+let localWriteTail = Promise.resolve();
+
+function withLocalWriteLock(fn) {
+  const run = localWriteTail.then(fn, fn);
+  localWriteTail = run.catch(() => {});
+  return run;
+}
+
+function isProcessAlive(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+}
+
+async function reclaimStaleLocalFileLock() {
+  try {
+    const [raw, before] = await Promise.all([
+      readFile(LOCAL_LOCK_FILE, 'utf8'),
+      stat(LOCAL_LOCK_FILE),
+    ]);
+    let owner = null;
+    try { owner = JSON.parse(raw); } catch {}
+    const createdAt = Date.parse(owner?.createdAt || '');
+    const lockTime = Number.isFinite(createdAt) ? createdAt : before.mtimeMs;
+    if (!Number.isFinite(lockTime) || Date.now() - lockTime < LOCAL_LOCK_STALE_MS) return false;
+    if (isProcessAlive(Number(owner?.pid))) return false;
+
+    // อ่านซ้ำก่อนลบ: ถ้า identity เปลี่ยน แปลว่ามีเจ้าของใหม่แล้ว ห้ามแตะ
+    const [confirmedRaw, after] = await Promise.all([
+      readFile(LOCAL_LOCK_FILE, 'utf8'),
+      stat(LOCAL_LOCK_FILE),
+    ]);
+    const sameFile = confirmedRaw === raw
+      && before.size === after.size
+      && before.mtimeMs === after.mtimeMs
+      && (!before.ino || !after.ino || before.ino === after.ino);
+    if (!sameFile) return false;
+
+    await unlink(LOCAL_LOCK_FILE);
+    console.warn(`[GenLogger] เก็บ local lock ค้างของ process ${owner?.pid || '?'} แล้ว`);
+    return true;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return true;
+    console.warn(`[GenLogger] ตรวจ local lock ค้างไม่สำเร็จ: ${error.message}`);
+    return false;
+  }
+}
+
+async function acquireLocalFileLock(timeoutMs = 15000) {
+  await mkdir(LOCAL_DIR, { recursive: true });
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    let handle = null;
+    try {
+      handle = await open(LOCAL_LOCK_FILE, 'wx');
+      await handle.writeFile(JSON.stringify({ token, pid: process.pid, createdAt: new Date().toISOString() }), 'utf8');
+      await handle.close();
+      return async () => {
+        try {
+          const owner = JSON.parse(await readFile(LOCAL_LOCK_FILE, 'utf8'));
+          if (owner?.token === token) await unlink(LOCAL_LOCK_FILE);
+        } catch (error) {
+          if (error?.code !== 'ENOENT') {
+            console.warn(`[GenLogger] ปลด local lock ไม่สำเร็จ: ${error.message}`);
+          }
+        }
+      };
+    } catch (error) {
+      if (handle) {
+        await handle.close().catch(() => {});
+        await unlink(LOCAL_LOCK_FILE).catch(() => {});
+      }
+      if (error?.code !== 'EEXIST') throw error;
+      if (await reclaimStaleLocalFileLock()) continue;
+      await new Promise(resolve => setTimeout(resolve, 40));
+    }
+  }
+  throw new Error('Generation Log local lock timeout — มีโปรเซสอื่นกำลังเขียนหรือมี lock ค้าง');
+}
 
 // ─── Local File Helpers ────────────────────────────────────────
 
@@ -27,20 +113,38 @@ async function readLocalLogs() {
       raw = raw.slice(1);
     }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) throw new Error('รูปแบบไฟล์ต้องเป็น array');
+    return parsed;
   } catch (err) {
-    console.warn('[GenLogger] readLocalLogs failed:', err.message);
-    return [];
+    if (err?.code === 'ENOENT') return [];
+    throw new Error(`อ่าน Generation Log ในเครื่องไม่สำเร็จ: ${err.message}`);
   }
 }
 
 async function writeLocalLogs(logs) {
+  await mkdir(LOCAL_DIR, { recursive: true });
+  const tempFile = `${LOCAL_FILE}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
   try {
-    await mkdir(LOCAL_DIR, { recursive: true });
-    await writeFile(LOCAL_FILE, JSON.stringify(logs, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('[GenLogger] Failed to write local file:', err.message);
+    await writeFile(tempFile, JSON.stringify(logs, null, 2), 'utf-8');
+    await rename(tempFile, LOCAL_FILE);
+  } catch (error) {
+    await unlink(tempFile).catch(() => {});
+    throw error;
   }
+}
+
+function nextLocalCaseNumber(logs) {
+  const numbers = logs.map((item) => {
+    const raw = String(item?.caseId ?? '');
+    if (!/^\d+$/.test(raw)) return NaN;
+    const number = Number(raw);
+    return Number.isSafeInteger(number) && number > 0 ? number : NaN;
+  });
+  if (numbers.some(number => !Number.isFinite(number))) {
+    throw new Error('เลข caseId ใน Generation Log ไม่ถูกต้อง');
+  }
+  const next = (numbers.length > 0 ? Math.max(...numbers) : 0) + 1;
+  return String(next).padStart(5, '0');
 }
 
 // ─── Case Number Generator ────────────────────────────────────
@@ -48,22 +152,66 @@ async function writeLocalLogs(logs) {
 async function getNextCaseNumber() {
   if (isSupabaseReady()) {
     const sb = getSupabase();
+    // case_id เป็น text: sort ตามตัวอักษรจะพังที่ 99999 → 100000
+    // ลำดับสร้างล่าสุดมีเลขสูงสุดตาม allocator นี้ จึงอ่านหน้าล่าสุดแล้วหา max แบบตัวเลข
     const { data, error } = await sb
       .from(TABLE)
       .select('case_id')
-      .order('case_id', { ascending: false })
-      .limit(1);
-    if (!error && data?.length > 0) {
-      const lastNum = parseInt(data[0].case_id, 10);
-      return String(lastNum + 1).padStart(5, '0');
+      .order('created_at', { ascending: false })
+      .limit(1000);
+    if (!error) {
+      if (data?.length > 0) {
+        const numbers = data.map((row) => {
+          const rawCaseId = String(row?.case_id ?? '');
+          if (!/^\d+$/.test(rawCaseId)) return NaN;
+          const parsed = Number(rawCaseId);
+          return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : NaN;
+        });
+        if (numbers.some(number => !Number.isFinite(number))) {
+          throw new Error('เลข case_id ใน Supabase ไม่ถูกต้อง');
+        }
+        const lastNum = Math.max(...numbers);
+        return String(lastNum + 1).padStart(5, '0');
+      }
+      return '00001';
     }
-    return '00001';
+    console.warn(`[GenLogger] หาเลขเคสจาก Supabase ไม่สำเร็จ ใช้เลขจาก local: ${error.message}`);
   }
   // Local fallback
   const logs = await readLocalLogs();
-  if (logs.length === 0) return '00001';
-  const lastNum = parseInt(logs[logs.length - 1].caseId, 10);
-  return String(lastNum + 1).padStart(5, '0');
+  return nextLocalCaseNumber(logs);
+}
+
+export function validateGenerationWriterProvenance({ sourceType, versions, pipelineInfo }) {
+  const info = pipelineInfo && typeof pipelineInfo === 'object' ? pipelineInfo : {};
+  const requiresWriterProvenance = sourceType === 'plain_text'
+    || sourceType === 'text';
+  if (!requiresWriterProvenance) return { ok: true, error: '' };
+
+  if (!Array.isArray(versions) || versions.length === 0) {
+    return { ok: false, error: 'งานข่าวข้อความไม่มีเวอร์ชันให้บันทึก' };
+  }
+
+  const versionModels = versions.map(version => (
+    typeof version?.usedModel === 'string' ? version.usedModel.trim() : ''
+  ));
+  const missingIndex = versionModels.findIndex(model => !model);
+  if (missingIndex >= 0) {
+    return { ok: false, error: `version ${missingIndex + 1} ไม่มี usedModel` };
+  }
+
+  const models = [...new Set(versionModels)];
+  const declaredModels = Array.isArray(info.writerModels)
+    ? [...new Set(info.writerModels
+      .map(model => (typeof model === 'string' ? model.trim() : ''))
+      .filter(Boolean))]
+    : [];
+  if (declaredModels.length !== models.length
+      || models.some(model => !declaredModels.includes(model))) {
+    return { ok: false, error: 'pipelineInfo.writerModels ไม่ตรงกับโมเดลรายเวอร์ชัน' };
+  }
+
+  return { ok: true, error: '', models };
 }
 
 // ─── Main Log Function ────────────────────────────────────────
@@ -94,7 +242,12 @@ export async function logGeneration({
   userId = null,
 }) {
   try {
-    const caseId = await getNextCaseNumber();
+    const provenance = validateGenerationWriterProvenance({ sourceType, versions, pipelineInfo });
+    if (!provenance.ok) {
+      throw new Error(`Generation Log provenance ไม่ครบ: ${provenance.error}`);
+    }
+
+    let caseId = await getNextCaseNumber();
     const now = new Date().toISOString();
 
     // ★ 14 ส.ค. 69 (เจ้าของอนุมัติ · สเปก Sol 8.8/10 — sol-backlog4-verdict ข้อ 2): ตัดสตริงด้วยเพดานไบต์ UTF-8 จริง
@@ -142,6 +295,10 @@ export async function logGeneration({
       closing: v.closing || '',
       tone: v.tone || '',
       target: v.target || '',
+      usedModel: typeof v.usedModel === 'string' ? v.usedModel.trim() : '',
+      _source: v._source || '',
+      _sourceLabel: v._sourceLabel || '',
+      promptId: v.promptId || '',
       wordCount: (v.content || '').split(/\s+/).filter(w => w).length,
       charCount: (v.content || '').length,
       paraCount: (v.content || '').split('\n\n').filter(p => p.trim().length > 10).length,
@@ -153,8 +310,8 @@ export async function logGeneration({
       newsTitle: newsTitle || 'ไม่มีหัวข้อ',
       sourceType,
       sourceUrl: sourceUrl || '',
-      sourceText: sourceText ? sourceText.slice(0, 5000) : '', // Cap at 5k chars
-      sourceTextLength: sourceText?.length || 0,
+      sourceText: sourceText ? String(sourceText) : '', // เก็บต้นฉบับเต็มเพื่อ audit การส่งค่าข้ามทุกขั้น
+      sourceTextLength: sourceText ? String(sourceText).length : 0,
       versionCount: compactVersions.length,
       versions: compactVersions,
       breakdown: breakdownData ? {
@@ -165,7 +322,7 @@ export async function logGeneration({
         quotesCount: (breakdownData.quotes || []).length,
       } : null,
       pipelineInfo: {
-        contentLength,
+        contentLength: pipelineInfo.contentLength || contentLength,
         totalTime: pipelineInfo.totalTime || 0,
         promptName: pipelineInfo.promptName || '',
         promptSource: pipelineInfo.promptSource || '',
@@ -173,6 +330,7 @@ export async function logGeneration({
         promptMatchType: pipelineInfo.promptMatchType || '', // ★ 30 มิ.ย.: MATCHED/BORROWED/EXACT/CLOSE — ตรงหรือยืมพร้อมท์ใกล้สุด
         promptId: pipelineInfo.promptId || '',               // ★ 30 มิ.ย.: id พร้อมท์จริง ไว้ตรวจย้อนหลัง
         newsType: pipelineInfo.newsType || '',
+        writerModels: Array.isArray(pipelineInfo.writerModels) ? pipelineInfo.writerModels : [],
         stepTimings: pipelineInfo.stepTimings || {},
         desk: pipelineInfo.desk || null, // ★ ป้ายโต๊ะข่าว {newsId, lane, category, editor, editorIcon}
       },
@@ -186,31 +344,41 @@ export async function logGeneration({
     // Save to Supabase
     if (isSupabaseReady()) {
       const sb = getSupabase();
-      const { error } = await sb.from(TABLE).insert({
-        case_id: caseId,
-        news_title: logEntry.newsTitle,
-        source_type: sourceType,
-        source_url: sourceUrl,
-        source_text: logEntry.sourceText,
-        source_text_length: logEntry.sourceTextLength,
-        version_count: logEntry.versionCount,
-        versions: logEntry.versions,
-        breakdown: logEntry.breakdown,
-        pipeline_info: logEntry.pipelineInfo,
-        user_id: logEntry.userId,
-        status: 'unreviewed',
-        review_note: null,
-        reviewed_at: null,
-        created_at: now,
-      });
-      if (error) {
-        console.warn(`[GenLogger] Supabase insert failed, using local: ${error.message}`);
-        await saveToLocal(logEntry);
-      } else {
-        console.log(`[GenLogger] ✅ Case #${caseId} saved to Supabase`);
+      const collisionDeadline = Date.now() + 30000;
+      let collisionCount = 0;
+      while (true) {
+        logEntry.caseId = caseId;
+        const { error } = await sb.from(TABLE).insert({
+          case_id: caseId,
+          news_title: logEntry.newsTitle,
+          source_type: sourceType,
+          source_url: sourceUrl,
+          source_text: logEntry.sourceText,
+          source_text_length: logEntry.sourceTextLength,
+          version_count: logEntry.versionCount,
+          versions: logEntry.versions,
+          breakdown: logEntry.breakdown,
+          pipeline_info: logEntry.pipelineInfo,
+          user_id: logEntry.userId,
+          status: 'unreviewed',
+          review_note: null,
+          reviewed_at: null,
+          created_at: now,
+        });
+        if (!error) break;
+        const isCaseCollision = /23505|duplicate key|unique/i.test(`${error.code || ''} ${error.message || ''}`);
+        if (!isCaseCollision) {
+          throw new Error(`บันทึก Generation Log ลง Supabase ไม่สำเร็จ: ${error.message}`);
+        }
+        collisionCount++;
+        if (Date.now() >= collisionDeadline) {
+          throw new Error(`จองเลข Generation Log ไม่สำเร็จภายใน 30 วินาที (ชน ${collisionCount} ครั้ง)`);
+        }
+        caseId = await getNextCaseNumber();
       }
+      console.log(`[GenLogger] ✅ Case #${caseId} saved to Supabase${collisionCount ? ` หลัง retry ${collisionCount} ครั้ง` : ''}`);
     } else {
-      await saveToLocal(logEntry);
+      caseId = await saveToLocal(logEntry);
     }
 
     return { caseId, success: true };
@@ -221,12 +389,29 @@ export async function logGeneration({
 }
 
 async function saveToLocal(logEntry) {
-  const logs = await readLocalLogs();
-  logs.push(logEntry);
-  // Keep last 500 entries
-  if (logs.length > 500) logs.splice(0, logs.length - 500);
-  await writeLocalLogs(logs);
-  console.log(`[GenLogger] ✅ Case #${logEntry.caseId} saved to local file`);
+  return withLocalWriteLock(async () => {
+    const release = await acquireLocalFileLock();
+    try {
+      const logs = await readLocalLogs();
+      const maxExisting = Number(nextLocalCaseNumber(logs)) - 1;
+      const requestedRaw = String(logEntry.caseId ?? '');
+      const requested = /^\d+$/.test(requestedRaw) ? Number(requestedRaw) : NaN;
+      if (!Number.isSafeInteger(requested) || requested < 1) {
+        throw new Error('เลข caseId ใหม่ไม่ถูกต้อง');
+      }
+      const caseId = requested > maxExisting
+        ? String(requested).padStart(5, '0')
+        : String(maxExisting + 1).padStart(5, '0');
+      logs.push({ ...logEntry, caseId });
+      // Keep last 500 entries
+      if (logs.length > 500) logs.splice(0, logs.length - 500);
+      await writeLocalLogs(logs);
+      console.log(`[GenLogger] ✅ Case #${caseId} saved to local file`);
+      return caseId;
+    } finally {
+      await release();
+    }
+  });
 }
 
 // ─── Query Functions ──────────────────────────────────────────

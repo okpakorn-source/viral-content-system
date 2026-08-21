@@ -12,8 +12,7 @@
  */
 
 import { getSupabase, isSupabaseReady } from './supabase.js';
-import { readFile, writeFile, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
+import { readFile, writeFile, mkdir, rename, unlink } from 'fs/promises';
 import { join } from 'path';
 
 const TABLE = 'store_items';
@@ -28,7 +27,7 @@ function _decodeStr(str) {
     try {
       const buf = Buffer.from(str, 'binary');
       return buf.toString('utf8');
-    } catch (e) {
+    } catch {
       return str;
     }
   }
@@ -52,20 +51,31 @@ function _decodeValue(val) {
   return val;
 }
 
-async function _fileFallbackLoad(name) {
-  // Only use cache if it has real data (avoid caching empty arrays from failed loads)
-  if (_memCache.has(name) && _memCache.get(name).length > 0) return _memCache.get(name);
+async function _fileFallbackLoad(name, { authoritative = false } = {}) {
+  // มี key แปลว่าเป็น snapshot ที่อ่าน/เขียนสำเร็จแล้ว แม้ snapshot นั้นจะว่างจริง
+  // failed reads ไม่เคยสร้าง key จึงแยกจาก true-empty ได้ด้วย _memCache.has(name)
+  // authoritative ต้องอ่านไฟล์หลักจริง เพื่อไม่ให้ cache เก่าบังไฟล์ที่เสียหรือถูกแก้ภายนอก
+  if (!authoritative && _memCache.has(name)) return _memCache.get(name);
   
   const filePath = join(process.cwd(), 'data', `${name}.json`);
   try {
     const data = JSON.parse(await readFile(filePath, 'utf-8'));
-    if (Array.isArray(data) && data.length > 0) {
-      const fixedData = data.map(_decodeValue);
-      _memCache.set(name, fixedData);
-      return fixedData;
+    if (!Array.isArray(data)) {
+      if (authoritative) throw new Error(`Invalid store file format (${name}): expected JSON array`);
+      return [];
     }
-    return data || [];
-  } catch {
+    const fixedData = data.map(_decodeValue);
+    if (authoritative || fixedData.length > 0) _memCache.set(name, fixedData);
+    return fixedData;
+  } catch (error) {
+    if (authoritative && error?.code === 'ENOENT') {
+      _memCache.set(name, []);
+      return [];
+    }
+    if (authoritative) {
+      if (error?.code === 'STORE_PRIMARY_READ_FAILED') throw error;
+      throw _primaryReadError(name, error);
+    }
     return [];
   }
 }
@@ -84,35 +94,62 @@ function _warnWriteSkipOnce(name, message) {
   console.warn(`[Store:${name}] ${message}`);
 }
 
-async function _fileFallbackSave(name, items) {
-  _memCache.set(name, items);
+async function _fileFallbackSave(name, items, { durable = false } = {}) {
+  // Supabase mirror เป็น best-effort จึงอัปเดต memory ได้แม้ดิสก์ใช้ไม่ได้
+  // แต่เมื่อ file fallback เป็นฐานหลัก ต้องเขียนดิสก์สำเร็จก่อนจึงอ้างว่าบันทึกแล้ว
+  if (!durable) _memCache.set(name, items);
   if (_diskReadOnly) {
     _warnWriteSkipOnce(name, 'Read-only filesystem detected — skipping local JSON cache write (in-memory cache only)');
-    return;
+    if (durable) throw new Error(`File fallback durable write failed: read-only filesystem (${name})`);
+    return false;
   }
+  const dir = join(process.cwd(), 'data');
+  const filePath = join(dir, `${name}.json`);
+  const tempPath = `${filePath}.${process.pid || 'process'}-${Date.now()}-${Math.random().toString(16).slice(2)}.tmp`;
   try {
-    const dir = join(process.cwd(), 'data');
     await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, `${name}.json`), JSON.stringify(items, null, 2), 'utf-8');
+    // เขียนให้ครบในไฟล์ข้างเคียงก่อน แล้วค่อยสลับชื่อครั้งเดียว
+    // disk เต็ม/เขียนขาดกลางทางจึงไม่ทำลาย primary เดิม
+    await writeFile(tempPath, JSON.stringify(items, null, 2), 'utf-8');
+    await rename(tempPath, filePath);
+    if (durable) _memCache.set(name, items);
     _warnedWriteSkip.delete(name); // เขียนสำเร็จ = รีเซ็ตตัวกดเงียบ — ถ้าพังใหม่ภายหลังต้องเห็นใน log อีก
+    return true;
   } catch (e) {
-    if (/EROFS|read-only|EPERM|EACCES/i.test(e.message || '')) {
+    try {
+      await unlink(tempPath);
+    } catch {
+      // temp อาจยังไม่ถูกสร้าง หรือ rename สำเร็จไปแล้ว — ไม่มี primary ให้ rollback
+    }
+    if (/EROFS|read-only/i.test(e.message || '')) {
       _diskReadOnly = true; // serverless จริง — เลิกพยายามทั้ง process กัน log spam
     }
     _warnWriteSkipOnce(name, `File write failed (further failures suppressed): ${e.message}`);
+    if (durable) throw new Error(`File fallback durable write failed (${name}): ${e.message}`);
+    return false;
   }
 }
 
 async function _withLock(name, fn) {
-  let retries = 0;
-  while (_locks.get(name)) {
-    if (retries >= 30) throw new Error(`Lock timeout: ${name}`);
-    await new Promise(r => setTimeout(r, 50));
-    retries++;
+  const previous = _locks.get(name) || Promise.resolve();
+  let releaseCurrent;
+  const currentGate = new Promise(resolve => { releaseCurrent = resolve; });
+  const currentTail = previous.catch(() => {}).then(() => currentGate);
+  _locks.set(name, currentTail);
+  await previous.catch(() => {});
+  try {
+    return await fn();
+  } finally {
+    releaseCurrent();
+    if (_locks.get(name) === currentTail) _locks.delete(name);
   }
-  _locks.set(name, true);
-  try { return await fn(); }
-  finally { _locks.delete(name); }
+}
+
+function _primaryReadError(name, error) {
+  const failure = new Error(`Primary store read failed (${name}): ${error?.message || 'unknown error'}`);
+  failure.code = 'STORE_PRIMARY_READ_FAILED';
+  failure.cause = error;
+  return failure;
 }
 
 // === Main Store Factory ===
@@ -121,66 +158,87 @@ export function createStore(name) {
   // ===== SUPABASE MODE =====
   if (isSupabaseReady()) {
     return {
-      async getAll() {
-        try {
-          const sb = getSupabase();
-          // ★ 26 มิ.ย.: ดึงครบทุกแถว (แบ่งหน้า 1000) — เดิม Supabase คืนแค่ 1000 แถวใหม่สุด → แถวเก่าเกินนั้น "กำพร้า"
-          //   ระบบลบของเก่า (auto-purge) ใช้ getAll → มองไม่เห็นแถวกำพร้า → ตารางบวมจน egress พุ่ง (เคยโดน 21k)
-          //   เลนเล็ก: จบหน้าเดียว (เร็วเท่าเดิม) · cap 20000 กัน loop ค้าง
-          let data = [];
-          let error = null;
-          let partialError = null; // ★ หน้า 2+ พัง = ข้อมูลไม่ครบ — ห้ามนับเป็นสำเร็จเต็ม (กัน cache ถูกทับด้วยชุดตัดครึ่ง)
-          for (let from = 0; from < 20000; from += 1000) {
-            const page = await sb
-              .from(TABLE)
-              .select('data')
-              .eq('store_name', name)
-              .order('created_at', { ascending: false })
-              .range(from, from + 999);
-            if (page.error) {
-              if (from === 0) error = page.error;
-              else partialError = page.error;
-              break;
+      async getAll({ authoritative = false } = {}) {
+        return _withLock(name, async () => {
+          try {
+            const sb = getSupabase();
+            // ★ 26 มิ.ย.: ดึงครบทุกแถว (แบ่งหน้า 1000) — เดิม Supabase คืนแค่ 1000 แถวใหม่สุด → แถวเก่าเกินนั้น "กำพร้า"
+            //   ระบบลบของเก่า (auto-purge) ใช้ getAll → มองไม่เห็นแถวกำพร้า → ตารางบวมจน egress พุ่ง (เคยโดน 21k)
+            //   เลนเล็ก: จบหน้าเดียว (เร็วเท่าเดิม) · cap 20000 กัน loop ค้าง
+            const data = [];
+            let error = null;
+            let partialError = null; // ★ หน้า 2+ พัง = ข้อมูลไม่ครบ — ห้ามนับเป็นสำเร็จเต็ม (กัน cache ถูกทับด้วยชุดตัดครึ่ง)
+            for (let from = 0; from < 20000; from += 1000) {
+              // eslint-disable-next-line no-await-in-loop -- each page determines whether another page is required
+              const page = await sb
+                .from(TABLE)
+                .select('data')
+                .eq('store_name', name)
+                .order('created_at', { ascending: false })
+                .range(from, from + 999);
+              if (page.error) {
+                if (from === 0) error = page.error;
+                else partialError = page.error;
+                break;
+              }
+              if (!page.data || page.data.length === 0) break;
+              data.push(...page.data);
+              if (page.data.length < 1000) break;
             }
-            if (!page.data || page.data.length === 0) break;
-            data.push(...page.data);
-            if (page.data.length < 1000) break;
-          }
 
-          if (error) {
-            console.warn(`[Store:${name}] Supabase query error: ${error.message} — falling back to local file`);
+            if (error) {
+              if (authoritative) throw _primaryReadError(name, error);
+              console.warn(`[Store:${name}] Supabase query error: ${error.message} — falling back to local file`);
+              const localData = await _fileFallbackLoad(name);
+              console.log(`[Store:${name}] 📁 Fallback: ${localData.length} items from local file`);
+              return [...localData];
+            }
+            const items = data.map(row => _decodeValue(row.data));
+
+            // ครบ 20,000 แถวพอดียังสรุปไม่ได้ว่าข้อมูลครบ — authoritative ต้อง probe แถวถัดไป
+            if (authoritative && data.length === 20000) {
+              const overflow = await sb
+                .from(TABLE)
+                .select('data')
+                .eq('store_name', name)
+                .order('created_at', { ascending: false })
+                .range(20000, 20000);
+              if (overflow.error) throw _primaryReadError(name, overflow.error);
+              if (overflow.data?.length > 0) {
+                throw _primaryReadError(name, new Error('Authoritative read exceeds 20,000-row safety limit'));
+              }
+            }
+
+            // ถ้าต้องใช้ข้อมูลครบเพื่อคุม revision ห้ามแทนผลว่างจากฐานหลักด้วย local cache
+            if (items.length === 0 && !authoritative) {
+              const localData = await _fileFallbackLoad(name);
+              if (localData.length > 0) {
+                console.log(`[Store:${name}] ⚠️ Supabase returned 0 but local has ${localData.length} — using local`);
+                return [...localData];
+              }
+            }
+
+            if (partialError) {
+              if (authoritative) throw _primaryReadError(name, partialError);
+              // ได้มาบางส่วน: ใช้งานต่อได้ แต่ห้าม sync ทับไฟล์ fallback — ไฟล์เดิมอาจครบกว่า
+              console.warn(`[Store:${name}] ⚠️ Loaded ${items.length} items แต่หน้าถัดไปพัง (${partialError.message}) — ข้อมูลอาจไม่ครบ ไม่เขียนทับ local cache`);
+              return items;
+            }
+            console.log(`[Store:${name}] ✅ Loaded ${items.length} items from Supabase`);
+            // Sync to local file cache for offline use
+            if (authoritative || items.length > 0) await _fileFallbackSave(name, items);
+            return items;
+          } catch (fetchErr) {
+            if (authoritative) {
+              if (fetchErr?.code === 'STORE_PRIMARY_READ_FAILED') throw fetchErr;
+              throw _primaryReadError(name, fetchErr);
+            }
+            console.warn(`[Store:${name}] Supabase fetch failed: ${fetchErr.message} — falling back to local file`);
             const localData = await _fileFallbackLoad(name);
             console.log(`[Store:${name}] 📁 Fallback: ${localData.length} items from local file`);
             return [...localData];
           }
-          const items = (data || []).map(row => _decodeValue(row.data));
-          
-          // If Supabase returns 0 but local file has data, prefer local
-          if (items.length === 0) {
-            const localData = await _fileFallbackLoad(name);
-            if (localData.length > 0) {
-              console.log(`[Store:${name}] ⚠️ Supabase returned 0 but local has ${localData.length} — using local`);
-              return [...localData];
-            }
-          }
-          
-          if (partialError) {
-            // ได้มาบางส่วน: ใช้งานต่อได้ แต่ห้าม sync ทับไฟล์ fallback — ไฟล์เดิมอาจครบกว่า
-            console.warn(`[Store:${name}] ⚠️ Loaded ${items.length} items แต่หน้าถัดไปพัง (${partialError.message}) — ข้อมูลอาจไม่ครบ ไม่เขียนทับ local cache`);
-            return items;
-          }
-          console.log(`[Store:${name}] ✅ Loaded ${items.length} items from Supabase`);
-          // Sync to local file cache for offline use
-          if (items.length > 0) {
-            _fileFallbackSave(name, items).catch(() => {});
-          }
-          return items;
-        } catch (fetchErr) {
-          console.warn(`[Store:${name}] Supabase fetch failed: ${fetchErr.message} — falling back to local file`);
-          const localData = await _fileFallbackLoad(name);
-          console.log(`[Store:${name}] 📁 Fallback: ${localData.length} items from local file`);
-          return [...localData];
-        }
+        });
       },
       
       async add(item) {
@@ -198,10 +256,11 @@ export function createStore(name) {
         }
         
         // Sync to local file cache
-        _fileFallbackLoad(name).then(items => {
+        _withLock(name, async () => {
+          const items = await _fileFallbackLoad(name);
           const filtered = items.filter(i => i.id !== item.id);
           filtered.unshift(item); // Put newest first
-          _fileFallbackSave(name, filtered);
+          await _fileFallbackSave(name, filtered);
         }).catch(() => {});
         
         console.log(`[Store:${name}] ✅ Added: ${item.id}`);
@@ -238,10 +297,11 @@ export function createStore(name) {
         }
 
         // Sync to local file cache
-        _fileFallbackLoad(name).then(items => {
+        _withLock(name, async () => {
+          const items = await _fileFallbackLoad(name);
           const newIds = new Set(fresh.map(i => i.id));
           const filtered = items.filter(i => !newIds.has(i.id));
-          _fileFallbackSave(name, [...fresh, ...filtered]);
+          await _fileFallbackSave(name, [...fresh, ...filtered]);
         }).catch(() => {});
 
         console.log(`[Store:${name}] ✅ Added ${fresh.length} items (ข้ามซ้ำ ${newItems.length - fresh.length})`);
@@ -309,9 +369,11 @@ export function createStore(name) {
         }
         
         // ลบจาก local file ด้วย
-        const localData = await _fileFallbackLoad(name);
-        const filtered = localData.filter(i => i.id !== id);
-        await _fileFallbackSave(name, filtered).catch(() => {});
+        await _withLock(name, async () => {
+          const localData = await _fileFallbackLoad(name);
+          const filtered = localData.filter(i => i.id !== id);
+          await _fileFallbackSave(name, filtered);
+        }).catch(() => {});
         
         console.log(`[Store:${name}] ✅ Deleted: ${id}`);
         return { removed: true };
@@ -330,7 +392,7 @@ export function createStore(name) {
         }
         
         // ต้อง clear local file ด้วย ไม่งั้น getAll() จะไปดึงของเก่ามาเพราะนึกว่าดึง db พลาด
-        await _fileFallbackSave(name, []).catch(() => {});
+        await _withLock(name, () => _fileFallbackSave(name, [])).catch(() => {});
         
         console.log(`[Store:${name}] ✅ Deleted ALL items`);
         return { removedAll: true };
@@ -363,28 +425,31 @@ export function createStore(name) {
   // ===== FILE FALLBACK MODE (local dev) =====
   console.log(`[Store:${name}] ⚠️ No Supabase — using file fallback`);
   return {
-    async getAll() {
-      return [...(await _fileFallbackLoad(name))];
+    async getAll({ authoritative = false } = {}) {
+      return [...(await _fileFallbackLoad(name, { authoritative }))];
     },
     async add(item) {
       return _withLock(name, async () => {
-        const items = await _fileFallbackLoad(name);
+        const items = (await _fileFallbackLoad(name, { authoritative: true })).map(_decodeValue);
+        if (items.some(existing => existing.id === item.id)) {
+          throw new Error(`duplicate key value violates unique constraint: ${item.id}`);
+        }
         items.push(item);
-        await _fileFallbackSave(name, items);
+        await _fileFallbackSave(name, items, { durable: true });
         return item;
       });
     },
     async addMany(newItems) {
       return _withLock(name, async () => {
-        const items = await _fileFallbackLoad(name);
+        const items = (await _fileFallbackLoad(name, { authoritative: true })).map(_decodeValue);
         items.push(...newItems);
-        await _fileFallbackSave(name, items);
+        await _fileFallbackSave(name, items, { durable: true });
         return newItems;
       });
     },
     async update(id, updateFn) {
       return _withLock(name, async () => {
-        const items = await _fileFallbackLoad(name);
+        const items = (await _fileFallbackLoad(name, { authoritative: true })).map(_decodeValue);
         const idx = items.findIndex(i => i.id === id);
         if (idx < 0) throw new Error(`ไม่พบ id: ${id}`);
         if (typeof updateFn === 'function') {
@@ -393,22 +458,23 @@ export function createStore(name) {
           Object.assign(items[idx], updateFn);
         }
         items[idx].updatedAt = new Date().toISOString();
-        await _fileFallbackSave(name, items);
+        await _fileFallbackSave(name, items, { durable: true });
         return items[idx];
       });
     },
     async remove(id) {
       return _withLock(name, async () => {
-        const items = await _fileFallbackLoad(name);
+        const items = await _fileFallbackLoad(name, { authoritative: true });
         const filtered = items.filter(i => i.id !== id);
         if (filtered.length === items.length) throw new Error(`ไม่พบ id: ${id}`);
-        await _fileFallbackSave(name, filtered);
+        await _fileFallbackSave(name, filtered, { durable: true });
         return { removed: true, remaining: filtered.length };
       });
     },
     async removeAll() {
       return _withLock(name, async () => {
-        await _fileFallbackSave(name, []);
+        await _fileFallbackLoad(name, { authoritative: true });
+        await _fileFallbackSave(name, [], { durable: true });
         return { removedAll: true, remaining: 0 };
       });
     },

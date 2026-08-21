@@ -16,6 +16,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { logApiUsage } from './usageLogger';
 import { sanitizeOutput } from './safetyFilter';
 import { ironRule5LengthLine, legacyLengthRule } from './legacyLengthRules.js'; // 🗑️ กฎที่ 5 ยุคแรก (ถอด 17 ส.ค. 69 · ถอยคืน LEGACY_LENGTH_RULES=1)
+import { preparePipelineSignal, rethrowPipelineDeadline } from '../utils/pipelineDeadline.js';
 
 let claudeClient = null;
 
@@ -172,11 +173,13 @@ ${String(_previewSrc)}
   };
 
   // ★ 16 ก.ค. 69 (B4): รับ AbortSignal จาก withTimeoutSignal — timeout แล้วยกเลิก HTTP จริง ตัดจ่ายซ้อน
-  const _reqOpts = signal ? { signal } : undefined;
+  const requestSignal = preparePipelineSignal(signal, `claude:${model}`, 15_000);
+  const _reqOpts = requestSignal ? { signal: requestSignal } : undefined;
   let response;
   try {
     response = await client.messages.create(requestBody, _reqOpts);
   } catch (effortErr) {
+    rethrowPipelineDeadline(effortErr, `claude:${model}`);
     // Defensive: SDK/รุ่น model ไม่รองรับ output_config → ลองใหม่แบบไม่ส่ง (ไม่ให้ pipeline ตายเพราะ param เดียว)
     if (requestBody.output_config && /output_config|effort/i.test(effortErr.message || '')) {
       console.warn('[Claude] ⚠️ output_config not supported — retrying without effort param');

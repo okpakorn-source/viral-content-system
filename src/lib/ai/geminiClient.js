@@ -18,6 +18,7 @@ const _fullLog = () => process.env.LOG_FULL_PROMPT === '1';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { logApiUsage } from './usageLogger';
 import { sanitizeOutput } from './safetyFilter';
+import { preparePipelineSignal, rethrowPipelineDeadline } from '../utils/pipelineDeadline.js';
 
 let geminiClient = null;
 
@@ -31,6 +32,15 @@ function getGeminiClient() {
     geminiClient = new GoogleGenerativeAI(apiKey);
   }
   return geminiClient;
+}
+
+// Google SDK รับ request options เป็นอาร์กิวเมนต์ตัวที่สองโดยตรง
+// แยก helper เพื่อให้ทดสอบรูปทรงจริงได้โดยไม่ต้องเรียก Gemini/network
+export function buildGeminiRequestOptions(signal) {
+  return {
+    timeout: 15000,
+    ...(signal ? { signal } : {}),
+  };
 }
 
 // ★ 26 มิ.ย. (ผู้ใช้สั่ง): คีย์แยกสำหรับ "ถอดประเด็นจากคลิป (วิดีโอ)" เท่านั้น — แยกโควต้าจากระบบทำข่าว
@@ -71,7 +81,7 @@ const _isOverload = (e) => {
  * เหมาะสำหรับ: extraction, summarization, fast tasks
  */
 // ★ 1 ส.ค. 69 (เจ้าของสั่ง): สายข่าว text → gemini-3.6-flash (ใหม่ ไว ไม่ล่ม) · ถอยกลับ: GEMINI_TEXT_MODEL=gemini-3.5-flash
-export async function callGemini({ prompt, model = process.env.GEMINI_TEXT_MODEL || 'gemini-3.6-flash', temperature = 0.3, maxTokens = 4000 }) {
+export async function callGemini({ prompt, model = process.env.GEMINI_TEXT_MODEL || 'gemini-3.6-flash', temperature = 0.3, maxTokens = 4000, signal }) {
   const client = getGeminiClient();
   if (!client) throw new Error('GEMINI_API_KEY ไม่ได้ตั้งค่า — ไปตั้งค่าที่ Settings');
 
@@ -100,7 +110,14 @@ ${prompt}
 === จบ SAFETY RULES ===`,
   });
 
-  const result = await genModel.generateContent(prompt, { requestOptions: { timeout: 15000 } });
+  const requestSignal = preparePipelineSignal(signal, `gemini:${model}`, 15_000);
+  let result;
+  try {
+    result = await genModel.generateContent(prompt, buildGeminiRequestOptions(requestSignal));
+  } catch (error) {
+    rethrowPipelineDeadline(error, `gemini:${model}`);
+    throw error;
+  }
   const content = result.response?.text();
   const usageMetadata = result.response?.usageMetadata;
   const inputTokens = usageMetadata?.promptTokenCount || 0;

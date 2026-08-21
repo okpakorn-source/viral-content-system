@@ -6,6 +6,7 @@ import { MODEL_PRIMARY, MODEL_FAST } from '@/lib/ai/modelConfig';
 import { tavilySearch, isTavilyAvailable } from '@/lib/services/tavilyService';
 import { verifyResearchItems } from '@/lib/services/researchVerifier';
 import { isNewsResearchOn, RESEARCH_OFF_REASON } from '@/lib/utils/researchSwitch'; // 🔎 สวิตช์ปิดค้นข้อมูลเสริม (16 ส.ค. 69)
+import { composeAbortSignals, rethrowPipelineDeadline } from '@/lib/utils/pipelineDeadline';
 
 const rlog = createLogger('RESEARCH-SERVICE');
 
@@ -14,9 +15,12 @@ const SERPER_API_KEY = process.env.SERPER_API_KEY;
 // Simple Serper rate limiter — max 10 concurrent, 100ms delay between calls
 let _serperQueue = Promise.resolve();
 const _serperDelay = () => new Promise(r => setTimeout(r, 100));
-function throttledSerperSearch(query, num, type) {
+function throttledSerperSearch(query, num, type, signal) {
   _serperQueue = _serperQueue.then(() => _serperDelay()).catch(() => {});
-  return _serperQueue.then(() => _rawSerperSearch(query, num, type));
+  return _serperQueue.then(() => {
+    if (signal?.aborted) throw signal.reason;
+    return _rawSerperSearch(query, num, type, signal);
+  });
 }
 
 // Research cache — 10 min TTL, max 50 entries
@@ -37,26 +41,26 @@ function setCachedResult(key, data) {
 }
 
 // ── Serper Search (cached + throttled) ─────────────────────────
-async function serperSearch(query, num = 5) {
+async function serperSearch(query, num = 5, signal) {
   const cacheKey = `serper:${query}:${num}`;
   const cached = getCachedResult(cacheKey);
   if (cached) {
     rlog.step('serper-cache-hit', `Cache hit for "${query}"`);
     return cached;
   }
-  const results = await throttledSerperSearch(query, num);
+  const results = await throttledSerperSearch(query, num, undefined, signal);
   setCachedResult(cacheKey, results);
   return results;
 }
 
 // ── Raw Serper Search ──────────────────────────────────────────
-async function _rawSerperSearch(query, num = 5) {
+async function _rawSerperSearch(query, num = 5, _type, signal) {
   if (!SERPER_API_KEY) throw new Error('SERPER_API_KEY not configured');
   
   const headers = { 'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json' };
   const body = JSON.stringify({ q: query, gl: 'th', hl: 'th', num });
 
-  const serperSignal = AbortSignal.timeout(8000); // ★ 8s guard — ป้องกัน Serper ค้างใน generate-per-angle step
+  const serperSignal = composeAbortSignals(signal, AbortSignal.timeout(8000)); // ★ 8s guard + parent stage
   const [resOrg, resNews] = await Promise.all([
     fetch('https://google.serper.dev/search', { method: 'POST', headers, body, signal: serperSignal }),
     fetch('https://google.serper.dev/news', { method: 'POST', headers, body, signal: serperSignal })
@@ -176,7 +180,7 @@ function resolveKeywordInput(newsTitle, newsBody, breakdownData) {
 // fail-closed ทิ้งผลทั้งหมด → Research Grade: Missing
 // แก้แบบคนจริง: google ชื่อเล่น+บริบทเหตุการณ์ก่อน 1 รอบ → AI อ่านผลสรุปว่า "คือใคร"
 // แล้วใช้ชื่อจริงสร้างคำค้น + เป็นจุดยึดให้ตัวกรอง — ถ้าไม่มั่นใจ = คืน null (ไม่เดามั่ว)
-async function resolveIdentityFromContext({ newsTitle, newsBody, breakdownData }) {
+async function resolveIdentityFromContext({ newsTitle, newsBody, breakdownData, signal }) {
   const people = breakdownData?.key_facts?.people || [];
   const mainPerson = String(people[0] || '').replace(/\(.*?\)/g, '').trim()
     || (newsTitle?.match(/['"‘“]([^'"’”]{2,20})['"’”]/)?.[1] || '');
@@ -224,7 +228,7 @@ ${snippetBlock}
 ตอบ JSON เท่านั้น:
 {"resolved": true/false, "fullName": "ชื่อเต็มที่ยืนยันได้", "aliases": ["ชื่อเล่น","ฉายาอื่น"], "extraAnchors": ["..."], "evidence": "สรุปหลักฐานสั้นๆ"}`;
 
-    const res = await callAI({ prompt, model: MODEL_FAST, temperature: 0, maxTokens: 500 });
+    const res = await callAI({ prompt, model: MODEL_FAST, temperature: 0, maxTokens: 500, signal });
     const parsed = typeof res === 'object' ? res : JSON.parse(String(res?.content || res || '{}').match(/\{[\s\S]*\}/)?.[0] || '{}');
 
     if (parsed?.resolved && parsed?.fullName && String(parsed.fullName).trim().length >= 4) {
@@ -239,12 +243,13 @@ ${snippetBlock}
     console.log(`[Research-Resolve] 🛡️ ยืนยันไม่ได้ (${String(parsed?.evidence || 'no evidence').slice(0, 60)}) — keep fail-closed behavior`);
     return null;
   } catch (e) {
+    rethrowPipelineDeadline(e, 'research_identity');
     console.log('[Research-Resolve] ⚠️ error (non-fatal):', e.message?.slice(0, 60));
     return null;
   }
 }
 
-export async function performResearch({ newsBody, newsTitle, breakdownData, focusAngle, workflowId: wfId }) {
+export async function performResearch({ newsBody, newsTitle, breakdownData, focusAngle, workflowId: wfId, signal }) {
   const startTime = Date.now();
   const workflowId = wfId || ('research_' + Date.now());
 
@@ -296,7 +301,7 @@ export async function performResearch({ newsBody, newsTitle, breakdownData, focu
     const quotes = breakdownData?.quotes?.join(' | ') || '';
 
     // ★ STEP 0.5: Context-Resolve — ข่าวชื่อเล่นล้วนให้ค้นระบุตัวตนก่อน (เพิ่มความแม่นยำตัวละคร)
-    const resolvedIdentity = await resolveIdentityFromContext({ newsTitle, newsBody, breakdownData });
+    const resolvedIdentity = await resolveIdentityFromContext({ newsTitle, newsBody, breakdownData, signal });
 
     let keywords = [];
     let keywordSource = 'unknown';
@@ -337,6 +342,7 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
         prompt: keywordPrompt,
         temperature: 0.2,
         maxTokens: 1500,
+        signal,
       });
       const aiDuration = Date.now() - aiStart;
 
@@ -355,6 +361,7 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
         console.log('[Research-Service] ✅ AI keywords (' + aiDuration + 'ms): ' + keywords.map(k => k.keyword).join(', '));
       }
     } catch (aiErr) {
+      rethrowPipelineDeadline(aiErr, 'research_keywords');
       keywordError = 'KEYWORD_AI_FAILED: ' + aiErr.message;
       console.warn('[Research-Service] ⚠️ AI keyword extraction failed:', aiErr.message);
     }
@@ -429,10 +436,11 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
     const searchPromises = keywords.map(async (kw) => {
       try {
         if (!useSerper) return { keyword: kw, results: [] };
-        const results = await serperSearch(kw.searchQuery, 3);
+        const results = await serperSearch(kw.searchQuery, 3, signal);
         console.log('[Research-Service] 🔍 "' + kw.keyword + '" → ' + results.length + ' results');
         return { keyword: kw, results };
       } catch (err) {
+        if (signal?.aborted) throw (signal.reason || err);
         console.warn('[Research-Service] ⚠️ Search failed for "' + kw.keyword + '": ' + err.message);
         return { keyword: kw, results: [] };
       }
@@ -456,6 +464,7 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
             maxResults: 3,
             searchDepth: 'basic',
             includeAnswer: false,
+            signal,
           });
           const mapped = results.map(r => ({
             title: r.title || '',
@@ -465,6 +474,7 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
           }));
           return { keyword: kw, results: mapped };
         } catch (err) {
+          if (signal?.aborted) throw (signal.reason || err);
           console.warn('[Research-Service] ⚠️ Tavily failed for "' + kw.keyword + '": ' + err.message);
           return { keyword: kw, results: [] };
         }
@@ -542,6 +552,7 @@ ${searchCatalog}
       prompt: factPrompt,
       temperature: 0.1,
       maxTokens: 4000,
+      signal,
     });
 
     let finalItems = factResult?.items || [];
@@ -559,6 +570,7 @@ ${searchCatalog}
           breakdownData,
           items: finalItems,
           resolvedIdentity, // ★ Context-Resolve: ชื่อจริง+จุดยึดจากการค้นระบุตัวตน
+          signal,
         });
         identityDropped = verified.droppedCount;
         finalItems = verified.items;
@@ -595,6 +607,7 @@ ${searchCatalog}
     };
 
   } catch (error) {
+    rethrowPipelineDeadline(error, 'research');
     const errorType = error.errorType || 'RESEARCH_SEARCH_FAILED';
     console.error('[Research-Service] ' + errorType + ':', error.message);
     await logPipeline({
