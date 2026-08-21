@@ -76,6 +76,7 @@ function makeInputs(overrides = {}) {
     diversityWarning: 'V1/V2 ยังคล้ายกัน — ให้พนักงานอ่านเลือก',
     pipelineQualityWarnings: [
       'Correction V1 ล้ม — ใช้ร่างนักเขียนเดิมและส่งเข้าด่าน RAW เต็ม',
+      'V1 เพิ่มปริมาณน้ำหนึ่งแก้ว — ให้พนักงานตรวจบริบทก่อนโพสต์',
       'V1/V2 ยังคล้ายกัน — ให้พนักงานอ่านเลือก',
     ],
     factualGateSummary: { model: 'gpt-5.6-sol', regeneratedVersions: [1] },

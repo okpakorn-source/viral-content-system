@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const axios = require('axios');
+const { makeQueueTerminalError, isQueueTerminalError, selectQualityWarnings } = require('./queue-errors');
 
 const client = new Client({
   intents: [
@@ -338,10 +339,10 @@ async function processNewsJob(job) {
           data = st.result;
           break;
         } else if (st.status === 'failed') {
-          throw new Error(st.error || 'Queue job failed');
+          throw makeQueueTerminalError(st);
         }
       } catch (pollErr) {
-        if (pollErr.message?.includes('Queue job failed') || pollErr.message?.includes('failed') || pollErr.message?.includes('หายไป')) throw pollErr;
+        if (isQueueTerminalError(pollErr) || pollErr.message?.includes('หายไป')) throw pollErr;
         console.warn('[Discord Bot] Poll error:', pollErr.message);
       }
     }
@@ -357,6 +358,13 @@ async function processNewsJob(job) {
     // ดึงเวอร์ชันทั้งหมด (รองรับสูงสุด 10 เวอร์ชัน)
     const allVersions = data.analysisResult?.versions || data.data?.analysisResult?.versions || [];
     const versionsToShow = allVersions.slice(0, 10);
+    const qualityWarnings = data.analysisResult?.qualityWarnings
+      || data.data?.analysisResult?.qualityWarnings
+      || [];
+    const visibleWarnings = selectQualityWarnings(qualityWarnings, 2);
+    const warningPreview = visibleWarnings.length > 0
+      ? `\n⚠️ **จุดให้พนักงานตรวจ:** ${visibleWarnings.join(' | ').slice(0, 500)}`
+      : '';
 
     // ดึง newsTitle และ caseId จาก path ที่ถูกต้อง
     const newsTitle = data.data?.newsData?.newsTitle || data.newsData?.newsTitle || data.data?.analysisResult?.newsTitle || 'ไม่ทราบหัวข้อ';
@@ -368,7 +376,7 @@ async function processNewsJob(job) {
     }
 
     const jobTime = ((Date.now() - jobStartTime) / 1000).toFixed(1);
-    await processingMsg.edit({ content: `✅ **สร้างข่าวสำเร็จ!** ${versionsToShow.length} เวอร์ชัน | ใช้เวลา ${jobTime}s\n📰 **${newsTitle.slice(0, 80)}**${logLink}` });
+    await processingMsg.edit({ content: `✅ **สร้างข่าวสำเร็จ!** ${versionsToShow.length} เวอร์ชัน | ใช้เวลา ${jobTime}s\n📰 **${newsTitle.slice(0, 80)}**${warningPreview}${logLink}` });
 
     // ดึง Research items — ลอง path ทั้งหมดที่เป็นไปได้
     const researchItems = data.data?.researchItems 

@@ -810,8 +810,10 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   // Plain-text jobs must be grounded against the user's immutable paste, not the AI extraction.
   // URL/transcript jobs keep their existing extracted-body authority outside this scoped fix.
   let grounding = assessRawTextSafety(finalVersions, groundingSourceText);
-  if (!grounding.ok) {
-    throwStep('auto_grounding', `ข่าวมีถ้อยคำที่อาจเกินต้นฉบับ — ${grounding.issues.slice(0, 3).join(' | ')}`);
+  let groundingWarnings = groundingIssuesToWarnings(grounding.issues);
+  pipelineQualityWarnings.push(...groundingWarnings);
+  if (groundingWarnings.length > 0) {
+    addLog('Quality', `⚠️ Grounding พบ ${groundingWarnings.length} จุดให้พนักงานตรวจ — ไม่ทิ้งข่าวและไม่เรียกนักเขียนซ้ำ`);
   }
 
   // ความคล้ายเป็นคำเตือนสำหรับพนักงาน ไม่ใช่เหตุให้เสีย API เขียนใหม่อัตโนมัติ
@@ -823,7 +825,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     pipelineQualityWarnings.push(diversityWarning);
     addLog('Quality', `⚠️ ${diversityWarning}`);
   } else {
-    addLog('Quality', `✅ Grounding ผ่าน · ความซ้ำสูงสุด ${Math.round(diversity.maxSimilarity * 100)}%`);
+    addLog('Quality', `${groundingWarnings.length > 0 ? '⚠️ Grounding ผ่านแบบมีคำเตือน' : '✅ Grounding ผ่าน'} · ความซ้ำสูงสุด ${Math.round(diversity.maxSimilarity * 100)}%`);
   }
 
   // === FULL-RAW FACTUAL GATE (plain text only) ===
@@ -904,10 +906,14 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
       }
 
       if (factOutcome.repairedIndexes.length > 0) {
+        pipelineQualityWarnings.splice(
+          0,
+          pipelineQualityWarnings.length,
+          ...pipelineQualityWarnings.filter(warning => !groundingWarnings.includes(warning)),
+        );
         grounding = assessRawTextSafety(finalVersions, rawText);
-        if (!grounding.ok) {
-          throwStep('auto_grounding', `ข่าวหลัง factual editor ไม่ผ่านด่าน RAW แบบกำหนดกฎ — ${grounding.issues.slice(0, 3).join(' | ')}`);
-        }
+        groundingWarnings = groundingIssuesToWarnings(grounding.issues);
+        pipelineQualityWarnings.push(...groundingWarnings);
 
         const postFactDiversity = assessVersionDiversity(finalVersions);
         pipelineQualityWarnings.splice(0, pipelineQualityWarnings.length,
@@ -1816,6 +1822,17 @@ export function assessRawTextSafety(versions, sourceText) {
     }
   });
   return { ok: issues.length === 0, issues };
+}
+
+/**
+ * กฎคำ/regex เป็นเพียงสัญญาณให้พนักงานตรวจ ไม่ใช่เหตุทิ้งข่าวที่จ่าย API ไปแล้ว
+ * technical failures (queue, DB, deadline, AI transport) อยู่นอก helper นี้และยังล้มตามเดิม
+ */
+export function groundingIssuesToWarnings(issues) {
+  return [...new Set((Array.isArray(issues) ? issues : [])
+    .map(issue => String(issue || '').trim())
+    .filter(Boolean))]
+    .map(issue => `${issue} — ให้พนักงานตรวจบริบทก่อนโพสต์`);
 }
 
 // ★ 19 ส.ค. 69 (🟡 FIXLIST-planK): สูตรจำนวนมุม 1-4 (default 2) รวมศูนย์ที่เดียว — เดิมก๊อปสูตรไว้ 2 จุด
