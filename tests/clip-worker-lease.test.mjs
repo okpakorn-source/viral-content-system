@@ -5,8 +5,10 @@ import test from 'node:test';
 
 const ROUTE_PATH = new URL('../src/app/api/clip-transcript/worker/route.js', import.meta.url);
 const WORKER_PATH = new URL('../scripts/clip-worker.mjs', import.meta.url);
-const ROUTE_SOURCE = readFileSync(ROUTE_PATH, 'utf8');
-const WORKER_SOURCE = readFileSync(WORKER_PATH, 'utf8');
+// Git may materialize tracked LF files as CRLF on Windows. Mutation fixtures use LF
+// literals, so normalize only the in-memory test sources (production files stay untouched).
+const ROUTE_SOURCE = readFileSync(ROUTE_PATH, 'utf8').replace(/\r\n/g, '\n');
+const WORKER_SOURCE = readFileSync(WORKER_PATH, 'utf8').replace(/\r\n/g, '\n');
 const PROTOCOL = 'clip-lease-v1';
 const WORKER_SECRET = 'clip-worker-test-secret';
 

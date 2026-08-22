@@ -1,6 +1,6 @@
-export const maxDuration = 800; // ★ 25 มิ.ย.: 300→800 — Gemini retry ได้ 4×180s=720s เกิน 300 → Vercel ฆ่าฟังก์ชันกลางคัน คืน error page (text) ทำหน้าเว็บ parse JSON พัง "An error o..." (แพลนรองรับ 800 เท่า queue worker)
+export const maxDuration = 800; // เผื่อดาวน์โหลด/บีบ/อัปโหลดคลิปยาว แต่ inference ถอดคลิปถูกล็อกไว้หนึ่งครั้งต่อคำขอ
 import { NextResponse } from 'next/server';
-import { extractClipInsight, extractInsightFromVideoBuffer, extractMultiTopicInsight, extractMultiTopicFromVideoBuffer } from '@/lib/services/clipInsightService';
+import { extractClipInsight, extractInsightFromVideoBuffer } from '@/lib/services/clipInsightService';
 import { createStore } from '@/lib/persistStore';
 import { getClipVideoQueue } from '@/lib/services/clipQueue';
 import { pickCasesToPurge, CLIP_CASE_KEEP, archiveRowId, CLIP_ARCHIVE_STORE } from '@/lib/services/clipArchive';
@@ -177,20 +177,6 @@ async function transcribeFor(url, type) {
 
 // ★ 22 มิ.ย.: รวมตรรกะสกัด "ข้อมูลดิบ" ไว้ในฟังก์ชันเดียว (ดูคลิป→fallback ถอดเสียง) — โยน error ที่มี .code
 //   เพื่อให้ห่อด้วยคิวได้สะอาด (ไม่ปน NextResponse กับงานหนัก)
-// ★ 26 มิ.ย.: ตัดเวลา promise — กัน YouTube URL passthrough ค้างนาน (Gemini โหลด YouTube ไม่ได้) → รีบสลับเส้นทาง
-function _raceTimeout(promise, ms, label) {
-  return Promise.race([
-    promise,
-    new Promise((_, rej) => setTimeout(() => { const e = new Error(`${label} ค้างเกิน ${Math.round(ms / 1000)} วิ`); e.code = 'URL_TIMEOUT'; rej(e); }, ms)),
-  ]);
-}
-// ★ 26 มิ.ย. (ค่ำ): จำว่า "Gemini โหลด YouTube URL เองค้าง" → ข้ามไปโหลดเองเลยชั่วคราว (กันเสีย 170 วิ ซ้ำ ๆ ทุกคลิป)
-//   เครื่องทีมที่มี yt-dlp: เจอค้างครั้งแรก → จำ 20 นาที → คลิปถัดไปข้าม URL ไปโหลดเองทันที (เร็วขึ้นมาก)
-//   ครบ 20 นาทีลอง URL ใหม่ (เผื่อ Gemini ฝั่งโหลด YouTube ฟื้น) — ปรับอัตโนมัติ ไม่ต้องแก้มือ
-//   ★ เริ่มต้น = ข้าม URL ไว้ก่อน 20 นาที (26 มิ.ย. Gemini โหลด YouTube เองพังทั้งวัน) → YouTube เร็วทันทีทุกตัว
-//     ถ้าฝั่งโหลด YouTube ฟื้น: ครบ 20 นาทีจะลอง URL เอง · ถ้าอยากกลับไปลอง URL ก่อนเสมอ ตั้งเป็น 0
-let _ytUrlBrokenUntil = Date.now() + 20 * 60 * 1000;
-
 // ★ 14 ส.ค. 69 (เจ้าของสั่งเทียบสองโมเดล): model (optional) — ไม่ส่ง = VIDEO_MODEL ตามเดิมเป๊ะ
 async function buildInsight({ url, type, model = '' }) {
   // ★ 25 มิ.ย.: ใช้ insight เดียว (enhanced) เสมอ — Gemini "ตัดสินเอง" (content-aware) ว่าคลิปมีหลายประเด็นไหม
@@ -201,28 +187,15 @@ async function buildInsight({ url, type, model = '' }) {
   //   ถ้า Gemini แน่น → โยน error ให้ผู้ใช้ "รอ/กดใหม่" ดีกว่าได้ผลด้อยจาก transcript ล้วน
   //   (ฟังก์ชัน transcript ยังอยู่ในโค้ด เผื่อเปิดใช้ภายหลัง — แค่ไม่เรียกในเส้นทาง insight)
   if (type === 'youtube') {
-    // ★ 26 มิ.ย. (ผู้ใช้สั่ง + ปรับเร็วขึ้น): YouTube ไฮบริด "อัจฉริยะ"
-    //   - เครื่องทีม (win32 มี yt-dlp): ถ้าเพิ่งเจอ URL ค้าง (ใน 20 นาที) → ข้ามไปโหลดเองเลย (ไม่เสีย 170 วิ ซ้ำ)
-    //     ไม่งั้นลอง URL ก่อน (170 วิ) → ค้าง → จำไว้ + สลับโหลดเอง+อัปไฟล์ (เหมือน TikTok/FB คุณภาพเท่าเดิม)
-    //   - cloud (Vercel ไม่มี yt-dlp): ใช้ URL อย่างเดียว (ทางเลือกเดียว)
+    // หนึ่งคำขอเลือกทางเดียวเท่านั้น เพื่อไม่ให้ URL inference และ file inference ซ้อนกัน:
+    //   - Windows ทีมงาน: โหลดคลิปแล้วส่งไฟล์ให้ Gemini หนึ่งครั้ง
+    //   - cloud: ส่ง URL ให้ Gemini หนึ่งครั้ง
     const YT_FMT = 'best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best';
     const downloadAndExtract = async () => {
       const buf = await _fitForInline(await downloadMetaBuffer(url, YT_FMT), url); // ★ 14 ส.ค.: >19MB บีบก่อนแนบ inline
       return await extractInsightFromVideoBuffer(buf, 'video/mp4', model);
     };
-    if (process.platform === 'win32') {
-      if (Date.now() < _ytUrlBrokenUntil) {
-        console.log('[ClipInsight] ⏩ YouTube: ข้าม URL (เพิ่งค้าง) → โหลดเองเลย');
-        return await downloadAndExtract();
-      }
-      try {
-        return await _raceTimeout(extractClipInsight({ url, platform: 'youtube', ...(model ? { model } : {}) }), 170_000, 'YouTube URL passthrough');
-      } catch (e) {
-        _ytUrlBrokenUntil = Date.now() + 20 * 60 * 1000; // จำว่า URL ค้าง → ข้าม 20 นาที
-        console.log(`[ClipInsight] 🔄 YouTube URL ค้าง → โหลดเอง + ข้าม URL 20 นาที: ${String(e.message).slice(0, 60)}`);
-        return await downloadAndExtract();
-      }
-    }
+    if (process.platform === 'win32') return await downloadAndExtract();
     return await extractClipInsight({ url, platform: 'youtube', ...(model ? { model } : {}) }); // cloud: URL passthrough เท่านั้น
   }
   // TikTok/FB/IG → โหลดไฟล์ให้ Gemini "ดูจริง" (เห็นภาพ+ตัวหนังสือบนจอ) — ไม่มี fallback ถอดเสียง
@@ -291,7 +264,7 @@ export async function POST(request) {
     // ★ 22 มิ.ย.: ผ่าน "คิวงานหนัก" — กันยิง Gemini/Whisper ซ้อนกัน + เว้นช่วงอัตโนมัติเมื่อ API แน่น
     const startedAt = Date.now();
     let insight;
-    let attempts = 1;
+    const attempts = 1;
     try {
       insight = await getClipVideoQueue().run(() => buildInsight({ url, type, model: modelOverride }), { label: `insight:${type}${modelOverride ? `@${modelOverride}` : ''}` });
     } catch (e) {
@@ -299,24 +272,13 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: humanizeErr(e.message), errorType: code }, { status: 422 });
     }
 
-    // ★ 8 ก.ค.: ด่านตรวจคุณภาพ — ไม่ผ่าน → ถอดใหม่อัตโนมัติ 1 ครั้ง (เฉพาะเมื่อรอบแรกเร็วพอ ไม่ชน timeout)
-    //   ยังไม่ผ่านอีก → เก็บพร้อมธง lowQuality ให้เห็นชัดในคลัง (ไม่ทิ้งเงียบ ไม่ปนกับเคสดี)
+    // ด่านตรวจคุณภาพแบบไม่เสียรอบเพิ่ม: ผลไม่ครบให้ติดธงไว้ พนักงานเป็นผู้ตัดสินใจกดถอดใหม่เอง
+    // ห้ามเริ่ม Gemini รอบสองอัตโนมัติ เพราะงานรอบแรกอาจจ่ายค่า inference ไปแล้ว
     let lowQuality = false, qualityNote = '';
-    let issues = insightQualityIssues(insight);
-    if (issues.length && Date.now() - startedAt < 5 * 60 * 1000) {
-      console.warn(`[ClipInsight] ⚠️ ไม่ผ่านด่านคุณภาพ (${issues.join(' · ')}) → ถอดใหม่อัตโนมัติ 1 ครั้ง`);
-      attempts = 2;
-      try {
-        const retryInsight = await getClipVideoQueue().run(() => buildInsight({ url, type, model: modelOverride }), { label: `insight-qc-retry:${type}` });
-        const retryIssues = insightQualityIssues(retryInsight);
-        if (retryIssues.length < issues.length || String(retryInsight?.rawData || '').length > String(insight?.rawData || '').length) {
-          insight = retryInsight; issues = retryIssues; // เอารอบที่ดีกว่า
-        }
-      } catch (e) { console.warn('[ClipInsight] ถอดซ้ำรอบ QC ล้ม (ใช้ผลรอบแรก):', e.message?.slice(0, 50)); }
-    }
+    const issues = insightQualityIssues(insight);
     if (issues.length) {
       lowQuality = true;
-      qualityNote = `ผลอาจไม่สมบูรณ์: ${issues.join(' · ')} — แนะนำกดถอดใหม่`;
+      qualityNote = `ผลอาจไม่สมบูรณ์: ${issues.join(' · ')} — กรุณาตรวจหรือกดถอดใหม่เอง`;
       console.warn(`[ClipInsight] ⚠️ เก็บแบบติดธง lowQuality: ${qualityNote}`);
     }
 

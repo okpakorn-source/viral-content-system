@@ -12,6 +12,7 @@ import { HARVEST_MODES, LIBRARIES, isClip, enrichDeskItem } from '@/lib/services
 // ★ 28 ก.ค. 69 (แก้บั๊ก "มือถือค้างบันเดิลรุ่นเก่า"): เทียบรุ่นแอพนี้กับ mRev ที่ /api/m/cover ตอบมา — ต่างกันเตือนแตะรีโหลด
 import { M_APP_REV } from '@/lib/mAppRev';
 import { getPublishablePostText } from '@/lib/utils/publishablePostText';
+import { buildClipNewsReadyText, buildClipSubStoryText } from '@/lib/services/clipNewsReadyText';
 
 // เครื่องมือแต่งปกแมนวล — โหลดเฉพาะตอนเปิดแท็บ (ไฟล์หนัก ไม่ถ่วงจอแรก)
 const CoverEditor = dynamic(() => import('./CoverEditor'), {
@@ -716,38 +717,8 @@ export default function MobileApp() {
     else if (purpleEditing) setPurpleEdit(editSnapshot ?? null);
     closeAllEditors();
   };
-  // ข้อความ "คัดลอกทั้งหมด" — พอร์ตจากเว็บ /clip-transcript (insightCaseText + topicText) ตรงเป๊ะ รวม early-return ของ multiTopic ด้วย
-  const clipAllText = (ins) => {
-    if (!ins) return '';
-    const parts = [];
-    if (ins.headline) parts.push(`📌 ${ins.headline}`);
-    if (ins.overview) parts.push(ins.overview);
-    if (ins.multiTopic && ins.topics?.length) {
-      parts.push(`— แยก ${ins.topics.length} ประเด็น —`);
-      ins.topics.forEach((t) => {
-        const lines = [`【${t.no}】 ${t.title || ''}${(t.timeStart || t.timeEnd) ? `  (${t.timeStart || '?'}–${t.timeEnd || '?'})` : ''}`];
-        if (t.summary) lines.push(t.summary);
-        if (t.keyPoints?.length) lines.push(t.keyPoints.map((k) => `• ${k}`).join('\n'));
-        if (t.quotes?.length) lines.push(t.quotes.map((q) => `"${q}"`).join('\n'));
-        parts.push(lines.join('\n'));
-      });
-      return parts.join('\n\n'); // ★ เท่าเว็บ: คลิปยาว (multiTopic) จบที่นี่ ไม่ต่อ rawData/subStories/transcriptQuotes
-    }
-    if (ins.keyPoints?.length) parts.push('— ประเด็นสำคัญ —\n' + ins.keyPoints.map((k, i) => `${i + 1}. ${k.point}${k.detail ? ' — ' + k.detail : ''}`).join('\n'));
-    if (ins.quotes?.length) parts.push('— คำพูดสำคัญ —\n' + ins.quotes.map(q => `"${q}"`).join('\n'));
-    if (ins.rawData) parts.push('— ข้อมูลดิบรวม —\n' + ins.rawData);
-    if (ins.subStories?.length) {
-      ins.subStories.forEach((s, i) => parts.push(`— เนื้อดิบประเด็น ${s.no || i + 1}: ${s.topic}${s.timeRange ? ` (${s.timeRange})` : ''} —\n${s.rawData}${s.quotes?.length ? '\n\nคำพูด:\n' + s.quotes.map(q => `"${q}"`).join('\n') : ''}`));
-    }
-    const tq = ins.transcriptQuotes;
-    if (tq) {
-      if (tq.enrichedRaw) parts.push('— เนื้อดิบมีมิติ (ประเด็น+คำพูดจริง พร้อมเขียนข่าว) —\n' + tq.enrichedRaw);
-      if (tq.enrichedTopics?.length) tq.enrichedTopics.forEach((t, i) => parts.push(`— เนื้อดิบมีมิติ ประเด็น ${t.no || i + 1}: ${t.topic}${t.timeRange ? ` (${t.timeRange})` : ''} —\n${t.enrichedRaw}`));
-      if (tq.punchyQuotes?.length) parts.push('— ประโยคเด็ด —\n' + tq.punchyQuotes.map(q => `"${q.quote}"${q.speaker ? ' — ' + q.speaker : ''}${q.why ? ' (' + q.why + ')' : ''}`).join('\n'));
-      if (tq.transcript) parts.push('— บทพูดในคลิป (ไม่รวมเพลง) —\n' + tq.transcript);
-    }
-    return parts.join('\n\n');
-  };
+  // ใช้ projection เดียวกับหน้า desktop: ไม่ต่อ metadata/raw/subStories ซ้ำกัน
+  const clipAllText = (ins) => buildClipNewsReadyText(ins);
 
   const sendTopicsToWrite = () => {
     const picked = effectiveTopics(insight).filter((_, i) => selTopics.includes(i));
@@ -756,9 +727,13 @@ export default function MobileApp() {
     const tps = picked.filter(t => (t.topic || '').trim() || (t.raw || '').trim());
     if (!tps.length) { say('ประเด็นที่เลือกถูกแก้จนว่างหมด — เติมข้อความก่อนส่ง'); return; }
     if (tps.length < picked.length) say(`ข้าม ${picked.length - tps.length} ประเด็นที่แก้จนว่าง — ส่งเฉพาะที่มีเนื้อหา`);
-    let input = tps.map(t =>
-      `${t.topic}${t.time ? ` (ช่วง ${t.time})` : ''}\n\n${t.raw || ''}${t.quotes?.length ? '\n\nคำพูดจากคลิป:\n' + t.quotes.map(q => `"${q}"`).join('\n') : ''}`
-    ).join('\n\n———\n\n');
+    let input = tps.map((t, i) => buildClipSubStoryText({
+      no: t.no,
+      topic: t.topic,
+      timeRange: t.time,
+      rawData: t.raw,
+      quotes: t.quotes,
+    }, i)).filter(Boolean).join('\n\n———\n\n');
     const pq = Array.isArray(insight?.transcriptQuotes?.punchyQuotes) ? insight.transcriptQuotes.punchyQuotes.filter(q => q && typeof q.quote === 'string' && q.quote.trim()) : [];
     if (pq.length) {
       input += '\n\nประโยคเด็ดจากคลิป:\n' + pq.map(q => `"${q.quote}"${q.speaker ? ' — ' + q.speaker : ''}`).join('\n');
@@ -1412,8 +1387,8 @@ export default function MobileApp() {
           </p>
           <div className="row" style={{ flexWrap: 'wrap', gap: 8, marginTop: 9, marginBottom: 2 }}>
             {insightMeta?.url && <a className="lnk" href={insightMeta.url} target="_blank" rel="noreferrer">🔗 เปิดคลิป</a>}
-            {insight.rawData && <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5 }} onClick={() => copyText(insight.rawData, insight.id || '')}>📋 คัดลอกข้อมูลดิบ</button>}
-            <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5 }} onClick={() => copyText(clipAllText(insight), insight.id || '')}>📋 คัดลอกทั้งหมด</button>
+            {insight.rawData && <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5 }} onClick={() => copyText(insight.rawData, insight.id || '')}>📋 คัดลอกก้อนรวมเดิม</button>}
+            <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5 }} onClick={() => copyText(clipAllText(insight), insight.id || '')}>📋 คัดลอกเนื้อพร้อมใช้</button>
           </div>
           {insight.overview && <p className="bd" style={{ fontSize: 13.5, marginTop: 6, marginBottom: 6 }}>{insight.overview}</p>}
 
@@ -1449,7 +1424,7 @@ export default function MobileApp() {
               </div>
               <div className="bd" style={{ fontSize: 13, lineHeight: 1.75, whiteSpace: 'pre-wrap', maxHeight: 320, overflowY: 'auto', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, padding: 12 }}>{rawEdit ?? insight.rawData}</div>
               <div className="row" style={{ gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
-                <button className="gh" style={{ width: 'auto', padding: '5px 12px', fontSize: 11.5 }} onClick={() => copyText(insight.rawData, insight.id || '')}>📋 คัดลอกข้อมูลดิบ</button>
+                <button className="gh" style={{ width: 'auto', padding: '5px 12px', fontSize: 11.5 }} onClick={() => copyText(insight.rawData, insight.id || '')}>📋 คัดลอกก้อนรวมเดิม</button>
                 {/* 🛑 18 ส.ค. 69 — ซ่อนปุ่มส่งเข้าเขียนข่าว (กรอบเทา/ข้อมูลดิบ) · ดูเหตุผล+วิธีถอยที่ WEB_NEWS_GEN_ON บนสุดของ component
                     ปุ่มแก้/คัดลอกในกรอบเดียวกันยังอยู่ครบ — ถอดคลิปยังใช้ได้ตามปกติ */}
                 {WEB_NEWS_GEN_ON && <button className="gh" style={{ width: 'auto', padding: '5px 12px', fontSize: 11.5, borderColor: 'var(--pink)', color: 'var(--pink)' }} onClick={sendRawToWrite}>🚀 ส่งกรอบนี้เข้าเขียนข่าว</button>}
@@ -1497,7 +1472,7 @@ export default function MobileApp() {
                 </div>
                 {t.time && <p className="du">ช่วง {t.time}</p>}
                 {t.raw && <details className="raw" onClick={e => e.stopPropagation()}><summary>เนื้อดิบ ({t.raw.length} ตัวอักษร)</summary><div>{t.raw}</div>
-                  <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5, marginTop: 7 }} onClick={e => { e.stopPropagation(); copyText(`${t.topic}${t.time ? ` (ช่วง ${t.time})` : ''}\n\n${t.raw}`); }}>📋 คัดลอกประเด็นนี้</button>
+                  <button className="gh" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5, marginTop: 7 }} onClick={e => { e.stopPropagation(); copyText(buildClipSubStoryText({ no: t.no, topic: t.topic, timeRange: t.time, rawData: t.raw, quotes: t.quotes }, i)); }}>📋 คัดลอกประเด็นนี้</button>
                 </details>}
               </div>
             </div>
@@ -1505,6 +1480,12 @@ export default function MobileApp() {
 
           {/* ★ item 1: แถบเตือนแดง — ธงคุณภาพไม่สมบูรณ์ เหนือปุ่มส่ง เท่าเว็บ */}
           {insightMeta?.lowQuality && <div className="err">⚠️ {insightMeta.qualityNote || 'ผลอาจไม่สมบูรณ์ — แนะนำกดถอดใหม่'}</div>}
+          {insight.editorialWarnings?.length > 0 && (
+            <div className="bd" style={{ fontSize: 12, lineHeight: 1.65, color: '#fbbf24', background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.35)', borderRadius: 9, padding: '9px 11px', marginTop: 8 }}>
+              <b>✍️ จุดให้พนักงานตรวจประโยคเปิด</b>
+              {insight.editorialWarnings.map((warning, index) => <div key={index}>• {warning}</div>)}
+            </div>
+          )}
           {/* 🛑 18 ส.ค. 69 — ซ่อนปุ่มส่งประเด็นที่เลือกเข้าเขียนข่าว · ดูเหตุผล+วิธีถอยที่ WEB_NEWS_GEN_ON บนสุดของ component
               การเลือก/แก้ประเด็นยังทำได้ (ใช้ต่อกับปุ่มคัดลอกได้) */}
           {WEB_NEWS_GEN_ON && <button className="cta" style={{ marginTop: 6 }} onClick={sendTopicsToWrite}>ส่งประเด็นที่เลือกเข้าเขียนข่าว</button>}
@@ -1524,7 +1505,7 @@ export default function MobileApp() {
                     </div>
                   )}
                   <button className="gh" style={{ width: 'auto', padding: '5px 12px', fontSize: 11.5, marginTop: 7 }}
-                    onClick={() => copyText(`${s.topic}\n\n${s.rawData}${s.quotes?.length ? '\n\nคำพูด:\n' + s.quotes.map(q => `"${q}"`).join('\n') : ''}`)}>📋 คัดลอก</button>
+                    onClick={() => copyText(buildClipSubStoryText(s, i))}>📋 คัดลอก</button>
                 </div>
               ))}
             </div>
@@ -1566,7 +1547,7 @@ export default function MobileApp() {
                     <div key={i} style={{ marginBottom: 9, paddingTop: 9, borderTop: '1px dashed rgba(124,58,237,.25)' }}>
                       <p style={{ fontSize: 12.5, fontWeight: 700 }}>ประเด็น {t.no || i + 1}: {t.topic}{t.timeRange ? ` (${t.timeRange})` : ''}</p>
                       <p className="bd" style={{ fontSize: 12.5, marginTop: 3 }}>{t.enrichedRaw}</p>
-                      <button className="gh" style={{ width: 'auto', padding: '4px 10px', fontSize: 11.5, marginTop: 5 }} onClick={() => copyText(`${t.topic}${t.timeRange ? ` (${t.timeRange})` : ''}\n\n${t.enrichedRaw}`)}>📋 คัดลอก</button>
+                      <button className="gh" style={{ width: 'auto', padding: '4px 10px', fontSize: 11.5, marginTop: 5 }} onClick={() => copyText(buildClipSubStoryText({ no: t.no, topic: t.topic, timeRange: t.timeRange, rawData: t.enrichedRaw }, i))}>📋 คัดลอก</button>
                     </div>
                   ))}
                 </div>

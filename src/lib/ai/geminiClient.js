@@ -57,9 +57,8 @@ function getGeminiVideoClient() {
   return geminiVideoClient;
 }
 
-// ★ 26 มิ.ย. (ผู้ใช้สั่งกลับ): ปิด fallback — ใช้โมเดลวิดีโอตัวเดียวเท่านั้น (แม่นสุด)
-//   เหตุผล: 2.5-pro "มั่ว/แต่งเรื่อง" (เคสจริง: คลิป อั้ม อมรินทร์ แต่แต่งเป็น อั้ม อธิชาติ+เสก โลโซ ที่ไม่มีในคลิป)
-//   ยอมรอ/503 บ้าง ดีกว่าได้ข้อมูลผิด · เปิดคืนเมื่อมั่นใจคุณภาพ: ใส่โมเดลในอาเรย์นี้
+// Default ของ client ยังไม่สลับโมเดลเอง — caller ที่ยอมจ่าย fallback ต้องส่งรายชื่อมาชัดเจน
+// กันระบบอื่นถูกเพิ่มต้นทุนโดยไม่รู้ตัว
 const VIDEO_FALLBACK_MODELS = [];
 // ★ 22 ก.ค. 69 (ผู้ใช้สั่ง): โมเดลดูคลิป gemini-3.5-flash → gemini-3.6-flash
 //   เทสจริงผ่าน: ดูคลิป YouTube ยาว (input 208k tokens) จบใน 20.5 วิ ภาพ+เสียงถูกต้อง ขณะที่ 3.5-flash วันนั้นแน่น/timeout
@@ -69,12 +68,25 @@ const VIDEO_FALLBACK_MODELS = [];
 //   เช็ครายชื่อรุ่นได้เอง: GET /api/clip-transcript/gemini-health?list=3.7 · ถอยกลับ: env GEMINI_VIDEO_MODEL=gemini-3.6-flash
 //   ใช้เฉพาะสายวิดีโอ ไม่แตะ callGemini(text) ของระบบข่าว
 const VIDEO_MODEL = process.env.GEMINI_VIDEO_MODEL || 'gemini-3.7-flash';
-// อาการ "แน่น/ชั่วคราว" (ควรสลับโมเดล/ลองใหม่) — แยกจาก "ดูคลิปไม่ได้/parse พัง" (ไม่สลับ)
-const _isOverload = (e) => {
-  const status = Number(e?.status) || 0;
-  return [429, 500, 502, 503].includes(status)
-    || /\b503\b|\b429\b|overload|unavailable|high demand|temporar|resource exhausted/i.test(String(e?.message || ''));
-};
+// สลับโมเดลได้เฉพาะเมื่อ provider ปฏิเสธก่อนได้ผลลัพธ์อย่างชัดเจน
+// ห้ามสลับเมื่อ 500/502/timeout/network/empty/parse เพราะรอบแรกอาจประมวลผลและคิดเงินไปแล้ว
+export function isSafeGeminiVideoFallbackError(error) {
+  const status = [error?.status, error?.statusCode, error?.code]
+    .map((value) => Number(value))
+    .find((value) => Number.isInteger(value) && value > 0) || 0;
+  if (status) return status === 429 || status === 503;
+  const descriptor = `${String(error?.code || '')} ${String(error?.message || '')}`;
+  return /\b(?:429|503)\b|resource[_\s-]?exhausted|too many requests|high demand|overload(?:ed)?/i.test(descriptor);
+}
+
+export function buildGeminiVideoModelCandidates(model, allowModelFallback = true, fallbackModels = VIDEO_FALLBACK_MODELS) {
+  const configuredFallbacks = Array.isArray(fallbackModels) ? fallbackModels : [];
+  const candidates = allowModelFallback ? [model, ...configuredFallbacks] : [model];
+  return candidates
+    .map((candidate) => String(candidate || '').trim())
+    .filter(Boolean)
+    .filter((candidate, index, all) => all.indexOf(candidate) === index);
+}
 
 /**
  * เรียก Gemini — ส่ง prompt + response เป็น JSON
@@ -176,14 +188,23 @@ export function isGeminiAvailable() {
  *   ส่งลิงก์ YouTube สาธารณะผ่าน fileData.fileUri ให้ Gemini ดูเอง ไม่ต้องโหลด/ถอดเสียงก่อน
  *   timeout ยาว (3 นาที) เพราะดูคลิปทั้งเรื่อง | ใช้กับเครื่องมือ clip-insight เท่านั้น (แยกจากเวิร์กโฟลว์ข่าว)
  */
-export async function callGeminiVideo({ prompt, youtubeUrl, model = VIDEO_MODEL, temperature = 0.2, maxTokens = 8000 }) {
+export async function callGeminiVideo({
+  prompt,
+  youtubeUrl,
+  model = VIDEO_MODEL,
+  temperature = 0.2,
+  maxTokens = 8000,
+  maxAttempts = 4,
+  allowModelFallback = true,
+  fallbackModels = VIDEO_FALLBACK_MODELS,
+}) {
   const client = getGeminiVideoClient(); // ★ คีย์แยกสำหรับถอดคลิป
   if (!client) throw new Error('คีย์ Gemini สำหรับวิดีโอไม่ได้ตั้งค่า');
 
-  // ★ 26 มิ.ย. (ผู้ใช้สั่ง — แก้ 503 ด่วน): สลับโมเดลแบบ "รักษาคุณภาพ"
-  //   ตัวหลัก gemini-3.5-flash (ดีสุด/เดิม) ก่อนเสมอ → ถ้าแน่น 503 → สลับ gemini-2.5-pro (Pro คุณภาพสูง)
-  //   สลับเฉพาะตอน "แน่น/503" เท่านั้น (ดูคลิปไม่ได้/parse พัง = ไม่สลับ) → ส่วนใหญ่ได้คุณภาพเดิม
-  const models = [model, ...VIDEO_FALLBACK_MODELS].filter((m, i, a) => a.indexOf(m) === i);
+  // Caller เป็นผู้ระบุ fallbackModels เอง; client ไม่เพิ่มโมเดลนอกลิสต์
+  // แต่ละโมเดลใช้ tries ตาม maxAttempts และสลับเฉพาะ capacity rejection ที่ยืนยันได้
+  const tries = Math.max(1, Math.trunc(Number(maxAttempts) || 4));
+  const models = buildGeminiVideoModelCandidates(model, allowModelFallback, fallbackModels);
   let lastErr;
   for (const m of models) {
     console.log(`[GeminiVideo] model=${m}, url=${String(youtubeUrl).slice(0, 70)}`);
@@ -211,10 +232,10 @@ export async function callGeminiVideo({ prompt, youtubeUrl, model = VIDEO_MODEL,
           console.error('[GeminiVideo] JSON parse failed:', content.slice(0, 400));
           throw new Error('Gemini ส่งข้อมูลที่ parse ไม่ได้');
         }
-      }, { label: `GeminiVideo:${m}`, tries: 4 });
+      }, { label: `GeminiVideo:${m}`, tries });
     } catch (e) {
       lastErr = e;
-      if (_isOverload(e) && m !== models[models.length - 1]) {
+      if (isSafeGeminiVideoFallbackError(e) && m !== models[models.length - 1]) {
         console.warn(`[GeminiVideo] ${m} แน่น (${e?.status || '503'}) → สลับโมเดลสำรอง`);
         continue;
       }
@@ -286,7 +307,17 @@ function _repairTruncatedJson(raw) {
  *   ใช้กับคลิปที่ Gemini ดูจากลิงก์ตรงไม่ได้ (ไม่ใช่ YouTube) — อัปโหลดไฟล์ → รอประมวลผล → ให้ดู
  *   videoBuffer = Buffer ของวิดีโอ (mp4) | ลบไฟล์บน Gemini ทิ้งหลังใช้เสร็จ
  */
-export async function callGeminiVideoFile({ prompt, videoBuffer, mimeType = 'video/mp4', model = VIDEO_MODEL, temperature = 0.2, maxTokens = 8000 }) {
+export async function callGeminiVideoFile({
+  prompt,
+  videoBuffer,
+  mimeType = 'video/mp4',
+  model = VIDEO_MODEL,
+  temperature = 0.2,
+  maxTokens = 8000,
+  maxAttempts = 4,
+  allowModelFallback = true,
+  fallbackModels = VIDEO_FALLBACK_MODELS,
+}) {
   const apiKey = videoApiKey(); // ★ คีย์แยกสำหรับถอดคลิป (Files API ก็ใช้คีย์เดียวกัน)
   if (!apiKey) throw new Error('คีย์ Gemini สำหรับวิดีโอไม่ได้ตั้งค่า');
   if (!videoBuffer || videoBuffer.length < 10000) throw new Error('ไฟล์วิดีโอเล็ก/ว่างเกินไป');
@@ -330,9 +361,9 @@ export async function callGeminiVideoFile({ prompt, videoBuffer, mimeType = 'vid
     }
 
     const client = getGeminiVideoClient(); // ★ คีย์แยกสำหรับถอดคลิป
-    // ★ 26 มิ.ย.: ไฟล์อัปแล้ว (ACTIVE ครั้งเดียว) — สลับโมเดลตอน 503 ได้โดยไม่อัปซ้ำ
-    //   3.5-flash (ดีสุด) ก่อน → 2.5-pro (Pro) เมื่อแน่น · คงคุณภาพ
-    const models = [model, ...VIDEO_FALLBACK_MODELS].filter((m, i, a) => a.indexOf(m) === i);
+    // ไฟล์/inline payload ชุดเดิมใช้กับ fallback ที่ caller ระบุ จึงไม่ดาวน์โหลดหรืออัปโหลดคลิปซ้ำ
+    const tries = Math.max(1, Math.trunc(Number(maxAttempts) || 4));
+    const models = buildGeminiVideoModelCandidates(model, allowModelFallback, fallbackModels);
     let lastErr;
     for (const m of models) {
       const genModel = client.getGenerativeModel({
@@ -361,10 +392,10 @@ export async function callGeminiVideoFile({ prompt, videoBuffer, mimeType = 'vid
             if (repaired) { try { return sanitizeOutput(JSON.parse(repaired)); } catch {} }
             throw new Error('Gemini ส่งข้อมูลที่ parse ไม่ได้');
           }
-        }, { label: `GeminiVideoFile:${m}`, tries: 4 });
+        }, { label: `GeminiVideoFile:${m}`, tries });
       } catch (e) {
         lastErr = e;
-        if (_isOverload(e) && m !== models[models.length - 1]) {
+        if (isSafeGeminiVideoFallbackError(e) && m !== models[models.length - 1]) {
           console.warn(`[GeminiVideoFile] ${m} แน่น (${e?.status || '503'}) → สลับโมเดลสำรอง`);
           continue;
         }

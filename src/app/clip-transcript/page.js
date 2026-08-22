@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { buildClipNewsReadyText, buildClipSubStoryText } from '@/lib/services/clipNewsReadyText';
 
 // ★ 25 มิ.ย.: อ่าน response แบบปลอดภัย — กัน "Unexpected token 'A'..." เมื่อเซิร์ฟเวอร์
 //   timeout แล้ว Vercel คืน error page เป็น text (ไม่ใช่ JSON) → แปลงเป็นข้อความที่อ่านออก
@@ -116,10 +117,10 @@ export default function ClipTranscriptPage() {
       const r = await fetch('/api/clip-transcript/insight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), force: !!force, user: me }) });
       const d = await safeJson(r);
       if (d.success) { setInsight(d.data); loadInsightCases(); }   // ★ รีเฟรชคลังประเด็นทันทีที่ถอดสำเร็จ
-      // ★ 26 มิ.ย.: กดถอด "ทันที" แล้ว Gemini แน่น → ชวนไปกด "ส่งเข้าคิว" (ระบบรอ+รันเองจน Gemini ว่าง)
-      //   ปุ่มถอดตรง = ลองเดี๋ยวนี้ (ไม่วนเงียบ) · ปุ่มคิว = หย่อนทิ้งไว้ ระบบจัดการให้ → แยกชัด ไม่งง
+      // กดถอดทันทีแล้ว Gemini แน่น → ส่งเข้าคิวให้เครื่องทีมลองหนึ่งครั้งเมื่อรับงาน
+      // งานล้มต้องให้พนักงานกดใหม่เอง ห้ามสื่อว่าระบบวน inference จนสำเร็จ
       else if (/Gemini มีคนใช้งานหนัก|แน่นชั่วคราว|503|overload/i.test(String(d.error || ''))) {
-        setErr('⏳ ตอนนี้ Gemini แน่น ถอดทันทีไม่ผ่าน — กดปุ่ม "📥 ส่งเข้าคิว" ด้านล่างแทน ระบบจะรอแล้วรันให้เองจน Gemini ว่าง (ปิดหน้าได้ ผลเข้าคลังเอง ไม่ต้องเฝ้า/กดซ้ำ)');
+        setErr('⏳ ตอนนี้ Gemini แน่น ถอดทันทีไม่ผ่าน — กดปุ่ม "📥 ส่งเข้าคิว" เพื่อให้เครื่องทีมลองหนึ่งครั้งเมื่อรับงาน (ปิดหน้าได้ หากล้มระบบจะแจ้งให้กดใหม่เอง ไม่วนถอดซ้ำอัตโนมัติ)');
       }
       else setErr(d.error || 'ถอดประเด็นไม่สำเร็จ');
     } catch (e) { setErr(e.message); }
@@ -248,26 +249,8 @@ export default function ClipTranscriptPage() {
     return lines.join('\n');
   };
 
-  // รวมข้อความข้อมูลดิบของเคสประเด็น (เอาไปคัดลอกทั้งก้อน) — รองรับทั้ง single + multi-topic (คลิปยาว)
-  const insightCaseText = (ins) => {
-    if (!ins) return '';
-    const parts = [];
-    if (ins.headline) parts.push(`📌 ${ins.headline}`);
-    if (ins.overview) parts.push(ins.overview);
-    if (ins.multiTopic && ins.topics?.length) {
-      parts.push(`— แยก ${ins.topics.length} ประเด็น —`);
-      ins.topics.forEach((t) => parts.push(topicText(t)));
-      return parts.join('\n\n');
-    }
-    if (ins.keyPoints?.length) parts.push('— ประเด็นสำคัญ —\n' + ins.keyPoints.map((k, i) => `${i + 1}. ${k.point}${k.detail ? ' — ' + k.detail : ''}`).join('\n'));
-    if (ins.quotes?.length) parts.push('— คำพูดสำคัญ —\n' + ins.quotes.map(q => `“${q}”`).join('\n'));
-    if (ins.rawData) parts.push('— ข้อมูลดิบรวม —\n' + ins.rawData);
-    // ★ 25 มิ.ย.: เนื้อดิบแยกประเด็น
-    if (ins.subStories?.length) {
-      ins.subStories.forEach((s, i) => parts.push(`— เนื้อดิบประเด็น ${s.no || i + 1}: ${s.topic}${s.timeRange ? ` (${s.timeRange})` : ''} —\n${s.rawData}${s.quotes?.length ? '\n\nคำพูด:\n' + s.quotes.map(q => `“${q}”`).join('\n') : ''}`));
-    }
-    return parts.join('\n\n');
-  };
+  // ข้อความพร้อมส่งเข้าระบบข่าว: เรื่องเดียวใช้ rawData; หลายเรื่องใช้แต่ละ subStory โดยไม่ต่อข้อมูลซ้ำทุกชั้น
+  const insightCaseText = (ins) => buildClipNewsReadyText(ins);
 
   // ★ 8 ก.ค. rev.2: จัดหมวดผล — dna(คนละคน แยกระดับ ใกล้/กลาง/กว้าง) vs same(คนเดิม)
   //   รองรับเคสเก่า: tag 'follow'→คนเดิม · 'theme'→แนวเดียวกันกว้าง
@@ -431,7 +414,7 @@ export default function ClipTranscriptPage() {
                 display: 'flex', alignItems: 'center', gap: 9, border: '1px solid ' + c.bd, background: c.bg }}>
                 <span style={{ width: 10, height: 10, borderRadius: '50%', background: c.dot, flexShrink: 0, boxShadow: `0 0 7px ${c.dot}` }} />
                 <span><b>{c.label}</b> — {gem.msg || ''}{gem.ms ? ` (${(gem.ms / 1000).toFixed(1)} วิ)` : ''}
-                  {gem.light === 'red' && <span style={{ opacity: 0.85 }}> · กดได้ ระบบจะลองให้เองจน Gemini ว่าง หรือรอไฟเขียวค่อยกด</span>}
+                  {gem.light === 'red' && <span style={{ opacity: 0.85 }}> · รอไฟเขียว หรือส่งเข้าคิวให้เครื่องทีมลองหนึ่งครั้ง</span>}
                   {gem.light === 'green' && <span style={{ opacity: 0.85 }}> · กดถอดประเด็นได้เลย</span>}
                 </span>
               </div>
@@ -444,16 +427,16 @@ export default function ClipTranscriptPage() {
               border: '1px solid ' + (queueJob.status === 'error' ? '#ef4444' : queueJob.status === 'done' ? '#22c55e' : '#f59e0b'),
               background: queueJob.status === 'error' ? 'rgba(239,68,68,0.08)' : queueJob.status === 'done' ? 'rgba(34,197,94,0.08)' : 'rgba(245,158,11,0.08)' }}>
               {queueJob.status === 'pending' && <>⏳ <b>อยู่ในคิวเครื่องทีม</b> — ลำดับที่ {queueJob.position || '?'} · {platformIcon({ youtube: 'youtube', tiktok: 'tiktok', meta: 'meta' }[queueJob.platform])} กำลังรอเครื่องทีมดึงไปถอด (เปิดหน้านี้ค้างไว้ ผลจะเด้งขึ้นเอง)</>}
-              {queueJob.status === 'processing' && <>🔧 <b>เครื่องทีมกำลังถอดอยู่...</b>{queueJob.attempts > 0 ? <span style={{ color: '#fbbf24' }}> (ลองรอบที่ {queueJob.attempts + 1} — Gemini แน่น กำลังสู้อยู่)</span> : ''} {platformIcon(queueJob.platform)} (อาจใช้เวลา 1-3 นาทีต่อคลิป)</>}
-              {/* ★ 26 มิ.ย.: Gemini แน่น → ระบบลองใหม่เองทุก ~3 นาที จนได้ผล + นับถอยหลังสด (ปิดหน้าได้ ผลเข้าคลัง) */}
+              {queueJob.status === 'processing' && <>🔧 <b>เครื่องทีมกำลังถอดอยู่...</b>{queueJob.attempts > 0 ? <span style={{ color: '#fbbf24' }}> (รอบที่ {queueJob.attempts + 1} — รอบก่อนเซิร์ฟเวอร์ยืนยันว่ายังไม่เริ่มประมวลผล)</span> : ''} {platformIcon(queueJob.platform)} (อาจใช้เวลา 1-3 นาทีต่อคลิป)</>}
+              {/* retry_wait มีได้เฉพาะเมื่อ endpoint ยืนยัน retrySafe ว่ายังไม่เริ่มงานเสียเงิน */}
               {queueJob.status === 'retry_wait' && (() => {
                 const remainS = Math.max(0, Math.round(((queueJob.nextRetryAt ? new Date(queueJob.nextRetryAt).getTime() : nowMs) - nowMs) / 1000));
                 const mm = Math.floor(remainS / 60), ss = remainS % 60;
-                return <>🟡 <b>Gemini แน่นอยู่ — งานของคุณ &quot;อยู่ในคิว&quot; ระบบลองใหม่ให้เองอัตโนมัติ</b><br />
-                  ✅ ลองไปแล้ว <b>{queueJob.attempts || 0}</b> ครั้ง · {remainS > 0
+                return <>🟡 <b>งานยังไม่เริ่มประมวลผล — เซิร์ฟเวอร์ยืนยันว่าลองส่งใหม่ได้อย่างปลอดภัย</b><br />
+                  ✅ ส่งไปแล้ว <b>{queueJob.attempts || 0}</b> ครั้ง · {remainS > 0
                     ? <>⏱️ รอบถัดไปในอีก <b>{mm > 0 ? `${mm} นาที ` : ''}{ss} วินาที</b></>
                     : <>🔄 <b>กำลังลองใหม่เดี๋ยวนี้…</b></>}
-                  <br /><span style={{ fontSize: 11.5, opacity: 0.85 }}>👉 ปิดหน้านี้/ปิดมือถือได้เลย ไม่ต้องเฝ้า/ไม่ต้องส่งซ้ำ — พอ Gemini ว่าง ระบบถอดให้แล้วเก็บเข้า &quot;คลังประเด็นข่าว&quot; ด้านล่างอัตโนมัติ</span></>;
+                  <br /><span style={{ fontSize: 11.5, opacity: 0.85 }}>👉 สถานะนี้ไม่ใช่การถอดซ้ำ — ระบบจะเริ่ม inference เมื่อรับงานได้เท่านั้น และถ้าประมวลผลล้มจะหยุดให้พนักงานตัดสินใจ</span></>;
               })()}
               {queueJob.status === 'done' && <>✅ <b>ถอดเสร็จแล้ว</b> — ผลอยู่ด้านล่าง + เก็บเข้าคลังประเด็นข่าวให้แล้ว</>}
               {queueJob.status === 'error' && <>❌ <b>ถอดไม่สำเร็จ</b> — {queueJob.error || 'ลองส่งใหม่อีกครั้ง'}</>}
@@ -556,7 +539,7 @@ export default function ClipTranscriptPage() {
                 {insight.category && <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(245,158,11,0.16)', color: '#f59e0b', fontWeight: 800 }}>📂 {insight.category}</span>}
                 {insight.multiTopic && <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(245,158,11,0.18)', color: '#fbbf24', fontWeight: 800 }}>📚 คลิปยาว · {insight.totalTopics || insight.topics?.length || 0} ประเด็น</span>}
                 <span style={{ fontSize: 10, color: 'var(--text-muted,#888)' }}>{String(insight.engine || '').includes('gemini-video') ? '👁️ Gemini ดูคลิป' : '📝 จากบทถอดเสียง'}</span>
-                <button onClick={() => copy(insightCaseText(insight), 'insight-raw')} style={{ padding: '4px 11px', borderRadius: 8, border: 'none', background: copied === 'insight-raw' ? 'rgba(34,197,94,0.2)' : 'rgba(59,130,246,0.15)', color: copied === 'insight-raw' ? '#22c55e' : '#3b82f6', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'insight-raw' ? '✅ คัดลอกแล้ว' : '📋 คัดลอกทั้งหมด'}</button>
+                <button onClick={() => copy(insightCaseText(insight), 'insight-raw')} style={{ padding: '4px 11px', borderRadius: 8, border: 'none', background: copied === 'insight-raw' ? 'rgba(34,197,94,0.2)' : 'rgba(59,130,246,0.15)', color: copied === 'insight-raw' ? '#22c55e' : '#3b82f6', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'insight-raw' ? '✅ คัดลอกแล้ว' : '📋 คัดลอกเนื้อพร้อมใช้'}</button>
               </div>
             </div>
 
@@ -567,10 +550,16 @@ export default function ClipTranscriptPage() {
                 <button onClick={() => extractInsight(true)} style={{ padding: '4px 12px', borderRadius: 7, border: '1px solid rgba(34,197,94,0.5)', background: 'transparent', color: '#22c55e', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>🔁 ถอดใหม่</button>
               </div>
             )}
-            {/* ★ 8 ก.ค.: ด่านตรวจคุณภาพ — ผลไม่สมบูรณ์ (ลองซ้ำแล้ว) → เตือนชัด อย่าใช้เงียบๆ */}
+            {/* ด่านตรวจคุณภาพแบบไม่ถอดซ้ำอัตโนมัติ — พนักงานเห็นธงแล้วเลือกตรวจหรือกดใหม่เอง */}
             {insight.lowQuality && (
               <div style={{ fontSize: 12, padding: '9px 12px', borderRadius: 9, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.35)', color: '#f87171', marginBottom: 12 }}>
                 ⚠️ <b>{insight.qualityNote || 'ผลอาจไม่สมบูรณ์ — แนะนำกดถอดใหม่'}</b>
+              </div>
+            )}
+            {insight.editorialWarnings?.length > 0 && (
+              <div style={{ fontSize: 12, lineHeight: 1.65, padding: '9px 12px', borderRadius: 9, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.35)', color: '#fbbf24', marginBottom: 12 }}>
+                <b>✍️ จุดให้พนักงานตรวจประโยคเปิด</b>
+                {insight.editorialWarnings.map((warning, index) => <div key={index}>• {warning}</div>)}
               </div>
             )}
 
@@ -664,7 +653,7 @@ export default function ClipTranscriptPage() {
                           <span style={{ color: '#fbbf24' }}>ประเด็น {s.no || i + 1}:</span> {s.topic}
                           {s.timeRange && <span style={{ fontSize: 11, color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600, marginLeft: 6 }}>⏱️ {s.timeRange}</span>}
                         </div>
-                        <button onClick={() => navigator.clipboard?.writeText(`${s.topic}\n\n${s.rawData}${s.quotes?.length ? '\n\nคำพูด:\n' + s.quotes.map(q => `“${q}”`).join('\n') : ''}`)}
+                        <button onClick={() => navigator.clipboard?.writeText(buildClipSubStoryText(s, i))}
                           style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid rgba(245,158,11,0.4)', background: 'transparent', color: '#fbbf24', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>📋 คัดลอก</button>
                       </div>
                       <div style={{ fontSize: 13, lineHeight: 1.75, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 11 }}>{s.rawData}</div>
@@ -723,8 +712,9 @@ export default function ClipTranscriptPage() {
                         {ins.clipTypeLabel && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontWeight: 700 }}>{ins.emoji || '🎬'} {ins.clipTypeLabel}</span>}
                         {(c.category || ins.category) && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(245,158,11,0.16)', color: '#f59e0b', fontWeight: 800 }}>📂 {c.category || ins.category}</span>}
                         <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(37,99,235,0.15)', color: '#60a5fa', fontWeight: 700 }}>{String(ins.engine || '').includes('gemini-video') ? '👁️ ดูคลิป' : '📝 บทถอด'}</span>
-                        {/* ★ 8 ก.ค.: ธงคุณภาพ — เคสที่ไม่ผ่านด่านตรวจ (ลองซ้ำแล้ว) เห็นชัด ไม่ปนกับเคสดี */}
+                        {/* ธงคุณภาพ — เคสที่ไม่ผ่านเกณฑ์ขั้นต่ำ เห็นชัดและไม่เสีย Gemini รอบสองอัตโนมัติ */}
                         {c.lowQuality && <span title={c.qualityNote || ''} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(239,68,68,0.14)', color: '#f87171', fontWeight: 800 }}>⚠️ ไม่สมบูรณ์</span>}
+                        {ins.editorialWarnings?.length > 0 && <span title={ins.editorialWarnings.join('\n')} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(245,158,11,0.14)', color: '#fbbf24', fontWeight: 800 }}>✍️ ตรวจคำเปิด</span>}
                       </div>
                       <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{platformIcon(c.platform)} {ins.headline || c.title || c.url}</div>
                       <div style={{ fontSize: 10, color: 'var(--text-muted, #888)', marginTop: 3 }}>{c.platform} · {ins.multiTopic ? `📚 ${ins.topics?.length || 0} ประเด็น (คลิปยาว)` : `${ins.keyPoints?.length || 0} ประเด็น${ins.subStories?.length ? ` · 🧩 ${ins.subStories.length} เนื้อดิบแยก` : ''}`}{c.user ? ` · 👤 ${c.user}` : ''} · {new Date(c.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
@@ -735,9 +725,15 @@ export default function ClipTranscriptPage() {
                     <div style={{ padding: 14, borderTop: '1px solid rgba(37,99,235,0.2)' }}>
                       <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
                         <a href={c.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: '#3b82f6' }}>🔗 เปิดคลิป</a>
-                        {ins.rawData && <button onClick={() => copy(ins.rawData, 'ic-raw-' + c.id)} style={{ padding: '3px 10px', borderRadius: 6, border: 'none', background: 'rgba(59,130,246,0.15)', color: '#3b82f6', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'ic-raw-' + c.id ? '✅' : '📋 คัดลอกข้อมูลดิบ'}</button>}
-                        <button onClick={() => copy(insightCaseText(ins), 'ic-all-' + c.id)} style={{ padding: '3px 10px', borderRadius: 6, border: 'none', background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'ic-all-' + c.id ? '✅' : '📋 คัดลอกทั้งหมด'}</button>
+                        {ins.rawData && <button onClick={() => copy(ins.rawData, 'ic-raw-' + c.id)} style={{ padding: '3px 10px', borderRadius: 6, border: 'none', background: 'rgba(59,130,246,0.15)', color: '#3b82f6', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'ic-raw-' + c.id ? '✅' : '📋 คัดลอกก้อนรวมเดิม'}</button>}
+                        <button onClick={() => copy(insightCaseText(ins), 'ic-all-' + c.id)} style={{ padding: '3px 10px', borderRadius: 6, border: 'none', background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'ic-all-' + c.id ? '✅' : '📋 คัดลอกเนื้อพร้อมใช้'}</button>
                       </div>
+                      {ins.editorialWarnings?.length > 0 && (
+                        <div style={{ fontSize: 11.5, lineHeight: 1.6, padding: '8px 10px', borderRadius: 8, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)', color: '#fbbf24', marginBottom: 10 }}>
+                          <b>✍️ จุดให้พนักงานตรวจประโยคเปิด</b>
+                          {ins.editorialWarnings.map((warning, index) => <div key={index}>• {warning}</div>)}
+                        </div>
+                      )}
                       {ins.overview && <div style={{ fontSize: 13, lineHeight: 1.7, marginBottom: 10, whiteSpace: 'pre-wrap' }}>{ins.overview}</div>}
                       {ins.multiTopic && ins.topics?.length > 0 && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
@@ -786,7 +782,7 @@ export default function ClipTranscriptPage() {
                               <div key={i} style={{ border: '1px solid rgba(245,158,11,0.3)', borderRadius: 9, padding: 11, background: 'rgba(245,158,11,0.04)' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
                                   <div style={{ fontSize: 13, fontWeight: 800 }}><span style={{ color: '#fbbf24' }}>ประเด็น {s.no || i + 1}:</span> {s.topic}{s.timeRange && <span style={{ fontSize: 10.5, color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600, marginLeft: 6 }}>⏱️ {s.timeRange}</span>}</div>
-                                  <button onClick={() => copy(`${s.topic}\n\n${s.rawData}${s.quotes?.length ? '\n\nคำพูด:\n' + s.quotes.map(q => `“${q}”`).join('\n') : ''}`, 'ic-sub-' + c.id + '-' + i)} style={{ padding: '3px 9px', borderRadius: 7, border: '1px solid rgba(245,158,11,0.4)', background: 'transparent', color: '#fbbf24', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>{copied === 'ic-sub-' + c.id + '-' + i ? '✅' : '📋'}</button>
+                                  <button onClick={() => copy(buildClipSubStoryText(s, i), 'ic-sub-' + c.id + '-' + i)} style={{ padding: '3px 9px', borderRadius: 7, border: '1px solid rgba(245,158,11,0.4)', background: 'transparent', color: '#fbbf24', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>{copied === 'ic-sub-' + c.id + '-' + i ? '✅' : '📋'}</button>
                                 </div>
                                 <div style={{ fontSize: 12.5, lineHeight: 1.7, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 10 }}>{s.rawData}</div>
                                 {s.keyPoints?.length > 0 && <ul style={{ margin: '7px 0 0', paddingLeft: 18, fontSize: 12, lineHeight: 1.65, color: 'var(--text-muted,#bbb)' }}>{s.keyPoints.map((k, j) => <li key={j}>{k}</li>)}</ul>}

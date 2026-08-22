@@ -19,6 +19,24 @@ export const CLIP_TYPES = {
 
 const pickType = (t) => (CLIP_TYPES[t] ? t : 'other');
 
+export const CLIP_EDITORIAL_RAW_REV = 'clip-editorial-direct-lead-v7-0822';
+
+// งานถอดคลิปไม่ retry โมเดลเดิม: 3.7 หนึ่งครั้ง → 3.6 หนึ่งครั้ง เฉพาะ provider ปฏิเสธ 429/503 แบบชัดเจน
+// JSON เสีย, timeout, network ขาดกลางทาง หรือคุณภาพสำนวนไม่ดีจะไม่เรียกซ้ำ
+const CLIP_VIDEO_INFERENCE_POLICY = Object.freeze({
+  maxAttempts: 1,
+  allowModelFallback: true,
+  fallbackModels: Object.freeze(['gemini-3.6-flash']),
+});
+
+// การ A/B ที่ระบุ model เองต้องได้โมเดลนั้นจริง ห้ามแอบสลับเป็น 3.6
+const clipVideoInferenceOptions = (model = '') => {
+  const exactModel = String(model || '').trim();
+  return exactModel
+    ? { maxAttempts: 1, allowModelFallback: false, fallbackModels: [], model: exactModel }
+    : CLIP_VIDEO_INFERENCE_POLICY;
+};
+
 // ── 1) จำแนกประเภทคลิป + ผู้พูด (เบา เร็ว ใช้บทถอด) ──
 export async function classifyTranscript(rawText, caption = '') {
   const text = String(rawText || '').trim();
@@ -98,6 +116,28 @@ const INSIGHT_RULES = `กฎเหล็ก:
 - เลือกประโยคที่ "แรง/สะเทือนใจ/เห็นภาพ/เป็นข่าวได้" — คำต่อคำ ห้ามเรียบเรียงใหม่
 - คลิปไม่มีคำพูด (ภาพเหตุการณ์ล้วน) ปล่อยว่างได้ ไม่ต้องฝืน`;
 
+const EDITORIAL_RAW_RULES = `★★ เนื้อดิบพร้อมส่งเข้าระบบข่าว (ใช้กับ rawData และ subStory.rawData ทุกก้อน):
+- เนื้อดิบไม่ใช่บทถอดคำต่อคำและไม่ใช่สรุปรายการ ให้เริ่มที่เหตุการณ์หรือสาระข่าวทันที แล้วเรียงข้อเท็จจริงตามลำดับที่ทำให้คนอ่านเข้าใจง่าย
+- ประโยคแรกต้องเริ่มด้วยข้อเท็จจริง เหตุการณ์ หรือใจความสำคัญของเจ้าตัวโดยตรง ห้ามเริ่มด้วยถ้อยคำเมตาว่าใคร “เปิดใจ” “ให้สัมภาษณ์” “เล่าถึง” หรือ “เผยเรื่องราว” แล้วค่อยเข้าสาระ แม้ต้นทางเป็นรายการสัมภาษณ์ก็ตาม
+- ก่อนเขียน rawData ทุกก้อน ให้เขียน directLead เป็นประโยคเปิดพร้อมใช้ 1 ประโยค โดยเลือก “ข้อเท็จจริงหนึ่งก้อน” เช่น ความขัดแย้ง การกระทำ เหตุการณ์ หรือความรู้สึกที่เจ้าตัวพูดจริง แล้ว rawData ต้องเริ่มด้วย directLead เดิมแบบคำต่อคำ ก่อนเล่ารายละเอียดถัดไป
+- directLead ห้ามทำหน้าที่เป็นสารบัญหรือประกาศว่าจะเล่าเรื่อง เช่น “เปิดเผยเส้นทางชีวิต” “เผยเรื่องราว” “ถ่ายทอดประสบการณ์” “ย้อนเล่าชีวิตตั้งแต่...ถึง...” ให้หยิบเหตุการณ์จริงหนึ่งจุดมาเปิดเลย แม้ rawData รวมจะครอบหลายช่วงชีวิตก็ตาม
+- ตรวจไวยากรณ์ directLead ก่อนส่ง JSON: หลังชื่อบุคคล กริยาหลักต้องเป็นสิ่งที่บุคคล “ทำ/เจอ/รู้สึก/ตัดสินใจ” ในเรื่อง ห้ามเป็นกริยารายงานว่า เปิดใจ เปิดเผย เผย เล่า เล่าถึง ย้อนชีวิต ถ่ายทอด พูดถึง กล่าวถึง หรือให้สัมภาษณ์ หากเจอให้เขียน directLead ใหม่ภายในคำตอบรอบเดิม
+- ตัวอย่างผิด → ถูก: “เอ็ม บุษราคัม เล่าถึงชีวิตในวัยเด็กที่ไม่ค่อยได้รับคำชม” → “เอ็ม บุษราคัม เติบโตมากับความรู้สึกว่าไม่ค่อยได้รับคำชมตรง ๆ จากพ่อ” · “เอ็มเผยประสบการณ์ถูกกลั่นแกล้ง” → “เอ็มเคยถูกเพื่อนกลั่นแกล้งและล้อเลียนในช่วงวัยเรียน”
+- ตั้ง interviewEventIsNews = true ได้เฉพาะเมื่อ “การออกมาพูดครั้งนี้” เป็นเหตุการณ์ข่าวเองจริง เช่น พูดครั้งแรกหลังเงียบ ชี้แจง ยืนยัน ปฏิเสธ ขอโทษ แถลง หรือแก้ข่าว และ directLead ต้องบอกด้วยว่าชี้แจงหรือยืนยันเรื่องอะไร ห้ามตั้ง true เพียงเพราะต้นทางเป็นรายการสัมภาษณ์
+- rawData และ subStory.rawData ห้ามเปิดด้วยกรอบว่าใครมาออกรายการ ให้สัมภาษณ์ช่องใด หรือพิธีกรถามว่าอะไร ให้เปิดด้วยคนและเหตุการณ์ของข่าวโดยตรง
+- คำว่า “ให้สัมภาษณ์” “เปิดเผยในรายการ” “ผู้สื่อข่าวถาม” และคำบอกขั้นตอนสัมภาษณ์เป็นเพียงวิธีได้ข้อมูล ไม่ใช่ตัวข่าว ห้ามใช้เป็นคำเปิดหรือสะพานเชื่อม เว้นแต่การให้สัมภาษณ์เป็นเหตุการณ์ข่าวเอง ให้เปลี่ยนเป็นชื่อหรือบทบาทของเจ้าของข้อมูล แล้วเล่าสิ่งที่เขาบอกหรือยืนยันโดยตรง
+- ตัดชื่อรายการ ชื่อช่อง ชื่อพิธีกร คำเกริ่นของผู้ดำเนินรายการ คำเอ้อ คำถามซ้ำ คำทักทาย คำโปรโมต สปอนเซอร์ คำชวนติดตาม และคำแนะนำทั่วไป เมื่อสิ่งนั้นไม่ใช่ตัวข่าว การรู้ว่าใครพูดให้ระบุเจ้าของข้อความตรงๆ โดยไม่ใช้ชื่อรายการหรือพิธีกรเป็นสะพานเล่า
+- หากไม่ทราบชื่อผู้พูด ให้ใช้บทบาทในเรื่องที่คลิปยืนยันได้ เช่น “เพื่อนคนหนึ่งในกลุ่ม” หรือ “ผู้ร่วมเหตุการณ์” ห้ามบรรยายสีเสื้อ แว่นตา หรือตำแหน่งในภาพแทนชื่อ เว้นแต่จำเป็นจริงเพื่อแยกเจ้าของคำพูดและไม่มีข้อมูลอื่น
+- เก็บชื่อรายการ/ช่อง/พิธีกร/โปรโมชันไว้เฉพาะเมื่อสิ่งนั้นเป็นตัวข่าว หรือจำเป็นจริงต่อการแยกว่าใครเป็นเจ้าของข้อเท็จจริง ถ้าจำเป็นให้กล่าวสั้นเพียงครั้งเดียวหลังข้อเท็จจริงแรก ห้ามใช้เป็นคำเปิดหรือคำเปรย
+- ถ้าคลิปมีการเปิดตัวสินค้าหรือธุรกิจ ให้เก็บเฉพาะข้อเท็จจริงที่เป็นข่าว เช่น ใครร่วมธุรกิจ สินค้าคืออะไร และจุดเริ่มต้นที่คลิปยืนยัน ตัดราคาปกติ ราคาลด ของแถม ค่าส่ง ช่องทางสั่งซื้อ และคำเร่งขายออก เว้นแต่ราคา/โปรโมชันนั้นเป็นเหตุการณ์ข่าวหรือข้อพิพาทที่กำลังรายงานโดยตรง
+- ทุกประโยคต้องเพิ่มข้อเท็จจริง บริบท หรือคำพูดสำคัญใหม่ ถ้าข้อมูลเดิมถูกพูดซ้ำให้รวมเป็นครั้งเดียว โดยห้ามทำชื่อ ตัวเลข วัน เวลา จำนวนเงิน สถานที่ เหตุและผล หรือลำดับที่คลิปยืนยันหาย
+- คำพูดตรงที่เลือกไว้ใน quotes และสำคัญต่อข่าว ต้องวางรวมใน rawData ของประเด็นนั้นตรงจังหวะที่เกี่ยวข้องด้วย ให้ quotes เป็นหลักฐานสำรอง ไม่ใช่ที่เก็บข้อมูลสำคัญซึ่งหายไปจากเนื้อดิบ
+- เกลาคำพูดติดขัดและคำซ้ำให้เป็นภาษาไทยธรรมชาติได้เมื่อความหมายชัดเจน เขียนประธาน–กริยาให้ชัด เลี่ยงภาษารายงานแข็งหรือประโยคซ้อนที่อ่านสะดุดเมื่อเขียนตรงและง่ายกว่าได้ แต่ห้ามเปลี่ยนความหมาย
+- ตรวจทุกประโยคว่ามีความหมายและถูกไวยากรณ์ในบริบท ถ้าวลีจากเสียง/ซับเพี้ยน ขาดคำ ขัดกันเอง หรืออ่านแล้วไม่เป็นภาษาไทยธรรมชาติ ห้ามคัดลอกและห้ามซ่อมด้วยการเดา ให้ตัดเฉพาะวลีที่ไม่ชัดแล้วคงข้อเท็จจริงส่วนที่ฟังรู้เรื่องไว้ ส่วน quotes ให้เก็บเฉพาะประโยคที่ได้ยินครบและเข้าใจความหมายแน่นอน
+- ก่อนตอบให้อ่าน rawData และแต่ละ subStory.rawData ต่อเนื่องอีกครั้ง แล้วตัดข้อเท็จจริงหรือวลีที่กล่าวซ้ำในก้อนเดียวกัน โดยเก็บรายละเอียดใหม่และคำพูดสำคัญไว้ครบ
+- คลิปหลายประเด็นต้องแยกคน เหตุการณ์ คำพูด ตัวเลข และบริบทไว้ใน subStory ของเรื่องนั้น ห้ามนำคน คำพูด เหตุการณ์ หรือตัวเลขของคนละประเด็นมาปนกัน
+- จบที่ข้อเท็จจริงหรือคำพูดสำคัญสุดท้ายของเรื่อง ไม่เติมบทสรุปสอนใจ คำแนะนำ หรือความเห็นของผู้เรียบเรียง`;
+
 // ★ 15 ส.ค. 69 (เจ้าของสั่ง) — คืน "สมอความลึกแบบครบในตัวเอง" ให้ประเด็นย่อย (ของยุค 31 ก.ค. ที่หลุดไปตอนย้อนยุคนิ่ง 14 ส.ค. 499df17)
 //   ปัญหาที่ย้อนกลับมา: สมอผูกความลึกประเด็นย่อยไว้กับเนื้อรวม ("ครบเท่า rawData รวม") → เนื้อรวมสั้นเมื่อไหร่ ประเด็นย่อยหดตามทันที
 //   เกลาให้เข้ายุคปัจจุบัน (ไม่ใช่ยกของเก่ามาทั้งดุ้น): ยุคนี้ไม่มีกติกา "เขียนกระชับ" แล้ว มี "บันไดความยาวตามความยาวคลิป" แทน
@@ -127,8 +167,10 @@ const INSIGHT_SCHEMA = `ตอบ JSON เท่านั้น:
   "keyPoints": [{"point": "ประเด็นสำคัญ", "detail": "รายละเอียด/บริบทของประเด็นนี้ (ข้อเท็จจริง)"}],
   "quotes": ["คำพูดสำคัญตรงจากคลิป (ใส่ชื่อคนพูดถ้ารู้)"],
   "timeline": [{"time": "ช่วงเวลาโดยประมาณ เช่น 0:00–2:30 หรือ 'ช่วงต้น'", "topic": "ช่วงนี้คุยเรื่องอะไร"}],
-  "rawData": "ข้อมูลดิบรวมของข่าวนี้ เรียบเรียงเป็นย่อหน้าอ่านเข้าใจง่าย ข้อเท็จจริงล้วน ครบทุกประเด็น พร้อมให้คนอ่านเข้าใจว่าข่าวนี้คืออะไรแล้วเอาไปใช้ต่อเอง",
-  "subStories": [{"topic": "ชื่อประเด็นนี้ (สั้น ชัดเจน)", "timeRange": "ช่วงเวลาในคลิป เช่น 2:12–4:40", "rawData": "${SUBSTORY_SCHEMA_RAW}", "keyPoints": ["ข้อเท็จจริงสำคัญของประเด็นนี้"], "quotes": ["คำพูดตรงของประเด็นนี้"]}]
+  "directLead": "ประโยคเปิดพร้อมใช้ 1 ประโยคที่เริ่มด้วยเนื้อข่าวจริง ไม่ใช่กรอบรายการหรือคำว่าเปิดใจ/ให้สัมภาษณ์",
+  "interviewEventIsNews": false,
+  "rawData": "ต้องเริ่มด้วย directLead เดิมแบบคำต่อคำ แล้วเรียบเรียงข้อมูลดิบรวมของข่าวนี้เป็นย่อหน้าอ่านเข้าใจง่าย ข้อเท็จจริงล้วน ครบทุกประเด็น พร้อมให้คนอ่านเข้าใจว่าข่าวนี้คืออะไรแล้วเอาไปใช้ต่อเอง",
+  "subStories": [{"topic": "ชื่อประเด็นนี้ (สั้น ชัดเจน)", "timeRange": "ช่วงเวลาในคลิป เช่น 2:12–4:40", "directLead": "ประโยคเปิดพร้อมใช้ของประเด็นนี้", "interviewEventIsNews": false, "rawData": "ต้องเริ่มด้วย directLead เดิมแบบคำต่อคำ แล้วตามด้วย ${SUBSTORY_SCHEMA_RAW}", "keyPoints": ["ข้อเท็จจริงสำคัญของประเด็นนี้"], "quotes": ["คำพูดตรงของประเด็นนี้"]}]
 }`;
 
 // ★ 25 มิ.ย. (ผู้ใช้สั่ง) — เนื้อดิบ "แยกประเด็น" เพิ่มจาก rawData รวม (ไม่ใช่แทน) สำหรับคลิปหลายประเด็น
@@ -154,16 +196,79 @@ const VIDEO_INSIGHT_PROMPT = `คุณเป็นบรรณาธิกา�
 
 ${INSIGHT_RULES}
 
+${EDITORIAL_RAW_RULES}
+
 ${IDENTITY_RULES}
 
 ${SUBSTORY_RULES}
 
 ${INSIGHT_SCHEMA}`;
 
+const DIRECT_LEAD_META_PATTERN = /(?:เปิดใจ|เปิดเผย|เผย|เล่า(?:ถึง)?|ย้อน(?:เล่า|ชีวิต|เส้นทาง)?|ถ่ายทอด|พูดถึง|กล่าวถึง|ให้สัมภาษณ์|มาเป็นแขกรับเชิญ|ร่วมพูดคุยในรายการ)/u;
+const INTERVIEW_NEWS_EVENT_PATTERN = /(?:เป็นครั้งแรก|ครั้งแรกหลัง|หลัง(?:จาก)?เงียบ|ชี้แจง|ยืนยัน|ปฏิเสธ|ขอโทษ|แถลง|ประกาศ|ตอบโต้|แก้ข่าว|ยอมรับ|ถอนคำพูด|ยุติข่าวลือ)/u;
+const usesInterviewFrameAtStart = (text) => {
+  const match = String(text || '').trimStart().slice(0, 180).match(DIRECT_LEAD_META_PATTERN);
+  return Boolean(match && Number(match.index) <= 48);
+};
+
+// ตรวจด้วยโค้ดล้วนหลัง inference เดิม: ไม่แก้ข้อความ ไม่บล็อกผล และไม่เรียก AI ซ้ำ
+export function assessClipDirectLead({ directLead = '', rawData = '', interviewEventIsNews = false, label = 'ก้อนรวม' } = {}) {
+  const lead = String(directLead || '').trim();
+  const raw = String(rawData || '');
+  if (!raw.trim()) return [];
+
+  const warnings = [];
+  if (!lead) {
+    warnings.push(`${label}: ไม่มีประโยคเปิด directLead สำหรับตรวจ`);
+    return warnings;
+  }
+
+  const opening = raw.trimStart().slice(0, 240);
+  const rawStartsWithLead = raw.trimStart().startsWith(lead);
+  const leadUsesInterviewFrame = usesInterviewFrameAtStart(lead);
+  const openingUsesInterviewFrame = !rawStartsWithLead && usesInterviewFrameAtStart(opening);
+  const hasConcreteInterviewEvent = INTERVIEW_NEWS_EVENT_PATTERN.test(lead.slice(0, 240));
+  const interviewFrameAllowed = interviewEventIsNews === true && hasConcreteInterviewEvent;
+
+  if ((leadUsesInterviewFrame || openingUsesInterviewFrame) && !interviewFrameAllowed) {
+    warnings.push(`${label}: ประโยคเปิดยังเป็นคำเปรยหรือกรอบรายการ/สัมภาษณ์ ควรเปิดด้วยข้อเท็จจริงของข่าว`);
+  }
+  if (interviewEventIsNews === true && !hasConcreteInterviewEvent) {
+    warnings.push(`${label}: ระบุว่าการให้สัมภาษณ์เป็นข่าว แต่ประโยคเปิดไม่มีเหตุการณ์ชี้แจงหรือยืนยันที่ชัดเจน`);
+  }
+  if (!rawStartsWithLead) {
+    warnings.push(`${label}: เนื้อดิบไม่ได้เริ่มด้วย directLead ตามที่โมเดลส่งมา`);
+  }
+  return [...new Set(warnings)];
+}
+
 function normalizeInsight(p, engine) {
   const t = pickType(p.clipType);
+  const directLead = String(p.directLead || '').slice(0, 500);
+  const interviewEventIsNews = p.interviewEventIsNews === true;
+  const rawData = String(p.rawData || '').slice(0, 8000);
+  const subStories = Array.isArray(p.subStories) ? p.subStories.map((s, i) => ({
+    no: i + 1,
+    topic: String(s?.topic || s?.title || '').slice(0, 200),
+    timeRange: String(s?.timeRange || s?.time || '').slice(0, 40),
+    directLead: String(s?.directLead || '').slice(0, 500),
+    interviewEventIsNews: s?.interviewEventIsNews === true,
+    rawData: String(s?.rawData || '').slice(0, 6000),
+    keyPoints: Array.isArray(s?.keyPoints) ? s.keyPoints.slice(0, 12).map(k => String(k?.point || k || '').slice(0, 300)).filter(Boolean) : [],
+    quotes: Array.isArray(s?.quotes) ? s.quotes.slice(0, 10).map(q => String(q).slice(0, 400)).filter(Boolean) : [],
+  })).filter(s => s.topic && s.rawData) : [];
+  const editorialWarnings = [
+    ...assessClipDirectLead({ directLead, rawData, interviewEventIsNews, label: 'ก้อนรวม' }),
+    ...subStories.flatMap((story) => assessClipDirectLead({
+      directLead: story.directLead,
+      rawData: story.rawData,
+      interviewEventIsNews: story.interviewEventIsNews,
+      label: `ประเด็น ${story.no}`,
+    })),
+  ];
   return {
     engine,
+    promptRev: CLIP_EDITORIAL_RAW_REV,
     clipType: t,
     clipTypeLabel: CLIP_TYPES[t].label,
     emoji: CLIP_TYPES[t].emoji,
@@ -183,16 +288,12 @@ function normalizeInsight(p, engine) {
       time: String(tl?.time || '').slice(0, 40),
       topic: String(tl?.topic || '').slice(0, 200),
     })).filter(tl => tl.topic) : [],
-    rawData: String(p.rawData || '').slice(0, 8000),
+    directLead,
+    interviewEventIsNews,
+    rawData,
+    editorialWarnings: [...new Set(editorialWarnings)],
     // ★ 25 มิ.ย. — เนื้อดิบแยกประเด็น (เพิ่มจาก rawData รวม) — ว่างได้ถ้าคลิปเรื่องเดียว
-    subStories: Array.isArray(p.subStories) ? p.subStories.slice(0, 8).map((s, i) => ({
-      no: i + 1,
-      topic: String(s?.topic || s?.title || '').slice(0, 200),
-      timeRange: String(s?.timeRange || s?.time || '').slice(0, 40),
-      rawData: String(s?.rawData || '').slice(0, 6000),
-      keyPoints: Array.isArray(s?.keyPoints) ? s.keyPoints.slice(0, 12).map(k => String(k?.point || k || '').slice(0, 300)).filter(Boolean) : [],
-      quotes: Array.isArray(s?.quotes) ? s.quotes.slice(0, 10).map(q => String(q).slice(0, 400)).filter(Boolean) : [],
-    })).filter(s => s.topic && s.rawData) : [],
+    subStories,
   };
 }
 
@@ -209,7 +310,12 @@ export async function extractClipInsight({ url, platform, rawText = '', model = 
     const { callGeminiVideo } = await import('@/lib/ai/geminiClient');
     // ★ 21 มิ.ย.: 8000→16000 · ★ 25 มิ.ย.: 16000→24000 (เพิ่ม subStories) · ★ 8 ก.ค.: 24000→32000
     //   (พรอมต์ใหม่บังคับ rawData ละเอียดขึ้นมาก — เผื่อ output กัน JSON ถูกตัดท้าย = ต้นเหตุเคส rawData ว่างในคลัง)
-    const r = await callGeminiVideo({ prompt: VIDEO_INSIGHT_PROMPT, youtubeUrl: url, maxTokens: 32000, ...(model ? { model } : {}) });
+    const r = await callGeminiVideo({
+      prompt: VIDEO_INSIGHT_PROMPT,
+      youtubeUrl: url,
+      maxTokens: 32000,
+      ...clipVideoInferenceOptions(model),
+    });
     return normalizeInsight(r, 'gemini-video');
   }
 
@@ -221,6 +327,7 @@ export async function extractClipInsight({ url, platform, rawText = '', model = 
 หน้าที่: จับใจความว่าคลิปนี้สื่อสารข่าวเรื่องอะไร เก็บเนื้อหา–คำพูด–บริบท สรุปเป็นข้อมูลดิบให้คนอ่านเข้าใจว่าข่าวนี้คืออะไร
 
 ${INSIGHT_RULES}
+${EDITORIAL_RAW_RULES}
 (หมายเหตุ: นี่คือบทถอดเสียง อาจไม่มีไทม์สแตมป์ละเอียด — timeline/timeRange ใส่เป็นช่วง 'ช่วงต้น/กลาง/ท้าย' ตามลำดับเนื้อหาได้)
 
 ${IDENTITY_RULES}
@@ -248,7 +355,13 @@ export async function extractInsightFromVideoBuffer(videoBuffer, mimeType = 'vid
   const { callGeminiVideoFile } = await import('@/lib/ai/geminiClient');
   // ★ 8 ก.ค.: 24000→32000 — เท่าเส้นทางลิงก์ตรง (พรอมต์ละเอียดขึ้น กัน JSON ถูกตัดท้าย)
   // ★ 14 ส.ค. 69: model (optional) — ไม่ส่ง = VIDEO_MODEL ตามเดิมเป๊ะ (ใช้เทียบสองโมเดลบนคลิปเดียวกัน)
-  const r = await callGeminiVideoFile({ prompt: VIDEO_INSIGHT_PROMPT, videoBuffer, mimeType, maxTokens: 32000, ...(model ? { model } : {}) });
+  const r = await callGeminiVideoFile({
+    prompt: VIDEO_INSIGHT_PROMPT,
+    videoBuffer,
+    mimeType,
+    maxTokens: 32000,
+    ...clipVideoInferenceOptions(model),
+  });
   return normalizeInsight(r, 'gemini-video');
 }
 
@@ -320,7 +433,13 @@ function normalizeMultiTopic(p, engine) {
 /** ★ คลิปยาว (ไฟล์วิดีโอ TikTok/FB/Reels) → แยกทุกประเด็น */
 export async function extractMultiTopicFromVideoBuffer(videoBuffer, mimeType = 'video/mp4') {
   const { callGeminiVideoFile } = await import('@/lib/ai/geminiClient');
-  const r = await callGeminiVideoFile({ prompt: VIDEO_MULTITOPIC_PROMPT, videoBuffer, mimeType, maxTokens: 24000 });
+  const r = await callGeminiVideoFile({
+    prompt: VIDEO_MULTITOPIC_PROMPT,
+    videoBuffer,
+    mimeType,
+    maxTokens: 24000,
+    ...CLIP_VIDEO_INFERENCE_POLICY,
+  });
   return normalizeMultiTopic(r, 'gemini-video-multitopic');
 }
 
@@ -328,7 +447,12 @@ export async function extractMultiTopicFromVideoBuffer(videoBuffer, mimeType = '
 export async function extractMultiTopicInsight({ url, platform, rawText = '' }) {
   if (platform === 'youtube') {
     const { callGeminiVideo } = await import('@/lib/ai/geminiClient');
-    const r = await callGeminiVideo({ prompt: VIDEO_MULTITOPIC_PROMPT, youtubeUrl: url, maxTokens: 24000 });
+    const r = await callGeminiVideo({
+      prompt: VIDEO_MULTITOPIC_PROMPT,
+      youtubeUrl: url,
+      maxTokens: 24000,
+      ...CLIP_VIDEO_INFERENCE_POLICY,
+    });
     return normalizeMultiTopic(r, 'gemini-video-multitopic');
   }
   const text = String(rawText || '').trim();
