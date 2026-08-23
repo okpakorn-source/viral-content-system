@@ -23,7 +23,7 @@ import { scrapeArticle }   from '@/lib/providers/firecrawlProvider';
 import { scrapeTikTok, scrapeFacebook } from '@/lib/providers/apifyProvider';
 import { getYouTubeData }  from '@/lib/providers/youtubeProvider';
 import { logPipeline }     from '@/lib/pipelineLogger';
-import { logGeneration }   from '@/lib/services/generationLogger';
+import { logGeneration }   from '@/lib/services/era/generationLogger';
 import { createLogger }    from '@/lib/logger';
 
 // Direct Service Imports

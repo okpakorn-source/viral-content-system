@@ -10,7 +10,7 @@ import { logPipeline } from '@/lib/pipelineLogger';
 import { createLogger } from '@/lib/logger';
 import { withTimeout } from '@/lib/utils/withTimeout';
 import { runCorrectionPipeline } from '@/lib/correction/correctionPipeline';
-import { logGeneration } from '@/lib/services/generationLogger';
+import { logGeneration } from '@/lib/services/era/generationLogger';
 import { getBuiltinFallbackPrompt } from '@/lib/ai/builtinFallbackPrompt';
 
 const rlog = createLogger('AUTO-SERVICE');

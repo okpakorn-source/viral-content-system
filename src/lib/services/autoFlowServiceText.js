@@ -5,7 +5,7 @@ import { transcribeMetaReel, isMetaVideoUrl } from '@/lib/services/metaReelsServ
 import { performResearch } from '@/lib/services/researchService';
 import { performSummarize, getTopPrompts } from '@/lib/services/summarizeServiceText';
 import { smartResearch } from '@/lib/services/achievementResearch';
-import { logGeneration } from '@/lib/services/generationLogger';
+import { logGeneration } from '@/lib/services/era/generationLogger';
 import { getSession } from '@/lib/auth';
 import { logPipeline } from '@/lib/pipelineLogger';
 import { createLogger } from '@/lib/logger';
