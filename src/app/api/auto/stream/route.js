@@ -15,15 +15,6 @@ export async function POST(request) {
       { status: 400, headers: { 'Content-Type': 'application/x-ndjson' } }
     );
   }
-  // ★ 16 ก.ค. 69: TEXT-ONLY MODE — ปิดสาย URL (route นี้ deprecated แต่ยังเรียกได้ จึงต้องมีด่านเดียวกัน)
-  if (process.env.TEXT_ONLY_MODE !== '0' &&
-      (body.url || /https?:\/\//i.test(String(body.input || body.text || '')))) {
-    return new Response(
-      JSON.stringify({ type: 'error', error: 'โหมดข้อความเท่านั้น: ระบบปิดรับการเจนข่าวจากลิงก์ชั่วคราว', errorType: 'TEXT_ONLY_MODE' }) + '\n',
-      { status: 400, headers: { 'Content-Type': 'application/x-ndjson' } }
-    );
-  }
-
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -63,7 +54,7 @@ export async function POST(request) {
         controller.enqueue(encoder.encode(JSON.stringify({
           type: 'error',
           error: error.message,
-          failedStep: error.failedStep || 'unknown_step'
+          failedStep: error.failedStep || 'auto_scrape'
         }) + '\n'));
         controller.close();
       }

@@ -1,5 +1,4 @@
-import { callAI } from '@/lib/ai/openai';
-import { isLegacyLengthOn, legacyLengthRule, lengthLineAnalyze, lengthLineMix, sentenceQuotaLine, mixJsonContentHint, analyzeJsonContentHint, finalReminderLengthClause } from '@/lib/ai/legacyLengthRules'; // 🗑️ ซากกฎ "เขียนให้ยาว" ยุคแรก (ถอด 17 ส.ค. 69 · ถอยคืน LEGACY_LENGTH_RULES=1)
+import { callAI } from '@/lib/ai/era/openai';
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStore';
 import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, buildFullContext, validateOutput } from '@/lib/workflow/workflowEngine';
 import { MasterAgent } from '@/lib/agents/masterAgent';
@@ -10,10 +9,10 @@ import { logPipeline } from '@/lib/pipelineLogger';
 import { getSession } from '@/lib/auth';
 import { buildNarrativePayload, formatNarrativePayload, checkNarrativeSimilarity } from '@/lib/input-engine/narrativePayload';
 import { clusterMatch, findClusterScore, mapCategory, EMOTION_CLUSTERS, CONFLICT_CLUSTERS } from '@/lib/ai/semanticClusters';
-import { MODEL_PRIMARY, MODEL_FAST, MODEL_HEAVY_FALLBACK , MODEL_BLUEPRINT } from '@/lib/ai/modelConfig';
+import { MODEL_PRIMARY, MODEL_FAST, MODEL_HEAVY_FALLBACK } from '@/lib/ai/era/modelConfig';
 import { withTimeout } from '@/lib/utils/withTimeout';
 
-const MODEL_GEMINI_PRO = 'gemini-3.6-flash'; // ★ 1 ส.ค. 69 เจ้าของสั่ง 3.5→3.6 (ใหม่ ไว ไม่ล่ม)
+const MODEL_GEMINI_PRO = 'gemini-3.5-flash'; // ★ อัปเกรด 10 มิ.ย. 2026 (เดิม gemini-2.5-pro เก่า 2 รุ่น)
 
 // ═══════════════════════════════════════════════════════════
 // 🔍 POST-PROCESSING QUALITY FILTERS
@@ -56,24 +55,6 @@ function postProcessVersions(versions, sourceText, newsTitle, lenCfg = null) {
     content = content
       .replace(/\s+(แต่|และ|หรือ|เพราะ|ซึ่ง|โดยที่|โดย|จึง|ทั้งที่|เพื่อที่|เพื่อ|แล้วก็|ก่อนที่)\s*(\n\n)/g, '$2')
       .replace(/\s+(แต่|และ|หรือ|เพราะ|ซึ่ง|โดยที่|โดย|จึง|ทั้งที่|เพื่อที่|เพื่อ|แล้วก็|ก่อนที่)\s*$/g, '');
-
-    // 2.7 ★ เพดานย่อหน้าเชิงโค้ด (4 ส.ค. 69 — เทสจริง: ตัวเขียนแยกประโยคปิดเป็นย่อหน้าเกินกติกา)
-    //     เกินเพดาน + ย่อหน้าท้ายสั้น (≤160 ตัว = ประโยคปิดที่ถูกแยก) → ยุบกลับเข้าย่อหน้าก่อนหน้า
-    //     ย่อหน้าท้ายยาว = เนื้อจริง ไม่ยุบ (กันทำลายโครงข่าวยาว) — ปิดได้: PARA_CAP_ENFORCE=0
-    const _paraCap = parseInt(String(lenCfg?.paragraphs || '').match(/(\d+)\s*$/)?.[1] || '0', 10);
-    if (process.env.PARA_CAP_ENFORCE !== '0' && _paraCap > 0) {
-      const _paras = content.split(/\n\n+/).filter(p => p.trim());
-      let _merged = 0;
-      while (_paras.length > _paraCap && _paras[_paras.length - 1].trim().length <= 160) {
-        const _last = _paras.pop();
-        _paras[_paras.length - 1] = _paras[_paras.length - 1].trimEnd() + ' ' + _last.trim();
-        _merged++;
-      }
-      if (_merged > 0) {
-        content = _paras.join('\n\n');
-        console.log(`[Quality] 📐 V${idx + 1} ยุบย่อหน้าปิดที่แตกเกินกติกา ${_merged} ครั้ง (เหลือ ${_paras.length}/${_paraCap})`);
-      }
-    }
 
     // 3. Spell Check — ชื่อเฉพาะต้องตรงต้นฉบับ
     content = fixProperNouns(content, sourceNames);
@@ -486,12 +467,6 @@ export async function performSummarize({
     long:   { min: 500, max: 1000, paragraphs: '3-5', paraDesc: '3-5 ย่อหน้า', sentences: '4-8' },
   };
   let lenCfg = lengthConfig[contentLength] || lengthConfig.short;
-  // ★ 17 ส.ค. 69: หลักใหม่ล็อก 3 ย่อหน้าเหนือ VIRAL_HITS_FORMULA — ปิดสูตรไวรัลแล้วห้ามย้อนเป็น 4-5/3-5 ย่อหน้า
-  //   LEGACY_LENGTH_RULES=1 เท่านั้นที่คืนทางแยกเดิมของ 89df00a (รวมกรณี VIRAL_HITS_FORMULA=0)
-  if ((contentLength === 'medium' || contentLength === 'long')
-      && (!isLegacyLengthOn() || process.env.VIRAL_HITS_FORMULA !== '0')) {
-    lenCfg = { min: 250, max: 350, paragraphs: '3', paraDesc: '3 ย่อหน้า', sentences: '3-5' };
-  }
 
   // ===== MODE: extract — สกัดเนื้อข่าวอย่างเดียว =====
   if (mode === 'extract') {
@@ -645,25 +620,18 @@ export async function performSummarize({
     console.log(`[Breakdown-Service] 📋 PROMPT LENGTH: ${prompt.length}ch`);
     console.log(`[Breakdown-Service] 📋 NEWS IN PROMPT: ${actualNewsBody.length}ch of actual news content`);
 
-    // ★ B+ 10 ก.ค. 69: ให้ gpt-5.5 ทำจริงจนจบ — inner 200s (วัดจริง ~137-169s) + maxTokens 24000
-    //   (เพดาน 8000 เดิม: reasoning tokens กินหมดก่อนตอบ → content ว่างเปล่า+โดนบิลฟรี — เทสพิสูจน์แล้ว)
-    //   fallback (MODEL_HEAVY_FALLBACK=gpt-5.6-terra ★ 1 ส.ค. 69) timeout 90s (outer ใน autoFlowService = 300s — inner 200 + fallback 90 + เผื่อ 10)
+    // ★ gpt-5.5 มี inner timeout 60s → fail fast → fallback gpt-4o ทันที
+    // (outer withTimeout ใน autoFlowService คือ 210s — ต้องให้ fallback เสร็จก่อน)
     let result;
-    let breakdownModelUsed = MODEL_PRIMARY;
     try {
       result = await withTimeout(
-        callAI({ prompt, model: MODEL_PRIMARY, temperature: 0.4, maxTokens: 24000 }),
-        200000,
+        callAI({ prompt, model: MODEL_PRIMARY, temperature: 0.4, maxTokens: 8000 }),
+        60000, // ★ 60s max สำหรับ gpt-5.5 — ถ้าช้ากว่านี้ = overloaded → fallback
         'breakdown_gpt55_inner'
       );
     } catch (primaryErr) {
       console.warn(`[Breakdown-Service] ⚠️ ${MODEL_PRIMARY} failed/timeout: "${primaryErr.message}" — retrying with ${MODEL_HEAVY_FALLBACK} fallback...`);
-      breakdownModelUsed = MODEL_HEAVY_FALLBACK;
-      result = await withTimeout(
-        callAI({ prompt, model: MODEL_HEAVY_FALLBACK, temperature: 0.4, maxTokens: 8000 }),
-        90000,
-        'breakdown_fallback'
-      );
+      result = await callAI({ prompt, model: MODEL_HEAVY_FALLBACK, temperature: 0.4, maxTokens: 8000 });
     }
 
     try {
@@ -703,7 +671,7 @@ export async function performSummarize({
         await agent.saveMemoryToDB().catch(() => {});
       }
 
-      logPipeline({ workflowId, step: 'breakdown', status: 'success', model: result?._modelUsed || breakdownModelUsed, duration: Date.now() - _pipelineStart, detail: (result.core_story || '').slice(0, 60) }).catch(() => {});
+      logPipeline({ workflowId, step: 'breakdown', status: 'success', model: MODEL_PRIMARY, duration: Date.now() - _pipelineStart, detail: (result.core_story || '').slice(0, 60) }).catch(() => {});
       return {
         success: true,
         data: bdData,
@@ -745,8 +713,7 @@ export async function performSummarize({
     console.log(`[Analyze-Service] newsTitle: "${(actualNewsTitle || '').slice(0,80)}", textLen: ${actualNewsBody?.length}`);
 
     let smartPrompt = presetPrompt || null;
-    // ★ 1 ส.ค. 69 (Sol ตรวจจับ — parity สาย URL): เส้นที่ส่ง Built-in มาต้องไม่ติดป้าย 'library'
-    let promptSource = presetPrompt ? (presetPrompt.id === 'fallback_builtin' ? 'fallback_builtin' : 'library') : 'preset';
+    let promptSource = presetPrompt ? 'library' : 'preset';
     let promptMatchReason = presetPrompt ? `🏛️ Pre-selected: "${presetPrompt.promptName || 'Library Prompt'}"` : '';
     let newsTypeDetected = '';
     let newsAnalysis = null;
@@ -900,10 +867,7 @@ export async function performSummarize({
                 score: s.score,
                 matchType: (s.score >= 60 && sDims.length >= 2) ? 'EXACT' : s.score >= 40 ? 'CLOSE' : 'BORROWED',
                 matchedDimensions: s.dims,
-                reason: `Cluster Score: ${s.score.toFixed(1)}`,
-                // ★ 1 ส.ค. 69 (Opus P2-D — พอร์ต B5 จากแฝด TEXT): แนบโทน+เนื้อย่อจริง ให้ AI ตัดสินจากเนื้อ ไม่ใช่แค่ชื่อ
-                tone: pr.tone || (pr.emotionalTags || []).join(',') || '',
-                excerpt: String(pr.promptText || '').replace(/\s+/g, ' ').slice(0, 180),
+                reason: `Cluster Score: ${s.score.toFixed(1)}`
               };
             });
 
@@ -942,7 +906,6 @@ export async function performSummarize({
               smartPrompt._borrowReason = isBorrowed ? matchReason : null;
               smartPrompt._matchScore = selectedPromptScore;
               smartPrompt._matchType = matchType;
-              smartPrompt._formulaMatchType = matchType; // ★ Opus P2-C: ล้างค่าค้างจากงานก่อนบนอ็อบเจกต์แคช
               smartPrompt._matchedDimensions = matchedDimensions;
 
               promptMatchReason = isBorrowed
@@ -959,28 +922,15 @@ export async function performSummarize({
             promptMatchReason = `Engine match error: ${scorerErr.message}`;
           }
 
-          // --- STAGE 2.5: AI CARD PICKER (luna) ---
-          // ★ 1 ส.ค. 69: ยกระดับจาก "fallback เฉพาะ BORROWED" → สมองเลือกการ์ดทุกข่าว (เจ้าของสั่งหลังประลอง 6 โมเดล
-          //   กรรมการ Fable5 ปกปิดชื่อ: luna ถูก 3/3 ไม่กลับคำ · gemini 0.5/3 ห้ามนำ — memory: card-picker-brain-verdict)
-          //   ปิดคืนพฤติกรรมเดิม (AI เฉพาะ BORROWED): CARD_PICKER_AI=0 · เปลี่ยนสมอง: CARD_PICKER_MODEL
-          // หมายเหตุเส้นทาง (Opus ตรวจ 1 ส.ค.): สายคิว/autoFlow ส่ง presetPrompt มาเสมอ → บล็อกนี้ทำงานเฉพาะสายเรียกตรง
-          //   สมองเลือกการ์ดของท่ออัตโนมัติจริงอยู่ที่ getTopPrompts (ท้ายไฟล์นี้)
-          const _aiPickerOn = process.env.CARD_PICKER_AI !== '0';
-          const _legacyTrigger = matchType === 'BORROWED' && top10PromptScores.length > 0;
-          if (smartPrompt && (_aiPickerOn ? top10PromptScores.length > 1 : _legacyTrigger)) {
-            console.log(`[Analyze-Service] 🤖 STAGE 2.5: AI Card Picker (${_aiPickerOn ? 'always-on' : 'BORROWED-fallback'}, formula=${matchType}, score=${selectedPromptScore.toFixed(1)})`);
+          // --- STAGE 2.5: AI SEMANTIC FALLBACK (Gemini Flash) ---
+          // Only triggers when Stage 2 result is BORROWED (score < 40)
+          if (matchType === 'BORROWED' && smartPrompt && top10PromptScores.length > 0) {
+            console.log(`[Analyze-Service] 🤖 STAGE 2.5: AI Semantic Fallback triggered (matchType=BORROWED, score=${selectedPromptScore.toFixed(1)})`);
             try {
-              const topCandidates = top10PromptScores.slice(0, _aiPickerOn ? 8 : 5);
-              // ★ โหมดใหม่: ป้อนเนื้อการ์ดจริง 600 ตัวอักษร (ผลประลอง: ผู้ชนะคือสมองที่อ่านเนื้อการ์ดจริง)
-              //   โหมดสวิตช์ปิด: คงรูปแบบเดิมของสาย URL เป๊ะ (ชื่อ+คะแนน+มิติ เท่านั้น)
-              const candidateList = topCandidates.map((c, i) => {
-                if (!_aiPickerOn) {
-                  return `${i + 1}. "${c.name}" (id: ${c.id}) — Score: ${c.score.toFixed(1)}, Dimensions: ${c.matchedDimensions.join(', ')}`;
-                }
-                const _full = validPrompts.find(vp => vp.id && vp.id === c.id);
-                const _body = String(_full?.promptText || c.excerpt || '').replace(/\s+/g, ' ').slice(0, 600);
-                return `${i + 1}. "${c.name}" (id: ${c.id}) — Score: ${c.score.toFixed(1)}, Dimensions: ${c.matchedDimensions.join(', ')}\n   โทน: ${c.tone || '-'} | เนื้อพร้อมท์: ${_body || '-'}`;
-              }).join('\n');
+              const top5Candidates = top10PromptScores.slice(0, 5);
+              const candidateList = top5Candidates.map((c, i) => 
+                `${i + 1}. "${c.name}" (id: ${c.id}) — Score: ${c.score.toFixed(1)}, Dimensions: ${c.matchedDimensions.join(', ')}`
+              ).join('\n');
 
               const aiFallbackPrompt = `คุณเป็นผู้เชี่ยวชาญการเลือก prompt สำหรับเขียนข่าวไวรัล
 
@@ -989,45 +939,19 @@ export async function performSummarize({
 หมวดหมู่: ${newsTypeDetected}
 อารมณ์: ${(newsAnalysis?.emotionalTags || newsAnalysis?.emotionalThemes || []).join(', ')}
 ความขัดแย้ง: ${(newsAnalysis?.conflictTags || newsAnalysis?.conflictTypes || []).join(', ')}
-Archetype: ${newsAnalysis?.narrativeArchetype || '-'}${_aiPickerOn ? `
-เนื้อข่าว (ย่อ): ${(actualNewsBody || '').replace(/\s+/g, ' ').slice(0, 400)}` : ''}
+Archetype: ${newsAnalysis?.narrativeArchetype || '-'}
 === จบข่าว ===
 
-=== ตัวเลือก Prompt (Top ${topCandidates.length}) ===
+=== ตัวเลือก Prompt (Top 5) ===
 ${candidateList}
 === จบตัวเลือก ===
 
-จาก prompt ทั้ง ${topCandidates.length} ตัวเลือกด้านบน เลือก 1 ตัวที่เหมาะสมที่สุดสำหรับข่าวนี้
-${_aiPickerOn ? `เกณฑ์สำคัญ (เรียงตามน้ำหนัก):
-1. "แกนเรื่องของการ์ด" ต้องตรงเหตุการณ์จริงในข่าว — สำคัญกว่าโทนและคะแนน (การ์ดส่วนใหญ่โทนอบอุ่น-ชื่นชมคล้ายกันหมด ห้ามตัดสินจากโทนอย่างเดียว)
-2. ข่าวมีผู้เสียชีวิต → เลือกได้เฉพาะการ์ดที่รองรับการบอกการจากไปอย่างเคารพ ห้ามการ์ดโทนบวก/ภูมิใจ/อวยพรอนาคต
-3. ข่าวเลิกรา/มูฟออน ห้ามเลือกการ์ดโทนไว้อาลัย/การจากไป แม้คะแนนจะสูงกว่า
-4. อ่านเนื้อการ์ดจริงก่อนตัดสิน ห้ามเดาจากชื่อการ์ด
-` : ''}ตอบเป็น JSON: { "selectedIndex": <1-${topCandidates.length}>, "reason": "..." }`;
+จาก prompt ทั้ง 5 ตัวเลือกด้านบน เลือก 1 ตัวที่เหมาะสมที่สุดสำหรับข่าวนี้
+ตอบเป็น JSON: { "selectedIndex": <1-5>, "reason": "..." }`;
 
-              // ★ โหมดใหม่: luna นำ (แชมป์ประลอง 3/3) → Gemini สำรอง · เพดาน 1200 เพราะ luna เป็น reasoning model
-              //   (เพดานต่ำ=ตอบว่างเปล่า — บทเรียน AGENTS.md ข้อ 3, Opus P1-2) · โหมดสวิตช์ปิด: Gemini นำเพดาน 300 ตามเดิมเป๊ะ
-              const { callGemini, isGeminiAvailable } = await import('@/lib/ai/geminiClient');
+              const { callGemini, isGeminiAvailable } = await import('@/lib/ai/era/geminiClient');
               let aiSelection = null;
-              if (_aiPickerOn) {
-                try {
-                  aiSelection = await callAI({
-                    prompt: aiFallbackPrompt,
-                    model: process.env.CARD_PICKER_MODEL || MODEL_FAST, // gpt-5.6-luna
-                    temperature: 0.1, // สาย 5.x ถูกตัดทิ้งอัตโนมัติใน callAI
-                    maxTokens: 1200,
-                  });
-                } catch (lunaErr) {
-                  console.warn('[🤖 STAGE 2.5] luna ล่ม → ใช้ Gemini สำรอง:', lunaErr.message);
-                  if (!isGeminiAvailable()) throw lunaErr;
-                  aiSelection = await callGemini({
-                    prompt: aiFallbackPrompt,
-                    model: MODEL_GEMINI_PRO,
-                    temperature: 0.1,
-                    maxTokens: 400,
-                  });
-                }
-              } else if (isGeminiAvailable()) {
+              if (isGeminiAvailable()) {
                 aiSelection = await callGemini({
                   prompt: aiFallbackPrompt,
                   model: MODEL_GEMINI_PRO,
@@ -1035,7 +959,7 @@ ${_aiPickerOn ? `เกณฑ์สำคัญ (เรียงตามน้�
                   maxTokens: 300,
                 });
               } else {
-                // Fallback to callAI if Gemini not available (พฤติกรรมเดิม)
+                // Fallback to callAI if Gemini not available
                 aiSelection = await callAI({
                   prompt: aiFallbackPrompt,
                   model: MODEL_FAST,
@@ -1044,40 +968,29 @@ ${_aiPickerOn ? `เกณฑ์สำคัญ (เรียงตามน้�
                 });
               }
 
-              if (aiSelection && aiSelection.selectedIndex >= 1 && aiSelection.selectedIndex <= topCandidates.length) {
+              if (aiSelection && aiSelection.selectedIndex >= 1 && aiSelection.selectedIndex <= 5) {
                 const aiPickIdx = aiSelection.selectedIndex - 1;
-                const aiPickedCandidate = topCandidates[aiPickIdx];
-                const aiPickedPrompt = validPrompts.find(vp => vp.id && vp.id === aiPickedCandidate.id);
+                const aiPickedCandidate = top5Candidates[aiPickIdx];
+                const aiPickedPrompt = validPrompts.find(vp => vp.id === aiPickedCandidate.id);
 
-                if (aiPickedPrompt && smartPrompt.id && aiPickedPrompt.id !== smartPrompt.id) {
+                if (aiPickedPrompt && aiPickedPrompt.id !== smartPrompt.id) {
                   console.log(`[🤖 STAGE 2.5] AI picked different prompt: "${aiPickedCandidate.name}" (was: "${smartPrompt.promptName}") — Reason: ${aiSelection.reason || '-'}`);
                   smartPrompt = aiPickedPrompt;
-                  promptSource = _aiPickerOn ? 'library(ai-picked)' : 'library(ai-fallback)';
-                  // ★ เกรดสูตรของ "ใบที่ถูกเลือก" (Opus P2-4: เดิมใช้เกรดใบเก่าคู่กับคะแนนใบใหม่ ป้ายขัดกันเอง)
-                  smartPrompt._isBorrowed = _aiPickerOn ? aiPickedCandidate.matchType === 'BORROWED' : true;
-                  smartPrompt._borrowReason = smartPrompt._isBorrowed ? `AI Fallback: ${aiSelection.reason || 'AI selected'}` : null;
-                  smartPrompt._aiPickReason = aiSelection.reason || null;
+                  promptSource = 'library(ai-fallback)';
+                  smartPrompt._isBorrowed = true;
+                  smartPrompt._borrowReason = `AI Fallback: ${aiSelection.reason || 'Gemini selected'}`;
                   smartPrompt._matchScore = aiPickedCandidate.score;
-                  smartPrompt._formulaMatchType = aiPickedCandidate.matchType; // เกรดสูตรจริง — เกราะ REF_WEIGHT ใช้ตัวนี้
-                  smartPrompt._matchType = _aiPickerOn ? 'AI_PICKED' : 'BORROWED(AI)';
+                  smartPrompt._matchType = 'BORROWED(AI)';
                   smartPrompt._matchedDimensions = aiPickedCandidate.matchedDimensions;
-                  if (_aiPickerOn) {
-                    matchType = smartPrompt._matchType; // ป้าย debug ตรงความจริง (โหมดปิดคงค่าเดิมตาม legacy)
-                    smartPrompt.usageCount = (smartPrompt.usageCount || 0) + 1;
-                    smartPrompt.lastUsedAt = new Date().toISOString();
-                  }
-                  promptMatchReason = _aiPickerOn
-                    ? `🤖 AI เลือกการ์ด: "${smartPrompt.promptName}" (เหตุผล: ${aiSelection.reason || '-'} · สูตรเดิมให้ score ${selectedPromptScore.toFixed(1)})`
-                    : `🤖 AI Fallback: "${smartPrompt.promptName}" (AI Reason: ${aiSelection.reason || '-'}, Original Score: ${selectedPromptScore.toFixed(1)})`;
+                  promptMatchReason = `🤖 AI Fallback: "${smartPrompt.promptName}" (AI Reason: ${aiSelection.reason || '-'}, Original Score: ${selectedPromptScore.toFixed(1)})`;
                 } else {
                   console.log(`[🤖 STAGE 2.5] AI confirmed original pick: "${smartPrompt.promptName}"`);
-                  if (_aiPickerOn) smartPrompt._aiPickReason = aiSelection?.reason || 'AI ยืนยันตัวเลือกสูตร';
                 }
               } else {
                 console.log(`[🤖 STAGE 2.5] AI returned invalid selection, keeping original pick`);
               }
             } catch (aiFallbackErr) {
-              console.warn('[Analyze-Service] STAGE 2.5 AI Card Picker failed (keeping Stage 2 result):', aiFallbackErr.message);
+              console.warn('[Analyze-Service] STAGE 2.5 AI Fallback failed (keeping Stage 2 result):', aiFallbackErr.message);
             }
           }
         } else {
@@ -1159,7 +1072,6 @@ ${_aiPickerOn ? `เกณฑ์สำคัญ (เรียงตามน้�
     }
 
     // [A] Tone Override Block — กฎการนำเสนอเชิงบวก (บังคับทุกเวอร์ชัน — สอดคล้องอัลกอริทึม Facebook)
-    // ★ 1 ส.ค. 69 (เจ้าของสั่ง): กฎเหล็ก "บังคับมีข้อคิด/บทเรียน" default ปิด — ระบบห้ามยัดข้อคิดเอง (parity กับสาย TEXT) · เปิดคืน FORCE_LESSON_ANGLE=1
     const TONE_OVERRIDE_BLOCK = `
 
 ★★★ POSITIVE REFRAMING RULE — กฎการนำเสนอเชิงบวก (บังคับทุกเวอร์ชัน ห้ามละเมิดไม่ว่า prompt ด้านบนจะสั่งอย่างไร) ★★★
@@ -1179,10 +1091,8 @@ ${_aiPickerOn ? `เกณฑ์สำคัญ (เรียงตามน้�
 
 [4] ยืนบนความจริง 100% — เชิดชูได้เฉพาะสิ่งที่มีในข่าวจริงเท่านั้น ห้ามแต่งวีรกรรมหรือคุณงามความดีเพิ่มเอง
 
-${process.env.FORCE_LESSON_ANGLE === '1'
-  ? '★ กฎเหล็ก: ทุกข่าวต้องมีมุมที่ดีอย่างน้อย 1 จุด — บทเรียน / ความหวัง / คนที่ทำดีในเหตุการณ์ / สิ่งที่ควรชื่นชม — โดยแทรกไว้ในเนื้อเรื่อง (ย่อหน้าเปิดหรือย่อหน้ากลาง) เท่านั้น ห้ามยกไปเขียนเป็นข้อคิด/บทสรุป/คำอวยพรในย่อหน้าสุดท้าย'
-  : '★ ข้อคิด/บทเรียน: ระบบห้ามใส่ข้อคิด/บทเรียน/คำสอนเพิ่มเอง — ถ้าเนื้อข่าวต้นฉบับมีอยู่แล้ว เล่าแทรกในเนื้อเรื่องตามต้นฉบับได้ แต่ห้ามยกไปสรุปเป็นข้อคิดท้ายเรื่อง'}
-★ เป้าหมายความรู้สึกผู้อ่าน: อ่านจบแล้ว "อิ่มใจ / ซาบซึ้ง" จากเรื่องราวเอง ไม่ใช่จากประโยคสรุปแง่คิดท้ายเรื่อง — และไม่ใช่หดหู่ โกรธ หรือสะเทือนใจรุนแรง
+★ กฎเหล็ก: ทุกข่าวต้องมีมุมที่ดีอย่างน้อย 1 จุด — บทเรียน / ความหวัง / คนที่ทำดีในเหตุการณ์ / สิ่งที่ควรชื่นชม
+★ เป้าหมายความรู้สึกผู้อ่าน: อ่านจบแล้ว "อิ่มใจ / ซาบซึ้ง / ได้แง่คิด" — ไม่ใช่หดหู่ โกรธ หรือสะเทือนใจรุนแรง
 `;
 
     // Build Narrative Payload (Enriched with 5th argument: actualNewsBody)
@@ -1200,10 +1110,6 @@ ${process.env.FORCE_LESSON_ANGLE === '1'
       lenCfg = lengthConfig.short;
       console.log(`[Analyze-Service] ⚠️ Fact sufficiency is ${narrativePayload.factSufficiency}. Overriding length config to short to prevent AI filler.`);
     }
-
-    // 🗑️ 17 ส.ค. 69: สวิตช์ข่าวบาง THIN_SOURCE_2PARA (แฝดสาย URL) ถูกลบทั้งบล็อกตามคำสั่งเจ้าของ
-    //   ("ลบทิ้งเลยกันพลาด") — เหตุผลเต็มดูหมายเหตุจุดเดียวกันใน summarizeServiceText.js
-    //   จะเอากลับ: ดู commit 89df00a (บล็อกนี้ + thinSourceLenCfg ใน legacyLengthRules.js)
 
     let prompt = '';
     if (smartPrompt && smartPrompt.promptText) {
@@ -1357,9 +1263,6 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
         category: newsAnalysis?.primaryCategory || actualBreakdown?.primaryCategory || smartPrompt?.category || '',
         emotionalTags: newsAnalysis?.emotionalTags || newsAnalysis?.emotionalThemes || actualBreakdown?.emotionalTags || [],
         archetype: newsAnalysis?.narrativeArchetype || actualBreakdown?.narrativeArchetype || '',
-        newsTitle: actualNewsTitle || '', // 📒 ผูกประวัติการหยิบเข้ากับข่าว (สมุดประวัติ 8 ส.ค. 69)
-        // 🎯 โหมดจับคู่ (VIRAL_MATCH_MODE): ส่ง "เนื้อดิบจริง + แก่นเรื่อง" ให้ตัวเลือกใช้แมชตามคำสั่งเจ้าของ
-        newsBrief: { coreStory: actualBreakdown?.core_story || actualBreakdown?.coreStory || '', excerpt: String(actualNewsBody || '').slice(0, 900) }, // ★ สคีมาจริงใช้ core_story (ผู้ตรวจจับได้)
       });
     } catch (e) { console.log('[ViralFewshot] skip:', e.message?.slice(0, 40)); }
 
@@ -1381,17 +1284,10 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
         ? 'คุณต้องสร้างเนื้อหา 1 เวอร์ชันที่ "ดีที่สุด" จากข่าวนี้ — มุมเล่าถูกล็อกตาม FOCUS ANGLE แต่ลีลา สำนวน และความคิดสร้างสรรค์ต้องจัดเต็มที่สุด ห้ามเขียนแข็งแบบรายงานข่าว\n'
         : 'คุณต้องสร้างเนื้อหาหลายเวอร์ชันจากข่าวนี้ โดยแต่ละเวอร์ชันใช้มุมเขียนต่างกัน\n') +
       `แต่ละเวอร์ชัน:\n` +
-      // 🗑️ 17 ส.ค. 69: แฝดสาย URL — ต้องแก้คู่กับสาย TEXT ไม่งั้นสองสายได้กฎคนละแบบ · ถอย LEGACY_LENGTH_RULES=1
-      `- ${lengthLineAnalyze(lenCfg)} ทุกประโยคต้องให้ข้อมูลใหม่ แบ่ง ${lenCfg.paraDesc} ตามนี้เท่านั้น ห้ามเกิน — ประโยคปิดต้องอยู่ท้ายย่อหน้าสุดท้าย ห้ามแยกออกเป็นย่อหน้าใหม่เด็ดขาด\n` +
-      '- ★ แต่ละประเด็นเล่าได้ครั้งเดียว ห้ามเล่าประเด็นเดิมซ้ำด้วยสำนวนอื่นเพื่อถ่วงความยาว — ประเด็นจากต้นฉบับหมดแล้ว ให้ขยายด้วยข้อมูลรีเสิร์ชที่ให้มา/บริบทแวดล้อมที่เป็นจริง ห้ามเล่าประเด็นเดิมซ้ำ (สำนวนแต่ง/ภาพเปรียบใส่ได้เต็มที่ แต่ครั้งเดียวต่อประเด็น)\n' +
-      `- โครงสร้าง ${lenCfg.paragraphs} ย่อหน้า: [ย่อหน้า 1] เปิดแรง hook ดึงอารมณ์ [ย่อหน้าตรงกลาง] เล่ารายละเอียด storytelling [ย่อหน้าสุดท้าย] ปิดท้ายด้วยประโยคบรรยายเรียบๆ ที่บอกเล่าความจริงโดยไม่ตีความหมายเพิ่มเติม — จำนวนย่อหน้าต้องตรงตามที่กำหนด ห้ามเกิน ประโยคปิดต้องอยู่ท้ายย่อหน้าสุดท้าย ห้ามแยกออกมาเป็นย่อหน้าใหม่เด็ดขาด\n` +
-      // 🔴 17 ส.ค. 69: ตัดโควตาประโยคต่อย่อหน้า (แฝดสาย URL) — เจ้าของชี้เองว่า "อันนี้ตัวทำพัง"
-      sentenceQuotaLine(lenCfg) +
-      ('- ต้องอ้างอิงข้อมูลจริงจากข่าว ห้ามแต่งเรื่องที่ไม่มีในข่าว — ★ FACT-LOCK: ห้ามเพิ่มบุคคล/ความสัมพันธ์/อาชีพ/รายละเอียดชีวิตที่ต้นฉบับไม่มี (เคยพลาด: เติม "กับภรรยา" ทั้งที่ข่าวไม่มีภรรยา) และห้ามบรรยายฉาก สีหน้า อิริยาบถ เหมือนไปเห็นเหตุการณ์มาเอง — ต้นฉบับไม่ได้บรรยายภาพไหน '
-        // ★ 14 ส.ค. 69 สูตรแสนไลก์: วลี "ใครเห็นก็..." ชนกฎ v2 ห้ามบอกความรู้สึกแทนคนอ่าน (Sol จับได้ตอนรีวิวร่วม) — สวิตช์ปิด=ข้อความเดิมเป๊ะ
-        + (process.env.VIRAL_HITS_FORMULA !== '0'
-          ? 'ให้เล่าจากข้อเท็จจริงเท่านั้น ห้ามใช้สำนวนบอกความรู้สึกแทนคนอ่านทุกแบบ\n'
-          : 'ให้เล่าจากข้อเท็จจริง หรือใช้ภาษาที่บอกชัดว่าเป็นการนึกตาม ("ภาพแบบนั้นใครเห็นก็...") เท่านั้น\n')) +
+      `- ความยาวบังคับ ${lenCfg.min}-${lenCfg.max} คำ ทุกประโยคต้องให้ข้อมูลใหม่ แบ่ง ${lenCfg.paraDesc} สำหรับ Facebook\n` +
+      `- โครงสร้าง ${lenCfg.paragraphs} ย่อหน้า: [ย่อหน้า 1] เปิดแรง hook ดึงอารมณ์ [ย่อหน้าตรงกลาง] เล่ารายละเอียด storytelling [ย่อหน้าสุดท้าย] ปิดท้ายด้วยประโยคบรรยายเรียบๆ ที่บอกเล่าความจริงโดยไม่ตีความหมายเพิ่มเติม\n` +
+      `- แต่ละย่อหน้าต้องมีอย่างน้อย ${lenCfg.sentences} ประโยค คั่นด้วย \\n\\n\n` +
+      '- ต้องอ้างอิงข้อมูลจริงจากข่าว ห้ามแต่งเรื่องที่ไม่มีในข่าว — ★ FACT-LOCK: ห้ามเพิ่มบุคคล/ความสัมพันธ์/อาชีพ/รายละเอียดชีวิตที่ต้นฉบับไม่มี (เคยพลาด: เติม "กับภรรยา" ทั้งที่ข่าวไม่มีภรรยา) และห้ามบรรยายฉาก สีหน้า อิริยาบถ เหมือนไปเห็นเหตุการณ์มาเอง — ต้นฉบับไม่ได้บรรยายภาพไหน ให้เล่าจากข้อเท็จจริง หรือใช้ภาษาที่บอกชัดว่าเป็นการนึกตาม ("ภาพแบบนั้นใครเห็นก็...") เท่านั้น\n' +
       '- ⚠️ ห้ามตั้งคำถามปิดท้ายเด็ดขาด ห้ามจบด้วย "คุณคิดยังไง?", "เห็นด้วยไหม?" หรือคำถามใดๆ\n\n' +
       formalModeRule +
       '=== 🔍 QUALITY + WRITING STYLE (MANDATORY) ===\n' +
@@ -1435,9 +1331,9 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       '"ฆ่า" → "ก่อเหตุ" หรือ "ก่อเหตุร้ายแรง"\n' +
       '"ฆาตกรรม" → "เหตุสูญเสีย" หรือ "คดีร้ายแรง"\n' +
       '"ศพ" → "ร่างของผู้จากไป"\n' +
-      '"ตาย/ดับ/สิ้นใจ/เสียชีวิต" → ห้ามใช้ตรงๆ ทุกคำ ให้ใช้สำนวนเลี่ยงที่สุภาพ สวย และเข้ากับบริบทของเรื่อง เช่น "จากไปอย่างสงบ" "ไม่อยู่แล้ว" "ลาลับ" "สิ้นลมอย่างสงบ" "ปิดตำนาน" "หลับไม่ตื่นอีกเลย" — เลือกให้เหมาะกับโทนข่าวนั้นๆ ห้ามใช้สำนวนเดียวซ้ำทุกจุด/ทุกเวอร์ชัน ⚠️แต่ต้องบอกการจากไปให้ชัดอย่างน้อย 1 ครั้งเสมอ ห้ามเลี่ยงจนคนอ่านไม่รู้ว่าเสียชีวิตแล้ว (ห้ามเล่าฉากก่อนเสียชีวิตค้างไว้โดยไม่เฉลย)\n' +
+      '"ตาย/ดับ/สิ้นใจ/เสียชีวิต" → ห้ามใช้ตรงๆ ทุกคำ ให้ใช้สำนวนเลี่ยงที่สุภาพ สวย และเข้ากับบริบทของเรื่อง เช่น "จากไปอย่างสงบ" "ไม่อยู่แล้ว" "ลาลับ" "สิ้นลมอย่างสงบ" "ปิดตำนาน" "หลับไม่ตื่นอีกเลย" — เลือกให้เหมาะกับโทนข่าวนั้นๆ ห้ามใช้สำนวนเดียวซ้ำทุกจุด/ทุกเวอร์ชัน\n' +
       '"สยอง/โหด/สลด" → "สะเทือนใจ" หรือ "น่าตกใจ"\n' +
-      '"เลือด" → "ร่องรอยเหตุการณ์" (⚠️ยกเว้นศัพท์การแพทย์/อวัยวะ เช่น "เส้นเลือด" "เส้นเลือดในสมอง" — ห้ามแทนที่ ให้คงคำเดิม)\n' +
+      '"เลือด" → "ร่องรอยเหตุการณ์"\n' +
       '"แทง" → "ใช้ของมีคม"\n' +
       '"ยิง" → "ใช้อาวุธปืน"\n' +
       '"ข่มขืน" → "ล่วงละเมิดทางเพศ"\n' +
@@ -1452,13 +1348,11 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       'ห้าม clickbait: "คุณจะไม่เชื่อ", "แชร์ด่วน", "ดูก่อนโดนลบ"\n' +
       'ห้าม engagement bait: "พิมพ์ 1", "เมนต์ 99", "ใครเห็นด้วยกดไลก์"\n' +
       '=== จบกฎ FACEBOOK SAFETY ===\n\n' +
-      // 🔴 17 ส.ค. 69: แฝดสาย URL — ต้องแก้คู่กัน · ถอย LEGACY_LENGTH_RULES=1
-      `⚠️⚠️⚠️ คำสั่งเด็ดขาด: ต้องสร้างผลลัพธ์ให้ครบจำนวน ${targetCount || 5} เวอร์ชัน ห้ามขาดหาย${finalReminderLengthClause(lenCfg)} ⚠️⚠️⚠️\n\n` +
+      `⚠️⚠️⚠️ คำสั่งเด็ดขาด: ต้องสร้างผลลัพธ์ให้ครบจำนวน ${targetCount || 5} เวอร์ชัน ห้ามขาดหาย เนื้อหาแต่ละเวอร์ชันต้องมีความยาวตามที่กำหนด ⚠️⚠️⚠️\n\n` +
       'ตอบเป็น JSON:\n' +
       '{\n' +
       '  "versions": [\n' +
-      // 🗑️ 17 ส.ค. 69: ตัวอย่าง JSON แฝดสาย URL · ถอย LEGACY_LENGTH_RULES=1
-      `    {"style": "ชื่อแนว", "title": "พาดหัว", "content": "${analyzeJsonContentHint(lenCfg)} แบ่ง ${lenCfg.paraDesc} คั่นด้วย \\n\\n", "hook": "ประโยคเปิด", "closing": "ประโยคปิดกระตุ้น", "tone": "โทนเสียง", "target": "กลุ่มเป้าหมาย"}\n` +
+      `    {"style": "ชื่อแนว", "title": "พาดหัว", "content": "เนื้อหายาว ${lenCfg.min}-${lenCfg.max} คำ แบ่ง ${lenCfg.paraDesc} คั่นด้วย \\n\\n", "hook": "ประโยคเปิด", "closing": "ประโยคปิดกระตุ้น", "tone": "โทนเสียง", "target": "กลุ่มเป้าหมาย"}\n` +
       '  ],\n' +
       '  "news_reference": "สรุปข่าวต้นฉบับที่ใช้อ้างอิง 2-3 ประโยค"\n' +
       '}';
@@ -1476,7 +1370,7 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
     console.log(`📦 ${'─'.repeat(50)}\n`);
 
     try {
-      console.log(`[🤖 AI CALL] mode=write | calling SmartAI (Opus 4.8 > Fable 5 > GPT-5.6 Sol)...`);
+      console.log(`[🤖 AI CALL] mode=write | calling SmartAI (Claude > GPT-4o)...`);
       const { result, model: usedModel } = await callSmartAI('write', { prompt: multiPrompt, temperature: 0.7, maxTokens: 6000 }); // ★ 6000 (was 10000) — perf: 2 versions × ~500-600w = ~3000t + buffer
       console.log(`[🤖 AI RESULT] model used: ${usedModel}`);
       console.log(`[🤖 AI RESULT] versions: ${result?.versions?.length || 0}`);
@@ -1542,8 +1436,6 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
 
         // === 🔍 POST-PROCESSING QUALITY FILTERS ===
         const actualSourceText = actualNewsBody || text || '';
-        // ★ 1 ส.ค. 69 กล่องดำ: เก็บร่างดิบจากตัวเขียนก่อนโดนจัดระเบียบ/แก้คำ — หลักฐานชี้ตัวการชั้นแรก
-        versions = versions.map(v => ({ ...v, _rawModelDraft: String(v.content || v.text || v.main_post || '').slice(0, 2500) }));
         versions = postProcessVersions(versions, actualSourceText, actualNewsTitle, lenCfg);
         console.log(`[Analyze-Service] ✅ Post-processing complete: ${versions.length} versions filtered`);
 
@@ -1600,11 +1492,8 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
                   promptSource: promptSource || 'library',
                   matchScore: (typeof smartPrompt._matchScore === 'number') ? Math.round(smartPrompt._matchScore) : null,
                   matchType: smartPrompt._matchType || (smartPrompt._isBorrowed ? 'BORROWED' : 'MATCHED'),
-                  aiPickReason: smartPrompt._aiPickReason || null, // ★ 1 ส.ค.: แยก "luna ยืนยัน/เลือก" ออกจาก "luna ล่ม" ได้ในบันทึก
                 }
-              : (promptSource === 'fallback_builtin'
-                  ? { id: 'fallback_builtin', name: '📦 Built-in Fallback V12', source: 'fallback_builtin', promptSource: 'fallback_builtin', matchType: 'FALLBACK' }
-                  : { id: 'library', name: '📦 Library', source: 'library' }),
+              : { id: 'library', name: '📦 Library', source: 'library' },
             usedModel: usedModel || MODEL_PRIMARY,
             versions,
             news_reference: result.news_reference || '',
@@ -1711,14 +1600,10 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
 }`;
 
       const blueprintResult = await callAI({
-        // ★ 15 ส.ค. 69 (เจ้าของเคาะหลังแข่ง 9 โมเดล · กรรมการปิดตา 7 เสียง): ขั้น 3 → gpt-5.6-sol
-        //   ของเดิม: model: MODEL_FAST (= gpt-5.6-luna) — ถอยกลับได้ทันทีด้วย env MODEL_BLUEPRINT=gpt-5.6-luna
-        model: MODEL_BLUEPRINT,
+        model: MODEL_FAST,
         prompt: blueprintPrompt,
         temperature: 0.3,
-        // ★ 2 ส.ค. 69: 1200→8000 — ค่าเดิมจากยุคโมเดลเล็ก พอโล๊ะเป็น luna (reasoning คิดกินโควตา) เพดานไม่พอ
-        //   → ตอบว่างเปล่า ล้มเงียบ ~5/9 งาน (Blueprint: ❌ ใน log) — โรคเดียวกับที่แก้สำเร็จใน breakdown/picker/สารบัญ
-        maxTokens: 8000,
+        maxTokens: 1200,
       });
 
       if (!blueprintResult?.core_emotion) {
@@ -1856,8 +1741,7 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
             `${i+1}. [${item.type}] ${item.title}: ${item.content}\n   แหล่งอ้างอิง: ${item.sourceUrl || item.sourceName || '-'}`
           ).join('\n') +
           '\n⚠️ คำแนะนำการใช้ข้อมูล: เลือกหยิบข้อมูล ตัวเลข สถิติ หรือข้อเท็จจริง จาก "ข้อมูลเพิ่มเติมจาก AI Research" ด้านบน มาเขียนอธิบายเสริมในเนื้อหา **เฉพาะส่วนที่เข้ากับบริบทและมุมมองของเวอร์ชันนี้** เพื่อเพิ่มความลึกและน่าเชื่อถือ (ไม่จำเป็นต้องใช้ทั้งหมด และห้ามแทรก URL หรือคำว่าอ้างอิงลงในเนื้อหาโดยเด็ดขาด)\n' +
-          // 🗑️ 17 ส.ค. 69: ถอด "กฎความยาว: เขียนให้ยาว..." ออก (แฝดสาย URL · ถอยคืน LEGACY_LENGTH_RULES=1)
-          legacyLengthRule('research') +
+          '⚠️ กฎความยาว: เขียนเนื้อหาให้ยาว ลึกซึ้ง และมีรายละเอียดที่จับใจผู้อ่าน ห้ามเขียนสรุปรวบรัดสั้นๆ\n' +
           '\n=== จบข้อมูลเพิ่มเติม ===\n';
       }
 
@@ -1938,10 +1822,8 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
         '   - เวอร์ชัน 2: ผสมมุม Emotional + เรื่องเล่า (เน้นอิน สะเทือนใจ)\n' +
         '   - เวอร์ชัน 3: ผสมมุมข้อมูล + วิเคราะห์ (เน้นเนื้อหาครบถ้วน)\n\n' +
         `แต่ละเวอร์ชัน:\n` +
-        // 🗑️ 17 ส.ค. 69: โหมด mix แฝดสาย URL · ถอย LEGACY_LENGTH_RULES=1
-        `- ${lengthLineMix(lenCfg)} / ${lenCfg.paraDesc}\n` +
-        '- ★ แต่ละประเด็นเล่าได้ครั้งเดียว ห้ามเล่าประเด็นเดิมซ้ำด้วยสำนวนอื่นเพื่อถ่วงความยาว — ประเด็นจากต้นฉบับหมดแล้ว ให้ขยายด้วยข้อมูลรีเสิร์ชที่ให้มา/บริบทแวดล้อมที่เป็นจริง ห้ามเล่าประเด็นเดิมซ้ำ\n' +
-        `- โครงสร้าง ${lenCfg.paragraphs} ย่อหน้า: [ย่อหน้าแรก] เปิดแรง hook → [ย่อหน้ากลาง] เล่ารายละเอียด → [ย่อหน้าสุดท้าย] ปิดด้วยประโยคบรรยายทรงพลัง (จำนวนย่อหน้าต้องตรงตามนี้ ห้ามเกิน — ประโยคปิดอยู่ท้ายย่อหน้าสุดท้าย ห้ามแยกเป็นย่อหน้าใหม่เด็ดขาด)\n` +
+        `- ต้องยาวอย่างน้อย ${lenCfg.min} คำ ถึง ${lenCfg.max} คำ / ${lenCfg.paraDesc}\n` +
+        `- โครงสร้าง ${lenCfg.paragraphs} ย่อหน้า: [ย่อหน้าแรก] เปิดแรง hook → [ย่อหน้ากลาง] เล่ารายละเอียด → [ย่อหน้าสุดท้าย] ปิดด้วยประโยคบรรยายทรงพลัง\n` +
         '- ⚠️ ห้ามตั้งคำถามปิดท้าย ห้ามจบด้วยคำถามใดๆ\n' +
         '- ใช้ข้อมูลจากข่าวจริงเท่านั้น ห้ามแต่งเรื่องเพิ่ม\n' +
         '- ระบุว่าผสมจากมุมไหนบ้าง (ใน mixed_from)\n' +
@@ -1953,18 +1835,23 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
         'ตอบเป็น JSON:\n' +
         '{\n' +
         '  "versions": [\n' +
-        // 🗑️ 17 ส.ค. 69: ตัวอย่าง JSON โหมด mix แฝดสาย URL (เดิม "เนื้อหายาว 250+ คำ" ไม่มีสวิตช์ครอบ)
-        `    {"style": "ผสม: [ชื่อมุมที่ใช้]", "title": "พาดหัว", "content": "${mixJsonContentHint()}", "hook": "ประโยคเปิด", "closing": "ประโยคปิดบรรยาย", "tone": "โทน", "target": "กลุ่มเป้าหมาย", "mixed_from": ["มุม1", "มุม2"]}\n` +
+        '    {"style": "ผสม: [ชื่อมุมที่ใช้]", "title": "พาดหัว", "content": "เนื้อหายาว 250+ คำ 3 ย่อหน้า", "hook": "ประโยคเปิด", "closing": "ประโยคปิดบรรยาย", "tone": "โทน", "target": "กลุ่มเป้าหมาย", "mixed_from": ["มุม1", "มุม2"]}\n' +
         '  ],\n' +
         '  "news_reference": "สรุปข่าวต้นฉบับ 2-3 ประโยค"\n' +
         '}';
 
       console.log(`[Mix-Service] Prompt length: ${mixPrompt.length}ch`);
 
-      // โซ่นักเขียนมี fallback ครบใน Router แล้ว จึงไม่เริ่ม GPT รอบสองเมื่อทั้งโซ่ล้ม
-      const smartResult = await callSmartAI('write', { prompt: mixPrompt, temperature: 0.7, maxTokens: 8000 });
-      const result = smartResult.result;
-      const usedModel = smartResult.model;
+      let result, usedModel;
+      try {
+        const smartResult = await callSmartAI('write', { prompt: mixPrompt, temperature: 0.7, maxTokens: 8000 });
+        result = smartResult.result;
+        usedModel = smartResult.model;
+      } catch (err) {
+        console.warn(`[Mix-Service] SmartAI failed (${err.message}), falling back to GPT-4o`);
+        result = await callAI({ prompt: mixPrompt, temperature: 0.7, maxTokens: 8000 });
+        usedModel = MODEL_PRIMARY;
+      }
 
       if (result && typeof result === 'object') {
         let versions = result.versions || [];
@@ -2091,10 +1978,7 @@ ${keyPoints}
       .replace('{title}', newsData.news_title || '')
       .replace('{content}', newsData.news_body.slice(0, 6000))
       .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
-    // ★ 1 ส.ค. 69 (Sol รอบ 2 — parity legacy สาย URL): แนบกติกาห้ามยัดข้อคิด เว้นแต่เปิด FORCE_LESSON_ANGLE=1
-    const _legacyPrompt = process.env.FORCE_LESSON_ANGLE === '1' ? prompt
-      : prompt + '\n\n★ ห้ามใส่ข้อคิด/คำสอน/สัจธรรมที่ต้นฉบับไม่มี — ย่อหน้าสุดท้ายปิดด้วยการบรรยายข้อเท็จจริงเรียบๆ';
-    const result = await callAI({ prompt: _legacyPrompt, temperature: 0.6, maxTokens: 8000 });
+    const result = await callAI({ prompt, temperature: 0.6, maxTokens: 8000 });
     if (result && typeof result === 'object') {
       const summary = extractSummary(result);
       analysis = {
@@ -2116,7 +2000,7 @@ ${keyPoints}
   };
 }
 
-export async function getTopPrompts({ newsTitle, text, focusAngle, workflowId, excludePromptIds = [], _cachedNewsAnalysis = null, _cachedPromptLib = null, _cachedCatalogPicks = null }) {
+export async function getTopPrompts({ newsTitle, text, focusAngle, workflowId, excludePromptIds = [], _cachedNewsAnalysis = null, _cachedPromptLib = null }) {
   console.log(`[Analyze-Service] 🧠 getTopPrompts: "${newsTitle?.slice(0, 40)}"${focusAngle ? ` | Angle: ${focusAngle.slice(0, 30)}` : ''}${excludePromptIds.length > 0 ? ` | Excluding: ${excludePromptIds.length}` : ''}${_cachedNewsAnalysis ? ' | ♻️ cached-analysis' : ''}${_cachedPromptLib ? ' | ♻️ cached-lib' : ''}`);
   let actualNewsBody = text;
   let actualNewsTitle = newsTitle;
@@ -2232,232 +2116,17 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
   const { scoreLibraryPrompts } = await import('@/lib/services/promptMatcher');
   const scoredPrompts = scoreLibraryPrompts(newsAnalysis, validPrompts, { mismatchPenalty: true });
 
-  // ★ 1 ส.ค. 69 (Opus P2-5 — พอร์ตจากแฝด TEXT 16 ก.ค.): แนบ _matchType/_isBorrowed จริงให้ทุกใบ
-  //   เดิมสาย URL แนบแค่ _matchScore → usedPreset.matchType ตกไป default 'MATCHED' หลอกทุกงาน
   const topPrompts = scoredPrompts.slice(0, 3).map(s => {
     const pr = validPrompts[s.index];
-    const _coreDims = (s.dims || []).filter(d => !String(d).startsWith('boost'));
-    const _mt = (s.score >= 60 && _coreDims.length >= 2) ? 'EXACT' : s.score >= 40 ? 'CLOSE' : 'BORROWED';
     return {
       ...pr,
       _matchScore: s.score,
-      _matchedDimensions: s.dims,
-      _matchType: _mt,
-      _formulaMatchType: _mt, // ★ Opus P2-C: เซ็ตสดทุกครั้ง — กันค่าเก่าค้างบนอ็อบเจกต์แคชข้ามงาน
-      _isBorrowed: _mt === 'BORROWED',
+      _matchedDimensions: s.dims
     };
   });
 
-  // ═══ ★ 1 ส.ค. 69 ชั้นสารบัญ 201 ใบ (เจ้าของสั่งหลังประเมิน blind 5 ข่าว: ชนะ 2 · แพ้ฉิว 1 · เลือกตรงกัน 2) ═══
-  //   luna เปิดสารบัญ "ทุกใบในคลัง" (ชื่อ + ป้ายสาระจาก data/card-essences.json) คัดเข้ารอบ 14
-  //   → ทุกการ์ดมีสิทธิ์ถูกหยิบจริง 100% แก้ปัญหา top-8 วนใบเดิม/คลังกระจุก 2 หมวด (119/201)
-  //   ทำครั้งเดียวต่อข่าว — มุมถัดไปใช้โผแคช (_cachedCatalogPicks ส่งผ่าน autoFlow) · ล้ม/เกิน 45 วิ = ถอย top-8 เดิม
-  //   ปิดชั้นนี้: CARD_CATALOG_ALL=0 · ป้ายสาระรีเฟรช: node scripts/build-card-essences.mjs
-  // ★ Opus P2-C: null = ยังไม่เคยลอง · [] = ลองแล้วล้ม (มุมถัดไปห้ามจ่ายซ้ำ) · [ids] = โผจริง
-  let _catalogPicks = Array.isArray(_cachedCatalogPicks) ? _cachedCatalogPicks : null;
-  if (process.env.CARD_CATALOG_ALL !== '0' && process.env.CARD_PICKER_AI !== '0'
-      && _catalogPicks === null && validPrompts.length > 20 && topPrompts.length > 1) {
-    try {
-      const { loadCardEssences } = await import('@/lib/services/cardEssences');
-      const _ess = loadCardEssences();
-      const _catCards = validPrompts.filter(p => p.id);
-      const _cat = _catCards.map((p, i) => `${i + 1}. ${p.promptName}${_ess[p.id] ? ' — ' + _ess[p.id] : ''}`);
-      const _catPrompt = `คุณเป็นบรรณารักษ์คลังพร้อมท์ข่าวไวรัล — คัดการ์ดที่ "แกนเรื่องเข้ากับข่าวนี้จริง" เข้ารอบ 14 ใบ
-
-=== ข่าว (เนื้อเต็มจากผู้ใช้) ===
-${String(actualNewsBody || '').replace(/\s+/g, ' ').slice(0, 2000)}
-=== จบข่าว ===
-
-=== สารบัญทั้งคลัง ${_cat.length} ใบ ===
-${_cat.join('\n')}
-=== จบสารบัญ ===
-
-เลือก 14 ใบ เรียงจากเหมาะสุด กติกา: ดูแกนเรื่องจริง ห้ามเลือกเพราะดัง · ธีมซ้ำกันไม่เกิน 2 ใบ (เปิดมุมเขียนหลากหลาย) · ห้ามเลือกแกนเรื่องที่ข่าวไม่มี · ข่าวมีผู้เสียชีวิต→ต้องมีการ์ดรองรับการจากไปติดโผ
-ตอบ JSON: { "picks": [เลข 14 ตัว] }`;
-      // ★ Opus P2-B: ตัดสายจริงด้วย AbortSignal — Promise.race เปล่าๆ ปล่อยมือแต่ HTTP วิ่งต่อ+fallback terra เผาเงินฟรี
-      const _catCtl = new AbortController();
-      const _catTimer = setTimeout(() => _catCtl.abort(), 45000);
-      let _catPick;
-      try {
-        // ★ 15 ส.ค. 69 (ขั้น 4 sonnet-5 — เจ้าของอนุมัติ · แฝดกับ summarizeServiceText.js ต้องแก้คู่กันเสมอ):
-        //   โมเดลขึ้นต้น claude- → callClaude คิดเบา + แคชสารบัญ · ไม่ตั้ง env = luna เส้นเดิมทุกไบต์
-        // ★ 15 ส.ค. 69 ดึก (เจ้าของสั่ง "เปิดใช้ sonnet5"): default → claude-sonnet-5 · ถอยกลับ: CARD_PICKER_MODEL=gpt-5.6-luna
-        //   ของเดิม: const _pickerModelA = process.env.CARD_PICKER_MODEL || MODEL_FAST; // gpt-5.6-luna
-        const _pickerModelA = process.env.CARD_PICKER_MODEL || MODEL_FAST; // ★ 15 ส.ค. เย็น เจ้าของสั่งถอย: sonnet-5 ทำข่าวบิดเบือนเยอะ → กลับ luna (เปิด sonnet-5 คืน: CARD_PICKER_MODEL=claude-sonnet-5)
-        if (/^claude-/.test(_pickerModelA)) {
-          const { callClaude } = await import('@/lib/ai/claudeClient');
-          const _useCache = process.env.CARD_PICKER_CACHE !== '0';
-          const _catConstant = `คุณเป็นบรรณารักษ์คลังพร้อมท์ข่าวไวรัล — คัดการ์ดที่ "แกนเรื่องเข้ากับข่าวนี้จริง" เข้ารอบ 14 ใบ
-
-=== สารบัญทั้งคลัง ${_cat.length} ใบ ===
-${_cat.join('\n')}
-=== จบสารบัญ ===`;
-          const _catVariable = `=== ข่าว (เนื้อเต็มจากผู้ใช้) ===
-${String(actualNewsBody || '').replace(/\s+/g, ' ').slice(0, 2000)}
-=== จบข่าว ===
-
-เลือก 14 ใบ เรียงจากเหมาะสุด กติกา: ดูแกนเรื่องจริง ห้ามเลือกเพราะดัง · ธีมซ้ำกันไม่เกิน 2 ใบ (เปิดมุมเขียนหลากหลาย) · ห้ามเลือกแกนเรื่องที่ข่าวไม่มี · ข่าวมีผู้เสียชีวิต→ต้องมีการ์ดรองรับการจากไปติดโผ
-ตอบ JSON: { "picks": [เลข 14 ตัว] }`;
-          _catPick = await callClaude({
-            // Sol #1: คั่นก้อนด้วยบรรทัดว่าง — รอยต่อ block เทียบเท่า _catPrompt เดิมทุกไบต์ (เหลือแค่สลับลำดับที่เจตนา)
-            ...(_useCache
-              ? { promptBlocks: [{ text: _catConstant, cache: true }, { text: '\n\n' + _catVariable }] }
-              : {}),
-            prompt: _catPrompt,
-            systemPrompt: 'คุณเป็นบรรณารักษ์คัดการ์ดพร้อมท์ ตอบเป็น JSON ตามที่สั่งเท่านั้น',
-            model: _pickerModelA,
-            maxTokens: 12000,
-            effort: process.env.CARD_PICKER_EFFORT_A || 'low',
-            signal: _catCtl.signal,
-          });
-        } else {
-          // ── เส้นเดิม (luna) — ห้ามแตะ ──
-          _catPick = await callAI({
-            prompt: _catPrompt,
-            // ★ Opus NOTE-6: system prompt สั้น — ไม่งั้น callAI ยัดกฎเขียนข่าว ~9KB ที่ไม่เกี่ยวกับงานคัดการ์ด (จ่ายฟรี 30%)
-            systemPrompt: 'คุณเป็นบรรณารักษ์คัดการ์ดพร้อมท์ ตอบเป็น JSON ตามที่สั่งเท่านั้น',
-            model: _pickerModelA,
-            temperature: 0.1,
-            maxTokens: 8000, // สารบัญ 201 ใบ = reasoning หนัก เพดานต่ำ=ตอบว่าง (บทเรียนเดโม: 2500 ว่างเปล่า)
-            signal: _catCtl.signal,
-          });
-        }
-      } finally {
-        clearTimeout(_catTimer);
-      }
-      // ★ Opus P2-A: ตัดโผสารบัญที่ 14 — luna ตอบเกินมา ห้ามเบียดโควตาสูตรกันเหนียว
-      const _nums = (_catPick?.picks || []).map(Number).filter(n => n >= 1 && n <= _catCards.length).slice(0, 14);
-      if (_nums.length >= 2) {
-        _catalogPicks = [...new Set(_nums.map(n => _catCards[n - 1].id))];
-        console.log(`[📖 Catalog] สารบัญ ${_cat.length} ใบ → คัดเข้ารอบ ${_catalogPicks.length} ใบ`);
-      } else {
-        _catalogPicks = []; // ลองแล้วล้ม — จำไว้ ไม่จ่ายซ้ำมุมถัดไป
-        console.log('[📖 Catalog] คำตอบใช้ไม่ได้ — ถอยใช้ top-8 สูตรเดิม');
-      }
-    } catch (_catErr) {
-      _catalogPicks = []; // ลองแล้วล้ม — จำไว้ ไม่จ่ายซ้ำมุมถัดไป (Opus P2-C)
-      console.warn('[📖 Catalog] ล้ม — ถอยใช้ top-8 สูตรเดิม:', _catErr.message);
-    }
-  }
-
-  // ★ 1 ส.ค. 69: AI CARD PICKER (luna) ที่จุดเลือกจริงของท่ออัตโนมัติ — เจ้าของสั่งหลังประลอง 6 โมเดล
-  //   (กรรมการ Fable5 ปกปิดชื่อ: luna 3/3 ไม่กลับคำ · หลักฐานสด: ข่าวอาลัยเคยถูกสูตรจับการ์ดผิดเรื่องที่ score 98)
-  //   สูตรคัด top-8 → luna อ่านเนื้อการ์ดจริงเลือก 1 → ใบที่เลือกขึ้นหัวแถว (prompts[0] = ใบที่ autoFlow ใช้จริง)
-  //   คะแนนสูตรติดตัวใบเดิม → ด่าน ANGLE_MIN_MATCH_SCORE ทำงานต่อ · ล้ม/ปิดสวิตช์ = ลำดับสูตรเดิมเป๊ะ
-  //   ปิด: CARD_PICKER_AI=0 · เปลี่ยนสมอง: CARD_PICKER_MODEL (default gpt-5.6-luna)
-  if (process.env.CARD_PICKER_AI !== '0' && topPrompts.length > 1) {
-    // ★ รอบเทสจริง s5_abort (15 ส.ค. 69): ประกาศนอก try — catch (_pickErr) ใช้ชื่อโมเดลใน log ต้องมองเห็น
-    //   (เดิมประกาศใน try = ReferenceError ตอนสาย B ล่ม ทำเส้นถอยพังแทนที่จะถอยสูตรเดิม)
-    // ★ 15 ส.ค. 69 ดึก (เจ้าของสั่ง "เปิดใช้ sonnet5"): default → claude-sonnet-5 (ของเดิม: || MODEL_FAST = luna)
-    const _pickerModelB = process.env.CARD_PICKER_MODEL_B || process.env.CARD_PICKER_MODEL || MODEL_FAST; // ★ 15 ส.ค. เย็น เจ้าของสั่งถอยกลับ luna
-    try {
-      // ★ Opus P2-7: จับคู่ scored↔card แล้วกรองใบไร้ id ออกก่อน — กัน find เจอใบผิด/ตรรกะเทียบ id เพี้ยน
-      // ★ สารบัญ 201: มีโผสารบัญ → ผู้เข้ารอบ = โผสารบัญ ∪ สูตร top-4 (กันเหนียว, ไม่เกิน 16) · ไม่มี = top-8 สูตรเดิม
-      let _aiPairs;
-      if (Array.isArray(_catalogPicks) && _catalogPicks.length >= 2) {
-        const _byId = new Map();
-        scoredPrompts.forEach(s => { const pr = validPrompts[s.index]; if (pr?.id && !_byId.has(pr.id)) _byId.set(pr.id, { s, pr }); });
-        const _pool = [];
-        const _seen = new Set();
-        // ★ Opus P2-A: สารบัญไม่เกิน 12 ช่อง — การันตีโควตาสูตรกันเหนียว 4 ช่องเสมอ (รวม ≤16)
-        for (const id of _catalogPicks.slice(0, 12)) { const hit = _byId.get(id); if (hit && !_seen.has(id)) { _seen.add(id); _pool.push(hit); } }
-        for (const s of scoredPrompts.slice(0, 4)) { const pr = validPrompts[s.index]; if (pr?.id && !_seen.has(pr.id)) { _seen.add(pr.id); _pool.push({ s, pr }); } }
-        _aiPairs = _pool.slice(0, 16);
-      } else {
-        _aiPairs = scoredPrompts.slice(0, 8)
-          .map(s => ({ s, pr: validPrompts[s.index] }))
-          .filter(x => x.pr && x.pr.id);
-      }
-      if (_aiPairs.length < 2) throw new Error('การ์ดมี id ไม่พอให้ AI เลือก');
-      const _aiCands = _aiPairs.map((x, i) => {
-        const _body = String(x.pr.promptText || '').replace(/\s+/g, ' ').slice(0, 600);
-        const _tone = x.pr.tone || (x.pr.emotionalTags || []).join(',') || '-';
-        return `${i + 1}. "${x.pr.promptName}" (id: ${x.pr.id}) — Score: ${x.s.score.toFixed(1)}\n   โทน: ${_tone} | เนื้อพร้อมท์: ${_body || '-'}`;
-      });
-      // ★ Opus P2-6: ใช้เนื้อข่าวจริงที่ resolve จาก workflow แล้ว (actual*) ไม่ใช่พารามิเตอร์ดิบ
-      const _pickPrompt = `คุณเป็นผู้เชี่ยวชาญการเลือก prompt สำหรับเขียนข่าวไวรัล
-
-=== ข่าว ===
-หัวข้อ: ${actualNewsTitle || 'ไม่มีหัวข้อ'}
-${focusAngle ? `มุมที่กำลังเขียน: ${focusAngle}` : ''}
-เนื้อข่าว (ย่อ): ${String(actualNewsBody || '').replace(/\s+/g, ' ').slice(0, 400)}
-=== จบข่าว ===
-
-=== ตัวเลือก Prompt (Top ${_aiCands.length}) ===
-${_aiCands.join('\n')}
-=== จบตัวเลือก ===
-
-จาก prompt ทั้ง ${_aiCands.length} ตัวเลือกด้านบน เลือก 1 ตัวที่เหมาะสมที่สุดสำหรับข่าวนี้
-เกณฑ์สำคัญ (เรียงตามน้ำหนัก):
-1. "แกนเรื่องของการ์ด" ต้องตรงเหตุการณ์จริงในข่าว — สำคัญกว่าโทนและคะแนน (การ์ดส่วนใหญ่โทนอบอุ่น-ชื่นชมคล้ายกันหมด ห้ามตัดสินจากโทนอย่างเดียว)
-2. ข่าวมีผู้เสียชีวิต → เลือกได้เฉพาะการ์ดที่รองรับการบอกการจากไปอย่างเคารพ ห้ามการ์ดโทนบวก/ภูมิใจ/อวยพรอนาคต
-3. ข่าวเลิกรา/มูฟออน ห้ามเลือกการ์ดโทนไว้อาลัย/การจากไป แม้คะแนนจะสูงกว่า
-4. อ่านเนื้อการ์ดจริงก่อนตัดสิน ห้ามเดาจากชื่อการ์ด
-ตอบเป็น JSON: { "selectedIndex": <1-${_aiCands.length}>, "reason": "..." }`;
-
-      // ★ 15 ส.ค. 69 (ขั้น 4 sonnet-5 — เจ้าของอนุมัติ · แฝดกับ summarizeServiceText.js ต้องแก้คู่กันเสมอ):
-      //   ซ่อมบั๊ก race ไม่ตัดสาย HTTP จริง (จ่ายเงินฟรีหลัง timeout)
-      //   ของเดิม: const _pick = await Promise.race([ callAI({ prompt, model, temperature: 0.1, maxTokens: 2000 }), timeout 35s ])
-      const _pickCtl = new AbortController();
-      const _pickTimer = setTimeout(() => _pickCtl.abort(), (Number.isFinite(Number(process.env.CARD_PICKER_B_TIMEOUT_MS)) && Number(process.env.CARD_PICKER_B_TIMEOUT_MS) > 0) ? Number(process.env.CARD_PICKER_B_TIMEOUT_MS) : 35000);
-      let _pick;
-      try {
-        if (/^claude-/.test(_pickerModelB)) {
-          const { callClaude } = await import('@/lib/ai/claudeClient');
-          _pick = await callClaude({
-            prompt: _pickPrompt,
-            systemPrompt: 'คุณเป็นผู้เชี่ยวชาญเลือกการ์ดพร้อมท์ข่าวไวรัล ตอบเป็น JSON ตามที่สั่งเท่านั้น', // กัน DNA 9KB ของ callClaude ยัดฟรี
-            model: _pickerModelB,
-            maxTokens: 8000, // เผื่อโทเคนคิดร่วมเพดาน (แล็บ medium: คิด+ตอบ ~500-900)
-            effort: process.env.CARD_PICKER_EFFORT_B || 'medium',
-            signal: _pickCtl.signal,
-          });
-        } else {
-          _pick = await callAI({
-            prompt: _pickPrompt,
-            model: _pickerModelB, // gpt-5.6-luna
-            temperature: 0.1, // สาย 5.x ถูกตัดทิ้งอัตโนมัติใน callAI
-            maxTokens: 2000, // ★ Opus P2-E: ผู้เข้ารอบ 8→16 ใบ อินพุตเบิ้ล — ขยายเพดานตาม (เดิม 1200 เสี่ยงตอบว่าง)
-            signal: _pickCtl.signal,
-          });
-        }
-      } finally {
-        clearTimeout(_pickTimer);
-      }
-
-      if (_pick && _pick.selectedIndex >= 1 && _pick.selectedIndex <= _aiPairs.length) {
-        const _s = _aiPairs[_pick.selectedIndex - 1].s;
-        const _pr = _aiPairs[_pick.selectedIndex - 1].pr;
-        if (_pr && topPrompts[0].id && _pr.id !== topPrompts[0].id) {
-          console.log(`[🤖 CardPicker] ${_pickerModelB} เลือก "${_pr.promptName}" แทนหัวแถวสูตร "${topPrompts[0].promptName}" — เหตุผล: ${_pick.reason || '-'}`);
-          const _coreDims2 = (_s.dims || []).filter(d => !String(d).startsWith('boost'));
-          const _mtBase = (_s.score >= 60 && _coreDims2.length >= 2) ? 'EXACT' : _s.score >= 40 ? 'CLOSE' : 'BORROWED';
-          const _aiEntry = {
-            ..._pr,
-            _matchScore: _s.score,
-            _matchedDimensions: _s.dims,
-            _matchType: 'AI_PICKED',
-            _formulaMatchType: _mtBase, // เกรดสูตรจริงของใบที่เลือก — เกราะ REF_WEIGHT ใช้ตัวนี้
-            _isBorrowed: _mtBase === 'BORROWED',
-            _aiPickReason: _pick.reason || null,
-          };
-          const _rest = topPrompts.filter(p => p.id !== _pr.id).slice(0, 2);
-          topPrompts.length = 0;
-          topPrompts.push(_aiEntry, ..._rest);
-        } else {
-          console.log(`[🤖 CardPicker] ${_pickerModelB} ยืนยันหัวแถวสูตร "${topPrompts[0].promptName}"`);
-          topPrompts[0]._aiPickReason = _pick.reason || 'AI ยืนยันตัวเลือกสูตร';
-        }
-      } else {
-        console.log(`[🤖 CardPicker] ${_pickerModelB} ตอบนอกช่วง — ใช้ลำดับสูตรเดิม`);
-      }
-    } catch (_pickErr) {
-      console.warn(`[🤖 CardPicker] ${_pickerModelB} ล่ม — ใช้ลำดับสูตรเดิม:`, _pickErr.message);
-    }
-  }
-
   console.log(`[Analyze-Service] 🧠 getTopPrompts: Selected Top ${topPrompts.length} Prompts`);
   
-  return { prompts: topPrompts, newsAnalysis, _promptLib: validPrompts.length > 0 ? validPrompts.map(p => ({...p})) : [], _catalogPicks };
+  return { prompts: topPrompts, newsAnalysis, _promptLib: validPrompts.length > 0 ? validPrompts.map(p => ({...p})) : [] };
 }
 

@@ -7,83 +7,8 @@
  * เก็บ rollbackContent ไว้เสมอ
  */
 
-import { callAI } from '@/lib/ai/openai';
-import { MODEL_FAST } from '@/lib/ai/modelConfig';
-// ★ 1 ส.ค. 69 (เกราะแก่นข่าว): ใช้ตัวสกัด "เลขเด่น" ตัวเดียวกับ flagFixer — แหล่งความจริงเดียว ไม่ก๊อปตรรกะซ้ำ
-import { keyNumbersOf, hasKeyNumber } from './flagFixerService';
-
-// ═══ ★ 1 ส.ค. 69 (เกราะแก่นข่าว) ═══════════════════════════════════════════
-// เหตุ (พิสูจน์แล้ว 1 ส.ค.): เวอร์ชันที่ติดป้าย _correctionApplied=true มีเนื้อพัง —
-//   ชั้นแก้คำแทนคำโดนกลางคำ ("ตามลำดับ" → "ตามลำจากไป") แล้วชั้นตรวจถัดไปลบท่อนที่พังทิ้งทั้งท่อน
-//   จนประโยคแก่นข่าวหายทั้งใบ (เช่น "หมู่บิ๊กออกจากโรงพยาบาลแล้ว...8 เดือน")
-// หลักการของเกราะนี้: การเกลาคำเป็นของแถม แก่นข่าวเป็นของหลัก —
-//   ผลแก้ที่ทำ "เลขสำคัญหาย" หรือ "เนื้อหด" ให้ทิ้งทั้งชุดแล้วใช้ต้นฉบับเสมอ
-//   อย่างแย่ที่สุดที่ยอมได้ = คำไม่ถูกเกลา (ไม่ใช่แก่นข่าวหาย)
-const CORE_GUARD_MIN_KEEP_DEFAULT = 0.75;
-
-function coreGuardMinKeep() {
-  const raw = parseFloat(process.env.CORRECTION_MIN_KEEP);
-  // นอกช่วง (0,1] = ค่าเพี้ยน → ใช้ค่าปลอดภัยเริ่มต้น (กันตั้งค่าผิดแล้วเกราะบ้าตีกลับทุกใบ)
-  if (!Number.isFinite(raw) || raw <= 0 || raw > 1) return CORE_GUARD_MIN_KEEP_DEFAULT;
-  return raw;
-}
-
-/**
- * ด่านเทียบ ต้นฉบับ vs ผลแก้ — ใช้ก่อนเอาผลแก้ไปแทนต้นฉบับทุกครั้ง
- * export ไว้ให้ชั้นอื่นในท่อ (เช่น correctionPipeline) เรียกใช้เกราะเดียวกันได้ ถ้าทีมสั่งต่อ
- * @returns {{ ok: boolean, reason: string|null }}
- */
-export function guardCoreNews(originalContent, candidateContent) {
-  const original = String(originalContent || '');
-  const candidate = String(candidateContent || '');
-
-  // ไม่ได้แตะเนื้อเลย → ผ่านทันที (กันเตือนหลอกบนเส้นที่ไม่มีอะไรเปลี่ยน)
-  if (candidate === original) return { ok: true, reason: null };
-
-  if (!candidate.trim()) return { ok: false, reason: 'ผลแก้ว่างเปล่า' };
-
-  // (ก) เลขเด่นของต้นฉบับต้องอยู่ครบทุกตัว — ★ Sol รอบ 2: เทียบแบบขอบเลข+ผูกหน่วย (กัน "12" แมตช์ใน "312" / "12 คน" แทน "12 เดือน")
-  const missing = keyNumbersOf(original).filter(k => !hasKeyNumber(candidate, k));
-  if (missing.length > 0) {
-    return { ok: false, reason: `เลขสำคัญหาย ${missing.map(k => `${k.num} ${k.unit}`).join(', ')}` };
-  }
-
-  // (ข) เนื้อต้องไม่หดเกินเพดาน (ตัวจับ "ท่อนถูกลบทิ้ง")
-  const minKeep = coreGuardMinKeep();
-  if (original.length > 0 && candidate.length < original.length * minKeep) {
-    const shrink = Math.round((1 - candidate.length / original.length) * 100);
-    return { ok: false, reason: `เนื้อหด ${shrink}% (เพดาน ${Math.round((1 - minKeep) * 100)}%)` };
-  }
-
-  return { ok: true, reason: null };
-}
-
-/**
- * ทางออกเดียวของ safeCorrect — ผลแก้ทุกเส้นทางต้องผ่านด่านนี้ก่อนออกจาก service
- * ไม่ผ่าน = คืนต้นฉบับของเวอร์ชันนั้น + log ชัด + ทิ้งรายการแก้ (เพราะไม่มีอันไหนถูกใช้จริง)
- */
-function finalizeWithGuard(rollbackContent, correctedContent, corrections) {
-  const guard = guardCoreNews(rollbackContent, correctedContent);
-  if (guard.ok) {
-    return { correctedContent, rollbackContent, corrections, _coreGuard: 'passed' };
-  }
-
-  const dropped = [...new Set(corrections.filter(c => c.type !== 'skipped_low').map(c => c.type))];
-  console.warn(`[Correction] ⛔ เกราะแก่นข่าว: ${guard.reason} — ใช้ต้นฉบับ (ทิ้งการแก้ ${dropped.length ? dropped.join(', ') : 'ไม่มี'})`);
-  return {
-    correctedContent: rollbackContent,
-    rollbackContent,
-    // รายงานตามจริง: ไม่มีการแก้ไหนถูกใช้กับเนื้อที่คืนออกไป
-    corrections: [{
-      type: 'core_guard_revert',
-      original: `(ทิ้งผลแก้: ${dropped.length ? dropped.join(', ') : 'ไม่มี'})`,
-      fixed: '(ใช้ต้นฉบับ)',
-      reason: `เกราะแก่นข่าว: ${guard.reason}`,
-    }],
-    _coreGuard: `reverted:${guard.reason}`,
-  };
-}
-// ═══ จบเกราะแก่นข่าว ═══════════════════════════════════════════════════════
+import { callAI } from '@/lib/ai/era/openai';
+import { MODEL_FAST } from '@/lib/ai/era/modelConfig';
 
 /**
  * แก้ content ตาม issues ที่ audit พบ
@@ -98,9 +23,7 @@ export async function safeCorrect(content, issues) {
 
   try {
     if (!issues || issues.length === 0) {
-      // ★ 1 ส.ค. 69 (เกราะแก่นข่าว): เส้นนี้ยังไม่แตะเนื้อ (ผลแก้ = ต้นฉบับ) — ด่านจะปล่อยผ่านทันที
-      //   แต่ยังต้องเรียก เผื่ออนาคตมีใครแทรกการแก้ไว้ก่อนจุดนี้ จะได้ไม่มีทางออกไหนหลุดเกราะ
-      return finalizeWithGuard(rollbackContent, correctedContent, corrections);
+      return { correctedContent, rollbackContent, corrections };
     }
 
     // === แยก issues ตาม severity ===
@@ -120,13 +43,9 @@ export async function safeCorrect(content, issues) {
     // === HIGH/MEDIUM — แก้เฉพาะจุด ===
     // รวม forbidden_word ที่ต้องใช้ AI rewrite ประโยค (คำที่ replace ตรงๆ แล้วเพี้ยน)
     // ★ 12 มิ.ย. 69: กลุ่มการเสียชีวิต + พนัน/ยา/เหล้า ต้องเกลาตามบริบท — แทนคำตรงๆ จะได้สำนวนซ้ำจำเจ/ความหมายเพี้ยน
-    // ★ 16 ก.ค. 69 (B2): เพิ่ม 'เลือด'/'เลือดสาด' — เดิมตกไป direct-replace ได้ "พบร่องรอยเหตุการณ์ไหลออกมา"
-    //   ประโยคเพี้ยนแบบเดียวกับเคส "เส้นร่องรอยเหตุการณ์ในสมองแตก" (10 ก.ค.) ต้องให้ AI เกลาตามบริบท
-    const L3B_DIRECT_REPLACE_MAX = 12; // ★ ผู้ตรวจ F#3: คำใหม่ในลิสต์ห้ามยาวเกินนี้ (มีข้อสอบคุม)
     const needsAIRewrite = [
       'สะเก็ดระเบิด', 'ระเบิด', 'สนามรบ', 'บาดแผล',
       'เสียชีวิต', 'ตาย', 'ดับ', 'สิ้นใจ', 'ผูกคอ', 'จบชีวิต',
-      'เลือดสาด', 'เลือด',
       'พนัน', 'แทงบอล', 'แทงม้า', 'บาคาร่า', 'ยาบ้า', 'ยาไอซ์', 'ยาเสพติด', 'เสพยา', 'ค้ายา',
       'เมาแล้วขับ', 'วงเหล้า', 'ดื่มสุรา',
     ];
@@ -196,7 +115,7 @@ export async function safeCorrect(content, issues) {
         const result = await callAI({
           model: MODEL_FAST,
           temperature: 0.1,
-          maxTokens: 8000, // ★ ผู้ตรวจ F#1: L3B คืนทั้งบทความใน JSON — 2000 ตันกับข่าวจริง
+          maxTokens: 2000,
           prompt: `อ่านเนื้อหาด้านล่างแล้ว rewrite เฉพาะคำเสี่ยงที่ระบุ ให้ปลอดภัยสำหรับ Facebook
 ห้ามเปลี่ยนเนื้อหา ห้ามเพิ่มข้อมูล ห้ามลดข้อมูล ห้ามเปลี่ยนโทน ห้ามยาวขึ้น
 แค่เปลี่ยนคำเสี่ยงให้ปลอดภัย โดยรักษาความหมายและอ่านลื่นเหมือนเดิม
@@ -213,14 +132,11 @@ ${riskyWords}
 ${correctedContent}
 === จบ ===
 
-ตอบเป็น JSON เท่านั้น: {"content": "เนื้อหาที่แก้แล้วทั้งหมด"} ห้ามอธิบาย ห้ามใส่ข้อความอื่นนอก JSON`,
+ตอบเฉพาะเนื้อหาที่แก้แล้ว ไม่ต้องอธิบาย ไม่ต้องใส่ prefix`,
         });
 
-        // ★ 14 ส.ค. 69 (Sol backlog ข้อ 3 ขั้น 2 — แก้สัญญา L3B): callAI คืน JSON object เสมอ
-        //   เดิมเช็ค typeof string = ไม่มีวันผ่าน → ตกไป direct replace ทุกครั้ง (ต้นตอ "Fallback direct replace" เคสจริง)
-        const _rewritten = typeof result === 'string' ? result : (result?.content ?? null);
-        if (typeof _rewritten === 'string' && _rewritten.length > correctedContent.length * 0.7 && _rewritten.length < correctedContent.length * 1.3) {
-          correctedContent = _rewritten.trim();
+        if (typeof result === 'string' && result.length > correctedContent.length * 0.7 && result.length < correctedContent.length * 1.3) {
+          correctedContent = result.trim();
           corrections.push({
             type: 'ai_context_rewrite',
             original: aiRewriteIssues.map(i => i.text).join(', '),
@@ -229,32 +145,27 @@ ${correctedContent}
           });
           console.log(`[SafeCorrection] L3B AI Rewrite: ${aiRewriteIssues.length} context-sensitive words fixed`);
         } else {
-          // ★ 14 ส.ค. 69 (Sol: AI ล้มต้อง fail-closed กับท่อนยาว): direct replace ได้เฉพาะคำสั้น ≤12 ตัว —
-          //   ท่อนยาวแทนดิบๆ = ประโยคพัง (เคส "หลอดร่องรอยเหตุการณ์") ให้คงเนื้อเดิม + จดธงไว้ให้คนตรวจ
-          console.warn(`[SafeCorrection] L3B AI Rewrite: response invalid, short-word replace + flag long spans`);
+          // AI ตอบผิดรูปแบบ → fallback ใช้ direct replace
+          console.warn(`[SafeCorrection] L3B AI Rewrite: response invalid, fallback to direct replace`);
           for (const issue of aiRewriteIssues) {
-            if (issue.suggestion && issue.text.length <= L3B_DIRECT_REPLACE_MAX) {
+            if (issue.suggestion) {
               const before = correctedContent;
               correctedContent = correctedContent.replace(issue.text, issue.suggestion);
               if (correctedContent !== before) {
                 corrections.push({ type: 'regex_replace', original: issue.text, fixed: issue.suggestion, reason: 'Fallback direct replace' });
               }
-            } else {
-              corrections.push({ type: 'needs_review', original: issue.text.slice(0, 80), fixed: null, reason: 'AI เกลาล้ม + ท่อนยาวเกินจะแทนดิบ — คงเนื้อเดิมไว้ให้คนตรวจ' });
             }
           }
         }
       } catch (aiErr) {
-        console.warn(`[SafeCorrection] L3B AI Rewrite failed: ${aiErr.message} — short-word replace + flag long spans`);
+        console.warn(`[SafeCorrection] L3B AI Rewrite failed: ${aiErr.message}, using direct replace`);
         for (const issue of aiRewriteIssues) {
-          if (issue.suggestion && issue.text.length <= L3B_DIRECT_REPLACE_MAX) {
+          if (issue.suggestion) {
             const before = correctedContent;
             correctedContent = correctedContent.replace(issue.text, issue.suggestion);
             if (correctedContent !== before) {
               corrections.push({ type: 'regex_replace', original: issue.text, fixed: issue.suggestion, reason: 'Fallback direct replace' });
             }
-          } else {
-            corrections.push({ type: 'needs_review', original: issue.text.slice(0, 80), fixed: null, reason: 'AI เกลาล้ม + ท่อนยาวเกินจะแทนดิบ — คงเนื้อเดิมไว้ให้คนตรวจ' });
           }
         }
       }
@@ -265,12 +176,9 @@ ${correctedContent}
 
     console.log(`[SafeCorrection] Applied ${corrections.filter(c => c.type !== 'skipped_low').length} corrections`);
 
-    // ★ 1 ส.ค. 69 (เกราะแก่นข่าว): ทางออกหลัก — ผลแก้ทั้งชุด (direct replace + AI rewrite + ลบ bait)
-    //   ต้องผ่านด่านเทียบกับต้นฉบับก่อนเสมอ ไม่ผ่าน = ใช้ต้นฉบับ
-    return finalizeWithGuard(rollbackContent, correctedContent, corrections);
+    return { correctedContent, rollbackContent, corrections };
 
   } catch (err) {
-    // เส้น error: คืนต้นฉบับอยู่แล้ว = ปลอดภัยโดยโครงสร้าง ไม่ต้องผ่านด่าน (ผลแก้ไม่ได้ออกไปเลย)
     console.error('[SafeCorrection] Error:', err.message);
     return { correctedContent: rollbackContent, rollbackContent, corrections: [] };
   }
