@@ -1,0 +1,56 @@
+#!/bin/sh
+# 🔒🏆 GOLDEN-LOCK — git pre-push (23 ส.ค. 69 — เจ้าของสั่ง "ล็อกระบบข่าวกันพลาดเวลาแก้ระบบอื่น")
+# ทำงานทุกครั้งที่ push ไป refs/heads/main (ทุก worktree ที่ใช้ .git นี้ — ไม่ว่าจะเป็น Claude/codex/มือ):
+#   ถ้ามี commit ในช่วงที่จะ push แตะไฟล์ "ระบบเขียนข่าว" (PROTECTED) → ทุก commit ที่แตะต้องมีรหัสอนุมัติในข้อความ
+#   รูปแบบรหัส:  [NEWS-LOCK-APPROVED by <ชื่อผู้อนุมัติ> <วันที่>]   (เจ้าของเท่านั้นที่ให้ได้)
+#   ไม่มีรหัส → ❌ ปฏิเสธการ push (ไม่กระทบกิ่งอื่นที่ไม่ใช่ main)
+# ติดตั้ง: คัดลอกไฟล์นี้ไป <repo>/.git/hooks/pre-push (ดู scripts/golden-lock/install-hooks.cmd)
+
+remote="$1"
+PROTECTED='^src/lib/services/autoFlowService\.js|^src/lib/services/autoFlowServiceText\.js|^src/lib/services/summarizeService\.js|^src/lib/services/summarizeServiceText\.js|^src/lib/ai/aiRouter\.js|^src/lib/ai/era/|^src/lib/ai/openai\.js|^src/lib/ai/promptStore\.js|^src/lib/ai/promptStoreText\.js|^src/lib/ai/modelConfig\.js|^src/app/api/auto/|^src/app/api/summarize/|^src/app/api/extract/|^src/app/api/research-search/|^src/lib/ai/claudeClient\.js|^src/lib/ai/geminiClient\.js|^src/lib/ai/safetyFilter\.js|^src/lib/correction/|^src/lib/services/queueService\.js|^src/app/api/queue/|^src/lib/persistStore\.js|^src/lib/services/promptMatcher\.js|^src/lib/services/researchService\.js|^src/lib/services/researchVerifier\.js|^src/lib/services/achievementResearch\.js|^src/lib/services/viralFewshot\.js|^src/lib/ai/moderationAgent\.js|^src/lib/ai/semanticClusters\.js|^src/lib/ai/builtinFallbackPrompt\.js|^src/lib/input-engine/|^src/lib/workflow/workflowEngine\.js|^src/lib/agents/masterAgent\.js|^data/prompt-library\.json$|^scripts/golden-lock/|^scripts/news-lock-guard\.mjs$'
+APPROVAL='\[NEWS-LOCK-APPROVED'
+
+zero=0000000000000000000000000000000000000000
+blocked=0
+
+while read local_ref local_sha remote_ref remote_sha; do
+  [ "$remote_ref" = "refs/heads/main" ] || continue
+  [ "$local_sha" = "$zero" ] && continue          # ลบกิ่ง — ไม่เกี่ยว
+  if [ "$remote_sha" = "$zero" ]; then
+    base=$(git rev-parse --verify -q origin/main || echo "")
+  else
+    base="$remote_sha"
+  fi
+  if [ -z "$base" ]; then
+    range="$local_sha"
+  else
+    range="$base..$local_sha"
+  fi
+  # commit ในช่วงที่แตะไฟล์ล็อก
+  for c in $(git rev-list $range 2>/dev/null); do
+    touched=$(git diff-tree --no-commit-id --name-only -r "$c" | grep -E "$PROTECTED")
+    [ -z "$touched" ] && continue
+    if git log -1 --format=%B "$c" | grep -qE "$APPROVAL"; then
+      continue
+    fi
+    if [ $blocked -eq 0 ]; then
+      echo "=============================================================="
+      echo "🔒🏆 GOLDEN-LOCK BLOCKED: push ไป main นี้แตะ 'ระบบเขียนข่าวยุคปัง' โดยไม่มีรหัสอนุมัติ"
+      echo "=============================================================="
+    fi
+    blocked=1
+    echo "⛔ commit $(git log -1 --format='%h %s' "$c" | cut -c1-90)"
+    echo "$touched" | sed 's/^/      ↳ /'
+  done
+done
+
+if [ $blocked -eq 1 ]; then
+  echo ""
+  echo "กติกา: ไฟล์ระบบข่าวถูกล็อกไว้ที่ยุคปัง (tag news-golden-era-23aug69) — แก้ได้เมื่อเจ้าของอนุมัติเท่านั้น"
+  echo "ถ้าเจ้าของอนุมัติจริง: ใส่รหัสในข้อความ commit  [NEWS-LOCK-APPROVED by <ชื่อ> <วันที่>]  แล้ว push ใหม่"
+  echo "ถ้าไม่ได้ตั้งใจแตะ: git checkout news-golden-era-23aug69 -- <ไฟล์> แล้ว commit ทับ"
+  echo "ตรวจสถานะ: node scripts/golden-lock/check-golden-lock.mjs HEAD"
+  echo "=============================================================="
+  exit 1
+fi
+exit 0

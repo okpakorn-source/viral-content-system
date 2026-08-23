@@ -1,0 +1,27 @@
+#!/bin/sh
+# 🔒 NEWS-WRITING SYSTEM LOCK — git pre-commit (28 มิ.ย. 2026 — ผู้ใช้สั่ง)
+# บล็อก commit ที่แตะ "ระบบเขียนข่าวอัตโนมัติ" — กันแก้หลุด (จาก agent ใดก็ตาม/มือพลาด)
+# ✅ override เมื่อเจ้าของอนุญาตจริงเท่านั้น:  git commit --no-verify
+# 🔴 รายชื่อตรงกับ SYSTEM_LOCKED_FILES.md + scripts/news-lock-guard.mjs + scripts/golden-lock/hooks/pre-push
+# 🏆 23 ส.ค. 69: เพิ่ม src/lib/ai/era/ (ตัวเรียกโมเดลยุคปัง) · data/prompt-library.json · scripts/golden-lock/ — ระบบข่าวถูกล็อกไว้ที่ยุคปัง (tag news-golden-era-23aug69)
+
+PROTECTED='^src/lib/services/autoFlowService\.js|^src/lib/services/autoFlowServiceText\.js|^src/lib/services/summarizeService\.js|^src/lib/services/summarizeServiceText\.js|^src/lib/ai/aiRouter\.js|^src/lib/ai/openai\.js|^src/lib/ai/promptStore\.js|^src/lib/ai/promptStoreText\.js|^src/lib/ai/modelConfig\.js|^src/app/api/auto/|^src/app/api/summarize/|^src/app/api/extract/|^src/app/api/research-search/|^src/app/content/new/page\.js|^scripts/validate-workflow\.mjs|^src/lib/ai/claudeClient.js|^src/lib/ai/geminiClient.js|^src/lib/ai/safetyFilter.js|^src/lib/correction/|^src/lib/utils/withTimeout.js|^src/lib/services/queueService.js|^src/app/api/queue/|^src/lib/persistStore.js|^scripts/news-lock-guard.mjs|^discord-bot/|^src/lib/services/promptMatcher\.js|^src/lib/services/researchService\.js|^src/lib/services/achievementResearch\.js|^src/lib/services/viralFewshot\.js|^src/lib/ai/moderationAgent\.js|^src/lib/ai/semanticClusters\.js|^src/lib/ai/builtinFallbackPrompt\.js|^src/lib/input-engine/|^src/lib/workflow/workflowEngine\.js|^src/lib/agents/masterAgent\.js'
+
+HITS=$(git diff --cached --name-only --diff-filter=ACMR | grep -E "$PROTECTED")
+
+if [ -n "$HITS" ]; then
+  echo "=============================================================="
+  echo "🔒🔴 BLOCKED: commit นี้แตะ 'ระบบเขียนข่าวอัตโนมัติ' ที่ถูกล็อกไว้"
+  echo "=============================================================="
+  echo "ไฟล์ที่ถูกล็อก (โดน commit นี้):"
+  echo "$HITS" | sed 's/^/   ⛔ /'
+  echo ""
+  echo "กฎเหล็กโปรเจกต์: ห้ามแก้ระบบเขียนข่าวโดยไม่ได้รับอนุญาตจากเจ้าของ"
+  echo "ถ้าเจ้าของอนุญาตจริงแล้ว → commit ด้วย --no-verify และใส่รหัสในข้อความ commit:"
+  echo "      [NEWS-LOCK-APPROVED by <ชื่อ> <วันที่>]   (ไม่มีรหัสนี้ → ด่าน pre-push จะไม่ให้ขึ้น main)"
+  echo "ตรวจว่ายังเป็นยุคปัง: node scripts/golden-lock/check-golden-lock.mjs"
+  echo "=============================================================="
+  exit 1
+fi
+
+exit 0
