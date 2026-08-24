@@ -14,7 +14,7 @@ zero=0000000000000000000000000000000000000000
 blocked=0
 
 while read local_ref local_sha remote_ref remote_sha; do
-  [ "$remote_ref" = "refs/heads/main" ] || continue
+  case "$remote_ref" in refs/heads/main|refs/heads/version/golden-era) ;; *) continue;; esac
   [ "$local_sha" = "$zero" ] && continue          # ลบกิ่ง — ไม่เกี่ยว
   if [ "$remote_sha" = "$zero" ]; then
     base=$(git rev-parse --verify -q origin/main || echo "")
@@ -28,7 +28,9 @@ while read local_ref local_sha remote_ref remote_sha; do
   fi
   # commit ในช่วงที่แตะไฟล์ล็อก
   for c in $(git rev-list $range 2>/dev/null); do
-    touched=$(git diff-tree --no-commit-id --name-only -r "$c" | grep -E "$PROTECTED")
+    # --diff-merges=first-parent: merge commit เทียบกับ parent แรกเท่านั้น (ค่าเริ่มต้น diff ของ merge = ว่าง → ตาบอด
+    # ส่วน "-m --first-parent" ผิด: ยังรวม diff ของทุก parent → บล็อกผิด commit — พิสูจน์กับ 98d42a3 แล้ว)
+    touched=$(git diff-tree --diff-merges=first-parent --no-commit-id --name-only -r "$c" | grep -E "$PROTECTED")
     [ -z "$touched" ] && continue
     if git log -1 --format=%B "$c" | grep -qE "$APPROVAL"; then
       continue
