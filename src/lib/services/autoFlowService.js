@@ -3,6 +3,7 @@ import { transcribeTiktok } from '@/lib/services/tiktokService';
 import { transcribeYoutube } from '@/lib/services/youtubeService';
 import { transcribeMetaReel, isMetaVideoUrl } from '@/lib/services/metaReelsService';
 import { performResearch } from '@/lib/services/researchService';
+import { isNewsResearchOn } from '@/lib/utils/researchSwitch'; // 🔎 ใช้แยก log "ปิดอยู่" ออกจาก "ค้นแล้วไม่เจอ"
 import { performSummarize, getTopPrompts } from '@/lib/services/summarizeService';
 import { smartResearch } from '@/lib/services/achievementResearch';
 import { getSession } from '@/lib/auth';
@@ -10,7 +11,7 @@ import { logPipeline } from '@/lib/pipelineLogger';
 import { createLogger } from '@/lib/logger';
 import { withTimeout } from '@/lib/utils/withTimeout';
 import { runCorrectionPipeline } from '@/lib/correction/correctionPipeline';
-import { logGeneration } from '@/lib/services/era/generationLogger';
+import { logGeneration } from '@/lib/services/generationLogger';
 import { getBuiltinFallbackPrompt } from '@/lib/ai/builtinFallbackPrompt';
 
 const rlog = createLogger('AUTO-SERVICE');
@@ -223,7 +224,7 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
     mode: 'breakdown',
     workflowId: _autoWorkflowId,
     user: _user,
-  }), 120000, 'breakdown'); // ★ 120s (was 210s) — perf: cut timeout to trigger fallback faster
+  }), 300000, 'breakdown'); // ★ 300s (10 ก.ค. 69) = inner gpt-5.5 200s + fallback gpt-4o 60s + เผื่อ 40s — ค่าเดิม 120s ผิดหลัก: outer ไม่ได้ trigger fallback (ไม่มี catch) มันฆ่าทั้ง job
 
   if (!breakRes.success || !breakRes.data) {
     throwStep('auto_breakdown', `แตกประเด็นไม่สำเร็จ: ${breakRes.error || ''}`);
@@ -242,6 +243,10 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
   addLog('Parallel', '🚀 Blueprint + SmartResearch ทำงานพร้อมกัน...');
   
   // ★ ทำ 2 งานพร้อมกัน แทนที่จะรอทีละตัว (ประหยัด 30-60 วินาที!)
+  // ★ 14 ส.ค. 69 (Sol 9.5/10 — sol-backlog4 ข้อ 4a · parity กับสาย Text): จับเวลาจริงของแต่ละงานใน finally
+  const _taskElapsed = { blueprint: null, research: null };
+  const _bpT0 = Date.now();
+  const _srT0 = Date.now();
   const [bpSettled, srSettled] = await Promise.allSettled([
     // Task 1: Blueprint
     withTimeout(performSummarize({
@@ -251,14 +256,14 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
       breakdownData,
       workflowId: _autoWorkflowId,
       user: _user,
-    }), 120000, 'blueprint').catch(() => null), // ★ 120s (was 75s) — GPT-5.5 needs more time
-    
+    }), 120000, 'blueprint').catch(() => null).finally(() => { _taskElapsed.blueprint = Date.now() - _bpT0; }), // ★ 120s (was 75s) — GPT-5.5 needs more time
+
     // Task 2: Smart Research
     withTimeout(
       smartResearch(newsData, breakdownData),
       60000,  // ★ 60s (was 30s) — เพิ่มเป็น 2× เพราะ SmartResearch มี 2 AI calls + 7 Serper HTTP calls
       'smart_research'
-    ).catch(() => null),
+    ).catch(() => null).finally(() => { _taskElapsed.research = Date.now() - _srT0; }),
   ]);
 
   // Extract Blueprint result
@@ -273,6 +278,9 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
     factPool = srResult;
     addLog('SmartResearch', `✅ พบ ${factPool.facts.length} ข้อเท็จจริงเกี่ยวกับ "${factPool.entityName || '?'}" (${factPool.duration || '?'}s)`);
     await logPipeline({ workflowId: _autoWorkflowId, step: 'smart-research', status: 'success', duration: (factPool.duration || 0) * 1000, detail: `${factPool.facts.length} facts for "${factPool.entityName}"` }).catch(() => {});
+  } else if (!isNewsResearchOn()) {
+    // ★ 16 ส.ค. 69: แยก "ถูกปิดตามคำสั่ง" ออกจาก "ค้นแล้วไม่เจอ" (เหมือนสาย TEXT — ผู้ตรวจอิสระท้วง)
+    addLog('SmartResearch', '⏭️ ปิดอยู่ตามคำสั่ง — ข่าวนี้ใช้เนื้อต้นฉบับอย่างเดียว (เปิดคืน: NEWS_RESEARCH=1)');
   } else {
     addLog('SmartResearch', '⚠️ ไม่พบข้อมูลเพียงพอ — ใช้ flow เดิม');
   }
@@ -288,8 +296,12 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
   // ★ ปรับ 10 มิ.ย. 2026: default 3 มุม × 1 เวอร์ชัน = 3 ชิ้นที่ "ต่างกันจริง" (คนละมุม คนละ prompt คนละ research)
   //   เดิม 2 มุม × 2 → เวอร์ชันในมุมเดียวกันแทบซ้ำกัน (V2/V4 เคยได้พาดหัวเหมือนกันคำต่อคำ)
   //   ปรับได้ผ่าน .env: GEN_ANGLES (1-4) / GEN_PER_ANGLE (1-3)
-  const GEN_ANGLES = Math.max(1, Math.min(4, parseInt(process.env.GEN_ANGLES || '3', 10) || 3));
+  // ★ ปรับ 10 ก.ค. 69 (คำสั่งทีม หลังเคส #01641): default 2 มุม — ฝืนหามุมที่ 3 = พร้อมท์อันดับท้ายธีมผิดเรื่อง
+  const GEN_ANGLES = Math.max(1, Math.min(4, parseInt(process.env.GEN_ANGLES || '2', 10) || 2));
   const GEN_PER_ANGLE = Math.max(1, Math.min(3, parseInt(process.env.GEN_PER_ANGLE || '1', 10) || 1));
+  // ★ REVERT 10 ก.ค. 69 (เคส #01635): ห้ามเรียงตามคะแนนไวรัล — มุมคะแนนสูงมักเป็นมุมพี่น้องเรื่องเดียวกัน
+  //   → 3 เวอร์ชันเปิดเหมือนกันหมด + ชื่อมุมแคบจนจับคู่พร้อมท์คลังเพี้ยน (เจอพร้อมท์ไว้อาลัยกับข่าวมูฟออน)
+  //   ใช้ลำดับเดิมของ template 12 หมวด = ความหลากหลายมาในตัว (หมวด 1,2,3 คนละแนวเสมอ)
   const anglesToUse = breakdownData.possible_angles?.slice(0, GEN_ANGLES) || [];
   if (anglesToUse.length === 0) {
     anglesToUse.push({ angle_name: 'นำเสนอข่าวสารทั่วไป', description: 'เล่าเหตุการณ์ตามจริง' });
@@ -306,7 +318,8 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
   const anglePrompts = [];
   let _cachedNewsAnalysis = null;
   let _cachedPromptLib = null;
-  
+  let _cachedCatalogPicks = null; // ★ สารบัญ 201: โผเข้ารอบต่อข่าว — จ่ายค่าสารบัญครั้งเดียว มุมถัดไปใช้ซ้ำ
+
   for (const angleObj of anglesToUse) {
     const focusAngle = `${angleObj.angle_name}: ${angleObj.description}`;
     const promptsRes = await getTopPrompts({
@@ -317,14 +330,19 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
       excludePromptIds: [...usedPromptIds],
       _cachedNewsAnalysis,   // ★ ส่ง cached analysis (null ครั้งแรก → AI วิเคราะห์ → cache)
       _cachedPromptLib,      // ★ ส่ง cached lib (null ครั้งแรก → load → cache)
+      _cachedCatalogPicks,
     }).catch(() => null);
-    
+
     // Cache จากผลลัพธ์ครั้งแรก → ใช้ซ้ำครั้งถัดไป
     if (!_cachedNewsAnalysis && promptsRes?.newsAnalysis) {
       _cachedNewsAnalysis = promptsRes.newsAnalysis;
     }
     if (!_cachedPromptLib && promptsRes?._promptLib?.length > 0) {
       _cachedPromptLib = promptsRes._promptLib;
+    }
+    // ★ Opus P2-C: แคชแม้ตอนล้ม ([]) — มุมถัดไปจะได้ไม่จ่ายค่าสารบัญซ้ำเปล่าๆ
+    if (_cachedCatalogPicks === null && Array.isArray(promptsRes?._catalogPicks)) {
+      _cachedCatalogPicks = promptsRes._catalogPicks;
     }
     
     let topPrompt = promptsRes?.prompts?.[0] || null;
@@ -337,6 +355,22 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
       addLog('PromptSelect', `📋 Angle "${angleObj.angle_name}" → ${topPrompt.promptName?.slice(0, 40)} (excluded: ${usedPromptIds.length - 1})${_cachedNewsAnalysis ? ' ♻️' : ''}`);
     }
     anglePrompts.push(topPrompt);
+  }
+
+  // ★ 10 ก.ค. 69 (เคส #01641 "แม่ยังอยู่"): มุมจริง-แมตช์จริงเท่านั้น — ห้ามฝืนเขียนด้วยพร้อมท์ธีมผิดเรื่อง
+  //   มุมที่ 2 เป็นต้นไป ถ้าจับคู่หลวม (_matchScore < 45 หรือหลุดไป Built-in Fallback ซึ่งไม่มี score)
+  //   → ตัดมุมทิ้ง ออกน้อยเวอร์ชันแต่ไม่บิดเบือน — มุมแรกเก็บเสมอ = การันตีมีผลลัพธ์อย่างน้อย 1 เวอร์ชัน
+  const MIN_ANGLE_MATCH = Math.max(0, parseInt(process.env.ANGLE_MIN_MATCH_SCORE || '45', 10) || 45);
+  for (let i = anglesToUse.length - 1; i >= 1; i--) {
+    // ★ 1 ส.ค. 69 (Opus P2-A): ใบที่ luna ตั้งใจเลือก (AI_PICKED) อ่านการ์ดเต็ม+เนื้อข่าวแล้ว — ห้ามใช้คะแนนสูตร
+    //   (ที่มันตัดสินว่าด้อยกว่าอยู่แล้ว) มาโยนทิ้ง ไม่งั้นฟีเจอร์ถูกล้างเงียบๆ ในเคสที่ควรช่วยที่สุด
+    if (anglePrompts[i]?._matchType === 'AI_PICKED') continue;
+    const _score = Number(anglePrompts[i]?._matchScore ?? 0);
+    if (_score < MIN_ANGLE_MATCH) {
+      addLog('PromptSelect', `✂️ ตัดมุม "${anglesToUse[i].angle_name}" — พร้อมท์จับคู่หลวม (score ${_score} < ${MIN_ANGLE_MATCH}) เอาเฉพาะมุมที่แมตช์จริง`);
+      anglesToUse.splice(i, 1);
+      anglePrompts.splice(i, 1);
+    }
   }
 
   // ★ HOTFIX (10 มิ.ย.): สไตล์เปิดเรื่องหมุนเวียนต่อ angle — โหมด 1 เวอร์ชัน/call ไม่มีแรงบังคับ
@@ -500,7 +534,9 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
   // === POST-GENERATION CORRECTION PIPELINE ===
   let finalVersions = allVersions;
   try {
-    finalVersions = await runCorrectionPipeline(allVersions, newsData, breakdownData);
+    finalVersions = await runCorrectionPipeline(allVersions, newsData, breakdownData,
+      // ★ 14 ส.ค. 69: ส่งข้อเท็จจริงรีเสิร์ชให้ด่าน L1.8 — ของจริงจากรีเสิร์ชไม่ใช่ "ของเกิน"
+      (factPool?.facts || []).map((x) => (typeof x === 'string' ? x : (x?.text || x?.content || ''))).filter(Boolean).join('\n') || null);
     addLog('Correction', `🔧 Correction Pipeline: ${finalVersions.filter(v => v._correctionApplied).length}/${finalVersions.length} corrected`);
   } catch (corrErr) {
     console.error('[AutoFlow] Correction pipeline failed, using original:', corrErr.message);
@@ -530,8 +566,9 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
           scrape: ((step2Start - step1Start) / 1000).toFixed(1),
           extract: ((step3Start - step2Start) / 1000).toFixed(1),
           breakdown: ((stepParallelStart - step3Start) / 1000).toFixed(1),
-          blueprint: ((stepGenStart - stepParallelStart) / 1000).toFixed(1),
-          research: ((stepGenStart - stepParallelStart) / 1000).toFixed(1),
+          // ★ 14 ส.ค. 69 (Sol 4a): เวลาจริงรายงาน — เดิมสองตัวนี้ใช้ช่วงขนานรวม = เลขซ้ำทุกเคส
+          blueprint: _taskElapsed.blueprint != null ? (_taskElapsed.blueprint / 1000).toFixed(1) : null,
+          research: _taskElapsed.research != null ? (_taskElapsed.research / 1000).toFixed(1) : null,
           generate: ((Date.now() - stepGenStart) / 1000).toFixed(1),
         },
         desk: deskMeta || null, // ★ ป้ายโต๊ะข่าว {newsId, lane, category, editor, editorIcon}
@@ -569,14 +606,23 @@ export async function processAutoFlow({ url, text, sourceType: forceType, preset
         viralScore: usedPreset.viralScore || null,
         matchReason: primaryResult.debug?.promptMatchReason || '',
         newsType: newsType || '',
+        // ★ 1 ส.ค. 69 (Opus P2-E + พอร์ต B5 จากแฝด TEXT): ฟิลด์ตรวจย้อนต้องทะลุถึงกล่องดำ/job_queue
+        promptName: usedPreset.promptName || '',
+        promptId: usedPreset.promptId || null,
+        promptSource: usedPreset.promptSource || usedPreset.source || '',
+        matchScore: (typeof usedPreset.matchScore === 'number') ? usedPreset.matchScore : null,
+        matchType: usedPreset.matchType || null,
+        isBorrowed: usedPreset.isBorrowed || false,
+        aiPickReason: usedPreset.aiPickReason || null,
       } : null,
       stepTimings: {
         detect: ((step1Start - step0Start) / 1000).toFixed(1),
         scrape: ((step2Start - step1Start) / 1000).toFixed(1),
         extract: ((step3Start - step2Start) / 1000).toFixed(1),
         breakdown: ((stepParallelStart - step3Start) / 1000).toFixed(1),
-        blueprint: ((stepGenStart - stepParallelStart) / 1000).toFixed(1),
-        research: ((stepGenStart - stepParallelStart) / 1000).toFixed(1),
+        // ★ 14 ส.ค. 69 (Sol 4a): เวลาจริงรายงาน — logger กับ response ใช้ก้อนเดียวกัน
+        blueprint: _taskElapsed.blueprint != null ? (_taskElapsed.blueprint / 1000).toFixed(1) : null,
+        research: _taskElapsed.research != null ? (_taskElapsed.research / 1000).toFixed(1) : null,
         generate: ((Date.now() - stepGenStart) / 1000).toFixed(1),
       },
       log,

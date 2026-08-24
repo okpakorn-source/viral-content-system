@@ -10,11 +10,13 @@
  * Graceful Fallback: ถ้าล้มเหลวทุกขั้นตอน → return null → flow เดิมทำงานปกติ
  */
 
-import { callAI } from '@/lib/ai/era/openai';
+import { callAI } from '@/lib/ai/openai';
 import { createLogger } from '@/lib/logger';
-import { MODEL_FAST } from '@/lib/ai/era/modelConfig';
+import { MODEL_FAST } from '@/lib/ai/modelConfig';
 import { tavilySearch, isTavilyAvailable } from '@/lib/services/tavilyService';
 import { extractIdentityAnchors } from '@/lib/services/researchVerifier';
+import { isNewsResearchOn } from '@/lib/utils/researchSwitch'; // 🔎 สวิตช์ปิดค้นข้อมูลเสริม (16 ส.ค. 69)
+import { composeAbortSignals, rethrowPipelineDeadline } from '@/lib/utils/pipelineDeadline';
 
 const rlog = createLogger('SMART-RESEARCH');
 const SERPER_API_KEY = process.env.SERPER_API_KEY;
@@ -46,7 +48,7 @@ function containsBlacklist(text) {
 // ═══════════════════════════════════════════════
 // === Serper Search (lightweight) + Tavily Supplement ===
 // ═══════════════════════════════════════════════
-async function quickSearch(query, num = 3) {
+async function quickSearch(query, num = 3, signal) {
   let results = [];
 
   // Try Serper first (if API key available)
@@ -56,7 +58,7 @@ async function quickSearch(query, num = 3) {
         method: 'POST',
         headers: { 'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json' },
         body: JSON.stringify({ q: query, gl: 'th', hl: 'th', num }),
-        signal: AbortSignal.timeout(5000),  // ★ 5s per Serper call — ป้องกัน Serper ช้ากิน SmartResearch budget
+        signal: composeAbortSignals(signal, AbortSignal.timeout(5000)),  // ★ 5s guard + parent stage
       });
       if (res.ok) {
         const data = await res.json();
@@ -67,7 +69,8 @@ async function quickSearch(query, num = 3) {
           source: r.displayLink || '',
         }));
       }
-    } catch {
+    } catch (error) {
+      if (signal?.aborted) throw (signal.reason || error);
       // Serper failed, will try Tavily below
     }
   }
@@ -81,6 +84,7 @@ async function quickSearch(query, num = 3) {
         maxResults: num,
         searchDepth: 'basic',
         includeAnswer: false,
+        signal,
       });
       const existingLinks = new Set(results.map(r => r.link));
       const newResults = tavilyResults
@@ -95,7 +99,8 @@ async function quickSearch(query, num = 3) {
       if (newResults.length > 0) {
         console.log(`[SmartResearch] 🔍 Tavily added ${newResults.length} results for "${query.slice(0, 40)}"`);
       }
-    } catch {
+    } catch (error) {
+      if (signal?.aborted) throw (signal.reason || error);
       // Tavily failed silently
     }
   }
@@ -106,11 +111,12 @@ async function quickSearch(query, num = 3) {
 // ═══════════════════════════════════════════════
 // === Wikipedia Search (free, no key) ===
 // ═══════════════════════════════════════════════
-async function wikiSearch(name, entity = null) {
+async function wikiSearch(name, entity = null, signal) {
   try {
     const encoded = encodeURIComponent(name);
     const res = await fetch(`https://th.wikipedia.org/api/rest_v1/page/summary/${encoded}`, {
       headers: { 'Accept': 'application/json' },
+      signal: composeAbortSignals(signal, AbortSignal.timeout(5000)),
     });
     let wikiText = '';
     if (res.ok) {
@@ -129,7 +135,9 @@ async function wikiSearch(name, entity = null) {
     if (!wikiText && entity && entity.type !== 'นักการเมือง') {
       try {
         const enUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(entity.realName || entity.name)}`;
-        const enRes = await fetch(enUrl, { signal: AbortSignal.timeout(5000) });
+        const enRes = await fetch(enUrl, {
+          signal: composeAbortSignals(signal, AbortSignal.timeout(5000)),
+        });
         if (enRes.ok) {
           const enData = await enRes.json();
           if (enData.type === 'standard' && enData.extract) {
@@ -141,11 +149,14 @@ async function wikiSearch(name, entity = null) {
             };
           }
         }
-      } catch {}
+      } catch (error) {
+        if (signal?.aborted) throw (signal.reason || error);
+      }
     }
 
     return null;
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) throw (signal.reason || error);
     return null;
   }
 }
@@ -153,7 +164,7 @@ async function wikiSearch(name, entity = null) {
 // ═══════════════════════════════════════════════
 // === STEP 1: Entity Detection ===
 // ═══════════════════════════════════════════════
-async function detectEntity(newsTitle, newsBody) {
+async function detectEntity(newsTitle, newsBody, signal) {
   const prompt = `วิเคราะห์ข่าวนี้แล้วระบุบุคคล/องค์กรหลักที่ถูกกล่าวถึง
 
 === ข่าว ===
@@ -175,10 +186,12 @@ async function detectEntity(newsTitle, newsBody) {
       prompt,
       temperature: 0.1,
       maxTokens: 500,
+      signal,
     });
     if (!result?.entity?.name) return null;
     return result;
   } catch (err) {
+    rethrowPipelineDeadline(err, 'smart_research_entity');
     rlog.step('entity-detect', `⚠️ Failed: ${err.message}`);
     return null;
   }
@@ -207,19 +220,23 @@ function buildSearchQueries(entity, anchorStr = '') {
   };
 }
 
-async function runAgents(entity, anchorStr = '') {
+async function runAgents(entity, anchorStr = '', signal) {
   const queries = buildSearchQueries(entity, anchorStr);
   rlog.step('agents', `🔎 6 Agents searching for "${entity.name}"${anchorStr ? ` + anchor "${anchorStr}"` : ''}...`);
 
   // Run all 6 agents + Wikipedia in parallel
+  const fallback = (value) => (error) => {
+    if (signal?.aborted) throw (signal.reason || error);
+    return value;
+  };
   const [achievements, numbers, quotes, history, funFacts, publicWork, wiki] = await Promise.all([
-    quickSearch(queries.achievements, 3).catch(() => []),
-    quickSearch(queries.numbers, 3).catch(() => []),
-    quickSearch(queries.quotes, 2).catch(() => []),
-    quickSearch(queries.history, 2).catch(() => []),
-    quickSearch(queries.funFacts, 3).catch(() => []),
-    quickSearch(queries.publicWork, 2).catch(() => []),
-    wikiSearch(entity.realName || entity.name, entity).catch(() => null),
+    quickSearch(queries.achievements, 3, signal).catch(fallback([])),
+    quickSearch(queries.numbers, 3, signal).catch(fallback([])),
+    quickSearch(queries.quotes, 2, signal).catch(fallback([])),
+    quickSearch(queries.history, 2, signal).catch(fallback([])),
+    quickSearch(queries.funFacts, 3, signal).catch(fallback([])),
+    quickSearch(queries.publicWork, 2, signal).catch(fallback([])),
+    wikiSearch(entity.realName || entity.name, entity, signal).catch(fallback(null)),
   ]);
 
   const agentResults = {
@@ -242,7 +259,7 @@ async function runAgents(entity, anchorStr = '') {
 // ═══════════════════════════════════════════════
 // === STEP 3: AI Fact Extraction + Safety ===
 // ═══════════════════════════════════════════════
-async function extractAndFilterFacts(entity, agentResults, wiki, newsTitle, newsBody = '') {
+async function extractAndFilterFacts(entity, agentResults, wiki, newsTitle, newsBody = '', signal) {
   // Build search catalog for AI
   let catalog = '';
   for (const [key, agent] of Object.entries(agentResults)) {
@@ -305,6 +322,7 @@ ${catalog}
       prompt,
       temperature: 0.1,
       maxTokens: 2000,
+      signal,
     });
 
     if (!result?.facts?.length) return null;
@@ -339,6 +357,7 @@ ${catalog}
       entityType: entity.type || '',
     };
   } catch (err) {
+    rethrowPipelineDeadline(err, 'smart_research_facts');
     rlog.step('facts', `⚠️ Fact extraction failed: ${err.message}`);
     return null;
   }
@@ -347,17 +366,26 @@ ${catalog}
 // ═══════════════════════════════════════════════
 // === MAIN: Smart Research Pipeline ===
 // ═══════════════════════════════════════════════
-export async function smartResearch(newsData, breakdownData) {
+export async function smartResearch(newsData, breakdownData, { signal } = {}) {
   const startTime = Date.now();
   const newsTitle = newsData?.newsTitle || '';
   const newsBody = newsData?.newsBody || '';
+
+  // 🔎 ประตูสวิตช์รีเสิร์ช (16 ส.ค. 69) — ตัวนี้คือคนสร้างบล็อก "SMART RESEARCH FACTS"
+  //   ที่สั่งนักเขียนว่า "นำไปเสริมในเนื้อหา" = ต้นทางของข้อมูลนอกต้นฉบับที่โผล่ในข่าว
+  //   คืน null = เส้นเดิมที่ระบบเดินอยู่แล้วเมื่อหา entity ไม่เจอ (บรรทัด ~364) → ปลายทางรับ null ได้อยู่แล้ว
+  //   🔴 ไม่ throw เด็ดขาด · ไม่เรียก AI แม้แต่ครั้งเดียว (ประหยัดเงินด้วย)
+  if (!isNewsResearchOn()) {
+    console.log('[Smart-Research] ⏭️ ปิดอยู่ — ข้ามการค้นข้อมูลเสริมทั้งดุ้น (เปิดคืนด้วย NEWS_RESEARCH=1)');
+    return null;
+  }
 
   try {
     rlog.start(`Smart Research for: "${newsTitle.slice(0, 50)}"`);
 
     // Step 1: Entity Detection
     rlog.step('entity', '🧠 Detecting entity...');
-    const detection = await detectEntity(newsTitle, newsBody);
+    const detection = await detectEntity(newsTitle, newsBody, signal);
     
     if (!detection?.entity) {
       rlog.step('entity', '⚠️ No entity found — skipping smart research');
@@ -378,7 +406,7 @@ export async function smartResearch(newsData, breakdownData) {
     }
 
     // Step 2: 6 Parallel Agents (+ anchor ใน query)
-    const { agentResults, wiki } = await runAgents(entity, anchorStr);
+    const { agentResults, wiki } = await runAgents(entity, anchorStr, signal);
 
     // ★ Step 2.5: Anchor pre-filter — ผลค้นหาที่เอ่ยชื่อ entity แต่ไม่มี anchor ของข่าวเลย = เสี่ยงคนละคน → ตัดทิ้ง
     if (anchors.length > 0) {
@@ -406,7 +434,7 @@ export async function smartResearch(newsData, breakdownData) {
     }
 
     // Step 3: AI Fact Extraction + Safety Filter (+ identityConfidence ≥ 8)
-    const factPool = await extractAndFilterFacts(entity, agentResults, wiki, newsTitle, newsBody);
+    const factPool = await extractAndFilterFacts(entity, agentResults, wiki, newsTitle, newsBody, signal);
     
     if (!factPool || factPool.facts.length === 0) {
       rlog.step('result', '⚠️ No safe facts — using original flow');
@@ -424,6 +452,7 @@ export async function smartResearch(newsData, breakdownData) {
     };
 
   } catch (err) {
+    rethrowPipelineDeadline(err, 'smart_research');
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
     rlog.step('error', `❌ Smart Research failed (${duration}s): ${err.message}`);
     // Graceful fallback — return null, flow เดิมทำงานปกติ

@@ -45,21 +45,6 @@ const PROTECTED = [
   /\/src\/app\/api\/queue\//i,                 // worker + add (dedup/routing)
   /\/src\/lib\/persistStore\.js$/i,            // ชั้นเก็บข้อมูล + fallback ไฟล์
   /\/scripts\/news-lock-guard\.mjs$/i,         // ล็อกตัวล็อกเอง — แก้ลิสต์ต้องยืนยันเสมอ
-  // 🏆 23 ส.ค. 69 GOLDEN-LOCK — ระบบข่าวถูกล็อกไว้ที่ "ยุคปัง" (tag news-golden-era-23aug69) ทุกไฟล์ด้านล่างแก้ได้เมื่อเจ้าของอนุมัติเท่านั้น
-  /\/src\/lib\/ai\/era\//i,                    // ตัวเรียกโมเดลยุคปัง (modelConfig/openai/claudeClient/geminiClient)
-  /\/src\/lib\/services\/promptMatcher\.js$/i, // สูตรคะแนนเลือกการ์ด
-  /\/src\/lib\/services\/researchService\.js$/i,
-  /\/src\/lib\/services\/researchVerifier\.js$/i,
-  /\/src\/lib\/services\/achievementResearch\.js$/i,
-  /\/src\/lib\/services\/viralFewshot\.js$/i,  // ตัวหยิบครูไวรัล
-  /\/src\/lib\/ai\/moderationAgent\.js$/i,
-  /\/src\/lib\/ai\/semanticClusters\.js$/i,
-  /\/src\/lib\/ai\/builtinFallbackPrompt\.js$/i,
-  /\/src\/lib\/input-engine\//i,
-  /\/src\/lib\/workflow\/workflowEngine\.js$/i,
-  /\/src\/lib\/agents\/masterAgent\.js$/i,
-  /\/data\/prompt-library\.json$/i,            // การ์ดสำรอง 73 ใบ
-  /\/scripts\/golden-lock\//i,                 // ตัวล็อก/ลายนิ้วมือยุคปัง
 ];
 
 if (norm && PROTECTED.some((re) => re.test(norm))) {

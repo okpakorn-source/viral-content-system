@@ -48,13 +48,3 @@
 - scripts/news-lock-guard.mjs — ตัวล็อกเอง (แก้ลิสต์ต้องยืนยัน)
 
 บทเรียนที่มาของการเสริม: เคส #01641 พิสูจน์ว่ากฎแบนคำ/ด่านตรวจกระจายอยู่หลายไฟล์นอกลิสต์เดิม — แก้ผิดตัวเดียวเนื้อหาเพี้ยนได้ทั้งระบบ
-
----
-
-## 🏆🔒 GOLDEN-LOCK — ระบบข่าวถูกล็อกไว้ที่ "ยุคปัง" (เพิ่ม 23 ส.ค. 69 — เจ้าของสั่ง)
-- production ตั้งแต่ 23 ส.ค. 69 = ระบบข่าวยุคปัง 12 มิ.ย.–10 ก.ค. 69 (GitHub tag `news-golden-era-23aug69` = commit 02f0c34 · โค้ดข่าว = 5b566c2 ทุกไบต์ + `src/lib/ai/era/*`)
-- **ห้ามแก้ไฟล์ระบบข่าวทุกไฟล์ในรายการด้านบน + `src/lib/ai/era/` + `data/prompt-library.json` + `scripts/golden-lock/`** เว้นเจ้าของอนุมัติเป็นรายครั้ง
-- ด่าน 3 ชั้น: ① Claude PreToolUse `scripts/news-lock-guard.mjs` (ถามยืนยันก่อนแก้) ② git pre-commit (บล็อก commit) ③ **git pre-push → main** (บล็อก push ถ้า commit ที่แตะไฟล์ข่าวไม่มีรหัสอนุมัติ) — ติดตั้งด้วย `scripts\golden-lock\install-hooks.cmd`
-- **รหัสอนุมัติ** (ใส่ในข้อความ commit เมื่อเจ้าของอนุมัติแล้วเท่านั้น): `[NEWS-LOCK-APPROVED by <ชื่อ> <วันที่>]`
-- ตรวจว่ายังเป็นยุคปังครบทุกไฟล์: `node scripts/golden-lock/check-golden-lock.mjs` (หรือระบุ commit เช่น `origin/main`) · ลายนิ้วมือ 42 ไฟล์อยู่ `scripts/golden-lock/manifest.json`
-- กู้ไฟล์ที่เผลอแตะ: `git checkout news-golden-era-23aug69 -- <ไฟล์>` · ก้อนกู้เต็ม: `C:\Users\User\GOLDEN-ระบบข่าวยุคปัง-23-8-69\00-อ่านก่อน-วิธีกู้ระบบข่าวยุคปัง.md`

@@ -3,11 +3,119 @@
  * ทุก step จะ save/load context จาก DB
  */
 import { prisma } from '@/lib/db';
+import { legacyLengthRule } from '../ai/legacyLengthRules.js';
 
 // สร้าง workflow ใหม่
 export async function createWorkflow(sourceType = 'url') {
   return prisma.workflowRun.create({
     data: { currentStep: 'input', sourceType },
+  });
+}
+
+// ล็อกเฉพาะการเริ่ม workflow ID เดียวกันใน process นี้ ส่วนหลาย process ใช้ PK ของ DB
+// เป็นผู้ตัดสิน แล้วผู้แพ้ race อ่านแถวที่ผู้ชนะสร้างกลับมาแทนการสร้างซ้ำ
+const _workflowInitLocks = new Map();
+
+async function _withWorkflowInitLock(id, task) {
+  const previous = _workflowInitLocks.get(id) || Promise.resolve();
+  let releaseCurrent;
+  const current = new Promise(resolve => { releaseCurrent = resolve; });
+  const tail = previous.catch(() => {}).then(() => current);
+  _workflowInitLocks.set(id, tail);
+  await previous.catch(() => {});
+  try {
+    return await task();
+  } finally {
+    releaseCurrent();
+    if (_workflowInitLocks.get(id) === tail) _workflowInitLocks.delete(id);
+  }
+}
+
+function _workflowInitError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function _canonicalWorkflowSourceType(value) {
+  const sourceType = typeof value === 'string' ? value.trim() : '';
+  if (sourceType === 'text' || sourceType === 'plain_text') return 'plain_text';
+  return sourceType || 'url';
+}
+
+function _assertSameWorkflowContext(existing, expected) {
+  const existingType = existing?.sourceType
+    ? _canonicalWorkflowSourceType(existing.sourceType)
+    : '';
+  if (existingType && expected.sourceType && existingType !== expected.sourceType) {
+    throw _workflowInitError(
+      'WORKFLOW_CONTEXT_CONFLICT',
+      `workflow ${expected.id} ถูกใช้กับชนิดข้อมูลอื่นแล้ว`,
+    );
+  }
+  if (typeof existing?.rawInput === 'string' && existing.rawInput.length > 0
+      && expected.rawInput !== null && existing.rawInput !== expected.rawInput) {
+    throw _workflowInitError(
+      'WORKFLOW_CONTEXT_CONFLICT',
+      `workflow ${expected.id} ถูกใช้กับเนื้อข่าวอื่นแล้ว`,
+    );
+  }
+}
+
+async function _reuseWorkflowWithoutReset(existing, expected) {
+  _assertSameWorkflowContext(existing, expected);
+  const missing = {};
+  if (!existing.sourceType && expected.sourceType) missing.sourceType = expected.sourceType;
+  if ((existing.rawInput === null || existing.rawInput === undefined || existing.rawInput === '')
+      && expected.rawInput !== null) {
+    missing.rawInput = expected.rawInput;
+  }
+  if (Object.keys(missing).length === 0) return existing;
+  const updated = await prisma.workflowRun.update({ where: { id: expected.id }, data: missing });
+  if (!updated) {
+    throw _workflowInitError('WORKFLOW_INIT_FAILED', `เติมบริบท workflow ${expected.id} ไม่สำเร็จ`);
+  }
+  return updated;
+}
+
+/**
+ * รับประกันว่า workflow ID ที่ route เลือกมีแถวจริงก่อนเรียก AI
+ * - ID เดิม + ข่าวเดิม: ใช้ต่อโดยไม่ reset currentStep หรือผลขั้นก่อนหน้า
+ * - ID เดิม + คนละข่าว/คนละ source: หยุด เพื่อกันผลของสองงานเขียนทับกัน
+ * - create ชนกันหลาย process: อ่านแถวผู้ชนะแล้วตรวจ context ซ้ำ
+ */
+export async function ensureWorkflow(id, { sourceType = 'url', rawInput = null } = {}) {
+  if (typeof id !== 'string' || !id || id.trim() !== id) {
+    throw _workflowInitError('WORKFLOW_ID_INVALID', 'workflowId ต้องเป็นข้อความที่ไม่ว่างและไม่มีช่องว่างหัวท้าย');
+  }
+  if (rawInput !== null && typeof rawInput !== 'string') {
+    throw _workflowInitError('WORKFLOW_CONTEXT_INVALID', 'rawInput ของ workflow ต้องเป็นข้อความ');
+  }
+  const expected = {
+    id,
+    sourceType: _canonicalWorkflowSourceType(sourceType),
+    rawInput,
+  };
+
+  return _withWorkflowInitLock(id, async () => {
+    const existing = await prisma.workflowRun.findUnique({ where: { id } });
+    if (existing) return _reuseWorkflowWithoutReset(existing, expected);
+
+    try {
+      return await prisma.workflowRun.create({
+        data: {
+          id,
+          currentStep: 'input',
+          sourceType: expected.sourceType,
+          ...(rawInput !== null ? { rawInput } : {}),
+        },
+      });
+    } catch (createError) {
+      // อีก process อาจชนะ insert ด้วย PK เดียวกันระหว่าง find กับ create
+      const winner = await prisma.workflowRun.findUnique({ where: { id } });
+      if (winner) return _reuseWorkflowWithoutReset(winner, expected);
+      throw createError;
+    }
   });
 }
 
@@ -53,6 +161,22 @@ export async function saveAnalysis(id, analysisResult, presetUsed) {
       currentStep: 'analyzed',
       analysisResult: JSON.stringify(analysisResult),
       presetUsed,
+    },
+  });
+}
+
+// ข่าวที่ไม่มีฉบับผ่านด่าน RAW: เก็บเฉพาะสถานะ/diagnostic ที่ไม่เผยร่างผิด
+export async function saveFactualReview(id, diagnostic) {
+  return prisma.workflowRun.update({
+    where: { id },
+    data: {
+      currentStep: 'factual_review',
+      analysisResult: JSON.stringify({
+        publishable: false,
+        versions: [],
+        factualGate: diagnostic,
+      }),
+      presetUsed: null,
     },
   });
 }
@@ -115,7 +239,9 @@ export function buildFullContext(workflow) {
     }
 
     ctx += `=== จบผลแตกประเด็น ===\n\n`;
-    ctx += `⚠️ คำสั่งเหล็ก: ต้องครอบคลุมทุกประเด็นด้านบน ห้ามข้าม ห้ามซ้ำ ห้ามแต่งเรื่องใหม่ ต้องเขียนยาวอย่างน้อย 250 คำ หรือ 3 ย่อหน้าเต็มสำหรับ Facebook (แต่ละย่อหน้า 3-5 ประโยค คั่นด้วย \n\n)\n`;
+    // 🗑️ 17 ส.ค. 69: ตัดเฉพาะวรรคความยาวออก — ส่วนครอบคลุมทุกประเด็น/ห้ามข้าม/ห้ามซ้ำ/ห้ามแต่งเรื่องใหม่ยังอยู่
+    //    เส้นนี้เป็นเส้นสำรอง (ใช้เมื่อ MasterAgent โหลดไม่ได้ — summarizeServiceText.js:1966)
+    ctx += `⚠️ คำสั่งเหล็ก: ต้องครอบคลุมทุกประเด็นด้านบน ห้ามข้าม ห้ามซ้ำ ห้ามแต่งเรื่องใหม่${legacyLengthRule('workflowIron')}\n`;
   }
 
   return ctx;

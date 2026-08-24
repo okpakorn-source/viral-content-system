@@ -16,8 +16,8 @@
  *         ติดป้ายให้ AI เขียนรู้ว่า "ห้ามผูกกับตัวบุคคล" (กฎอยู่ใน narrativePayload)
  *  Fail-closed: judge พัง → เก็บเฉพาะ item ที่มี anchor ≥ 2 เท่านั้น
  */
-import { callAI } from '@/lib/ai/era/openai';
-import { MODEL_FAST } from '@/lib/ai/era/modelConfig';
+import { callAI } from '@/lib/ai/openai';
+import { MODEL_FAST } from '@/lib/ai/modelConfig';
 
 const _norm = (s) => String(s || '').replace(/\s+/g, '').toLowerCase();
 
@@ -97,7 +97,7 @@ function classifyItem(itemText, names, anchors) {
  * ชั้น 2: AI judge — เทียบ items กับข่าวต้นฉบับว่าเรื่อง/คนเดียวกันจริงไหม
  * fail-closed: ถ้า judge พัง เก็บเฉพาะ person ที่ anchorHits >= 2
  */
-async function aiIdentityJudge({ newsTitle, newsBody, candidates }) {
+async function aiIdentityJudge({ newsTitle, newsBody, candidates, signal }) {
   if (candidates.length === 0) return [];
   const list = candidates
     .map((c, i) => `${i + 1}. ${String(c.text).slice(0, 220)}`)
@@ -124,7 +124,7 @@ ${list}
 ตอบ JSON เท่านั้น:
 {"verdicts":[{"i":1,"verdict":"same|generic|reject","reason":"สั้นๆ"}]}`;
 
-  const result = await callAI({ model: MODEL_FAST, prompt, temperature: 0.0, maxTokens: 1200 });
+  const result = await callAI({ model: MODEL_FAST, prompt, temperature: 0.0, maxTokens: 1200, signal });
   if (!Array.isArray(result?.verdicts)) throw new Error('judge ตอบรูปแบบไม่ถูกต้อง');
   return result.verdicts;
 }
@@ -134,7 +134,7 @@ ${list}
  * @param {object} p { newsTitle, newsBody, breakdownData, items, getText? }
  * @returns { items (tagged _identity), droppedCount, report[] }
  */
-export async function verifyResearchItems({ newsTitle, newsBody, breakdownData, items, getText, resolvedIdentity = null }) {
+export async function verifyResearchItems({ newsTitle, newsBody, breakdownData, items, getText, resolvedIdentity = null, signal }) {
   if (!items || items.length === 0) return { items: [], droppedCount: 0, report: [] };
 
   const textOf = getText || ((it) => [it.title, it.content, it.snippet, it.keyword, it.text].filter(Boolean).join(' '));
@@ -163,7 +163,7 @@ export async function verifyResearchItems({ newsTitle, newsBody, breakdownData, 
   // ── ชั้น 2: AI judge (เข้มงวด + fail-closed) ──
   let kept = [];
   try {
-    const verdicts = await aiIdentityJudge({ newsTitle, newsBody, candidates: survivors });
+    const verdicts = await aiIdentityJudge({ newsTitle, newsBody, candidates: survivors, signal });
     const byIndex = new Map(verdicts.map((v) => [Number(v.i), v]));
     survivors.forEach((s, idx) => {
       const v = byIndex.get(idx + 1);

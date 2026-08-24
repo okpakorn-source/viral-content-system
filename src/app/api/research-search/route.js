@@ -1,10 +1,26 @@
 import { NextResponse } from 'next/server';
 import { performResearch } from '@/lib/services/researchService';
+import { isNewsResearchOn } from '@/lib/utils/researchSwitch';
 
 export async function POST(request) {
   try {
     const body = await request.json();
     const { newsBody, newsTitle, breakdownData, workflowId } = body;
+
+    // 🔎 16 ส.ค. 69 (ผู้ตรวจอิสระจับได้ — จุดตายที่เกือบหลุดขึ้นระบบ):
+    //   ปุ่ม "🔎 AI หาข้อมูลเพิ่มเติม" ที่หน้า /content/new เรียก route นี้ แล้วผลที่ได้
+    //   **ไหลเข้าเนื้อข่าวจริง** (content/new/page.js:1163 → เก็บใน researchData → ส่งเข้าตอนเจนที่บรรทัด 1056/1111)
+    //   ⇒ ถ้าปล่อยปุ่มนี้ทำงานทั้งที่สั่งปิดรีเสิร์ช = รูยังเปิด ข้อมูลนอกต้นฉบับยังเข้าข่าวได้อยู่ดี
+    //   ⛔ และห้ามปล่อยให้ประตูข้างใน performResearch คืน items:[] เฉยๆ ด้วย —
+    //      หน้าเว็บเช็คแค่ .length > 0 ⇒ ผู้ใช้จะเห็น "จอว่างเปล่า" ไม่มี error ไม่รู้ว่าโดนปิดหรือระบบเสีย
+    //   → ตอบให้ชัดตรงนี้เลย ผู้ใช้จะได้รู้ทันทีว่า "ปิดอยู่" ไม่ใช่ "ระบบพัง"
+    if (!isNewsResearchOn()) {
+      return NextResponse.json({
+        success: false,
+        error: 'ระบบค้นข้อมูลเสริมถูกปิดอยู่ตามคำสั่งเจ้าของ — ข่าวจะเขียนจากเนื้อต้นฉบับที่วางเข้ามาเท่านั้น',
+        errorType: 'RESEARCH_DISABLED',
+      }, { status: 503 });
+    }
 
     // Primary: Serper
     if (process.env.SERPER_API_KEY) {

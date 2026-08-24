@@ -10,9 +10,9 @@
  * คำสั่งห้ามรั่ว + ตัวเลขจากต้นฉบับต้องอยู่ครบ — ไม่ผ่านด่านไหน = ใช้ของเดิม
  */
 
-import { callAI } from '@/lib/ai/era/openai';
+import { callAI } from '@/lib/ai/openai';
 
-const MODEL_POLISH = 'gpt-5.5'; // ขัดเงา = งานภาษาละเอียด ใช้ตัวเก่งสุด
+const MODEL_POLISH = 'gpt-5.6-sol'; // ขัดเงา = งานภาษาละเอียด ใช้ตัวเก่งสุด (★ 1 ส.ค. 69 โล๊ะ 5.5→sol)
 
 function numbersIn(text) {
   return [...new Set((String(text).match(/\d[\d,]{1,}/g) || []).map(n => n.replace(/,/g, '')))];
@@ -29,6 +29,7 @@ export async function viralPolish(versions, newsData, breakdownData) {
       category: breakdownData?.primaryCategory || '',
       emotionalTags: breakdownData?.emotionalTags || [],
       archetype: breakdownData?.narrativeArchetype || '',
+      noHistory: true, // 📒 สายขัดเงาห้ามจดสมุดประวัติ — กันสถิตินับเฟ้อ (ข่าวเดียวโดนจด 2 รอบ) ถ้าวันหน้าถูกต่อกลับ
     });
   } catch { /* ไม่มีตัวอย่าง = เกลาด้วยกฎอย่างเดียว */ }
 

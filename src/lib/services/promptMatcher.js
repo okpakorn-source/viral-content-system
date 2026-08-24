@@ -158,6 +158,31 @@ export function scoreLibraryPrompts(newsAnalysis, validPrompts, { mismatchPenalt
   });
 
   scored.sort((a, b) => b.score - a.score);
+
+  // ★ 26 ก.ค. 69 (เจ้าของเคาะ): "วงคะแนนใกล้แชมป์" — กระจายการใช้การ์ดที่คะแนนสูสีแชมป์
+  //   ปัญหาเดิม: สูตรคะแนน deterministic → ข่าวแนวเดิมได้ใบเดิมตลอด (ท็อป 10 กินการใช้งาน 94%)
+  //   ข้อมูลจริง (จำลอง 201 ใบ × 202 ข่าว): 92.6% ของข่าว แชมป์ชนะอันดับ 2 แค่ 0-1 คะแนน = ของดีเท่ากันเป็นกลุ่ม
+  //   เปิดด้วย env PROMPT_VARIETY_BAND (แนะนำ 5, เพดานแข็ง 8 — เกินนี้เกรดเริ่มหลุด) · ไม่ตั้ง/ค่าขยะ = ปิด = พฤติกรรมเดิมเป๊ะ
+  //   พื้นกันตก: ไม่หยิบใบต่ำกว่าเกตตัดมุม (ANGLE_MIN_MATCH_SCORE, default 45) → ใบที่สุ่มได้เป็นใบเกรดดีเสมอ
+  //   ย้อนกลับ: ถอด env = พฤติกรรมเดิม 100% (ไม่มีสถานะสะสม) · โค้ด: git revert คอมมิตนี้ / tag ก่อน-variety-band-2607
+  const _band = Math.min(Number(process.env.PROMPT_VARIETY_BAND) || 0, 8);
+  if (_band > 0 && scored.length > 1) {
+    const _floor = Math.max(0, parseInt(process.env.ANGLE_MIN_MATCH_SCORE || '45', 10) || 45);
+    if (scored[0].score >= _floor) {
+      const _cut = Math.max(scored[0].score - _band, _floor);
+      let _n = 1;
+      while (_n < scored.length && scored[_n].score >= _cut) _n++;
+      if (_n > 1) {
+        const _pick = Math.floor(Math.random() * _n);
+        if (_pick > 0) {
+          const [_c] = scored.splice(_pick, 1);
+          scored.unshift(_c);
+        }
+        console.log(`[PromptMatcher] 🎲 variety(pick ${_pick + 1}/${_n}, band=${_band}): ได้ score ${scored[0].score.toFixed(1)} (แชมป์เดิม ${(_pick > 0 ? scored[1] : scored[0]).score.toFixed(1)})`);
+      }
+    }
+  }
+
   return scored;
 }
 

@@ -11,7 +11,7 @@
  * ห้ามแก้ output ใน layer นี้ — แค่ตรวจแล้ว report
  */
 
-import { callAI } from '@/lib/ai/era/openai';
+import { callAI } from '@/lib/ai/openai';
 
 // === คำเสี่ยง Facebook (regex-based fast check) ===
 const FORBIDDEN_WORDS = [
@@ -20,7 +20,7 @@ const FORBIDDEN_WORDS = [
   { pattern: /ฆาตกรรม/g, type: 'forbidden_word', severity: 'high', suggestion: 'คดีร้ายแรง' },
   { pattern: /ฆ่าตัวตาย/g, type: 'forbidden_word', severity: 'high', suggestion: 'จากไปอย่างเงียบๆ' },
   { pattern: /ศพ/g, type: 'forbidden_word', severity: 'high', suggestion: 'ร่างผู้เสียหาย' },
-  { pattern: /(?<!เสีย)ตาย(?!ตัว|ด้าน|แล้ว)/g, type: 'forbidden_word', severity: 'high', suggestion: 'จากไป' },
+  { pattern: /(?<!เสีย|ปิด)ตาย(?!ตัว|ด้าน|แล้ว)/g, type: 'forbidden_word', severity: 'high', suggestion: 'จากไป' },
   { pattern: /ชำแหละ/g, type: 'forbidden_word', severity: 'high', suggestion: 'เหตุรุนแรงอย่างยิ่ง' },
   { pattern: /หมกศพ/g, type: 'forbidden_word', severity: 'high', suggestion: 'ซุกซ่อนร่าง' },
   { pattern: /ข่มขืน/g, type: 'forbidden_word', severity: 'high', suggestion: 'ล่วงละเมิดทางเพศ' },
@@ -30,8 +30,9 @@ const FORBIDDEN_WORDS = [
   { pattern: /ยิง(?!ประตู|จรวด|ดาว)/g, type: 'forbidden_word', severity: 'high', suggestion: 'ใช้อาวุธปืน' },
 
   // === คำเสี่ยงที่ขาดไป (เพิ่มใหม่) ===
-  // ★ เสียชีวิต/ตาย: ห้ามแทนคำตรงๆ (จะได้ "จากไป" ซ้ำจำเจทุกข่าว) — เข้าโหมด AI เกลาตามบริบทใน safeCorrect
-  { pattern: /เสียชีวิต/g, type: 'forbidden_word', severity: 'high', suggestion: 'สำนวนเลี่ยงตามบริบท เช่น จากไปอย่างสงบ/ไม่อยู่แล้ว/ลาลับ/ปิดตำนาน' },
+  // ★ 16 ก.ค. 69 (B2 completion — review จับได้): ถอดกฎแบน "เสียชีวิต" ออกจาก L2 —
+  //   system/user prompt อนุญาตคำนี้แล้ว (บทเรียนเคส #01641) แต่ L2 ยังจับ → L3B เกลาทิ้งทุกงาน
+  //   = ย้อนกลับการแก้เงียบๆ ทุกข่าวการสูญเสีย ("ตาย/ดับ/สิ้นใจ" คำห้วนยังคงกฎเดิมตามนโยบาย)
   { pattern: /บาดเจ็บสาหัส/g, type: 'forbidden_word', severity: 'high', suggestion: 'ได้รับบาดเจ็บหนัก' },
   { pattern: /สะเก็ดระเบิด/g, type: 'forbidden_word', severity: 'high', suggestion: 'เหตุการณ์ไม่คาดฝัน' },
   { pattern: /ระเบิด(?!ความ|พลัง|แรง)/g, type: 'forbidden_word', severity: 'high', suggestion: 'เหตุการณ์รุนแรง' },
@@ -43,14 +44,25 @@ const FORBIDDEN_WORDS = [
   { pattern: /กระสุน/g, type: 'forbidden_word', severity: 'medium', suggestion: 'วัตถุอันตราย' },
 
   // === ความรุนแรง (MEDIUM) ===
-  { pattern: /ดับ(?!เพลิง|ไฟ|กลิ่น|แสง)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'จากไป' },
+  // ★ 1 ส.ค. 69 (กรรมการเทสจับได้ — เคสจริง "ตามลำดับ"→"ตามลำจากไป" แล้วท่อนพังถูกลบทั้งท่อนจนแก่นข่าวหาย):
+  //   เพิ่ม lookbehind กันจับกลางคำ ลำดับ/อันดับ/ระดับ + lookahead ดับเบิล/ดับบลิว — สไตล์เดียวกับเคส "เส้นเลือด" ข้างล่าง
+  { pattern: /(?<!ลำ|อัน|ระ|ไฟ|เครื่อง)ดับ(?!เพลิง|ไฟ|กลิ่น|แสง|เบิล|บลิว)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'จากไป' },
   { pattern: /สิ้นใจ/g, type: 'forbidden_word', severity: 'medium', suggestion: 'จากไป' },
   { pattern: /สยอง/g, type: 'forbidden_word', severity: 'medium', suggestion: 'น่าตกใจ' },
   { pattern: /โหด(?!ร้อน)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'รุนแรง' },
-  { pattern: /เลือด(?!ดี|ข้น|ฝาด|จาง|ผสม)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'ร่องรอยเหตุการณ์' },
+  // ★ 10 ก.ค. 69: เพิ่ม lookbehind (?<!เส้น) — "เส้นเลือด/เส้นเลือดในสมอง" คือศัพท์การแพทย์ ห้ามจับ (เคยถูกแทนเป็น "เส้นร่องรอยเหตุการณ์ในสมองแตก")
+  // ★ 14 ส.ค. 69 (เจ้าของอนุมัติ + Sol รับรอง 9.1/10): ขยายศัพท์แพทย์ หลอด|ลิ่ม|เม็ด|ฟอก|ดัน|บริจาค —
+  //   บั๊กพิสูจน์ 2 รอบ (ข่าวพระ): "โรคหลอดเลือดสมอง" ถูกแทนเป็น "หลอดร่องรอยเหตุการณ์" → semantic scrub ตัดวลี → กริยาหาย
+  // ★ รอบ 2 คืนเดียวกัน (Sol รับรอง 9.2/10 — เคสจริง #03995 "สายเลือด" พังบนโปรดักชัน): + สาย|เกล็ด|กระแส|ถ่าย|ปั๊ม|เติม|ห้าม
+  //   ข้อจำกัดที่รู้ (Sol บันทึก): regex ไม่อ่านบริบททั้งประโยค — "เร่งห้ามเลือดที่ไหลนอง" จะรอดด่านนี้ (ยอมรับ เพราะ compound เองคือปฐมพยาบาล/การแพทย์)
+  { pattern: /(?<!เส้น|หลอด|ลิ่ม|เม็ด|ฟอก|ดัน|บริจาค|สาย|เกล็ด|กระแส|ถ่าย|ปั๊ม|เติม|ห้าม)เลือด(?!ดี|ข้น|ฝาด|จาง|ผสม|กำเดา)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'ร่องรอยเหตุการณ์' },
   { pattern: /ทุบตี/g, type: 'forbidden_word', severity: 'medium', suggestion: 'ใช้ความรุนแรง' },
   { pattern: /ทำร้าย(?!ตัวเอง)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'ใช้ความรุนแรง' },
   { pattern: /เลือดสาด/g, type: 'forbidden_word', severity: 'high', suggestion: 'เหตุรุนแรง' },
+  // ★ 14 ส.ค. 69 ดึก (Sol backlog ข้อ 3 ขั้น 3 — ปิดความเสี่ยงคงเหลือที่จดไว้ตอนทำ whitelist):
+  //   คำแพทย์+ภาคต่อรุนแรง = ฉากกราฟิกจริง ("กระแสเลือดทะลักออกจากแผล") — whitelist ทำให้หลุดด่านคำเดี่ยว
+  //   severity high → เข้าเส้น AI เกลาทั้งประโยค (L3B ที่เพิ่งซ่อมสัญญา) ไม่แทนคำดิบ
+  { pattern: /(?:เส้น|หลอด|สาย|เกล็ด|กระแส|ถ่าย|ปั๊ม|เติม|ห้าม|บริจาค)เลือด(?:ที่)?(?:ออกมา)?(?:ไหลนอง|ทะลัก|สาด|พุ่งออก|เป็นกอง)/gu, type: 'forbidden_word', severity: 'high', suggestion: 'เหตุการณ์รุนแรง' },
   { pattern: /บาดแผล(?!ทางใจ)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'อาการบาดเจ็บ' },
 
   // === ★ การพนัน / ยาเสพติด / แอลกอฮอล์ (Meta restricted — เพิ่ม 12 มิ.ย. 69) ===

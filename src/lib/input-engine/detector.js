@@ -63,8 +63,8 @@ function isBase64Image(str) {
  */
 function getTextContent(input) {
   if (!input) return '';
-  // ลบ URLs ออก แล้วดูว่าเหลือ text อะไร
-  return input.replace(URL_REGEX, '').replace(/\s+/g, ' ').trim();
+  // ลบเฉพาะ URL แต่รักษาย่อหน้า/ช่องว่างของต้นฉบับไว้ให้ text pipeline
+  return input.replace(URL_REGEX, '').trim();
 }
 
 // ─── MAIN DETECTOR ─────────────────────────────────────────────────
@@ -78,8 +78,9 @@ export function detectInputType(input = '', images = []) {
   const trimmed    = (input || '').trim();
   const urls       = extractUrls(trimmed);
   const textOnly   = getTextContent(trimmed);
+  const normalizedText = textOnly.replace(/\s+/g, ' ').trim();
   const hasImages  = Array.isArray(images) && images.length > 0;
-  const hasText    = textOnly.length > 20;
+  const hasText    = normalizedText.length > 20;
   const hasUrls    = urls.length > 0;
 
   // ── Case 1: ไม่มีอะไรเลย ─────────────────────────────────────
@@ -199,8 +200,8 @@ export function detectInputType(input = '', images = []) {
   // ── Case 7: Plain text only ───────────────────────────────────
   if (!hasUrls && hasText && !hasImages) {
     // ตรวจว่าเป็น transcript หรือ article body
-    const isLong     = textOnly.length > 500;
-    const isThai     = /[\u0e00-\u0e7f]/.test(textOnly);
+    const isLong     = normalizedText.length > 500;
+    const isThai     = /[\u0e00-\u0e7f]/.test(normalizedText);
     return build({
       inputType:       'plain_text',
       platform:        'text',

@@ -8,7 +8,7 @@
  * - ความยาวไม่เปลี่ยนเกิน ±15%
  * 
  * ใช้ JS logic เท่านั้น ไม่เรียก AI
- * ถ้า fact drift → return rollback
+ * พบ drift ทุกระดับ → preserved=false; rollback เฉพาะ drift ระดับ high
  */
 
 /**
@@ -91,10 +91,13 @@ export function checkFactPreservation(originalContent, correctedContent, newsDat
 
     // === ตัดสิน ===
     const highDrifts = drifts.filter(d => d.severity === 'high');
-    const preserved = highDrifts.length === 0;
+    const mediumDrifts = drifts.filter(d => d.severity === 'medium');
+    // แยก "พบ drift" ออกจาก "ต้อง rollback": medium drift ยังทำให้ preserved=false
+    // เพื่อไม่ติดธงผ่านเท็จ แต่ไม่ตีกลับงาน L4.6/L5 ที่ดีด้วยสัญญาณโครงสร้างเพียงอย่างเดียว
+    const preserved = drifts.length === 0;
     const action = highDrifts.length > 0 ? 'rollback' : 'pass';
 
-    console.log(`[FactCheck] Preserved: ${preserved} | Drifts: ${drifts.length} (high: ${highDrifts.length}) | Action: ${action}`);
+    console.log(`[FactCheck] Preserved: ${preserved} | Drifts: ${drifts.length} (high: ${highDrifts.length}, medium: ${mediumDrifts.length}) | Action: ${action}`);
 
     return { preserved, drifts, action };
 

@@ -10,6 +10,9 @@
  *  emotionalBlueprint, narrativeAngle, storytellingDirection,
  *  quoteFragments (≤15 words each)
  */
+import { isLegacyLengthOn, legacyLengthRule } from '../ai/legacyLengthRules.js';
+import { isCardAuthorityR3Enabled } from '../ai/cardAuthority.js';
+import { objTextList, objText, isObjFixEnabled, quoteTextFix } from '../utils/objText.js'; // 🔧 19 ส.ค. 69 (HOOKS_OBJ_FIX): ตัวแปลงกลาง object → ข้อความ (กัน "[object Object]" หลุดเข้าตัวเขียน) — ถอย HOOKS_OBJ_FIX=0
 
 // ─── Fact Extraction Helper ────────────────────────────────────────
 
@@ -91,7 +94,23 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
     bd.key_facts.dates.forEach(d => timeline.push({ event: d, type: 'date' }));
   }
   if (bd.best_sections?.length > 0) {
-    bd.best_sections.forEach(s => timeline.push({ event: s, type: 'key_moment' }));
+    // 🔧 19 ส.ค. 69 (HOOKS_OBJ_FIX บั๊ก B): รูปร่างจริง 9 ใน 10 แบบไม่ใช้คีย์ reason
+    //   (why_strong / why_it_works / why_best / use_for / best_use / use_case / usable_angle — นับจากไฟล์ผล 23 รอบ)
+    //   → บรรทัดเดิมได้แค่หัวข้อท่อน เหตุผลหายเงียบ · objText อ่านคีย์ชุดนี้ครบ (DETAIL_KEYS ใน objText.js)
+    //   มีคีย์ reason = เดินนิพจน์เดิมทุกไบต์ · สวิตช์ถอย HOOKS_OBJ_FIX=0 = นิพจน์เดิมทั้งหมด
+    // 🔧 20 ส.ค. 69 (โซล-max ตรวจรอบ 2 — ปิดผลข้างเคียง 2 จุด):
+    //   S2: เดิมอ่าน s.reason 2 ครั้ง (ของเดิมอ่านครั้งเดียว) → เก็บใส่ตัวแปรอ่านครั้งเดียว
+    //   S1: เดิมใช้ !s.reason ซึ่งเป็นจริงกับ 0 และ false ด้วย → หลุดเข้า objText ได้ "S — 0" / "S — false"
+    //       แต่ของเดิม filter(Boolean) ทิ้ง 0/false แล้วได้ "S" → เปลี่ยนเงื่อนไขเป็น "ไม่มีคีย์ reason เลย"
+    //       ⇒ มีคีย์ reason ในรูปแบบใดก็ตาม (รวม 0/false/'') = เดินนิพจน์เดิมทุกไบต์
+    bd.best_sections.forEach(s => {
+      const isObj = s !== null && typeof s === 'object';
+      const reason = isObj ? s.reason : undefined; // อ่านครั้งเดียว
+      const legacyEvent = typeof s === 'string' ? s : [s.section, reason].filter(Boolean).join(' — ');
+      const hasReasonKey = isObj && 'reason' in s;
+      const event = (isObj && !hasReasonKey && isObjFixEnabled()) ? (objText(s) || legacyEvent) : legacyEvent;
+      timeline.push({ event, type: 'key_moment' });
+    });
   }
 
   // People
@@ -141,19 +160,77 @@ export function buildNarrativePayload(newsTitle, breakdownData, researchData, bl
     forbidden: bp.forbidden || [],
   } : null;
 
+  // ★ 18 ส.ค. 69 (แบบ ก — ANGLE_CLOSING_SPLIT): bp.angle_closing = แผนจบเฉพาะมุมนี้
+  //   (autoFlowServiceText แนบมาเฉพาะเมื่อ ANGLE_CLOSING_SPLIT=1 + จับคู่ชื่อมุมสำเร็จ)
+  //   🔧 19 ส.ค. 69 แก้ตามผู้ตรวจอิสระ 4 คน (FIXLIST-planK):
+  //   ร้ายแรง 4 (fail-closed): เช็ค env ตรงนี้ด้วย — ข้อมูลป้อน bp.angle_closing อย่างเดียวห้ามเปิดฟีเจอร์ได้
+  //   ร้ายแรง 2 (ทั้งชุดหรือไม่เลย): hasAngleClosing ตั้ง "หลัง" regex ทุบท้ายติดเท่านั้น —
+  //     regex ไม่ติด = ไม่แตะสักชั้น ถอยพฤติกรรมเดิมทั้งใบ (เดิมชั้น 2/3 ยิงแม้ชั้น 1 พลาด = ได้ผลแย่สุดพร้อมกัน)
+  //   ร้ายแรง 1 (เลิกกรอง forbidden): ตัวกรอง regex เคยทิ้งกฎกันแต่งข้อเท็จจริง 8/34 ข้อ (เคส RUN6 มัทฉะ) —
+  //     ลบทั้งก้อน ใช้บรรทัดลำดับอำนาจในบล็อก 🔚 (ใน formatNarrativePayload) แทน
+  //     (ต้นทางกันไว้แล้ว: prompt Blueprint สั่งห้ามใส่เรื่องวิธีจบใน FORBIDDEN — summarizeServiceText ข้อ 7)
+  //   🟡 กัน [object Object]: รับเฉพาะ string — AI ตอบ field เป็น object เมื่อไหร่ = ถือว่าไม่มีค่า
+  //   ชั้นที่ตัดเมื่อทำงาน: ชั้น 1 แทนข้อสุดท้าย timeline · ชั้น 3 ตัด "ปิด:" (จุดสร้างด้านล่าง)
+  let hasAngleClosing = false;
+  if (process.env.ANGLE_CLOSING_SPLIT === '1'
+      && emotionalBlueprint && bp.angle_closing && typeof bp.angle_closing === 'object' && !Array.isArray(bp.angle_closing)) {
+    const _ac = bp.angle_closing;
+    const _str = (v) => (typeof v === 'string' ? v.trim() : '');
+    const _direction = _str(_ac.closing_direction);
+    const _sketch = _str(_ac.closing_sketch);
+    const _closingText = [_direction, _sketch].filter(Boolean).join(' — ');
+    const _tl = emotionalBlueprint.timeline;
+    // 🔧 19 ส.ค. 69 รอบ 3: เงื่อนไข "ทุบท้าย" ใช้ helper เดียวกับฝั่ง autoFlow (closingTailMatches ท้ายไฟล์นี้)
+    //   — autoFlow เช็คก่อนแนบแผน+ก่อน log เพื่อให้ log ตรงกับสิ่งที่ฝั่งเขียนใช้จริง (แก้ log โกหก)
+    const _tlTailIsClosing = closingTailMatches(_tl);
+    if (_closingText && _tlTailIsClosing) {
+      hasAngleClosing = true;
+      emotionalBlueprint.angleClosing = {
+        angleName: _str(_ac.angle_name),
+        direction: _direction,
+        sketch: _sketch,
+        avoidOverlap: _str(_ac.avoid_overlap),
+      };
+      // ชั้น 1: ข้อสุดท้ายของ timeline คือ "ประโยคทุบท้าย — ..." กลางที่แชร์ทุกมุม → แทนด้วยแผนของมุมนี้
+      //   (สร้าง array ใหม่เสมอ ห้ามแก้ array เดิมใน bp — blueprint ก้อนกลางถูกมุมอื่นใช้ต่อ)
+      emotionalBlueprint.timeline = [..._tl.slice(0, -1), `ประโยคทุบท้าย (เฉพาะมุมนี้) — ${_closingText}`];
+    }
+  }
+
+  // ★ 18 ส.ค. 69 (แบบ A — ANGLE_BLUEPRINT_MODE=per_angle): ตราประทับนี้มาจาก key ชื่อมุมที่ autoFlow ผูกไว้
+  //   Blueprint ทั้งใบ (รวม timeline/ท่อนจบ) จึงเป็นของมุมนี้อยู่แล้ว และต้องตัด "ปิด:" กลางจาก breakdown
+  //   ไม่มีตราประทับหรือ env ไม่ใช่ "per_angle" = ไม่เพิ่ม field และไม่เปลี่ยนใบสั่งเขียนเดิมแม้แต่ตัวอักษรเดียว
+  if (process.env.ANGLE_BLUEPRINT_MODE === 'per_angle'
+      && emotionalBlueprint && bp.angle_blueprint && typeof bp.angle_blueprint === 'object') {
+    const _angleName = String(bp.angle_blueprint.angle_name || '').trim();
+    if (_angleName) {
+      emotionalBlueprint.angleBlueprint = {
+        angleName: _angleName,
+        description: String(bp.angle_blueprint.description || '').trim(),
+      };
+      hasAngleClosing = true;
+    }
+  }
+
   // Narrative Angle
   const narrativeAngle = bd.best_main_angle
     ? `${bd.best_main_angle.angle_name}: ${bd.best_main_angle.why_best}`
     : '';
 
   // Storytelling Direction
+  // ★ ANGLE_CLOSING_SPLIT ชั้น 3: มุมที่มีแผนจบเฉพาะตัว ไม่รับ "ปิด: ..." กลางจาก breakdown (แชร์ข้ามมุม) — เปิด/เล่า คงเดิม
   const storytellingDirection = bd.language_strategy
-    ? `เปิด: ${bd.language_strategy.opening_style || '-'}, เล่า: ${bd.language_strategy.storytelling_style || '-'}, ปิด: ${bd.language_strategy.ending_style || '-'}`
+    ? (hasAngleClosing
+        ? `เปิด: ${bd.language_strategy.opening_style || '-'}, เล่า: ${bd.language_strategy.storytelling_style || '-'}`
+        : `เปิด: ${bd.language_strategy.opening_style || '-'}, เล่า: ${bd.language_strategy.storytelling_style || '-'}, ปิด: ${bd.language_strategy.ending_style || '-'}`)
     : '';
 
   // Quote Fragments (≤15 words, no surrounding context)
+  // 🔧 19 ส.ค. 69 (HOOKS_OBJ_FIX บั๊ก A): รูปร่าง { speaker, quote_type, content, emotional_use } ไม่มีคีย์ quote/text
+  //   → ได้ '' แล้วถูก filter ทิ้งทั้งรายการ = คำพูดสำคัญไม่ถึงนักเขียนเลย
+  //   quoteTextFix เป็นตัวสำรอง "ท้ายนิพจน์เดิม" เท่านั้น (สวิตช์ปิด/รูปร่างเดิม = ผลเดิมทุกไบต์) · ถอย HOOKS_OBJ_FIX=0
   const quoteFragments = (bd.quotes || []).map(q => {
-    const text = (typeof q === 'string' ? q : q.text || '').trim();
+    const text = (typeof q === 'string' ? q : q.quote || q.text || quoteTextFix(q) || '').trim();
     const words = text.split(/\s+/);
     return words.length <= 15 ? text : words.slice(0, 15).join(' ') + '...';
   }).filter(q => q.length > 0);
@@ -300,7 +377,7 @@ export function formatNarrativePayload(payload) {
   // Conflicts
   if (payload.conflicts.length > 0) {
     p += `⚡ จุดขัดแย้ง:\n`;
-    payload.conflicts.forEach((c, i) => p += `  ${i + 1}. ${c}\n`);
+    payload.conflicts.forEach((c, i) => p += `  ${i + 1}. ${typeof c === 'string' ? c : [c.conflict, c.detail].filter(Boolean).join(' — ')}\n`);
     p += '\n';
   }
 
@@ -317,11 +394,23 @@ export function formatNarrativePayload(payload) {
     payload.backgroundKnowledge.forEach((b, i) => p += `  ${i + 1}. [${b.type}] ${b.data}\n`);
     p += '\n';
   }
-  if (payload.emotionalHooks.length > 0) {
-    p += `❤️ จุดที่คนอิน: ${payload.emotionalHooks.join(' | ')}\n`;
+  // 🔧 19 ส.ค. 69 (HOOKS_OBJ_FIX): ขั้นสกัดคืน emotional_hooks เป็น object บ้าง/สตริงบ้าง —
+  //   จุดนี้ต่อสตริงตรงๆ เลยได้ "[object Object]" ส่งเข้าตัวเขียนโดยไม่มี error · ถอย: HOOKS_OBJ_FIX=0 (คืนอาเรย์เดิมทั้งดุ้น)
+  const objFixHooks = objTextList(payload.emotionalHooks, 'emotional_hooks');
+  if (objFixHooks.length > 0) {
+    // ★ 19 ส.ค. 69 (HOOKS_AS_OPENERS — สเปคเฟเบิ้ล-สุด): เดิม hook ทั้งพวงถูกอัดบรรทัดเดียว "a | b | c"
+    //   นักเขียนมักลอกยกพวงไปเปิดเรื่อง — เปิดสวิตช์แล้วแตกเป็นรายการแยกบรรทัด + กำกับว่าเป็นตัวเลือกวัตถุดิบ
+    //   เปิด: HOOKS_AS_OPENERS=1 · ปิด (ค่าเริ่มต้น — ไม่ตั้ง env): บรรทัดเดิมทุกไบต์
+    if (process.env.HOOKS_AS_OPENERS === '1') {
+      p += `❤️ จุดที่คนอิน (ตัวเลือกวัตถุดิบ — ไม่บังคับ ถ้าขัดกับการ์ดให้ยึดการ์ด):\n`;
+      objFixHooks.forEach((h, i) => p += `  ${i + 1}. ${h}\n`);
+    } else {
+      p += `❤️ จุดที่คนอิน: ${objFixHooks.join(' | ')}\n`;
+    }
   }
-  if (payload.painPoints.length > 0) {
-    p += `😢 Pain Points: ${payload.painPoints.join(' | ')}\n`;
+  const objFixPains = objTextList(payload.painPoints, 'pain_points'); // 🔧 HOOKS_OBJ_FIX (เหตุผลเดียวกับ hooks ด้านบน)
+  if (objFixPains.length > 0) {
+    p += `😢 Pain Points: ${objFixPains.join(' | ')}\n`;
   }
 
   // Research
@@ -336,7 +425,9 @@ export function formatNarrativePayload(payload) {
     p += '🚨 กฎ IDENTITY (ห้ามฝ่าฝืนเด็ดขาด): รายการ [🌐บริบททั่วไป] ใช้เป็นความรู้ประกอบเท่านั้น — ห้ามเขียนผูกกับตัวบุคคลในข่าว (ห้ามบอกว่าเขาเคยทำ/เคยพูด/มีประวัติตามข้อมูลนั้น) เฉพาะรายการ [✅ยืนยันบุคคล] เท่านั้นที่ผูกกับบุคคลได้\n';
     // ถอดกฎการแนบลิงก์ในประโยคออก เพื่อไม่ให้รบกวนเนื้อหา (พนักงานจะเช็คจาก UI แทน)
     p += '⚠️ คำแนะนำการใช้ข้อมูล: เลือกหยิบข้อมูล ตัวเลข สถิติ หรือข้อเท็จจริง จากบรรทัดด้านบน มาเขียนอธิบายเสริมในเนื้อหา **เฉพาะส่วนที่เข้ากับบริบทและมุมมองของเวอร์ชันนี้** เพื่อเพิ่มความลึกและน่าเชื่อถือ (ไม่จำเป็นต้องใช้ทั้งหมด และห้ามแทรก URL หรือคำว่าอ้างอิงลงในเนื้อหาโดยเด็ดขาด พนักงานจะเช็คจาก UI เอง)\n';
-    p += '⚠️ กฎความยาว: เขียนเนื้อหาให้ยาว ลึกซึ้ง และมีรายละเอียดที่จับใจผู้อ่าน ห้ามเขียนสรุปรวบรัดสั้นๆ\n\n';
+    // 🗑️ 17 ส.ค. 69: ถอด "กฎความยาว: เขียนให้ยาว...ห้ามสรุปรวบรัดสั้นๆ" ออก (เจ้าของสั่ง — กฎยุคแรกที่สั่งยาวไว้ก่อน)
+    //    ถอยคืนด้วย LEGACY_LENGTH_RULES=1 · '\n' ที่เหลือคือบรรทัดว่างคั่นหัวข้อ ต้องคงไว้
+    p += legacyLengthRule('research') + '\n';
   } else {
     p += `\n⚠️ [Research: Missing] ไม่มีข้อมูลเพิ่มเติม — ห้ามอ้างข้อมูลนอกเหนือจาก facts ด้านบน\n\n`;
   }
@@ -363,6 +454,11 @@ export function formatNarrativePayload(payload) {
     p += `แกนอารมณ์: ${eb.coreEmotion}`;
     if (eb.emotionReason) p += ` (${eb.emotionReason})`;
     p += '\n';
+    if (eb.angleBlueprint) {
+      p += `🎯 Blueprint ใบนี้สร้างเฉพาะมุม: ${eb.angleBlueprint.angleName}\n`;
+      if (eb.angleBlueprint.description) p += `  • คำอธิบายมุม: ${eb.angleBlueprint.description}\n`;
+      p += `  • ใช้ emotional timeline และท่อนจบจากใบนี้กับมุมนี้เท่านั้น\n`;
+    }
     if (eb.timeline.length > 0) {
       p += 'Emotional Timeline:\n';
       eb.timeline.forEach((t, i) => p += `  ${i + 1}. ${t}\n`);
@@ -372,6 +468,17 @@ export function formatNarrativePayload(payload) {
       eb.bridges.forEach(b => p += `  • "${b}"\n`);
     }
     if (eb.forbidden.length > 0) p += `ห้าม: ${eb.forbidden.join(' | ')}\n`;
+    // ★ 18 ส.ค. 69 (แบบ ก — ANGLE_CLOSING_SPLIT): แผนจบเฉพาะมุมนี้ — มีเฉพาะเมื่อสวิตช์เปิด+จับคู่มุมสำเร็จ
+    //   (ไม่มี = บล็อกนี้หายทั้งก้อน → ใบสั่งเขียนเดิมทุกไบต์)
+    if (eb.angleClosing) {
+      p += `🔚 แผนจบเฉพาะมุมนี้ (ท่อนจบของเวอร์ชันนี้ต้องเดินตามนี้ — ห้ามใช้ภาพจบ/ประโยคจบร่วมกับเวอร์ชันมุมอื่น):\n`;
+      if (eb.angleClosing.direction) p += `  • แนวทางปิด: ${eb.angleClosing.direction}\n`;
+      if (eb.angleClosing.sketch) p += `  • ร่างประโยคทุบท้าย (แนวทางใจความ — เกลาคำเองได้ แต่ห้ามหลุดใจความ): ${eb.angleClosing.sketch}\n`;
+      if (eb.angleClosing.avoidOverlap) p += `  • ห้ามซ้ำกับมุมอื่น: ${eb.angleClosing.avoidOverlap}\n`;
+      // ★ 19 ส.ค. 69 (ร้ายแรง 1 — แทนตัวกรอง forbidden ที่ลบทิ้ง): ลำดับอำนาจ ไม่ลบข้อมูล —
+      //   ข้อ "ห้าม" ทุกข้อยังอยู่ครบในใบสั่ง (โดยเฉพาะกฎกันแต่งข้อเท็จจริง) แค่เรื่องวิธีจบให้แผนนี้ชนะ
+      p += `  ⚠️ แผนจบเฉพาะมุมนี้มีอำนาจเหนือคำสั่ง "ต้องปิดด้วย..." ใดๆ ในข้อ "ห้าม" ด้านบน — ส่วนข้อห้ามที่กันแต่งข้อเท็จจริง ยังบังคับครบทุกข้อ\n`;
+    }
     p += '=== จบ Blueprint ===\n\n';
   }
 
@@ -381,7 +488,27 @@ export function formatNarrativePayload(payload) {
   p += '❌ ห้ามสลับบทบาทของบุคคล ให้ยึดตาม fact อย่างเคร่งครัด\n';
   p += '❌ ระวังอย่าสลับ "ชื่อ" หรือ "ฉายา" ระหว่างบุคคลที่หนึ่งกับบุคคลที่สองเด็ดขาด\n';
   p += '❌ ห้ามสร้าง quote ปลอม — ใช้ได้เฉพาะ quoteFragments\n';
-  p += '✅ **อนุญาตให้ยกตัวอย่างสถานการณ์จำลอง (Simulation) ที่สอดคล้องกับบริบท เพื่อขยายความให้ครบ 250 คำได้ โดยเฉพาะกรณีที่เป็นนโยบายหรือข้อความเชิงวิชาการ**\n';
+  // ★ 16 ส.ค. 69 (เจ้าของสั่งปิด): เดิมบรรทัดนี้อนุญาตให้ "แต่งสถานการณ์จำลอง" เพื่อยืดให้ครบ 250 คำ
+  //   ฝัง 1 มิ.ย. 69 เจตนาเดิมคือช่วยข่าวนโยบาย/วิชาการที่ไม่มีคนในเหตุการณ์ — แต่มีปัญหา 3 ข้อ:
+  //   (1) วางไว้ใน FACT SAFETY แบบไม่มีเงื่อนไข → ครอบทุกข่าว ไม่ใช่แค่ข่าวนโยบาย
+  //       ("โดยเฉพาะ" ในภาษาไทย = "ยิ่งเหมาะถ้า..." ไม่ได้แปลว่า "เฉพาะ")
+  //   (2) เลข 250 ตกยุคแล้ว — พื้นความยาวปัจจุบันคือ 165 คำ (WORD_FLEX_V2, eb6ff50)
+  //   (3) ทับซ้อนกับหน้าที่ของการ์ด: การ์ดทั้ง 201/201 ใบมี writingStyle + tone + exampleHooks
+  //       ที่สั่งเรื่อง "สำนวนให้น่าอ่าน" อยู่แล้ว และ FabGate ก็ระบุเองว่า
+  //       "สำนวนแต่ง/ภาพเปรียบ/การเรียบเรียงใหม่จากข้อเท็จจริงเดิม ไม่นับเป็นของเกิน"
+  //       → นักเขียนมีเครื่องมือทำให้น่าอ่านครบอยู่แล้วโดยไม่ต้องแต่งเหตุการณ์ขึ้นใหม่
+  //       การเปิดช่องให้แต่งเรื่องจึงไปแทนที่งานฝีมือของการ์ด ไม่ใช่เสริม
+  //   (4) ขัดกับด่านจับของเกินตรงๆ — พรอมต์สั่งให้เติม แล้วอีกด่านมาตัดทิ้ง
+  //   เปิดคำแนะนำเสริม: ALLOW_SIMULATION=1 (รับ 1/true/on ไม่สนตัวพิมพ์เล็กใหญ่/เครื่องหมายคำพูด)
+  //   โหมดปกติริบใบอนุญาตแต่งสถานการณ์และไม่ผูกกับจำนวนคำ · LEGACY_LENGTH_RULES=1 คืนข้อความเดิมเป๊ะ
+  const _simOn = ['1', 'true', 'on'].includes(
+    String(process.env.ALLOW_SIMULATION || '').trim().toLowerCase().replace(/^["']|["']$/g, '')
+  );
+  if (_simOn) {
+    p += isLegacyLengthOn()
+      ? '✅ **อนุญาตให้ยกตัวอย่างสถานการณ์จำลอง (Simulation) ที่สอดคล้องกับบริบท เพื่อขยายความให้ครบ 250 คำได้ โดยเฉพาะกรณีที่เป็นนโยบายหรือข้อความเชิงวิชาการ**\n'
+      : '✅ **สำหรับข่าวนโยบายหรือข้อความเชิงวิชาการ ให้อธิบายหลักการ ผลกระทบ และความสำคัญจากข้อเท็จจริงหรือบริบทที่ให้มาเพื่อให้เข้าใจง่ายขึ้น แต่ห้ามสร้างสถานการณ์จำลอง บุคคล คำพูด หรือรายละเอียดที่ข่าวไม่ได้ให้มา และพอดีแล้วต้องพอ ห้ามหาคำมาเติม**\n';
+  }
   if (payload.factSufficiency === 'insufficient') {
     p += '⚠️ [FACTS INSUFFICIENT] ข้อเท็จจริงน้อย — ให้มุ่งเน้นการขยายความอธิบายถึงผลกระทบ ความสำคัญ หรือยกตัวอย่างให้เห็นภาพชัดเจนขึ้น\n';
   }
@@ -391,9 +518,12 @@ export function formatNarrativePayload(payload) {
   p += '=== NARRATIVE RECONSTRUCTION MANDATE ===\n';
   p += 'ใช้ facts, quotes และ context จาก payload นี้เป็นแกนของเรื่อง — เนื้อข่าวต้นฉบับ (ถ้าแนบมาด้านล่าง) มีไว้ตรวจความถูกต้องของรายละเอียดเท่านั้น\n';
   p += 'งาน: สร้างเรื่องเล่าใหม่ทั้งหมดจาก facts\n';
-  p += 'ห้าม: เรียง facts ตามลำดับที่ให้ (สลับตามความเหมาะสม)\n';
+  // ★ 19 ส.ค. 69 (CARD_AUTHORITY R3 — default ปิด): กฎ 2 บรรทัดนี้ทับ hookStyle + structure_formula ของการ์ดตรงๆ
+  //   และถูกต่อท้ายการ์ด = ชนะโดยตำแหน่ง — เปิดสวิตช์เพื่อตัดออก · ปิด = ใบสั่งเดิมทุกไบต์
+  const _r3On = isCardAuthorityR3Enabled();
+  if (!_r3On) p += 'ห้าม: เรียง facts ตามลำดับที่ให้ (สลับตามความเหมาะสม)\n';
   p += 'ห้าม: สรุปทีละย่อหน้า ห้ามลอกโครงเรื่องหรือสำนวนจากต้นฉบับ\n';
-  p += 'ต้อง: เลือก angle → เปิดด้วย moment/conflict → เล่า → ปิดด้วยอารมณ์\n';
+  if (!_r3On) p += 'ต้อง: เลือก angle → เปิดด้วย moment/conflict → เล่า → ปิดด้วยอารมณ์\n';
   p += '=== จบ MANDATE ===\n\n';
 
   return p;
@@ -444,4 +574,57 @@ export function checkNarrativeSimilarity(sourceText, generatedText) {
     pass: score < 0.4,
     grade: score < 0.15 ? 'excellent' : score < 0.3 ? 'good' : score < 0.4 ? 'acceptable' : 'too_similar',
   };
+}
+
+// ─── ANGLE_CLOSING_SPLIT helpers — จุดความจริงเดียว (19 ส.ค. 69 รอบ 3 ตามผลตรวจโซล) ───
+// วางไว้ไฟล์นี้เพราะเป็นปลายทางของ dependency (ไม่ import ใคร) — autoFlow (แนบแผน+log)
+// และ summarize (นับรายงาน) import ไปใช้กติกาเดียวกันเป๊ะ ห้ามก๊อปสูตรไปแก้แยกที่
+
+// เงื่อนไขชั้น 1: ข้อสุดท้ายของ emotional_timeline ต้องเป็น "ประโยคทุบท้าย" (เช็คแค่คำ "ทุบท้าย" — AI อาจตัดคำหน้า)
+// autoFlow เช็คตัวนี้ "ก่อนแนบแผน+ก่อน log" → log ตรงกับที่ฝั่งเขียนใช้จริงเสมอ (แก้ log โกหก — โซลชี้)
+export function closingTailMatches(timeline) {
+  return Array.isArray(timeline) && timeline.length > 0 && /ทุบท้าย/.test(String(timeline[timeline.length - 1]));
+}
+
+// 🔧 19 ส.ค. 69 รอบ 3 (โซลรันเจอเคสกลับด้าน): จับคู่แผนจบกับมุมแบบ two-pass
+//   รอบ 1: จอง exact ให้ครบทุกมุมก่อน — กันมุมที่มาก่อนแบบ contain แย่งใบที่เป็น exact ของมุมหลัง
+//   รอบ 2: จ่าย contain จาก "ใบที่ยังว่าง" เท่านั้น — ใบที่เจอถูกจองแล้วให้ค้นใบว่างใบถัดไปต่อ ไม่ยอมแพ้กลางทาง
+//   ใบเดียวจ่ายได้มุมเดียว (กันจบแฝด) · field ต้องเป็น string (กัน [object Object]) ·
+//   ใบใช้ได้ = มีชื่อ + (แนวทางปิด หรือ ร่างประโยค) · คืน array ยาวเท่า angleNames — null = มุมนั้นใช้แผนกลาง
+export function assignAngleClosings(closings, angleNames) {
+  const names = Array.isArray(angleNames) ? angleNames : [];
+  const results = names.map(() => null);
+  try {
+    const _str = (v) => (typeof v === 'string' ? v.trim() : '');
+    const _norm = (v) => _str(v).replace(/\s+/g, '');
+    const targets = names.map((n) => _norm(n));
+    const usable = (Array.isArray(closings) ? closings : []).filter((c) =>
+      c && typeof c === 'object' && !Array.isArray(c) && _norm(c.angle_name)
+      && (_str(c.closing_direction) || _str(c.closing_sketch)));
+    if (usable.length === 0) return results;
+    const claimed = new Set();
+    const take = (hit, matchType) => ({
+      angle_name: _str(hit.angle_name),
+      closing_direction: _str(hit.closing_direction),
+      closing_sketch: _str(hit.closing_sketch),
+      avoid_overlap: _str(hit.avoid_overlap),
+      match_type: matchType,
+    });
+    // รอบ 1 — exact (หลัง normalize ช่องว่าง)
+    targets.forEach((t, i) => {
+      if (!t) return;
+      const hit = usable.find((c) => !claimed.has(c) && _norm(c.angle_name) === t);
+      if (hit) { claimed.add(hit); results[i] = take(hit, 'exact'); }
+    });
+    // รอบ 2 — contain เฉพาะมุมที่ยังไม่ได้แผน จากใบที่ยังว่าง
+    targets.forEach((t, i) => {
+      if (!t || results[i]) return;
+      const hit = usable.find((c) => !claimed.has(c) && (_norm(c.angle_name).includes(t) || t.includes(_norm(c.angle_name))));
+      if (hit) { claimed.add(hit); results[i] = take(hit, 'contain'); }
+    });
+    return results;
+  } catch (err) {
+    console.warn('[NarrativePayload] assignAngleClosings ล้ม — ทุกมุมถอยแผนกลาง:', err?.message || err);
+    return names.map(() => null);
+  }
 }
