@@ -385,6 +385,22 @@ function _shortlistOn() {
   }
   return false;
 }
+// 🎴 24 ส.ค. 69 — "การ์ดนำทางครู" (CARD_TEACHER_MATCH=1) · โค้ดล้วน ไม่เรียก AI
+//   ปัญหาที่แก้: การ์ด (สูตรเขียน) กับครู (ตัวอย่างไวรัล) ถูกเลือกแยกกันคนละทาง — ครูไม่เคยเห็นการ์ดที่เลือก
+//   วิธี: ส่ง "ป้ายสาระการ์ดที่เลือก" (data/card-essences.json) เข้าช่องสัญญาณเชื่อถือได้ (strong)
+//   ของตัวคัดโผ shortlistExamples — สูตรคะแนนเดิมไม่ถูกแตะแม้แต่ตัวเดียว ธีม/อารมณ์ครูที่ตรงการ์ดได้แต้มเอง
+//   ขอบเขต: ทำงานเฉพาะคู่กับชั้นเฉพาะกิจ (VIRAL_SHORTLIST เปิด) · ไม่แตะโหมดเก่า ai/score · ไม่แตะสาย URL
+//   ไม่ตั้ง = ปิด = ระบบเดิม 100% (แบบแผนสวิตช์พี่น้อง — อ่านผ่าน _envTok ทนอัญประกาศ/ตัวพิมพ์)
+let _ctWarned = '';
+function _cardTeacherOn() {
+  const v = _envTok('CARD_TEACHER_MATCH');
+  if (SL_ON_RE.test(v)) return true;
+  if (!SL_OFF_RE.test(v) && _ctWarned !== v) {
+    _ctWarned = v;
+    console.log(`[ViralFewshot] 🎴 CARD_TEACHER_MATCH="${v}" อ่านไม่ออก → ถือว่าปิด (ค่าที่เปิดได้: 1/true/on/yes)`);
+  }
+  return false;
+}
 // ขนาดโผปรับได้โดยไม่ต้องแก้โค้ด (เจ้าของลอง 6/8/10 เองได้) — ค่าเริ่มต้น 8 ตามที่วัดมาแล้ว
 // 🔴 16 ส.ค. 69 (ผู้ตรวจอิสระจับได้): พื้นเดิม 2 ทำให้ env ตัวเดียวพาระบบกลับไปเป็นท่าที่เจ้าของสั่งห้าม —
 //   K=2 → weightedSample(2 ใบ, 2) คืนทั้งคู่เสมอ = "ครูตายตัว" (K=3 ก็ยังข้ามชั้นแค่ 27%)
@@ -568,7 +584,9 @@ export function shortlistExamples(brief = {}, rows = [], essences = {}, K = 8) {
   // ⚠️ ต้องอ่านแบบ optional ทุกช่อง — สายขัดเงา (correction/viralPolishService) เรียกโดยไม่ส่ง newsBrief/newsTitle
   //   🔴 แท็กอารมณ์ต้องผ่าน _tagsText เสมอ — ท่อจริงส่ง newsAnalysis?.emotionalTags ดิบๆ ถ้า AI คืนสตริงเดี่ยว
   //      .join(' ') จะโยน TypeError แล้วนักเขียน "ไม่ได้ตัวอย่างเลย" ทั้งที่ปิดสวิตช์ยังได้ 2 ใบ (ผู้ตรวจจับได้)
-  const strong = [brief.title, brief.category, _tagsText(brief.emotionalTags), brief.archetype, brief.coreStory]
+  // 🎴 brief.cardEssence = ป้ายสาระการ์ดที่เลือก (มาเฉพาะตอน CARD_TEACHER_MATCH เปิด — ผู้เรียกคุมสวิตช์)
+  //   เข้าช่อง strong เพราะการ์ดคือทิศทางที่ระบบ "เลือกแล้ว" ไม่ใช่เนื้อดิบ — สูตรคะแนนไม่เปลี่ยน
+  const strong = [brief.title, brief.category, _tagsText(brief.emotionalTags), brief.archetype, brief.coreStory, brief.cardEssence]
     .filter(Boolean).join(' ').toLowerCase();
   const body = String(brief.excerpt || '').toLowerCase();
   // ★ toLowerCase() ไม่มีผลกับอักษรไทย แต่ต้องเรียกอยู่ดี — คลังมีธีมภาษาอังกฤษจริง ('ICU', 'CPR')
@@ -789,7 +807,7 @@ async function aiMatchExamples(brief, rows, essences) {
  *   3) correction/viralPolishService.js (สายขัดเงา ถอดสายอยู่) — เรียกโดยไม่มี newsBrief/newsTitle เลย
  *      ⇒ โค้ดในไฟล์นี้ต้องทนกรณีไม่มี newsBrief เสมอ (เทสไว้แล้ว: ถอยวิธีเดิม ไม่พัง ไม่จดสมุด)
  */
-export async function getViralFewshotBlock({ category = '', emotionalTags = [], archetype = '', newsTitle = '', newsBrief = null, noHistory = false, teacherGuideEligible = false } = {}) {
+export async function getViralFewshotBlock({ category = '', emotionalTags = [], archetype = '', newsTitle = '', newsBrief = null, noHistory = false, teacherGuideEligible = false, cardEssence = '' } = {}) {
   const libCat = pickLibraryCategory({ category, emotionalTags, archetype });
 
   let examplesBlock = '';
@@ -821,6 +839,10 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
     const shortlistOn = _shortlistOn() && !mode && rotate;
     if (_shortlistOn() && mode) console.log(`[ViralFewshot] 🎚️ VIRAL_SHORTLIST=1 แต่ VIRAL_MATCH_MODE=${mode} ตั้งอยู่ด้วย → โหมดจับคู่เดิมชนะ ชั้นเฉพาะกิจไม่ทำงาน`);
     else if (_shortlistOn() && !rotate) console.log('[ViralFewshot] 🎚️ VIRAL_SHORTLIST=1 แต่ VIRAL_ROTATE=0 ตั้งอยู่ด้วย → สวิตช์ถอยเก่าชนะ ชั้นเฉพาะกิจไม่ทำงาน (ROTATE=0 = หยิบตายตัว ห้ามใช้คู่กัน)');
+    // 🎴 การ์ดนำทางครู: มีผลเฉพาะผ่านชั้นเฉพาะกิจ — เปิดการ์ดแต่ชั้นคัดโผไม่ทำงาน ต้องตะโกนบอก (แบบแผนเกราะ 4/5)
+    //   cap 400 ตัวอักษร: ป้ายสาระจริงยาว ~80-150 — กันการ์ดผิดรูปดันสัญญาณจนกลบหัวข่าว/แก่นเรื่อง
+    const cardEss = (_cardTeacherOn() && shortlistOn) ? String(cardEssence || '').slice(0, 400) : '';
+    if (_cardTeacherOn() && !shortlistOn) console.log('[ViralFewshot] 🎴 CARD_TEACHER_MATCH=1 แต่ชั้นเฉพาะกิจไม่ทำงาน (VIRAL_SHORTLIST ปิด/แพ้สวิตช์เก่า) → การ์ดไม่มีตัวคัดให้ผล — ระบบวิ่งเส้นเดิม');
     // 🔴 จุดตายเงียบ: ถ้าไม่นับ shortlist เป็น "เอาทั้งคลัง" ทั้ง cacheKey และ limit ระบบจะดึงมาแค่ชั้น libCat
     //   แล้วให้คะแนนกันเองในชั้นเดิม = เปิดสวิตช์แล้วเหมือนไม่มีอะไรเกิดขึ้น แต่ log บอกว่าทำงานอยู่
     //   (แคชต้องคนละคีย์ด้วย ไม่งั้นเปิด/ปิดสวิตช์สลับกันจะกินแคชผิดก้อน)
@@ -921,7 +943,8 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
         const K = _shortlistK();
         const sl = shortlistExamples(
           { title: newsTitle, category, emotionalTags, archetype, libCat,
-            coreStory: newsBrief?.coreStory || '', excerpt: newsBrief?.excerpt || '' },
+            coreStory: newsBrief?.coreStory || '', excerpt: newsBrief?.excerpt || '',
+            cardEssence: cardEss },
           rows || [], _loadEssences(), K,
         );
         if (sl.list.length) {

@@ -1733,6 +1733,11 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
     let viralFewshotBlock = '';
     try {
       const { getViralFewshotBlock } = await import('@/lib/services/viralFewshot');
+      // 🎴 24 ส.ค. 69 การ์ดนำทางครู: ป้ายสาระของการ์ดที่เลือก (คลังเดียวกับสารบัญ) ส่งให้ตัวคัดครูเสมอ
+      //   สวิตช์ CARD_TEACHER_MATCH ถูกอ่าน "จุดเดียว" ใน viralFewshot — ปิดสวิตช์ = ค่านี้ถูกทิ้ง ระบบเดิม 100%
+      let _ctEss = {};
+      try { _ctEss = (await import('@/lib/services/cardEssences')).loadCardEssences() || {}; }
+      catch { _ctEss = {}; /* ป้ายหาย = ส่งว่าง — ห้ามล้มท่อครู */ }
       // flow คิว/auto ส่ง presetPrompt มา → บล็อก Stage 1 ถูกข้าม newsAnalysis เป็น null
       // ต้อง fallback ไป breakdown (มี primaryCategory เสมอ) แล้วค่อย category ของ prompt ที่เลือก
       viralFewshotBlock = await getViralFewshotBlock({
@@ -1743,6 +1748,7 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
         teacherGuideEligible: true, // FL15: จำกัดคู่มือครูไว้ที่ Text writer — สาย URL/viral-polish ต้องคง prompt เดิม
         // 🎯 โหมดจับคู่ (VIRAL_MATCH_MODE): ส่ง "เนื้อดิบจริง + แก่นเรื่อง" ให้ตัวเลือกใช้แมชตามคำสั่งเจ้าของ
         newsBrief: { coreStory: actualBreakdown?.core_story || actualBreakdown?.coreStory || '', excerpt: newsForStage('VIRAL_MATCH', actualNewsBody) }, // ★ สคีมาจริงใช้ core_story (ผู้ตรวจจับได้)
+        cardEssence: _ctEss[smartPrompt?.id] || '', // 🎴 ป้ายสาระการ์ดที่เลือก — ไม่มีการ์ด/ไม่มีป้าย = ว่าง
       });
     } catch (e) { console.log('[ViralFewshot] skip:', e.message?.slice(0, 40)); }
 
