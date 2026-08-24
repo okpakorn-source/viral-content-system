@@ -27,7 +27,7 @@ export function getOpenAIClient() {
  * เรียก AI — Single prompt system
  * callAI({ prompt: "..." }) — prompt เดียวครบ
  */
-export async function callAI({ prompt, systemPrompt, userPrompt, imageContents, model = MODEL_PRIMARY, temperature = 0.7, maxTokens = 4000, signal, allowModelFallback = true, maxRetries }) {
+export async function callAI({ prompt, systemPrompt, userPrompt, imageContents, model = MODEL_PRIMARY, temperature = 0.7, maxTokens = 4000, signal, allowModelFallback = true, maxRetries, textNewsLengthPolicy = false }) {
   const client = getOpenAIClient();
 
   if (!client) {
@@ -60,7 +60,7 @@ export async function callAI({ prompt, systemPrompt, userPrompt, imageContents, 
 - ถ้า prompt มีเนื้อข่าวอยู่ระหว่าง === เนื้อข่าว === ให้ใช้ข้อมูลจากส่วนนั้นเท่านั้น
 
 [กฎที่ 5: โครงสร้างเนื้อหา Facebook]
-${ironRule5LengthLine('openai')}
+${ironRule5LengthLine('openai', textNewsLengthPolicy)}
 - โครงสร้าง: [เปิดแรง hook] → [เล่ารายละเอียด storytelling] → [ปิดด้วยประโยคบรรยายทรงพลัง]
 - ⚠️ ห้ามตั้งคำถามปิดท้าย ห้ามจบด้วย "คุณคิดยังไง?" "เห็นด้วยไหม?" — ปิดด้วยบรรยายเท่านั้น${legacyLengthRule('ironRule5NoShort')}
 

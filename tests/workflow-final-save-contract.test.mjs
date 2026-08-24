@@ -23,7 +23,7 @@ function makeFinalSnapshotRunner(source = autoFlowSource) {
   return new AsyncFunction(
     'primaryResult', 'aggregateUsedModel', 'usedModels', 'finalVersions', 'allVersions',
     'totalResearchItems', 'diversityWarning', 'pipelineQualityWarnings', 'factualGateSummary',
-    'usedPreset', 'anglePrompts', '_autoWorkflowId',
+    'textLengthGateSummary', 'usedPreset', 'anglePrompts', '_autoWorkflowId',
     'buildPublishableAnalysisResult', 'saveAnalysis', 'throwStep', 'addLog', 'getActivePipelineDeadline', 'rethrowPipelineDeadline',
     `${block}\nreturn { analysisResult, finalPresetId, finalWorkflowSave };`,
   );
@@ -80,6 +80,17 @@ function makeInputs(overrides = {}) {
       'V1/V2 ยังคล้ายกัน — ให้พนักงานอ่านเลือก',
     ],
     factualGateSummary: { model: 'gpt-5.6-sol', regeneratedVersions: [1] },
+    // fixture จาก live canary ข่าวแตงโม r231: V1 151 คำผ่าน / V2 143 คำถูกกัก
+    textLengthGateSummary: {
+      status: 'partial',
+      publishable: true,
+      minimumWords: 146,
+      checks: [
+        { version: 1, wordCount: 151, passes: true },
+        { version: 2, wordCount: 143, passes: false },
+      ],
+      quarantinedVersions: [2],
+    },
     usedPreset: { promptId: 'prompt-final', id: 'library' },
     anglePrompts: [{ id: 'prompt-angle' }],
     workflowId: 'unify-job-final',
@@ -111,7 +122,7 @@ async function executeFinalSnapshot(source = autoFlowSource, overrides = {}) {
     values.primaryResult, values.aggregateUsedModel, values.usedModels,
     values.finalVersions, values.allVersions, values.totalResearchItems,
     values.diversityWarning, values.pipelineQualityWarnings, values.factualGateSummary,
-    values.usedPreset, values.anglePrompts, values.workflowId,
+    values.textLengthGateSummary, values.usedPreset, values.anglePrompts, values.workflowId,
     buildPublishableAnalysisResult, saveAnalysis, throwStep, (...args) => logs.push(args), getActivePipelineDeadline,
     rethrowPipelineDeadline,
   );
@@ -129,6 +140,7 @@ async function assertSnapshotRetention(source = autoFlowSource) {
   assert.strictEqual(run.result.analysisResult.researchItems, run.values.totalResearchItems);
   assert.deepEqual(run.result.analysisResult.qualityWarnings, run.values.pipelineQualityWarnings);
   assert.strictEqual(run.result.analysisResult.factualGate, run.values.factualGateSummary);
+  assert.strictEqual(run.result.analysisResult.lengthGate, run.values.textLengthGateSummary);
   assert.deepEqual(run.deadlineChecks, ['final_workflow_persist', 'final_workflow_persist']);
   return run;
 }
@@ -227,6 +239,13 @@ test('mutations: ใช้ฉบับก่อนแก้ ถอด save ห�
   );
   assert.notEqual(lostFactualGate, autoFlowSource);
   await assert.rejects(assertSnapshotRetention(lostFactualGate));
+
+  const lostLengthGate = autoFlowSource.replace(
+    '    lengthGate: textLengthGateSummary,',
+    '    lengthGate: null,',
+  );
+  assert.notEqual(lostLengthGate, autoFlowSource);
+  await assert.rejects(assertSnapshotRetention(lostLengthGate));
 
   const lostModels = autoFlowSource.replace(
     '    usedModels,',

@@ -21,10 +21,12 @@ import { saveAnalysis, saveFactualReview } from '@/lib/workflow/workflowEngine';
 import {
   buildPublishableAnalysisResult,
   countFinalVersionSources,
+  enforceTextNewsPublicationFloor,
   getPublishablePostText,
   resolveFinalUsedPreset,
 } from '@/lib/utils/publishablePostText';
 import { getBuiltinFallbackPrompt } from '@/lib/ai/builtinFallbackPrompt';
+import { isLegacyLengthOn, NEW_LENGTH_CFG } from '@/lib/ai/legacyLengthRules';
 // ★ 19 ส.ค. 69 รอบ 3 (ANGLE_CLOSING_SPLIT): กติกาจับคู่แผนจบ+เงื่อนไขทุบท้าย อยู่ที่เดียวใน narrativePayloadText
 //   (ปลายทาง dependency — ไม่เกิด circular import) เพื่อให้ log ฝั่งนี้ตรงกับที่ฝั่งเขียนใช้จริงเสมอ
 import { assignAngleClosings, closingTailMatches } from '@/lib/input-engine/narrativePayloadText';
@@ -832,6 +834,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   // ตรวจเฉพาะ content ที่พนักงานโพสต์จริง หากผิดให้ Sol แก้ทุกฉบับพร้อมกันหนึ่งครั้ง
   // ห้ามเรียก writer/Fable ซ้ำและห้ามวนซ่อม เพื่อจำกัดค่า API แบบพิสูจน์ call-count ได้
   let factualGateSummary = null;
+  let textLengthGateSummary = null;
   if ((detectedType === 'text' || detectedType === 'plain_text') && isRawFactCompletenessGateEnabled()) {
     try {
       const factOutcome = await enforceRawFactCompleteness({
@@ -941,6 +944,37 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     addLog('FactGate', '⏭️ ปิดด่าน Sol ตรวจ RAW ชั่วคราวด้วย RAW_FACT_COMPLETENESS_GATE=0');
   }
 
+  // === FINAL TEXT PUBLICATION FLOOR ===
+  // Writer อาจทำตามพื้น 146 แล้ว แต่ correction/factual editor เปลี่ยน content ภายหลังได้
+  // จึงตรวจข้อความที่พนักงานโพสต์จริงตรงนี้เป็นด่านสุดท้าย: กักทั้งฉบับ ห้าม pad/rerun AI
+  // LEGACY_LENGTH_RULES=1 ต้องถอยพฤติกรรมเดิมครบ และท่อ URL ไม่ผ่าน service TEXT นี้อยู่แล้ว
+  if ((detectedType === 'text' || detectedType === 'plain_text') && !isLegacyLengthOn()) {
+    const lengthOutcome = enforceTextNewsPublicationFloor(finalVersions, {
+      minimumWords: NEW_LENGTH_CFG.min,
+    });
+    finalVersions = lengthOutcome.passingVersions;
+    textLengthGateSummary = {
+      status: lengthOutcome.status,
+      publishable: true,
+      minimumWords: lengthOutcome.minimumWords,
+      checks: lengthOutcome.checks,
+      quarantinedVersions: lengthOutcome.checks
+        .filter(check => !check.passes)
+        .map(check => check.version),
+    };
+    if (lengthOutcome.quarantinedVersions.length > 0) {
+      const rejected = lengthOutcome.checks
+        .filter(check => !check.passes)
+        .map(check => `V${check.version} (${check.wordCount} คำ)`)
+        .join(', ');
+      const warning = `กักฉบับหลังตรวจที่สั้นกว่าขั้นต่ำ ${NEW_LENGTH_CFG.min} คำ: ${rejected} · ส่งเฉพาะ ${finalVersions.length} ฉบับที่ผ่าน โดยไม่เติมคำหรือเรียก AI ซ้ำ`;
+      pipelineQualityWarnings.push(warning);
+      addLog('LengthGate', `⚠️ ${warning}`);
+    } else {
+      addLog('LengthGate', `✅ ผลสุดท้ายทุกฉบับยาวอย่างน้อย ${NEW_LENGTH_CFG.min} คำ · ไม่มีเพดานสูงสุด`);
+    }
+  }
+
   ({ classic: classicVersionCount, enhanced: enhancedVersionCount } = countFinalVersionSources(finalVersions));
   usedPreset = resolveFinalUsedPreset(finalVersions, usedPresetByPromptId, usedPreset);
 
@@ -963,6 +997,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     researchItems: totalResearchItems,
     qualityWarnings: [...new Set(pipelineQualityWarnings.filter(Boolean))],
     factualGate: factualGateSummary,
+    lengthGate: textLengthGateSummary,
   });
   const finalPresetId = usedPreset?.promptId || finalVersions[0]?.promptId
     || anglePrompts[0]?.id || usedPreset?.id || 'library';

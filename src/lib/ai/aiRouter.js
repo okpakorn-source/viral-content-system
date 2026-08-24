@@ -33,10 +33,13 @@ function runWriterAttempt(factory, timeoutMs, step, parentSignal) {
 /**
  * เลือก model + เรียก AI อัตโนมัติ
  * @param {string} task - 'extract', 'breakdown', 'write', 'general'
- * @param {object} options - { prompt, temperature, maxTokens, systemPrompt }
+ * @param {object} options - { prompt, temperature, maxTokens, systemPrompt, textNewsLengthPolicy }
  */
 export async function callSmartAI(task, options) {
-  const { prompt, temperature, maxTokens, systemPrompt, signal } = options;
+  const { prompt, temperature, maxTokens, systemPrompt, signal, textNewsLengthPolicy = false } = options;
+  // สิทธิ์พื้น 146/no-cap เป็นของนักเขียนข่าว TEXT เท่านั้น
+  // ต่อให้ caller งานอื่นส่ง true ผิดมา Router ต้องตัดทิ้ง ไม่ให้รั่วเข้า Breakdown/การ์ด/Blueprint/QC
+  const useTextNewsLengthPolicy = task === 'write' && textNewsLengthPolicy === true;
   
   // กำหนด strategy ตาม task
   const strategy = getStrategy(task);
@@ -50,7 +53,14 @@ export async function callSmartAI(task, options) {
   for (let i = 0; i < strategy.chain.length; i++) {
     const modelName = strategy.chain[i];
     try {
-      const result = await callModel(modelName, { prompt, temperature: temp, maxTokens: maxT, systemPrompt, signal });
+      const result = await callModel(modelName, {
+        prompt,
+        temperature: temp,
+        maxTokens: maxT,
+        systemPrompt,
+        signal,
+        textNewsLengthPolicy: useTextNewsLengthPolicy,
+      });
       if (i > 0) {
         console.log(`[SmartAI] ✅ Fallback ${modelName} succeeded`);
       } else {
@@ -122,10 +132,10 @@ function getStrategy(task) {
   return { chain, defaultTemp, defaultMaxTokens };
 }
 
-async function callModel(modelName, { prompt, temperature, maxTokens, systemPrompt, signal }) {
+async function callModel(modelName, { prompt, temperature, maxTokens, systemPrompt, signal, textNewsLengthPolicy }) {
   switch (modelName) {
     case 'claude':
-      return callClaude({ prompt, temperature, maxTokens, systemPrompt, signal });
+      return callClaude({ prompt, temperature, maxTokens, systemPrompt, signal, textNewsLengthPolicy });
 
     // ★ 21 ส.ค. 69 (เจ้าของเคาะจากศึกตาบอด R118): สายนักเขียนโดยเฉพาะ
     //   opus-4.8 ล้ม (refusal/HTTP/เนื้อว่าง/JSON พัง — โยนเป็น error จาก callClaude ทั้งหมด) → ถอย fable-5
@@ -139,7 +149,7 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
         return await runWriterAttempt(
           (requestSignal) => callClaude({
             prompt, temperature, maxTokens, systemPrompt, signal: requestSignal, model: _primary,
-            maxRetries: 0, retryWithoutEffort: false,
+            maxRetries: 0, retryWithoutEffort: false, textNewsLengthPolicy,
           }),
           WRITER_ATTEMPT_TIMEOUT_MS.opus, 'writer_opus', signal
         );
@@ -150,7 +160,7 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
         return await runWriterAttempt(
           (requestSignal) => callClaude({
             prompt, temperature, maxTokens, systemPrompt, signal: requestSignal, model: _fb,
-            maxRetries: 0, retryWithoutEffort: false,
+            maxRetries: 0, retryWithoutEffort: false, textNewsLengthPolicy,
           }),
           WRITER_ATTEMPT_TIMEOUT_MS.fable, 'writer_fable', signal
         );
@@ -160,7 +170,7 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
       return runWriterAttempt(
         (requestSignal) => callAI({
           prompt, temperature, maxTokens, model: MODEL_PRIMARY, signal: requestSignal,
-          allowModelFallback: false, maxRetries: 0,
+          allowModelFallback: false, maxRetries: 0, textNewsLengthPolicy,
         }),
         WRITER_ATTEMPT_TIMEOUT_MS.sol, 'writer_sol', signal
       );
@@ -169,7 +179,7 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
       return callGemini({ prompt, temperature, maxTokens, signal });
     case 'gpt4o':
     default:
-      return callAI({ prompt, temperature, maxTokens, model: MODEL_PRIMARY, signal });
+      return callAI({ prompt, temperature, maxTokens, model: MODEL_PRIMARY, signal, textNewsLengthPolicy });
   }
 }
 

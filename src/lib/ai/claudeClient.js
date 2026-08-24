@@ -57,7 +57,7 @@ function getClaudeClient() {
 //   ของเดิม: export async function callClaude({ prompt, systemPrompt, model, temperature = 0.7, maxTokens = 8000, signal })
 //   effort: ชนะ env กลาง CLAUDE_WRITE_EFFORT เฉพาะการเรียกนั้น (ผลแล็บ 44+12 นัด: จุดเลือกการ์ด A=low B=medium)
 //   promptBlocks: อาเรย์ [{text, cache}] → content blocks + cache_control (แคชสารบัญคงที่ ลดต้นทุน ~85%)
-export async function callClaude({ prompt, systemPrompt, model = DEFAULT_WRITE_MODEL, temperature = 0.7, maxTokens = 8000, signal, effort, promptBlocks, maxRetries, retryWithoutEffort = true }) {
+export async function callClaude({ prompt, systemPrompt, model = DEFAULT_WRITE_MODEL, temperature = 0.7, maxTokens = 8000, signal, effort, promptBlocks, maxRetries, retryWithoutEffort = true, textNewsLengthPolicy = false }) {
   const client = getClaudeClient();
   if (!client) throw new Error('ANTHROPIC_API_KEY ไม่ได้ตั้งค่า — ไปตั้งค่าที่ Settings');
 
@@ -87,7 +87,7 @@ export async function callClaude({ prompt, systemPrompt, model = DEFAULT_WRITE_M
 - ถ้า prompt มีเนื้อข่าวอยู่ระหว่าง === เนื้อข่าว === ให้ใช้ข้อมูลจากส่วนนั้นเท่านั้น
 
 [กฎที่ 5: โครงสร้างเนื้อหา Facebook]
-${ironRule5LengthLine('claude')}
+${ironRule5LengthLine('claude', textNewsLengthPolicy)}
 - โครงสร้าง: [เปิดแรง hook] → [เล่ารายละเอียด storytelling] → [ปิดด้วยประโยคบรรยายทรงพลัง]
 - ⚠️ ห้ามตั้งคำถามปิดท้าย ห้ามจบด้วย "คุณคิดยังไง?" "เห็นด้วยไหม?" — ปิดด้วยบรรยายเท่านั้น${legacyLengthRule('ironRule5NoShort')}
 

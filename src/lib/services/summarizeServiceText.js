@@ -1,5 +1,5 @@
 import { callAI } from '@/lib/ai/openai';
-import { isLegacyLengthOn, legacyLengthRule, lengthLineAnalyze, lengthLineMix, sentenceQuotaLine, mixJsonContentHint, analyzeJsonContentHint, finalReminderLengthClause, NEW_LENGTH_CFG } from '@/lib/ai/legacyLengthRules'; // 🗑️ ซากกฎ "เขียนให้ยาว" ยุคแรก (ถอด 17 ส.ค. 69 · ถอยคืน LEGACY_LENGTH_RULES=1) + นโยบายเลขชุดเดียว 146-269 (18 ส.ค. 69)
+import { isLegacyLengthOn, legacyLengthRule, lengthLineAnalyze, lengthLineMix, sentenceQuotaLine, mixJsonContentHint, analyzeJsonContentHint, finalReminderLengthClause, NEW_LENGTH_CFG } from '@/lib/ai/legacyLengthRules'; // 🗑️ ซากกฎ "เขียนให้ยาว" ยุคแรก (ถอด 17 ส.ค. 69 · ถอยคืน LEGACY_LENGTH_RULES=1) + นโยบายขั้นต่ำกลางของท่อ TEXT
 import { isCardAuthorityR4Enabled, isCardAuthorityR5AEnabled, isCardAuthorityR5BEnabled, isCardAuthorityR6Enabled, isCardAuthorityRXCEnabled } from '@/lib/ai/cardAuthority'; // 🎛️ สวิตช์ปลดกฎกลางทับการ์ด (19 ส.ค. 69) — ห้ามอ่าน env CARD_AUTH* เอง ต้อง import จากไฟล์กลางเท่านั้น
 import { isEndingPlain, isWitnessFactLockEnabled } from '@/lib/ai/promptModes'; // 🎛️ 20 ส.ค. 69 (R3): ENDING_MODE ท่อนจบ + WITNESS_FACTLOCK — ห้ามอ่าน env 2 ตัวนี้เองจากไฟล์อื่น
 import { newsForStage } from '@/lib/utils/newsCap'; // 📖 สมุดเพดานเนื้อข่าวกลาง (16 ส.ค. 69)
@@ -761,9 +761,9 @@ export async function performSummarize({
       lenCfg = { min: 250, max: 350, paragraphs: '3', paraDesc: '3 ย่อหน้า', sentences: '3-5' };
     }
   } else {
-    // ★ 18 ส.ค. 69 (เจ้าของเคาะทางเลือก 🅰️): เลขชุดเดียวทั้งใบสั่งงาน — 146-269 คำ · 3 ย่อหน้า ทุกปุ่มความยาว
-    //   บั๊กที่แก้: ชั้นใน (กฎที่ 5) พูด "กรอบอ้างอิง 146-269" แต่บรรทัดนี้เคยส่ง max=350 เข้าใบสั่ง → AI เลือกตัวใหญ่
-    //   → ยาวเกินกรอบ 7/12 ฉบับ · 3 ย่อหน้ายังล็อกเหนือ VIRAL_HITS_FORMULA เหมือนหลัก 17 ส.ค. (ค่าคงที่ในนโยบายกลาง)
+    // ★ นโยบายกลางทั้งใบสั่งงาน: ขั้นต่ำจาก NEW_LENGTH_CFG · ไม่มีเพดาน · 3 ย่อหน้า ทุกปุ่มความยาว
+    //   บั๊กเดิม: ชั้นในกับชั้นนอกเคยส่งตัวเลขคนละชุด → AI เลือกตัวใหญ่
+    //   3 ย่อหน้ายังล็อกเหนือ VIRAL_HITS_FORMULA เหมือนหลัก 17 ส.ค. (ค่าคงที่ในนโยบายกลาง)
     //   spread กัน mutate ก้อนกลางร่วม (NEW_LENGTH_CFG ถูก freeze ไว้อีกชั้น)
     lenCfg = { ...NEW_LENGTH_CFG };
   }
@@ -1516,7 +1516,7 @@ ${_aiPickerOn ? `เกณฑ์สำคัญ (เรียงตามน้�
     // Dynamic Word Count Scaling
     // ★ 18 ส.ค. 69: จำกัดไว้โหมดถอยเท่านั้น — ถ้าปล่อยรันในโหมดปกติ จะทับเลขกลับเป็น short {250,300}
     //   → ใบสั่งพิมพ์ "สูงสุดไม่เกิน 300 คำ" ขัดชุดเลขเดียว (พิสูจน์จากใบสั่งจริงฝั่งแฝด URL ที่ไม่มี WORD_FLEX บัง)
-    //   เจตนาเดิม "กันฟิลเลอร์ข่าวข้อมูลบาง" มีตัวแทนแล้ว: เพดานใหม่ 269 ต่ำกว่า 300 + กฎ "พอดีแล้วต้องพอ ห้ามหาคำมาเติม"
+    //   เจตนาเดิม "กันฟิลเลอร์ข่าวข้อมูลบาง" มีตัวแทนแล้ว: พื้น 146/no-cap ตามเนื้อดิบ + กฎ "พอดีแล้วต้องพอ ห้ามหาคำมาเติม"
     if (isLegacyLengthOn() && narrativePayload && (narrativePayload.factSufficiency === 'minimal' || narrativePayload.factSufficiency === 'insufficient')) {
       lenCfg = lengthConfig.short;
       console.log(`[Analyze-Service] ⚠️ Fact sufficiency is ${narrativePayload.factSufficiency}. Overriding length config to short to prevent AI filler.`);
@@ -1537,8 +1537,8 @@ ${_aiPickerOn ? `เกณฑ์สำคัญ (เรียงตามน้�
     //   สูตรเพดาน: มากกว่าระหว่าง 350 คำ กับ 75% ของคำในต้นฉบับ — ไม่เกิน 900 กันบวมเกินเหตุ
     //   ปรับค่าได้: WORD_FLOOR / WORD_CAP_BASE / WORD_CAP_RATIO / WORD_CAP_MAX
     //   ถอยกลับพฤติกรรมเดิมทั้งหมด: WORD_FLEX_V2=0
-    // ★ 18 ส.ค. 69: จำกัดไว้โหมดถอยเท่านั้น — สูตรเพดานโตตามดิบขัดกรอบใหม่ 146-269 ตรงๆ
-    //   (พิสูจน์จากใบสั่งจริง: ดิบ 1110 คำ → "สูงสุดไม่เกิน 833 คำ" ขณะชั้นในพูด 146-269 · สถิติเจ้าของ: 270+ คำ อัตราปัง 0%)
+    // ★ จำกัดไว้โหมดถอยเท่านั้น — สูตรเพดานโตตามดิบขัดนโยบายปกติที่ไม่มีเพดานตัวเลขและห้ามยืดคำ
+    //   (พิสูจน์จากใบสั่งเดิม: ดิบ 1110 คำ → "สูงสุดไม่เกิน 833 คำ" ขณะชั้นในส่งเลขอีกชุด)
     //   โหมดถอย: พฤติกรรม + env ทุกตัว (WORD_FLEX_V2/WORD_FLOOR/WORD_CAP_*) เหมือน 89df00a เป๊ะ
     if (isLegacyLengthOn() && process.env.WORD_FLEX_V2 !== '0') {
       const _numEnv = (k, d) => {
@@ -1908,7 +1908,12 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       //   (review fix: outer เดิม 300s ไม่พอเพราะ research กินก่อน ~30-60s → ขยายเป็น 420s ที่ autoFlowServiceText)
       // callSmartAI('write') เป็นเจ้าของโซ่ Opus→Fable→Sol ครบแล้ว ห้ามยิง Sol ซ้ำที่ service
       const _writeOut = await withTimeoutSignal(
-        (requestSignal) => callSmartAI('write', { prompt: multiPrompt, temperature: 0.7, maxTokens: 10000, signal: requestSignal }),
+        (requestSignal) => callSmartAI('write', { prompt: multiPrompt,
+          temperature: 0.7,
+          maxTokens: 10000,
+          signal: requestSignal,
+          textNewsLengthPolicy: true,
+        }),
         270000, 'write_inner', signal
       );
       const { result, model: usedModel } = _writeOut;
@@ -2476,7 +2481,12 @@ ${_timelineFlowGuidance}
 
       // โซ่นักเขียนมี fallback ครบใน Router แล้ว จึงไม่เริ่ม GPT รอบสองเมื่อทั้งโซ่ล้ม
       const smartResult = await withTimeoutSignal(
-        (requestSignal) => callSmartAI('write', { prompt: mixPrompt, temperature: 0.7, maxTokens: 8000, signal: requestSignal }),
+        (requestSignal) => callSmartAI('write', { prompt: mixPrompt,
+          temperature: 0.7,
+          maxTokens: 8000,
+          signal: requestSignal,
+          textNewsLengthPolicy: true,
+        }),
         270000, 'mix_inner', signal
       );
       const result = smartResult.result;
