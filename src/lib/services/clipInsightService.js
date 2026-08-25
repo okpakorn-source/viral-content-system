@@ -242,20 +242,67 @@ export function assessClipDirectLead({ directLead = '', rawData = '', interviewE
   return [...new Set(warnings)];
 }
 
+/**
+ * ★ 25 ส.ค. 69 — ปลดเพดานตัดผลลัพธ์ (เจ้าของสั่ง: "ไม่จำกัดตัวอักษรหรือคำ เพื่อให้ได้ประเด็นครบจริง ไม่ย่อ")
+ * ------------------------------------------------------------------
+ * ที่มา: วัดคลังจริง 400 ใบ เพดานเดิมแทบไม่ถูกชน (2%) — **เพราะโมเดลเขียนสั้นอยู่แล้ว**
+ *   แต่ทันทีที่สั่งให้เขียนละเอียด เพดานจะกัดทันที (เทสจริง: ได้คำพูด 39 ประโยค เพดานเดิม 12 = ตัดทิ้ง 27)
+ * ตัวเลขชุด UNCAPPED ไม่ใช่ "ไม่จำกัด" แบบไร้ขอบ แต่เป็น **เพดานกันระบบพัง** ที่สูงเกินเนื้อจริงหลายสิบเท่า
+ *   (กันกรณีโมเดลตอบพังเป็นลูปจนทำฐานข้อมูล/หน้าเว็บล่ม) — เนื้อข่าวจริงไม่มีทางแตะ
+ * ถอยกลับพฤติกรรมเดิมเป๊ะทุกไบต์: ตั้ง env `CLIP_UNCAPPED=0`
+ */
+const UNCAPPED = process.env.CLIP_UNCAPPED !== '0';
+const LIM = UNCAPPED ? {
+  rawData: 200000, subRawData: 100000, overview: 20000, headline: 500, topic: 500,
+  directLead: 3000, timeRange: 60, category: 100,
+  keyPointsN: 200, keyPointText: 500, keyPointDetail: 5000,
+  quotesN: 300, quoteText: 2000, subQuotesN: 200,
+  timelineN: 300, timelineTime: 60, timelineTopic: 500,
+  speakersN: 100, speakerName: 200,
+  topicsN: 500, summary: 20000, transcriptIn: 400000, transcriptInLong: 400000,
+} : {
+  rawData: 8000, subRawData: 6000, overview: 1500, headline: 200, topic: 200,
+  directLead: 500, timeRange: 40, category: 30,
+  keyPointsN: 12, keyPointText: 200, keyPointDetail: 600,
+  quotesN: 12, quoteText: 400, subQuotesN: 10,
+  timelineN: 15, timelineTime: 40, timelineTopic: 200,
+  speakersN: 8, speakerName: 80,
+  topicsN: 50, summary: 1500, transcriptIn: 12000, transcriptInLong: 24000,
+};
+
+// เพดานคำตอบของโมเดล — ปลดคู่กับ LIM (เดิม 32000/8000 · reasoning model เพดานต่ำ = ตอบว่างเปล่า จึงต้องเผื่อ)
+const VIDEO_MAX_TOKENS = UNCAPPED ? 65000 : 32000;
+const TEXT_MAX_TOKENS = UNCAPPED ? 32000 : 8000;
+
+/** ตัดข้อความพร้อม "ส่งเสียง" เมื่อตัดจริง — เดิมตัดเงียบ ไม่มีใครรู้ว่าเนื้อหาย */
+function cut(value, max, what) {
+  const s = String(value == null ? '' : value);
+  if (s.length <= max) return s;
+  try { console.warn(`[ClipInsight] ✂️ ตัด ${what}: ${s.length} → ${max} ตัวอักษร (เนื้อหาย ${s.length - max})`); } catch {}
+  return s.slice(0, max);
+}
+/** ตัดจำนวนรายการพร้อมส่งเสียงเช่นกัน */
+function cutList(arr, max, what) {
+  const a = Array.isArray(arr) ? arr : [];
+  if (a.length <= max) return a;
+  try { console.warn(`[ClipInsight] ✂️ ตัด ${what}: ${a.length} → ${max} รายการ (หาย ${a.length - max})`); } catch {}
+  return a.slice(0, max);
+}
+
 function normalizeInsight(p, engine) {
   const t = pickType(p.clipType);
-  const directLead = String(p.directLead || '').slice(0, 500);
+  const directLead = cut(p.directLead, LIM.directLead, 'ประโยคเปิด');
   const interviewEventIsNews = p.interviewEventIsNews === true;
-  const rawData = String(p.rawData || '').slice(0, 8000);
+  const rawData = cut(p.rawData, LIM.rawData, 'เนื้อดิบรวม');
   const subStories = Array.isArray(p.subStories) ? p.subStories.map((s, i) => ({
     no: i + 1,
-    topic: String(s?.topic || s?.title || '').slice(0, 200),
-    timeRange: String(s?.timeRange || s?.time || '').slice(0, 40),
-    directLead: String(s?.directLead || '').slice(0, 500),
+    topic: cut(s?.topic || s?.title, LIM.topic, 'ชื่อประเด็นย่อย'),
+    timeRange: cut(s?.timeRange || s?.time, LIM.timeRange, 'ช่วงเวลาประเด็นย่อย'),
+    directLead: cut(s?.directLead, LIM.directLead, 'ประโยคเปิดประเด็นย่อย'),
     interviewEventIsNews: s?.interviewEventIsNews === true,
-    rawData: String(s?.rawData || '').slice(0, 6000),
-    keyPoints: Array.isArray(s?.keyPoints) ? s.keyPoints.slice(0, 12).map(k => String(k?.point || k || '').slice(0, 300)).filter(Boolean) : [],
-    quotes: Array.isArray(s?.quotes) ? s.quotes.slice(0, 10).map(q => String(q).slice(0, 400)).filter(Boolean) : [],
+    rawData: cut(s?.rawData, LIM.subRawData, `เนื้อประเด็นย่อยที่ ${i + 1}`),
+    keyPoints: cutList(s?.keyPoints, LIM.keyPointsN, `ข้อสรุปประเด็นย่อยที่ ${i + 1}`).map(k => cut(k?.point || k, LIM.keyPointDetail, 'ข้อสรุป')).filter(Boolean),
+    quotes: cutList(s?.quotes, LIM.subQuotesN, `คำพูดในประเด็นย่อยที่ ${i + 1}`).map(q => cut(q, LIM.quoteText, 'คำพูด')).filter(Boolean),
   })).filter(s => s.topic && s.rawData) : [];
   const editorialWarnings = [
     ...assessClipDirectLead({ directLead, rawData, interviewEventIsNews, label: 'ก้อนรวม' }),
@@ -274,20 +321,20 @@ function normalizeInsight(p, engine) {
     emoji: CLIP_TYPES[t].emoji,
     usageNote: CLIP_TYPES[t].note,
     // ★ 8 ก.ค.: หมวดเนื้อหา + ความยาวคลิป (metadata คลัง — เดิมว่างทุกเคสเพราะสคีมาวิดีโอไม่มีช่องนี้)
-    category: String(p.category || 'อื่นๆ').slice(0, 30),
+    category: cut(p.category || 'อื่นๆ', LIM.category, 'หมวด'),
     clipDurationSec: Math.max(0, Number(p.clipDurationSec) || 0),
-    speakers: Array.isArray(p.speakers) ? p.speakers.slice(0, 8).map(s => String(s).slice(0, 80)) : [],
-    headline: String(p.headline || '').slice(0, 200),
-    overview: String(p.overview || '').slice(0, 1500),
-    keyPoints: Array.isArray(p.keyPoints) ? p.keyPoints.slice(0, 12).map(k => ({
-      point: String(k?.point || k || '').slice(0, 200),
-      detail: String(k?.detail || '').slice(0, 600),
-    })).filter(k => k.point) : [],
-    quotes: Array.isArray(p.quotes) ? p.quotes.slice(0, 12).map(q => String(q).slice(0, 400)).filter(Boolean) : [],
-    timeline: Array.isArray(p.timeline) ? p.timeline.slice(0, 15).map(tl => ({
-      time: String(tl?.time || '').slice(0, 40),
-      topic: String(tl?.topic || '').slice(0, 200),
-    })).filter(tl => tl.topic) : [],
+    speakers: cutList(p.speakers, LIM.speakersN, 'รายชื่อผู้พูด').map(s => cut(s, LIM.speakerName, 'ชื่อผู้พูด')),
+    headline: cut(p.headline, LIM.headline, 'พาดหัว'),
+    overview: cut(p.overview, LIM.overview, 'ภาพรวม'),
+    keyPoints: cutList(p.keyPoints, LIM.keyPointsN, 'ข้อสรุป').map(k => ({
+      point: cut(k?.point || k, LIM.keyPointText, 'ข้อสรุป'),
+      detail: cut(k?.detail, LIM.keyPointDetail, 'รายละเอียดข้อสรุป'),
+    })).filter(k => k.point),
+    quotes: cutList(p.quotes, LIM.quotesN, 'คำพูดรวม').map(q => cut(q, LIM.quoteText, 'คำพูด')).filter(Boolean),
+    timeline: cutList(p.timeline, LIM.timelineN, 'แผนที่ประเด็น (timeline)').map(tl => ({
+      time: cut(tl?.time, LIM.timelineTime, 'เวลาใน timeline'),
+      topic: cut(tl?.topic, LIM.timelineTopic, 'หัวข้อใน timeline'),
+    })).filter(tl => tl.topic),
     directLead,
     interviewEventIsNews,
     rawData,
@@ -313,7 +360,7 @@ export async function extractClipInsight({ url, platform, rawText = '', model = 
     const r = await callGeminiVideo({
       prompt: VIDEO_INSIGHT_PROMPT,
       youtubeUrl: url,
-      maxTokens: 32000,
+      maxTokens: VIDEO_MAX_TOKENS,
       ...clipVideoInferenceOptions(model),
     });
     return normalizeInsight(r, 'gemini-video');
@@ -335,13 +382,13 @@ ${IDENTITY_RULES}
 ${SUBSTORY_RULES}
 
 === บทถอดเสียง ===
-${text.slice(0, 12000)}
+${cut(text, LIM.transcriptIn, "บทถอดเสียงขาเข้า")}
 === จบ ===
 
 ${INSIGHT_SCHEMA}`;
   // ★ 26 มิ.ย.: ใช้ gpt-5.5 (ตัวเก่งสุด) ไม่ใช่ mini — fallback นี้ทำงานตอน Gemini แน่น
   //   ผู้ใช้ให้ความสำคัญคุณภาพข้อมูลดิบสูง → ยอมจ่ายแพงขึ้นในเส้นทางสำรอง (ใช้นานๆครั้ง) เพื่อคงคุณภาพ
-  const r = await callAI({ prompt, model: MODEL_NEWS_ANALYSIS, temperature: 0.2, maxTokens: 8000 });
+  const r = await callAI({ prompt, model: MODEL_NEWS_ANALYSIS, temperature: 0.2, maxTokens: TEXT_MAX_TOKENS });
   const p = typeof r === 'object' ? r : JSON.parse(String(r).match(/\{[\s\S]*\}/)?.[0] || '{}');
   return normalizeInsight(p, 'transcript-llm');
 }
@@ -359,7 +406,7 @@ export async function extractInsightFromVideoBuffer(videoBuffer, mimeType = 'vid
     prompt: VIDEO_INSIGHT_PROMPT,
     videoBuffer,
     mimeType,
-    maxTokens: 32000,
+    maxTokens: VIDEO_MAX_TOKENS,
     ...clipVideoInferenceOptions(model),
   });
   return normalizeInsight(r, 'gemini-video');
@@ -406,15 +453,15 @@ ${IDENTITY_RULES}
 ${MULTITOPIC_SCHEMA}`;
 
 function normalizeMultiTopic(p, engine) {
-  const topics = Array.isArray(p.topics) ? p.topics.slice(0, 50).map((t, i) => ({
+  const topics = cutList(p.topics, LIM.topicsN, 'ประเด็น (โหมดคลิปยาว)').map((t, i) => ({
     no: Number(t?.no) || (i + 1),
-    title: String(t?.title || '').slice(0, 200),
-    timeStart: String(t?.timeStart || '').slice(0, 20),
-    timeEnd: String(t?.timeEnd || '').slice(0, 20),
-    summary: String(t?.summary || '').slice(0, 1500),
-    keyPoints: Array.isArray(t?.keyPoints) ? t.keyPoints.slice(0, 12).map(k => String(k?.point || k || '').slice(0, 300)).filter(Boolean) : [],
-    quotes: Array.isArray(t?.quotes) ? t.quotes.slice(0, 10).map(q => String(q).slice(0, 400)).filter(Boolean) : [],
-  })).filter(t => t.title || t.summary) : [];
+    title: cut(t?.title, LIM.topic, 'ชื่อประเด็น'),
+    timeStart: cut(t?.timeStart, LIM.timeRange, 'เวลาเริ่ม'),
+    timeEnd: cut(t?.timeEnd, LIM.timeRange, 'เวลาจบ'),
+    summary: cut(t?.summary, LIM.summary, `เนื้อประเด็นที่ ${i + 1}`),
+    keyPoints: cutList(t?.keyPoints, LIM.keyPointsN, `ข้อสรุปประเด็นที่ ${i + 1}`).map(k => cut(k?.point || k, LIM.keyPointDetail, 'ข้อสรุป')).filter(Boolean),
+    quotes: cutList(t?.quotes, LIM.subQuotesN, `คำพูดประเด็นที่ ${i + 1}`).map(q => cut(q, LIM.quoteText, 'คำพูด')).filter(Boolean),
+  })).filter(t => t.title || t.summary);
   const ct = pickType(p.clipType);
   return {
     engine,
@@ -423,8 +470,8 @@ function normalizeMultiTopic(p, engine) {
     clipTypeLabel: CLIP_TYPES[ct].label,
     emoji: CLIP_TYPES[ct].emoji,
     usageNote: CLIP_TYPES[ct].note,
-    headline: String(p.headline || '').slice(0, 200),
-    overview: String(p.overview || '').slice(0, 1500),
+    headline: cut(p.headline, LIM.headline, 'พาดหัว'),
+    overview: cut(p.overview, LIM.overview, 'ภาพรวม'),
     totalTopics: topics.length,
     topics,
   };
@@ -460,10 +507,10 @@ export async function extractMultiTopicInsight({ url, platform, rawText = '' }) 
   const prompt = `${VIDEO_MULTITOPIC_PROMPT}
 
 === บทถอดเสียงทั้งคลิป ===
-${text.slice(0, 24000)}
+${cut(text, LIM.transcriptInLong, "บทถอดเสียงขาเข้า (โหมดคลิปยาว)")}
 === จบ ===`;
   // ★ 26 มิ.ย.: gpt-5.5 (ตัวเก่งสุด) — fallback แตกหลายประเด็นต้องคุณภาพสูง เหมือนเส้นทางหลัก
-  const r = await callAI({ prompt, model: MODEL_NEWS_ANALYSIS, temperature: 0.2, maxTokens: 8000 });
+  const r = await callAI({ prompt, model: MODEL_NEWS_ANALYSIS, temperature: 0.2, maxTokens: TEXT_MAX_TOKENS });
   const pp = typeof r === 'object' ? r : JSON.parse(String(r).match(/\{[\s\S]*\}/)?.[0] || '{}');
   return normalizeMultiTopic(pp, 'transcript-llm-multitopic');
 }

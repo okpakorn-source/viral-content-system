@@ -288,7 +288,8 @@ export async function POST(request) {
     const elapsedMs = Date.now() - startedAt;
     const record = {
       id: caseId, url, platform: type,
-      title: (insight.headline || insight.overview || url).slice(0, 80),
+      // ★ 25 ส.ค. 69: 80→300 (เจ้าของสั่งปลดข้อจำกัดความยาวข้อความ) — พาดหัวยาวถูกตัดกลางคำในหน้าคลัง
+      title: (insight.headline || insight.overview || url).slice(0, 300),
       insight,
       category: insight.category || '', clipDurationSec: insight.clipDurationSec || 0,
       user: String(user || '').slice(0, 40), elapsedMs, attempts,
