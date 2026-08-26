@@ -799,3 +799,36 @@ test('โฟลเดอร์บัญชีถูกส่งถึงลู�
     assert.equal(env.ANTHROPIC_API_KEY, undefined);
   });
 });
+
+test('บัญชีหลุดล็อกอิน: CLI ตอบ "สำเร็จ" แต่เนื้อคือ Not logged in ต้องได้ BRAIN_AUTH ไม่ใช่ผ่านเป็นเนื้อข่าว', async () => {
+  await withEnv(fakeEnv('not-logged-in'), async () => {
+    const r = await runBrain({ brain: 'claude', prompt: 'ทดสอบบัญชีหลุด', expectJson: false });
+    assert.equal(r.ok, false, 'ห้ามปล่อยข้อความล็อกอินไหลเข้าเป็นคำตอบ');
+    assert.equal(r.errorType, 'BRAIN_AUTH');
+  });
+});
+
+test('บัญชีแรกหลุดล็อกอิน → สลับไปบัญชีถัดไปได้เหมือนโควตาหมด', async () => {
+  await withEnv(fakeEnv('by-account', {
+    CLIP_BRAIN_CLAUDE_ACCOUNTS: 'C:/tmp/acct-noauth,C:/tmp/acct-good',
+    CLIP_BRAIN_PASS_ENV: 'FAKE_MODE',
+  }), async () => {
+    const r = await runBrain({ brain: 'claude', prompt: 'สลับเพราะหลุดล็อกอิน' });
+    assert.equal(r.ok, true);
+    assert.equal(r.json.accountDir, 'C:/tmp/acct-good');
+    assert.equal(r.accountsTried[0].authHit, true, 'บัญชีแรกต้องถูกบันทึกว่าหลุดล็อกอิน');
+    assert.equal(r.accountsTried[0].quotaHit, false, 'ต้องแยกจากโควตาหมด');
+  });
+});
+
+test('รายการบัญชีใช้คำว่า default = ปล่อยให้ CLI หาบัญชีเครื่องเอง (ชี้ด้วยโฟลเดอร์ไม่ได้)', async () => {
+  await withEnv(fakeEnv('by-account', {
+    CLIP_BRAIN_CLAUDE_ACCOUNTS: 'default,C:/tmp/acct-good',
+    CLIP_BRAIN_PASS_ENV: 'FAKE_MODE',
+  }), async () => {
+    const r = await runBrain({ brain: 'claude', prompt: 'ทดสอบ default' });
+    assert.equal(r.ok, true);
+    assert.equal(r.accountsTried[0].dir, null, 'รายการแรกต้องไม่ยัดโฟลเดอร์ให้ลูก');
+    assert.equal(r.json.accountDir, '(ไม่ได้รับโฟลเดอร์บัญชี)');
+  });
+});

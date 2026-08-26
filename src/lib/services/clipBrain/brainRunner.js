@@ -256,7 +256,13 @@ export function accountList(brain) {
   const dirVar = brain === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME';
   const raw = String(process.env[envName] || '').split(',').map((s) => s.trim()).filter(Boolean);
   if (!raw.length) return [{ name: 'default', dirVar, dir: null }];   // ไม่ตั้ง = เดิม
-  return raw.slice(0, 5).map((dir, i) => ({ name: i === 0 ? 'หลัก' : `สำรอง${i}`, dirVar, dir }));
+  // 🔑 พิสูจน์จริง 26 ส.ค.: บัญชีที่เครื่องใช้อยู่ "ชี้ด้วยโฟลเดอร์ไม่ได้" — ต้องปล่อยให้ CLI หาเอง
+  //    (ทดสอบแล้ว CLAUDE_CONFIG_DIR=C:\Users\User ได้ "Not logged in") → ใช้คำว่า default/- แทน
+  return raw.slice(0, 5).map((s, i) => ({
+    name: i === 0 ? 'หลัก' : `สำรอง${i}`,
+    dirVar,
+    dir: (s === 'default' || s === '-') ? null : s,
+  }));
 }
 
 /**
@@ -265,6 +271,14 @@ export function accountList(brain) {
  */
 const QUOTA_RE = /usage limit reached|rate.?limit|quota (?:exceeded|exhausted)|out of (?:credits?|quota)|insufficient (?:credits?|quota)|429|too many requests|upgrade to increase|limit will reset|credit balance is too low|plan limit/i;
 export function isQuotaMessage(s) { return QUOTA_RE.test(String(s || '')); }
+
+/**
+ * 🔴 บัญชีไม่ได้ล็อกอิน/โทเคนหมดอายุ — อันตรายกว่าโควตาหมด เพราะ CLI **ตอบว่า "สำเร็จ"**
+ *    แล้วส่งข้อความ "Not logged in · Please run /login" มาเป็นคำตอบ (พิสูจน์จริง 26 ส.ค. 69)
+ *    ถ้าไม่ดัก ข้อความนี้จะไหลเข้าไปเป็น "เนื้อข่าว" หรือ "ผลตรวจ" = ล่มเงียบเต็มรูปแบบ
+ */
+const AUTH_RE = /not logged in|please run \/login|run `?claude login|authentication (?:failed|required)|invalid (?:api key|credentials)|unauthorized|401|session (?:expired|invalid)|token (?:expired|invalid)|re-?authenticate/i;
+export function isAuthMessage(s) { return AUTH_RE.test(String(s || '')); }
 
 // 🔑 พิสูจน์จริง 25 ส.ค.: โหมด "ผอม" (ไม่โหลดเครื่องมือ/กฎโปรเจกต์/MCP) เร็วกว่าเดิม ~8 เท่า
 //    (พรอมต์วางแผนเดียวกัน: ค่าเริ่มต้น 62.8 วิ → ผอม 8.0 วิ) และกันกฎเขียนโค้ดของโปรเจกต์
@@ -535,16 +549,23 @@ export async function runBrain(rawOpts) {
         r = await execBrain({ file: launch.file, args: launch.args, cwdDir: workDir(), timeoutMs, prompt, accountDirs: dirs });
         used = acc;
         const blob = `${r.out || ''}\n${r.err || ''}`;
-        const quotaHit = !r.spawnError && !r.timedOut && isQuotaMessage(blob);
-        tried.push({ account: acc.name, dir: acc.dir, quotaHit });
-        if (!quotaHit) break;
-        try { console.warn(`[ClipBrain] 🔁 ${label}: บัญชี "${acc.name}" โควตาหมด → สลับบัญชีถัดไป`); } catch {}
+        const alive = !r.spawnError && !r.timedOut;
+        const quotaHit = alive && isQuotaMessage(blob);
+        // 🔴 บัญชีหลุดล็อกอิน: CLI ตอบ 'สำเร็จ' แต่เนื้อคือคำสั่งให้ไปล็อกอิน — ต้องสลับบัญชีเหมือนโควตาหมด
+        const authHit = alive && !quotaHit && isAuthMessage(blob);
+        tried.push({ account: acc.name, dir: acc.dir, quotaHit, authHit });
+        if (!quotaHit && !authHit) break;
+        try { console.warn(`[ClipBrain] 🔁 ${label}: บัญชี "${acc.name}" ${quotaHit ? 'โควตาหมด' : 'ยังไม่ได้ล็อกอิน'} → สลับบัญชีถัดไป`); } catch {}
       }
       const accountInfo = { account: used?.name || 'default', accountsTried: tried };
-      // ทุกบัญชีโควตาหมด → บอกตรงๆ ห้ามกลืนเป็น error ทั่วไป
-      if (tried.length && tried.every((t) => t.quotaHit)) {
-        return fail('BRAIN_QUOTA',
-          `โควตาหมดทุกบัญชี (ลองแล้ว ${tried.length}: ${tried.map((t) => t.account).join(', ')}) — ต้องเติมแพลนหรือเพิ่มบัญชีสำรอง`,
+      // ใช้ไม่ได้ทุกบัญชี → บอกตรงๆ ว่าเพราะอะไร ห้ามกลืนเป็น error ทั่วไป (เจ้าของสั่ง "ห้ามล่มเงียบ")
+      if (tried.length && tried.every((t) => t.quotaHit || t.authHit)) {
+        const allAuth = tried.every((t) => t.authHit);
+        const detail = tried.map((t) => `${t.account}=${t.quotaHit ? 'โควตาหมด' : 'ไม่ได้ล็อกอิน'}`).join(', ');
+        return fail(allAuth ? 'BRAIN_AUTH' : 'BRAIN_QUOTA',
+          allAuth
+            ? `ทุกบัญชียังไม่ได้ล็อกอิน/โทเคนหมดอายุ (${detail}) — ต้องล็อกอินใหม่`
+            : `ใช้ไม่ได้ทุกบัญชี (ลองแล้ว ${tried.length}: ${detail}) — ต้องเติมแพลนหรือล็อกอินเพิ่ม`,
           { ...accountInfo, rawSample: tail(`${r?.out || ''}\n${r?.err || ''}`, 300) });
       }
       if (r.spawnError) {
@@ -580,6 +601,12 @@ export async function runBrain(rawOpts) {
       if (parsed.cliError) return fail('BRAIN_CLI_ERROR', parsed.cliError, { rawSample: head(r.out, 300), ...accountInfo });
       const text = String(parsed.text || '');
       if (!text.trim()) return fail('BRAIN_EMPTY_ANSWER', 'สมองตอบว่างเปล่า', accountInfo);
+      // 🔴 ด่านสุดท้ายกันล่มเงียบ: CLI ตอบ subtype=success แต่เนื้อเป็น "Not logged in · Please run /login"
+      //    (พิสูจน์จริง 26 ส.ค. 69) — ถ้าปล่อยผ่าน ข้อความนี้จะกลายเป็น "เนื้อข่าว"/"ผลตรวจ" ในใบงานจริง
+      //    เช็คเฉพาะคำตอบสั้น (<400 ตัว) เพื่อไม่ให้บทความที่บังเอิญพูดถึงการล็อกอินถูกตีเป็นบัญชีหลุด
+      if (text.trim().length < 400 && isAuthMessage(text)) {
+        return fail('BRAIN_AUTH', `บัญชี "${accountInfo.account}" ยังไม่ได้ล็อกอิน/โทเคนหมดอายุ — ${head(text.trim(), 150)}`, accountInfo);
+      }
       let json = null;
       if (opts.expectJson !== false) {
         json = extractJson(text) || (kind === 'codex' ? extractJson(r.out) : null);

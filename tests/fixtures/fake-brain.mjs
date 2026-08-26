@@ -39,12 +39,21 @@ process.stdin.on('end', () => {
     process.stdout.write(`user\n${input.slice(0, 80)}\n\ncodex\n${j}\ntokens used\n6,262\n${j}\n`);
     process.exit(0);
   }
+  if (mode === 'not-logged-in') {
+    // CLI ตอบว่า "สำเร็จ" แต่เนื้อคือคำสั่งให้ไปล็อกอิน — เคสจริงที่เจอ 26 ส.ค. 69
+    process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'Not logged in · Please run /login' }));
+    process.exit(0);
+  }
   if (mode === 'quota') {
     process.stderr.write('Claude usage limit reached. Your limit will reset at 3pm.');
     process.exit(0);
   }
   if (mode === 'by-account') {
     const dir = process.env.CLAUDE_CONFIG_DIR || process.env.CODEX_HOME || '(ไม่ได้รับโฟลเดอร์บัญชี)';
+    if (/-noauth$/.test(dir)) {
+      process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'Not logged in · Please run /login' }));
+      process.exit(0);
+    }
     if (/-full$/.test(dir)) {
       process.stderr.write(`Claude usage limit reached for ${dir}`);
       process.exit(0);
