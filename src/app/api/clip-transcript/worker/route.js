@@ -2,6 +2,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { NextResponse } from 'next/server';
 import { createStore } from '@/lib/persistStore';
 import { getSupabase, isSupabaseReady } from '@/lib/supabase';
+import { touchWorkerHeartbeat, isHeartbeatRow } from '../workerHeartbeat';
 
 /**
  * Clip Worker bridge — ให้เครื่องทีมดึงงานและรายงานผลผ่าน lease เดียวต่อหนึ่งงาน
@@ -223,10 +224,14 @@ export async function GET(request) {
   }
   if (!isSupabaseReady()) return primaryUnavailableResponse();
 
+  // 💓 แตะชีพจร "เครื่องทีมยังเปิดอยู่" — worker วนขอทุก 5 วิแม้คิวว่าง (ตัวช่วยเขียนจริงแค่นาทีละครั้ง)
+  //    ไม่ await และกลืน error ในตัวเอง — ชีพจรพลาดต้องไม่กระทบการ claim งาน
+  touchWorkerHeartbeat({ host: request.headers.get('x-clip-worker-host') || '', version: WORKER_PROTOCOL });
+
   try {
     const store = createStore(STORE_NAME);
     // production ห้าม fallback ไปอ่านไฟล์ cache เก่า เพราะอาจทำให้หยิบงานซ้ำข้ามเครื่อง
-    const all = await store.getAll({ authoritative: true });
+    const all = (await store.getAll({ authoritative: true })).filter((x) => !isHeartbeatRow(x));
     const nowMs = Date.now();
     const nowIso = new Date(nowMs).toISOString();
     const candidates = all

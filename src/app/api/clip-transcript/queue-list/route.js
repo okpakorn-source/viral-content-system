@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createStore } from '@/lib/persistStore';
+import { readWorkerStatus, isHeartbeatRow } from '../workerHeartbeat';
 
 /**
  * GET /api/clip-transcript/queue-list (26 มิ.ย.) — รายการ "คิวคลิป" ทั้งหมดให้ UI โชว์เป็นแผงรวม
@@ -16,7 +17,10 @@ const FINISHED = ['done', 'error', 'cancelled'];
 export async function GET() {
   try {
     const store = createStore('clip-jobs');
-    const all = await store.getAll();
+    const raw = await store.getAll();
+    // 💓 แถวชีพจรเครื่องทีมไม่ใช่ใบงาน — แยกออกก่อนนับ/แสดงผล
+    const worker = readWorkerStatus(raw);
+    const all = (raw || []).filter((x) => !isHeartbeatRow(x));
     // ★ 26 ส.ค. 69: ส่ง statusNote/lastError/user/cancelledAt ติดไปด้วย (มีในใบงานอยู่แล้ว แต่ไม่เคยส่งออก)
     //   UI ต้องบอกได้ว่าใบไหนติดอะไร ใครส่ง ยกเลิกเมื่อไร — error เต็มไม่ตัด (พิมพ์เขียวข้อ 1)
     const slim = (j) => ({
@@ -59,7 +63,7 @@ export async function GET() {
       active: active.length,
     };
 
-    return NextResponse.json({ success: true, counts, active, recent });
+    return NextResponse.json({ success: true, counts, active, recent, worker });
   } catch (error) {
     console.error('[ClipQueueList]', error.message);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

@@ -95,3 +95,35 @@ export function recommendAction(url) {
   if (d.platform === 'article') return 'news-hunt';
   return null;
 }
+
+/**
+ * ★ 26 ส.ค. 69 (เจ้าของสั่ง): "ทุกช่องทางถอดเครื่องทีมปุ่มเดียว · เครื่องทีมปิดค่อยถอดสำรองบน Vercel เฉพาะอันที่ถอดได้"
+ * ตัดสินให้ปุ่มเดียวว่าจะไปทางไหน — ไม่ให้พนักงานต้องจำเอง
+ *   queue  = ส่งเครื่องทีม (ทางหลักทุกแพลตฟอร์ม — เครื่องทีมโหลดคลิปได้ทุกช่องทาง)
+ *   direct = ถอดสดบนคลาวด์ (สำรอง เฉพาะ YouTube/TikTok ที่คลาวด์ทำได้)
+ *   blocked = เครื่องทีมปิด และคลาวด์ทำแพลตฟอร์มนี้ไม่ได้ (Facebook/IG ต้องใช้ yt-dlp บนเครื่องทีม)
+ */
+const CLOUD_CAPABLE = new Set(['youtube', 'tiktok']);
+export function planClipRoute(url, workerAlive) {
+  const d = detectLink(url);
+  if (!d.isClip) return { mode: 'not-clip', platform: d.platform, label: '' };
+  if (workerAlive) {
+    return { mode: 'queue', platform: d.platform, label: 'ส่งเครื่องทีมถอด', why: 'เครื่องทีมพร้อม — ถอดได้ทุกช่องทาง คุณภาพสูงสุด' };
+  }
+  if (CLOUD_CAPABLE.has(d.platform)) {
+    return { mode: 'direct', platform: d.platform, label: 'ถอดสำรองบนคลาวด์', why: 'เครื่องทีมปิดอยู่ — ลิงก์นี้คลาวด์ถอดแทนได้' };
+  }
+  return {
+    mode: 'blocked', platform: d.platform, label: 'รอเครื่องทีมเปิด',
+    why: 'เครื่องทีมปิดอยู่ และลิงก์ Facebook/IG ต้องโหลดไฟล์จากเครื่องทีมเท่านั้น — กดส่งเข้าคิวไว้ได้ เครื่องทีมเปิดเมื่อไหร่จะถอดให้เอง',
+  };
+}
+
+/** ข้อความ + สีของชิปสถานะเครื่องทีมบนหัวหน้า */
+export function workerChip(worker) {
+  if (!worker || !worker.known) return { text: 'เครื่องทีม: ไม่ทราบสถานะ', color: '#9ca3af', dot: '#9ca3af' };
+  if (worker.alive) return { text: 'เครื่องทีมพร้อม', color: '#22c55e', dot: '#22c55e' };
+  const s = Number(worker.secondsAgo) || 0;
+  const ago = s < 3600 ? `${Math.round(s / 60)} นาที` : `${Math.round(s / 3600)} ชม.`;
+  return { text: `เครื่องทีมปิด (เงียบไป ${ago})`, color: '#ef4444', dot: '#ef4444' };
+}

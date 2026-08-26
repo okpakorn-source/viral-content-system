@@ -199,6 +199,10 @@ async function loadRoute({
     createHash,
     timingSafeEqual,
     workerSecret,
+    // ★ 26 ส.ค. 69: ชีพจร "เครื่องทีมยังเปิดอยู่" (workerHeartbeat.js) — harness ตัด import ทิ้ง จึงต้องฉีดเอง
+    //   ของจริงยิงแบบไม่รอผลและกลืน error · ที่นี่ทำเป็นตัวนับเฉยๆ เพื่อยืนยันว่า "ไม่รบกวนตรรกะ lease"
+    touchWorkerHeartbeat: () => { globalThis.__heartbeatTouches = (globalThis.__heartbeatTouches || 0) + 1; },
+    isHeartbeatRow: (x) => !!x && x.id === '__clip_worker_heartbeat__',
   };
 
   let transformed = source.replace(/^import .*?;\r?\n/gm, '');
@@ -211,7 +215,7 @@ async function loadRoute({
       "process.env.CLIP_WORKER_SECRET || process.env.DISCORD_API_SECRET || ''",
       'workerSecret',
     );
-  const prefix = 'const { randomUUID, NextResponse, createStore, getSupabase, isSupabaseReady, createHash, timingSafeEqual, workerSecret } = globalThis.__clipWorkerRouteHarness;\n';
+  const prefix = 'const { randomUUID, NextResponse, createStore, getSupabase, isSupabaseReady, createHash, timingSafeEqual, workerSecret, touchWorkerHeartbeat, isHeartbeatRow } = globalThis.__clipWorkerRouteHarness;\n';
   transformed = `${prefix}${transformed}\nexport { GET, POST };\n// ${crypto.randomUUID()}\n`;
 
   try {
@@ -858,4 +862,25 @@ test('mutation: กลืน JSON body ที่ขาดแล้วเทส�
     () => assertUnreadableProcessBodyStops(mutated),
     /ต้องหยุดแบบ ambiguous|ต้องหยุด/,
   );
+});
+
+// ── 💓 ชีพจรเครื่องทีม (26 ส.ค. 69) — ต้องไม่รบกวนคิวเลยแม้แต่นิดเดียว ──
+
+test('แถวชีพจรเครื่องทีมต้องไม่ถูกหยิบไปเป็นงานถอด', async () => {
+  // แถวชีพจรไม่มี status/url — ถ้าโค้ดไม่กรองออก อาจหลุดเข้า candidates แล้วพังตอน claim
+  const heartbeatRow = { id: '__clip_worker_heartbeat__', lastSeenAt: new Date().toISOString() };
+  const route = await loadRoute({ jobs: [heartbeatRow] });
+  const res = await route.GET(makeRequest());
+  const body = await responseBody(res);
+  assert.equal(body.success, true);
+  assert.equal(body.job, null, 'มีแต่แถวชีพจร = ต้องไม่มีงานให้ทำ ไม่ใช่หยิบแถวชีพจรไปถอด');
+});
+
+test('มีแถวชีพจรปนอยู่ ต้องยังหยิบงานจริงได้ตามปกติ', async () => {
+  const heartbeatRow = { id: '__clip_worker_heartbeat__', lastSeenAt: new Date().toISOString() };
+  const route = await loadRoute({ jobs: [heartbeatRow, makeJob()] });
+  const res = await route.GET(makeRequest());
+  const body = await responseBody(res);
+  assert.ok(body.job, 'ต้องหยิบงานจริงได้ ไม่ถูกแถวชีพจรบัง');
+  assert.notEqual(body.job.id, '__clip_worker_heartbeat__');
 });

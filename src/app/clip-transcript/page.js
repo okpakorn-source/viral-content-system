@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import JobBoard from './ui/JobBoard';
 import StatsStrip from './ui/StatsStrip';
 import InsightCard from './ui/InsightCard';
-import { detectLink, recommendAction, platformIcon as platIcon, getBrainMeta, fmtDurSec, fmtClock } from './ui/statusMeta';
+import { detectLink, recommendAction, platformIcon as platIcon, getBrainMeta, fmtDurSec, fmtClock, planClipRoute, workerChip } from './ui/statusMeta';
 
 // โทนทั้งหน้า (พิมพ์เขียวข้อ 8) — สีเน้นเดียว #38bdf8 · เขียว/เหลือง/แดงสงวนให้สถานะ
 const C = {
@@ -314,6 +314,33 @@ export default function ClipTranscriptPage() {
   // myJob ให้ JobBoard (จาก queueJob)
   const busy = loading || insightLoading || hunting;
   const primaryAction = recommendAction(url);
+  // ★ 26 ส.ค. 69 (เจ้าของสั่ง): ปุ่มเดียว — เครื่องทีมเป็นทางหลักทุกช่องทาง · เครื่องทีมปิดค่อยถอดสำรองบนคลาวด์
+  const worker = queueList?.worker;
+  const route = planClipRoute(url, !!worker?.alive);
+  const wchip = workerChip(worker);
+
+  /** ปุ่มหลัก: ระบบเลือกเส้นทางให้เอง ไม่ให้พนักงานต้องจำ */
+  const runPrimary = () => {
+    if (!url.trim()) { setErr('วางลิงก์คลิปก่อน'); return; }
+    if (primaryAction === 'news-hunt') return extractNewsHunt();
+    if (route.mode === 'direct') {
+      setNotice('☁️ เครื่องทีมปิดอยู่ — ถอดสำรองบนคลาวด์ให้แทน (ลิงก์นี้คลาวด์ทำได้)');
+      return extractInsight();
+    }
+    // queue และ blocked ใช้เส้นเดียวกัน: เข้าคิวเครื่องทีม
+    // blocked = เครื่องทีมปิด + เป็น FB/IG → งานจะรอในคิวจนเครื่องทีมเปิด (ไม่หาย ไม่เงียบ)
+    if (route.mode === 'blocked') setNotice('🔴 เครื่องทีมปิดอยู่ — ส่งเข้าคิวไว้แล้ว เครื่องทีมเปิดเมื่อไหร่จะถอดให้เอง (ลิงก์ Facebook/IG ต้องใช้เครื่องทีมเท่านั้น)');
+    return submitToQueue();
+  };
+  const primaryLabel = () => {
+    if (submitting) return '⏳ กำลังส่ง…';
+    if (insightLoading) return '⏳ กำลังถอด…';
+    if (primaryAction === 'news-hunt') return '📰 วิจัยลิงก์ข่าว';
+    if (!url.trim()) return '🎯 ถอดประเด็น';
+    if (route.mode === 'direct') return '☁️ ถอดสำรองบนคลาวด์';
+    if (route.mode === 'blocked') return '📥 ส่งเข้าคิว (รอเครื่องทีมเปิด)';
+    return '🎯 ถอดประเด็น (เครื่องทีม)';
+  };
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'inherit' }}>
@@ -333,6 +360,12 @@ export default function ClipTranscriptPage() {
                 👤 {currentUser || 'ตั้งชื่อผู้ใช้'}
               </button>
             )}
+            {/* 🖥️ สถานะเครื่องทีม — ตัวชี้ว่าปุ่มหลักจะไปทางไหน */}
+            <span title={worker?.lastSeenAt ? `แตะชีพจรล่าสุด ${fmtClock(worker.lastSeenAt)}` : 'ยังไม่เคยได้รับชีพจรจากเครื่องทีม'}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 999, border: `1px solid ${C.line}`, background: C.sub, fontSize: 12.5, color: wchip.color }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: wchip.dot, boxShadow: `0 0 6px ${wchip.dot}` }} />
+              {wchip.text}
+            </span>
             {gem && (() => {
               const g = gem.light === 'green' ? { d: '#22c55e', t: 'Gemini พร้อม' } : gem.light === 'red' ? { d: '#ef4444', t: 'Gemini แน่น' } : { d: '#f59e0b', t: 'Gemini ช้า/ไม่แน่ใจ' };
               return (
@@ -353,17 +386,23 @@ export default function ClipTranscriptPage() {
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
             <div style={{ flex: 1, minWidth: 260, position: 'relative' }}>
               <input value={url} onChange={e => setUrl(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !busy) { primaryAction === 'news-hunt' ? extractNewsHunt() : extractInsight(); } }}
+                onKeyDown={e => { if (e.key === 'Enter' && !busy && !submitting) runPrimary(); }}
                 placeholder="วางลิงก์ที่นี่…"
                 style={{ width: '100%', padding: '12px 14px', borderRadius: 10, border: `1px solid ${C.line}`, background: C.sub, color: C.text, fontSize: 14, fontFamily: 'inherit', boxSizing: 'border-box' }} />
               {link.label && <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11.5, color: C.muted, background: C.card, padding: '2px 8px', borderRadius: 999, border: `1px solid ${C.line}` }}>{link.label}</span>}
             </div>
-            {/* ปุ่มหลัก 1 ปุ่ม */}
-            <button onClick={() => (primaryAction === 'news-hunt' ? extractNewsHunt() : extractInsight())} disabled={busy}
-              style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: busy ? '#334155' : C.accent, color: busy ? C.muted : '#04263b', fontWeight: 800, fontSize: 14, cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
-              {insightLoading ? '⏳ กำลังถอด…' : primaryAction === 'news-hunt' ? '📰 วิจัยลิงก์ข่าว' : '🎯 ถอดประเด็น'}
+            {/* ปุ่มหลัก 1 ปุ่ม — ระบบเลือกเส้นทางให้เอง (เครื่องทีมก่อนเสมอ) */}
+            <button onClick={runPrimary} disabled={busy || submitting}
+              style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: (busy || submitting) ? '#334155' : (route.mode === 'blocked' ? '#f59e0b' : C.accent), color: (busy || submitting) ? C.muted : '#04263b', fontWeight: 800, fontSize: 14, cursor: (busy || submitting) ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
+              {primaryLabel()}
             </button>
           </div>
+          {/* บอกล่วงหน้าว่าลิงก์นี้จะไปทางไหน — พนักงานไม่ต้องเดา */}
+          {route.why && url.trim() && (
+            <div style={{ marginTop: 8, fontSize: 12, color: route.mode === 'blocked' ? '#fbbf24' : C.muted }}>
+              {route.mode === 'queue' ? '🖥️' : route.mode === 'direct' ? '☁️' : '⏳'} {route.why}
+            </div>
+          )}
 
           {/* ปุ่มรอง ghost */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
