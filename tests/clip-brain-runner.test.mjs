@@ -23,6 +23,8 @@ const ENV_KEYS = [
   'CLIP_BRAIN_CLAUDE_BIN', 'CLIP_BRAIN_CODEX_BIN', 'FAKE_MODE',
   'CLIP_BRAIN_MAX_CONCURRENT', 'CLIP_BRAIN_TIMEOUT_MS', 'CLIP_BRAIN_WRITER_MODEL',
   'CLIP_BRAIN_PASS_ENV',
+  // ★ 26 ส.ค. 69: สวิตช์สลับบัญชี (เจ้าของสั่ง 'ห้ามล่มเงียบ')
+  'CLIP_BRAIN_CLAUDE_ACCOUNTS', 'CLIP_BRAIN_CODEX_ACCOUNTS', 'CLAUDE_CONFIG_DIR', 'CODEX_HOME',
 ];
 
 async function withEnv(vars, fn) {
@@ -716,4 +718,84 @@ test('🔒 CB-03 รอบสาม (มุ่งเป้าตรง): killTre
   } finally {
     try { fs.unlinkSync(tmpFile); } catch {}
   }
+});
+
+// ---------- 10. สวิตช์สลับบัญชี + โควตาหมด (เจ้าของสั่ง 26 ส.ค. 69 "ห้ามล่มเงียบ") ----------
+
+test('โควตาหมดต้องได้ BRAIN_QUOTA ไม่ใช่ error ทั่วไป (ของเดิมตกไปเป็น BRAIN_EXIT ปนสาเหตุอื่น)', async () => {
+  await withEnv(fakeEnv('quota'), async () => {
+    const r = await runBrain({ brain: 'claude', prompt: 'ทดสอบโควตา', expectJson: false });
+    assert.equal(r.ok, false);
+    assert.equal(r.errorType, 'BRAIN_QUOTA', 'ต้องแยกโควตาหมดออกจากพังทั่วไป');
+    assert.match(r.error, /โควตาหมด/);
+  });
+});
+
+test('บัญชีหลักโควตาหมด → สลับไปบัญชีสำรองแล้วสำเร็จ (ไม่ต้องรอคนมากด)', async () => {
+  await withEnv(fakeEnv('by-account', {
+    CLIP_BRAIN_CLAUDE_ACCOUNTS: 'C:/tmp/acct-main-full,C:/tmp/acct-backup',
+    CLIP_BRAIN_PASS_ENV: 'FAKE_MODE',
+  }), async () => {
+    const r = await runBrain({ brain: 'claude', prompt: 'ทดสอบสลับบัญชี' });
+    assert.equal(r.ok, true, 'สลับบัญชีแล้วต้องสำเร็จ');
+    assert.equal(r.json.accountDir, 'C:/tmp/acct-backup', 'ตัวปลอมต้องได้โฟลเดอร์ของบัญชีสำรอง');
+    assert.equal(r.account, 'สำรอง1');
+    assert.equal(r.accountsTried.length, 2, 'ต้องบันทึกว่าลองมาแล้วกี่บัญชี');
+    assert.equal(r.accountsTried[0].quotaHit, true, 'บัญชีแรกต้องถูกบันทึกว่าโควตาหมด');
+    assert.equal(r.accountsTried[1].quotaHit, false);
+  });
+});
+
+test('ทุกบัญชีโควตาหมด → BRAIN_QUOTA พร้อมรายชื่อบัญชีที่ลอง (ห้ามเงียบ)', async () => {
+  await withEnv(fakeEnv('by-account', {
+    CLIP_BRAIN_CLAUDE_ACCOUNTS: 'C:/tmp/a1-full,C:/tmp/a2-full',
+    CLIP_BRAIN_PASS_ENV: 'FAKE_MODE',
+  }), async () => {
+    const r = await runBrain({ brain: 'claude', prompt: 'หมดทุกบัญชี' });
+    assert.equal(r.ok, false);
+    assert.equal(r.errorType, 'BRAIN_QUOTA');
+    assert.match(r.error, /ลองแล้ว 2/, 'ต้องบอกจำนวนบัญชีที่ลอง');
+    assert.equal(r.accountsTried.length, 2);
+    assert.ok(r.accountsTried.every((t) => t.quotaHit));
+  });
+});
+
+test('ล้มด้วยสาเหตุอื่น (ไม่ใช่โควตา) ต้องหยุดที่บัญชีแรก — ห้ามไล่เผาบัญชีสำรอง', async () => {
+  await withEnv(fakeEnv('exit2', {
+    CLIP_BRAIN_CLAUDE_ACCOUNTS: 'C:/tmp/b1,C:/tmp/b2,C:/tmp/b3',
+    CLIP_BRAIN_PASS_ENV: 'FAKE_MODE',
+  }), async () => {
+    const r = await runBrain({ brain: 'claude', prompt: 'พังสาเหตุอื่น' });
+    assert.equal(r.ok, false);
+    assert.equal(r.errorType, 'BRAIN_EXIT');
+    assert.equal(r.accountsTried.length, 1, 'ต้องหยุดที่บัญชีแรก ไม่ลามไปบัญชีอื่น');
+    assert.equal(r.account, 'หลัก');
+  });
+});
+
+test('ไม่ตั้งทะเบียนบัญชี = พฤติกรรมเดิมเป๊ะ (ใช้บัญชีเริ่มต้นของเครื่อง)', async () => {
+  await withEnv(fakeEnv('claude-ok'), async () => {
+    const r = await runBrain({ brain: 'claude', prompt: 'ไม่ตั้งทะเบียน' });
+    assert.equal(r.ok, true);
+    assert.equal(r.account, 'default');
+    assert.equal(r.accountsTried.length, 1);
+    assert.equal(r.accountsTried[0].dir, null, 'ไม่ต้องยัดโฟลเดอร์บัญชีให้ลูกเมื่อไม่ได้ตั้ง');
+  });
+});
+
+test('โฟลเดอร์บัญชีถูกส่งถึงลูกจริง แต่ความลับยังไม่หลุด', async () => {
+  await withEnv(fakeEnv('by-account', {
+    CLIP_BRAIN_CLAUDE_ACCOUNTS: 'C:/tmp/acct-x',
+    CLIP_BRAIN_PASS_ENV: 'FAKE_MODE',
+    SUPABASE_SERVICE_KEY: 'ห้ามหลุด-1',
+    ANTHROPIC_API_KEY: 'ห้ามหลุด-2',
+  }), async () => {
+    const r = await runBrain({ brain: 'claude', prompt: 'ตรวจ env' });
+    assert.equal(r.ok, true);
+    assert.equal(r.json.accountDir, 'C:/tmp/acct-x', 'ลูกต้องได้โฟลเดอร์บัญชีที่สั่ง');
+    const env = buildChildEnv({ CLAUDE_CONFIG_DIR: 'C:/tmp/acct-x' });
+    assert.equal(env.CLAUDE_CONFIG_DIR, 'C:/tmp/acct-x');
+    assert.equal(env.SUPABASE_SERVICE_KEY, undefined, 'ความลับต้องไม่หลุดแม้เปิดทางโฟลเดอร์บัญชี');
+    assert.equal(env.ANTHROPIC_API_KEY, undefined);
+  });
 });

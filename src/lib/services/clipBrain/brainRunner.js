@@ -215,22 +215,56 @@ const ENV_ALLOW = new Set([
   'CLIP_BRAIN_CLAUDE_BIN', 'CLIP_BRAIN_CODEX_BIN', 'CLIP_BRAIN_WORKDIR',
   'CLIP_BRAIN_TIMEOUT_MS', 'CLIP_BRAIN_MAX_CONCURRENT',
 ]);
+// ★ 26 ส.ค. 69 (เจ้าของสั่ง "ต้องมีสวิตช์สลับบัญชี ห้ามล่มเงียบ"):
+//   ตัวแปรชี้ "โฟลเดอร์บัญชี" ของ CLI — ค่าเป็น path ไม่ใช่ความลับ แต่ต้องส่งให้ลูกถึงจะสลับบัญชีได้
+//   ⚠️ ชื่อ CODEX_HOME/CLAUDE_CONFIG_DIR ไม่ชนคำต้องห้าม แต่ประกาศแยกไว้ให้เห็นชัดว่าเป็นข้อยกเว้นที่ตั้งใจ
+const ENV_ACCOUNT_DIR = new Set(['CLAUDE_CONFIG_DIR', 'CODEX_HOME']);
 // คำต้องห้ามชนะทุกอย่าง — ชนะทั้ง allowlist ข้างบนและ PASS_ENV (ห้ามผ่านไม่ว่าใครสั่ง)
 const ENV_DENY_WORD = /KEY|SECRET|TOKEN|PASSWORD|PASSWD|PASSPHRASE|CREDENTIAL|COOKIE|AUTH|SESSION|PRIVATE|SUPABASE|GEMINI|OPENAI|ANTHROPIC|DISCORD/;
-export function buildChildEnv() {
+export function buildChildEnv(accountDirs = null) {
   const extra = new Set(
     String(process.env.CLIP_BRAIN_PASS_ENV || '').split(',').map((s) => s.trim().toUpperCase()).filter(Boolean),
   );
   const out = {};
   for (const k of Object.keys(process.env)) {
     const K = k.toUpperCase();
+    if (ENV_ACCOUNT_DIR.has(K)) { out[k] = process.env[k]; continue; }  // โฟลเดอร์บัญชี = path ไม่ใช่ความลับ
     if (ENV_DENY_WORD.test(K)) continue;
     if (ENV_ALLOW.has(K) || extra.has(K)) out[k] = process.env[k];
+  }
+  // บัญชีที่ผู้เรียกสั่งมา ชนะค่าจากสภาพแวดล้อมเสมอ (ใช้ตอนสลับบัญชีอัตโนมัติ)
+  if (accountDirs && typeof accountDirs === 'object') {
+    for (const k of Object.keys(accountDirs)) {
+      const K = k.toUpperCase();
+      if (ENV_ACCOUNT_DIR.has(K) && accountDirs[k]) out[K] = String(accountDirs[k]);
+    }
   }
   out.NO_COLOR = '1';
   out.FORCE_COLOR = '0';
   return out;
 }
+
+/**
+ * ★ ทะเบียนบัญชีสมอง — เจ้าของสั่ง 26 ส.ค. 69 "ห้ามล่มเงียบ ต้องมีสวิตช์สลับบัญชี"
+ * ตั้งผ่าน env (คั่นด้วย ,) เช่น
+ *   CLIP_BRAIN_CLAUDE_ACCOUNTS="C:\Users\User\.claude,C:\Users\User\.claude-okpakorn"
+ *   CLIP_BRAIN_CODEX_ACCOUNTS="C:\Users\User\.codex,C:\Users\User\.codex-mumoo"
+ * ไม่ตั้ง = ใช้บัญชีเริ่มต้นของเครื่องตัวเดียว (พฤติกรรมเดิมเป๊ะ)
+ */
+export function accountList(brain) {
+  const envName = brain === 'claude' ? 'CLIP_BRAIN_CLAUDE_ACCOUNTS' : 'CLIP_BRAIN_CODEX_ACCOUNTS';
+  const dirVar = brain === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME';
+  const raw = String(process.env[envName] || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (!raw.length) return [{ name: 'default', dirVar, dir: null }];   // ไม่ตั้ง = เดิม
+  return raw.slice(0, 5).map((dir, i) => ({ name: i === 0 ? 'หลัก' : `สำรอง${i}`, dirVar, dir }));
+}
+
+/**
+ * จับ "โควตาหมด/ถูกจำกัดอัตรา" ให้แยกจากพังทั่วไป — ของเดิมตกไปเป็น BRAIN_EXIT ปนสาเหตุอื่น = ล่มเงียบ
+ * ตรวจจากข้อความที่ CLI พ่นออกมา (ทั้ง stdout/stderr) ครอบทั้งฝั่ง Claude และ Codex
+ */
+const QUOTA_RE = /usage limit reached|rate.?limit|quota (?:exceeded|exhausted)|out of (?:credits?|quota)|insufficient (?:credits?|quota)|429|too many requests|upgrade to increase|limit will reset|credit balance is too low|plan limit/i;
+export function isQuotaMessage(s) { return QUOTA_RE.test(String(s || '')); }
 
 // 🔑 พิสูจน์จริง 25 ส.ค.: โหมด "ผอม" (ไม่โหลดเครื่องมือ/กฎโปรเจกต์/MCP) เร็วกว่าเดิม ~8 เท่า
 //    (พรอมต์วางแผนเดียวกัน: ค่าเริ่มต้น 62.8 วิ → ผอม 8.0 วิ) และกันกฎเขียนโค้ดของโปรเจกต์
@@ -338,7 +372,7 @@ function killTree(child) {
  * เรียกโปรเซสลูกจริง — ไม่ผ่าน shell (CB-02) และมีสถานะจบเดียวไม่แข่งกัน (CB-03)
  * @param {object} p { file, args:[], cwdDir, timeoutMs, prompt }
  */
-function execBrain({ file, args, cwdDir, timeoutMs, prompt }) {
+function execBrain({ file, args, cwdDir, timeoutMs, prompt, accountDirs = null }) {
   return new Promise((resolve) => {
     let done = false;
     const finish = (r) => { if (!done) { done = true; resolve(r); } };
@@ -350,7 +384,7 @@ function execBrain({ file, args, cwdDir, timeoutMs, prompt }) {
       cwd: cwdDir,
       windowsHide: true,
       detached: !WIN, // POSIX: ให้ลูกเป็นหัวกลุ่ม จะได้ฆ่าทั้งกลุ่มตอนหมดเวลา
-      env: buildChildEnv(),
+      env: buildChildEnv(accountDirs),
     };
     if (WIN) {
       const found = resolveWinExe(file);
@@ -491,10 +525,31 @@ export async function runBrain(rawOpts) {
     }
     inflight++;
     try {
-      const r = await execBrain({ file: launch.file, args: launch.args, cwdDir: workDir(), timeoutMs, prompt });
+      // ★ สลับบัญชีอัตโนมัติเมื่อโควตาหมด (เจ้าของสั่ง 26 ส.ค. "ห้ามล่มเงียบ")
+      //   ลองบัญชีตามลำดับในทะเบียน — เจอโควตาหมดค่อยขยับไปตัวถัดไป · สาเหตุอื่นหยุดทันที (ไม่เผาโควตาซ้ำ)
+      const accounts = accountList(kind);
+      const tried = [];
+      let r = null, used = null;
+      for (const acc of accounts) {
+        const dirs = acc.dir ? { [acc.dirVar]: acc.dir } : null;
+        r = await execBrain({ file: launch.file, args: launch.args, cwdDir: workDir(), timeoutMs, prompt, accountDirs: dirs });
+        used = acc;
+        const blob = `${r.out || ''}\n${r.err || ''}`;
+        const quotaHit = !r.spawnError && !r.timedOut && isQuotaMessage(blob);
+        tried.push({ account: acc.name, dir: acc.dir, quotaHit });
+        if (!quotaHit) break;
+        try { console.warn(`[ClipBrain] 🔁 ${label}: บัญชี "${acc.name}" โควตาหมด → สลับบัญชีถัดไป`); } catch {}
+      }
+      const accountInfo = { account: used?.name || 'default', accountsTried: tried };
+      // ทุกบัญชีโควตาหมด → บอกตรงๆ ห้ามกลืนเป็น error ทั่วไป
+      if (tried.length && tried.every((t) => t.quotaHit)) {
+        return fail('BRAIN_QUOTA',
+          `โควตาหมดทุกบัญชี (ลองแล้ว ${tried.length}: ${tried.map((t) => t.account).join(', ')}) — ต้องเติมแพลนหรือเพิ่มบัญชีสำรอง`,
+          { ...accountInfo, rawSample: tail(`${r?.out || ''}\n${r?.err || ''}`, 300) });
+      }
       if (r.spawnError) {
         const msg = (r.spawnError && (r.spawnError.message || r.spawnError.code)) || String(r.spawnError);
-        return fail(/ENOENT/i.test(String(msg)) ? 'BRAIN_UNAVAILABLE' : 'BRAIN_SPAWN_ERROR', msg);
+        return fail(/ENOENT/i.test(String(msg)) ? 'BRAIN_UNAVAILABLE' : 'BRAIN_SPAWN_ERROR', msg, accountInfo);
       }
       // orphaned/killFailed = บอกผู้เรียกตรงๆ ว่าโปรเซสลูกอาจยังไม่ตาย (จะได้ตัดสินใจเตือน/ไม่ยิงซ้ำรัวๆ)
       if (r.timedOut) {
@@ -503,6 +558,7 @@ export async function runBrain(rawOpts) {
           orphaned: !!r.orphaned,
           killFailed: !!r.killFailed,
           killReason: r.killReason || null, // เหตุผลจริงจาก taskkill/kill — ไม่ปั้นเอง
+          ...accountInfo,
         });
       }
       if (r.code !== 0) {
@@ -514,21 +570,23 @@ export async function runBrain(rawOpts) {
         //    (เช่นคลิปสอนคอมพูดถึง "command not found") ถูกตีเป็น "ไม่มีสมองบนเครื่อง" ทั้งที่ทำงานปกติ
         if (r.code === 9009 || r.code === 127 ||
             /is not recognized as an internal or external command|command not found|not recognized as the name of a cmdlet/i.test(String(r.err || ''))) {
-          return fail('BRAIN_UNAVAILABLE', `ไม่พบ CLI '${bin}' บนเครื่องนี้ (โค้ด ${r.code})`, { exitCode: r.code });
+          return fail('BRAIN_UNAVAILABLE', `ไม่พบ CLI '${bin}' บนเครื่องนี้ (โค้ด ${r.code})`, { exitCode: r.code, ...accountInfo });
         }
-        return fail('BRAIN_EXIT', `สมองออกด้วยโค้ด ${r.code}: ${tail(r.err || r.out, 300)}`, { exitCode: r.code });
+        return fail('BRAIN_EXIT', `สมองออกด้วยโค้ด ${r.code}: ${tail(r.err || r.out, 300)}`, { exitCode: r.code, ...accountInfo });
       }
       const parsed = spec.parse(r.out);
-      if (parsed.cliError) return fail('BRAIN_CLI_ERROR', parsed.cliError, { rawSample: head(r.out, 300) });
+      // CLI ตอบสำเร็จแต่ข้างในบอกโควตาหมด (เช่นซอง json ของ claude) — ต้องแยกให้ชัดเช่นกัน
+      if (parsed.cliError && isQuotaMessage(parsed.cliError)) return fail('BRAIN_QUOTA', parsed.cliError, { ...accountInfo, rawSample: head(r.out, 300) });
+      if (parsed.cliError) return fail('BRAIN_CLI_ERROR', parsed.cliError, { rawSample: head(r.out, 300), ...accountInfo });
       const text = String(parsed.text || '');
-      if (!text.trim()) return fail('BRAIN_EMPTY_ANSWER', 'สมองตอบว่างเปล่า');
+      if (!text.trim()) return fail('BRAIN_EMPTY_ANSWER', 'สมองตอบว่างเปล่า', accountInfo);
       let json = null;
       if (opts.expectJson !== false) {
         json = extractJson(text) || (kind === 'codex' ? extractJson(r.out) : null);
-        if (!json) return fail('BRAIN_BAD_JSON', 'ไม่พบ JSON ในคำตอบสมอง', { text: head(text, 2000), rawSample: head(r.out, 300) });
+        if (!json) return fail('BRAIN_BAD_JSON', 'ไม่พบ JSON ในคำตอบสมอง', { text: head(text, 2000), rawSample: head(r.out, 300), ...accountInfo });
       }
       const res = {
-        ok: true, ...base, text, json,
+        ok: true, ...base, ...accountInfo, text, json,
         costUSD: parsed.costUSD != null ? parsed.costUSD : null,
         tokensUsed: parsed.tokensUsed != null ? parsed.tokensUsed : null,
         elapsedMs: Date.now() - t0,
