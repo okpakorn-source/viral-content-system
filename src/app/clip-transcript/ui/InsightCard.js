@@ -46,7 +46,9 @@ function safeSubText(s, i) {
 }
 
 export default function InsightCard({ rec, live = false, copiedKey, onCopy, onDelete, onPin, onRetry }) {
-  const [rawOpen, setRawOpen] = useState(!!live);
+  // ★ 26 ส.ค. 69 (เจ้าของแจ้ง): เนื้อเต็มทั้งคลิปต้องเห็นเสมอ — บางข่าวใช้ก้อนรวม ไม่ได้ใช้แยกรายประเด็น
+  //   เดิมพับไว้ในคลัง (กางเฉพาะผลสด) ทำให้พนักงานเปิดเคสเก่าแล้วนึกว่าหาย
+  const [rawOpen, setRawOpen] = useState(true);
   const r = rec || {};
   const ins = r.insight || {};
   const id = r.id || 'live';
@@ -215,14 +217,14 @@ export default function InsightCard({ rec, live = false, copiedKey, onCopy, onDe
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 5 }}>
             <button onClick={() => setRawOpen(!rawOpen)} style={{ ...btn(false), color: C.text }}>
-              📄 ข้อมูลดิบรวม {rawOpen ? '▲' : '▼'}
+              📄 เนื้อเต็มทั้งคลิป (ก้อนรวม){ins.rawData.length ? ` · ${ins.rawData.length.toLocaleString()} ตัวอักษร` : ''} {rawOpen ? '▲' : '▼'}
             </button>
             <button onClick={() => copy(k('raw'), ins.rawData)} style={btn(isCopied(k('raw')))}>
               {isCopied(k('raw')) ? '✓' : '📋 คัดลอกก้อนรวม'}
             </button>
           </div>
           {rawOpen && (
-            <div style={{ fontSize: 13.5, lineHeight: 1.8, whiteSpace: 'pre-wrap', background: C.sub, borderRadius: 10, padding: 13, maxHeight: 360, overflowY: 'auto' }}>{ins.rawData}</div>
+            <div style={{ fontSize: 13.5, lineHeight: 1.8, whiteSpace: 'pre-wrap', background: C.sub, borderRadius: 10, padding: 13, maxHeight: 600, overflowY: 'auto' }}>{ins.rawData}</div>
           )}
         </div>
       )}

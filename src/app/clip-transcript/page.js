@@ -149,8 +149,8 @@ export default function ClipTranscriptPage() {
       if (!aliveRef.current) return;
       if (!d.success) setErr(d.error || 'ถอดไม่สำเร็จ');
       else { setOut(d.data); setView(d.data.tidyText ? 'tidy' : 'raw'); }
-    } catch (e) { setErr(e.message); }
-    setLoading(false);
+    } catch (e) { if (aliveRef.current) setErr(e.message); }
+    if (aliveRef.current) setLoading(false);
   };
 
   const extractInsight = async (force = false, targetUrl = null) => {
@@ -167,8 +167,8 @@ export default function ClipTranscriptPage() {
         setNotice('⏳ ตอนนี้ Gemini แน่น ถอดทันทีไม่ผ่าน — กด "ส่งเข้าคิว" ให้เครื่องทีมลองเมื่อรับงาน (ปิดหน้าได้ ถ้าล้มระบบจะไม่วนถอดซ้ำอัตโนมัติ)');
       }
       else setErr(d.error || 'ถอดประเด็นไม่สำเร็จ');
-    } catch (e) { setErr(e.message); }
-    setInsightLoading(false);
+    } catch (e) { if (aliveRef.current) setErr(e.message); }
+    if (aliveRef.current) setInsightLoading(false);
   };
 
   const extractHunt = async () => {
@@ -210,8 +210,8 @@ export default function ClipTranscriptPage() {
       }
       if (d2.success) { setHunt(d2.data); loadHuntCases(); loadInsightCases(0); }
       else setErr(d2.error || 'ค้นข่าวคล้ายไม่สำเร็จ');
-    } catch (e) { setErr(e.message); }
-    setHuntPhase(0); setHunting(false);
+    } catch (e) { if (aliveRef.current) setErr(e.message); }
+    if (aliveRef.current) { setHuntPhase(0); setHunting(false); }
   };
 
   const extractNewsHunt = async () => {
@@ -224,8 +224,8 @@ export default function ClipTranscriptPage() {
       if (!aliveRef.current) return;
       if (d.success) { setHunt(d.data); loadHuntCases(); }
       else setErr(d.error || 'วิจัยลิงก์ข่าวไม่สำเร็จ');
-    } catch (e) { setErr(e.message); }
-    setHuntPhase(0); setHunting(false);
+    } catch (e) { if (aliveRef.current) setErr(e.message); }
+    if (aliveRef.current) { setHuntPhase(0); setHunting(false); }
   };
 
   const huntMore = async (c) => {
@@ -238,8 +238,8 @@ export default function ClipTranscriptPage() {
       if (d.success && d.queued) setNotice('⏳ ส่งเครื่องทีมค้นเพิ่มแล้ว — ผลรวมเข้าเคสเดิมในคลังเอง');
       else if (d.success) { setHunt(d.data); loadHuntCases(); }
       else setErr(d.error || 'ค้นเพิ่มไม่สำเร็จ');
-    } catch (e) { setErr(e.message); }
-    setHuntPhase(0); setHunting(false);
+    } catch (e) { if (aliveRef.current) setErr(e.message); }
+    if (aliveRef.current) { setHuntPhase(0); setHunting(false); }
   };
 
   const submitToQueue = async (forceUrl = null, force = false) => {
@@ -255,8 +255,8 @@ export default function ClipTranscriptPage() {
       setQueueJob({ jobId: d.jobId, status: d.status || 'pending', position: d.position, platform: d.platform, url: target });
       loadQueueList();
       pollJob(d.jobId, target);
-    } catch (e) { setErr(e.message); }
-    setSubmitting(false);
+    } catch (e) { if (aliveRef.current) setErr(e.message); }
+    if (aliveRef.current) setSubmitting(false);
   };
 
   const pollJob = async (jobId, jobUrl = '') => {
@@ -287,7 +287,7 @@ export default function ClipTranscriptPage() {
       if (!aliveRef.current) return;
       if (!d.success) setErr(d.error || 'ยกเลิกไม่สำเร็จ');
       else setNotice('🚫 ยกเลิกงานแล้ว');
-    } catch (e) { setErr(e.message); }
+    } catch (e) { if (aliveRef.current) setErr(e.message); }
     loadQueueList();
   };
   const onRetry = (job) => { if (job?.url) submitToQueue(job.url, true); };
@@ -298,7 +298,7 @@ export default function ClipTranscriptPage() {
       if (!aliveRef.current) return;
       if (d.success && d.result) { setInsight(d.result); window.scrollTo({ top: 0, behavior: 'smooth' }); }
       else setNotice('งานนี้ยังไม่มีผลให้แสดง');
-    } catch (e) { setErr(e.message); }
+    } catch (e) { if (aliveRef.current) setErr(e.message); }
   };
   const deleteInsightCase = async (id) => {
     if (!confirm('ลบเคสนี้ออกจากคลัง?')) return;
