@@ -23,7 +23,8 @@ export async function POST(request) {
   try {
     // ★ 14 ส.ค. 69 (เจ้าของสั่งเทียบสองโมเดลผ่านคิวเครื่องทีม): model (optional) — allowlist เดียวกับ /insight
     //   ติดใบงานให้เครื่องทีมถอดด้วยรุ่นที่สั่ง · ค่านอกรายการ = ไม่เก็บ ใช้โมเดลหลักตามเดิม ไม่ล้มคำขอ
-    const { url, kind = 'insight', tidy = false, user = '', model = '' } = await request.json();
+    // ★ 26 ส.ค. 69: force — ปุ่ม "ทำใหม่" ในบอร์ดงาน (worker ส่งต่อเข้า /insight ให้ถอดใหม่ ไม่คืนใบเดิมในคลัง)
+    const { url, kind = 'insight', tidy = false, user = '', model = '', force = false } = await request.json();
     const MODEL_ALLOWED = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash'];
     const jobModel = MODEL_ALLOWED.includes(String(model)) ? String(model) : '';
     if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
@@ -56,11 +57,13 @@ export async function POST(request) {
       id: jobId, url, platform, kind: normKind, tidy: !!tidy,
       user: String(user || 'ไม่ระบุชื่อ').slice(0, 40),
       ...(jobModel ? { model: jobModel } : {}), // ★ 14 ส.ค.: ใบงานเทสโมเดล — ไม่ส่ง = ไม่มีฟิลด์ (ใบงานปกติเดิมเป๊ะ)
+      ...(force ? { force: true } : {}), // ★ 26 ส.ค.: ใบ "ทำใหม่" เท่านั้นที่มีฟิลด์นี้
       status: 'pending', createdAt: new Date().toISOString(),
     });
     // เก็บกวาดงานเก่า > 50 ชิ้น (กันคิวบวม)
     if (all.length > 50) {
-      const old = all.filter(j => j.status === 'done' || j.status === 'error')
+      // ★ 26 ส.ค.: นับใบ cancelled เป็นใบที่ลบได้ด้วย (จบแล้วเหมือน done/error)
+      const old = all.filter(j => j.status === 'done' || j.status === 'error' || j.status === 'cancelled')
         .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)).slice(0, all.length - 50);
       for (const o of old) await store.remove(o.id).catch(() => {});
     }

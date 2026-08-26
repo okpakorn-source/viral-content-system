@@ -10,6 +10,10 @@ const PAGE_SOURCE = readFileSync(new URL('../src/app/clip-transcript/page.js', i
 const MOBILE_SOURCE = readFileSync(new URL('../src/app/m/page.js', import.meta.url), 'utf8');
 const GEMINI_SOURCE = readFileSync(new URL('../src/lib/ai/geminiClient.js', import.meta.url), 'utf8');
 const SERVICE_SOURCE = readFileSync(new URL('../src/lib/services/clipInsightService.js', import.meta.url), 'utf8');
+// ★ 26 ส.ค. 69: รื้อหน้า /clip-transcript เป็นคอมโพเนนต์ — การเรนเดอร์ผลย้ายไป InsightCard.js
+const CARD_SOURCE = readFileSync(new URL('../src/app/clip-transcript/ui/InsightCard.js', import.meta.url), 'utf8');
+const JOBBOARD_SOURCE = readFileSync(new URL('../src/app/clip-transcript/ui/JobBoard.js', import.meta.url), 'utf8');
+const WEB_SOURCE = PAGE_SOURCE + '\n' + CARD_SOURCE + '\n' + JOBBOARD_SOURCE;
 
 const MOCK_OPENAI = `
 export async function callAI(args) {
@@ -313,11 +317,13 @@ test('ตรวจทั้งความตรงกันของ directLead
 });
 
 test('คำเตือน directLead แสดงทั้งเว็บและมือถือโดยไม่ผูกกับ lowQuality', () => {
-  assert.match(PAGE_SOURCE, /insight\.editorialWarnings\?\.length > 0/);
-  assert.match(PAGE_SOURCE, /จุดให้พนักงานตรวจประโยคเปิด/);
-  assert.match(PAGE_SOURCE, /ins\.editorialWarnings\?\.length > 0/);
+  // เว็บ: คำเตือน editorialWarnings ถูกเรนเดอร์ + มีป้ายให้พนักงานตรวจ (ย้ายไป InsightCard หลังรื้อหน้า)
+  assert.match(WEB_SOURCE, /editorialWarnings/);
+  assert.match(WEB_SOURCE, /จุดให้พนักงานตรวจประโยคเปิด/);
+  // มือถือคงเดิม (ไม่ได้แตะ /m)
   assert.match(MOBILE_SOURCE, /insight\.editorialWarnings\?\.length > 0/);
   assert.match(MOBILE_SOURCE, /จุดให้พนักงานตรวจประโยคเปิด/);
+  // ชั้น service ต้องไม่ผูก editorialWarnings กับ lowQuality
   assert.doesNotMatch(SERVICE_SOURCE, /editorialWarnings[\s\S]{0,120}lowQuality/);
 });
 
@@ -528,14 +534,19 @@ test('ผลกำกวมและผลคุณภาพต่ำไม่�
 });
 
 test('ทุกปุ่มส่งต่อหลักใช้ projection พร้อมข่าว และแยกชื่อปุ่มก้อนรวมเดิมให้พนักงานไม่สับสน', () => {
-  assert.match(PAGE_SOURCE, /import \{ buildClipNewsReadyText, buildClipSubStoryText \}/);
-  assert.match(PAGE_SOURCE, /const insightCaseText = \(ins\) => buildClipNewsReadyText\(ins\)/);
-  assert.equal((PAGE_SOURCE.match(/คัดลอกเนื้อพร้อมใช้/g) || []).length, 2);
-  assert.match(PAGE_SOURCE, /คัดลอกก้อนรวมเดิม/);
-  assert.equal((PAGE_SOURCE.match(/buildClipSubStoryText\(/g) || []).length, 2);
-  assert.match(PAGE_SOURCE, /ไม่วนถอดซ้ำอัตโนมัติ/);
-  assert.match(PAGE_SOURCE, /เซิร์ฟเวอร์ยืนยันว่าลองส่งใหม่ได้อย่างปลอดภัย/);
-  assert.doesNotMatch(PAGE_SOURCE, /ลองให้เองจน Gemini ว่าง|รันให้เองจน Gemini ว่าง|Gemini แน่น กำลังสู้อยู่/);
+  // เว็บ: การคัดลอกใช้ helper projection (ย้ายไป InsightCard หลังรื้อหน้า)
+  assert.match(WEB_SOURCE, /import \{ buildClipNewsReadyText, buildClipSubStoryText \}/);
+  assert.match(WEB_SOURCE, /buildClipNewsReadyText\(/);
+  assert.match(WEB_SOURCE, /คัดลอกเนื้อพร้อมใช้/);
+  assert.match(WEB_SOURCE, /คัดลอกก้อนรวม/);              // ปุ่มก้อนรวมแยกจากปุ่มเนื้อพร้อมใช้ (กันพนักงานสับสน)
+  assert.match(WEB_SOURCE, /buildClipSubStoryText\(/);
+  // ★ กันบั๊ก UI-01 (คัดลอกกลับด้าน): signature ปุ่มคัดลอกต้องตรงกันสองฝั่ง = (key, text)
+  assert.match(PAGE_SOURCE, /const copy = \(key, text\)/);
+  assert.match(CARD_SOURCE, /const copy = \(key, text\)/);
+  // ข้อความความปลอดภัยตอนรอลองใหม่ (retry_wait) ยังอยู่ในเว็บ (JobBoard) — ต้องไม่สื่อว่าถอดซ้ำเสียเงิน
+  assert.match(WEB_SOURCE, /ไม่วนถอดซ้ำอัตโนมัติ/);
+  assert.match(WEB_SOURCE, /เซิร์ฟเวอร์ยืนยันว่าลองส่งใหม่ได้อย่างปลอดภัย/);
+  assert.doesNotMatch(WEB_SOURCE, /ลองให้เองจน Gemini ว่าง|รันให้เองจน Gemini ว่าง|Gemini แน่น กำลังสู้อยู่/);
 
   assert.match(MOBILE_SOURCE, /import \{ buildClipNewsReadyText, buildClipSubStoryText \}/);
   assert.match(MOBILE_SOURCE, /const clipAllText = \(ins\) => buildClipNewsReadyText\(ins\)/);

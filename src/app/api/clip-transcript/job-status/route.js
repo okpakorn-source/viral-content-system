@@ -32,6 +32,13 @@ export async function GET(request) {
       statusNote: job.statusNote || '',
       attempts: job.attempts || 0,
       nextRetryAt: job.nextRetryAt || null,
+      // ★ 26 ส.ค. 69: ข้อมูลคิวครบตามพิมพ์เขียว — สาเหตุล่าสุด/เวลายกเลิก/เวลาจบ ให้ UI โชว์ได้ตรงระบบจริง
+      lastError: job.lastError || '',
+      cancelledAt: job.cancelledAt || null,
+      createdAt: job.createdAt || null,
+      startedAt: job.startedAt || null,
+      doneAt: job.doneAt || null,
+      user: job.user || '',
       platform: job.platform, kind: job.kind,
     });
   } catch (error) {

@@ -1,9 +1,17 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { buildClipNewsReadyText, buildClipSubStoryText } from '@/lib/services/clipNewsReadyText';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import JobBoard from './ui/JobBoard';
+import StatsStrip from './ui/StatsStrip';
+import InsightCard from './ui/InsightCard';
+import { detectLink, recommendAction, platformIcon as platIcon } from './ui/statusMeta';
 
-// ★ 25 มิ.ย.: อ่าน response แบบปลอดภัย — กัน "Unexpected token 'A'..." เมื่อเซิร์ฟเวอร์
-//   timeout แล้ว Vercel คืน error page เป็น text (ไม่ใช่ JSON) → แปลงเป็นข้อความที่อ่านออก
+// โทนทั้งหน้า (พิมพ์เขียวข้อ 8) — สีเน้นเดียว #38bdf8 · เขียว/เหลือง/แดงสงวนให้สถานะ
+const C = {
+  bg: '#0f172a', card: '#1f2937', sub: '#111827', line: '#374151',
+  text: '#e5e7eb', muted: '#9ca3af', accent: '#38bdf8',
+};
+
+// ★ อ่าน response แบบปลอดภัย — กัน "Unexpected token" เมื่อเซิร์ฟเวอร์ timeout แล้วคืน error page เป็น text
 async function safeJson(r) {
   const text = await r.text();
   try { return JSON.parse(text); }
@@ -15,263 +23,484 @@ async function safeJson(r) {
   }
 }
 
+const PAGE_SIZE = 12;
+
 export default function ClipTranscriptPage() {
   const [url, setUrl] = useState('');
   const [tidy, setTidy] = useState(true);
+  const [err, setErr] = useState('');       // กล่องแดง = ข้อผิดพลาดจริงเท่านั้น
+  const [notice, setNotice] = useState('');  // กล่องฟ้า = แจ้งข่าวดี/สถานะ (แยกจาก err — แก้บั๊กเดิมที่ปนกัน)
+
+  // ผู้ใช้ (เดิมไม่มี UI ตั้งค่า — ช่อง 👤 ในคลังเลยว่าง)
+  const [currentUser, setCurrentUser] = useState('');
+  const [editUser, setEditUser] = useState(false);
+
+  // ถอดบทสัมภาษณ์
   const [loading, setLoading] = useState(false);
   const [out, setOut] = useState(null);
-  const [err, setErr] = useState('');
-  const [view, setView] = useState('tidy'); // tidy | raw
-  // (★ 14 ส.ค. 69 เจ้าของสั่ง: ถอดแผง "คลังบทถอด" ออก — ไม่ได้ใช้ · บทถอดยังเก็บเข้าคลังฝั่งเซิร์ฟเวอร์ตามเดิม)
-  const [copied, setCopied] = useState('');
-  // ★ 16 มิ.ย.: ถอดประเด็นข่าว → ข้อมูลดิบ (Gemini ดูคลิป)
+  const [view, setView] = useState('tidy');
+
+  // ถอดประเด็น
   const [insight, setInsight] = useState(null);
   const [insightLoading, setInsightLoading] = useState(false);
-  // ★ 22 มิ.ย.: คลัง "ถอดประเด็นข่าว" แยก (เก็บทุกครั้งที่ถอดสำเร็จ หยิบกลับมาใช้ได้)
   const [insightCases, setInsightCases] = useState([]);
-  const [insightCasesOpen, setInsightCasesOpen] = useState(true);
-  const [insightExpanded, setInsightExpanded] = useState(null);
-  // ★ 24 มิ.ย.: ส่งเข้าคิว "เครื่องทีม" (พนักงานทำงานที่บ้านส่งผ่านเว็บ → เครื่องทีมถอด FB/IG ให้)
-  const [queueJob, setQueueJob] = useState(null); // { jobId, status, position, platform, result, error }
-  const [submitting, setSubmitting] = useState(false);
-  // ★ 26 มิ.ย.: ไฟสัญญาณ Gemini แบบเรียลไทม์ (เขียว=พร้อม แดง=แน่น เหลือง=ช้า/ไม่แน่ใจ)
-  const [gem, setGem] = useState(null); // { light, msg, ms }
-  // ★ 26 มิ.ย.: นาฬิกาเดินวินาที — ใช้นับถอยหลัง "ลองใหม่ในอีก ~X" ตอนงานรอ Gemini หาย (retry_wait)
-  const [nowMs, setNowMs] = useState(Date.now());
-  // ★ 26 มิ.ย.: แผงคิวรวม — เห็นทุกคลิปที่รออยู่/กำลังลองใหม่/เสร็จล่าสุด
-  const [queueList, setQueueList] = useState(null); // { counts, active[], recent[] }
-  const [queueListOpen, setQueueListOpen] = useState(true);
-  // ★ 8 ก.ค.: ถอด+ค้นข่าวคล้าย → คลังค้นประเด็นยูสเซอร์
-  const [hunting, setHunting] = useState(false);
-  const [huntPhase, setHuntPhase] = useState(0); // 1=ถอดเนื้อดิบ 2=วิเคราะห์+ค้น+คัด 3=รอเครื่องทีม(คิว)
-  const [hunt, setHunt] = useState(null);        // เคสผลลัพธ์ล่าสุด
-  const [huntCases, setHuntCases] = useState([]);
-  const [huntCasesOpen, setHuntCasesOpen] = useState(true);
-  const [huntExpanded, setHuntExpanded] = useState(null);
-  const [huntFilter, setHuntFilter] = useState('all'); // all | clip | article — กรองคลังตามที่มา
+  const [insightTotal, setInsightTotal] = useState(0);
+  const [insightOffset, setInsightOffset] = useState(0);
+  const [insightOpen, setInsightOpen] = useState(false); // พับ default (พิมพ์เขียวข้อ 8 ลดรก)
+  const [copied, setCopied] = useState('');
 
-  const loadInsightCases = async () => {
-    try { const r = await fetch('/api/clip-transcript/cases?kind=insight&limit=40', { cache: 'no-store' }); const d = await r.json(); if (d.success) setInsightCases(d.cases || []); } catch {}
-  };
-  // ★ 8 ก.ค.: คลังค้นประเด็นยูสเซอร์
-  const loadHuntCases = async () => {
-    try { const r = await fetch('/api/clip-transcript/cases?kind=hunt&limit=40', { cache: 'no-store' }); const d = await r.json(); if (d.success) setHuntCases(d.cases || []); } catch {}
-  };
-  // ★ 26 มิ.ย.: โหลดแผงคิวรวม (ทุกคลิปที่กำลังรอ/ลองใหม่/เสร็จล่าสุด)
-  const loadQueueList = async () => {
-    try { const r = await fetch('/api/clip-transcript/queue-list', { cache: 'no-store' }); const d = await r.json(); if (d.success) setQueueList(d); } catch {}
-  };
-  // ★ 27 มิ.ย. (ผู้ใช้สั่ง): ลบงานคลิปออกจากคิวจริงๆ — หยุดถอด/หยุด retry (ลิงก์เสีย/วนซ้ำ)
-  const cancelClip = async (id) => {
-    if (!confirm('ลบคลิปนี้ออกจากคิว? (หยุดถอด/หยุดลองใหม่)')) return;
+  // คิวเครื่องทีม
+  const [queueJob, setQueueJob] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [queueList, setQueueList] = useState(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  // ไฟ Gemini
+  const [gem, setGem] = useState(null);
+
+  // ค้นประเด็น (hunt)
+  const [hunting, setHunting] = useState(false);
+  const [huntPhase, setHuntPhase] = useState(0);
+  const [hunt, setHunt] = useState(null);
+  const [huntCases, setHuntCases] = useState([]);
+  const [huntOpen, setHuntOpen] = useState(false);
+  const [huntExpanded, setHuntExpanded] = useState(null);
+  const [huntFilter, setHuntFilter] = useState('all');
+
+  // refs กัน polling รั่วหลัง unmount (แก้บั๊ก setInterval/pollJob เดิมไม่มี cleanup)
+  const aliveRef = useRef(true);
+  const pollRef = useRef(null);
+  useEffect(() => { aliveRef.current = true; return () => { aliveRef.current = false; if (pollRef.current) clearInterval(pollRef.current); }; }, []);
+
+  const link = useMemo(() => detectLink(url), [url]);
+
+  const loadInsightCases = async (offset = insightOffset) => {
     try {
-      await fetch('/api/clip-transcript/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+      const r = await fetch(`/api/clip-transcript/cases?kind=insight&limit=${PAGE_SIZE}&offset=${offset}`, { cache: 'no-store' });
+      const d = await r.json();
+      if (!aliveRef.current) return;                       // UI-02: กันอัปเดตหลังปิดหน้า
+      if (d.success) { setInsightCases(d.cases || []); if (typeof d.total === 'number') setInsightTotal(d.total); }
     } catch {}
-    loadQueueList(); // รีเฟรชให้คลิปหายจากคิวทันที
   };
-  useEffect(() => { loadInsightCases(); loadHuntCases(); loadQueueList(); }, []);
-  // ★ 26 มิ.ย.: รีเฟรชแผงคิวทุก 10 วิ — เห็นคิวเดินสด แม้ไม่ได้ส่งงานเอง (คนอื่นในทีมส่งก็เห็น)
-  useEffect(() => { const t = setInterval(loadQueueList, 10000); return () => clearInterval(t); }, []);
-  // ★ 26 มิ.ย.: เช็กสถานะ Gemini เรียลไทม์ — โหลดหน้า + ทุก 45 วิ (server cache 30 วิ กันยิงถี่)
+  const loadHuntCases = async () => {
+    try {
+      const r = await fetch('/api/clip-transcript/cases?kind=hunt&limit=40', { cache: 'no-store' });
+      const d = await r.json();
+      if (!aliveRef.current) return;                       // UI-02
+      if (d.success) setHuntCases(d.cases || []);
+    } catch {}
+  };
+  const loadQueueList = async () => {
+    try { const r = await fetch('/api/clip-transcript/queue-list', { cache: 'no-store' }); const d = await r.json(); if (d.success && aliveRef.current) setQueueList(d); } catch {}
+  };
+
   useEffect(() => {
-    let alive = true;
+    // อ่านชื่อผู้ใช้หลัง mount เท่านั้น (localStorage ไม่มีตอน render ฝั่งเซิร์ฟเวอร์ — อ่านตอน render จะทำให้ hydration เพี้ยน)
+    const saved = (typeof window !== 'undefined' && localStorage.getItem('clip_user')) || '';
+    if (saved) queueMicrotask(() => { if (aliveRef.current) setCurrentUser(saved); });
+    loadInsightCases(0); loadHuntCases(); loadQueueList();
+    const qTimer = setInterval(loadQueueList, 10000);
+    return () => clearInterval(qTimer);
+  }, []);
+
+  // ไฟ Gemini ทุก 45 วิ
+  useEffect(() => {
+    let stop = false;
     const check = async () => {
       try {
         const r = await fetch('/api/clip-transcript/gemini-health', { cache: 'no-store', signal: AbortSignal.timeout(12000) });
         const d = await r.json();
-        if (alive) setGem(d);
-      } catch { if (alive) setGem({ light: 'yellow', msg: 'เช็กสถานะไม่ได้ชั่วคราว' }); }
+        if (!stop && aliveRef.current) setGem({ light: d.light, msg: d.msg, ms: d.ms });
+      } catch { if (!stop && aliveRef.current) setGem({ light: 'yellow', msg: 'เช็คสถานะไม่ได้ชั่วคราว' }); }
     };
     check();
     const t = setInterval(check, 45000);
-    return () => { alive = false; clearInterval(t); };
+    return () => { stop = true; clearInterval(t); };
   }, []);
-  // ★ 26 มิ.ย.: เดินนาฬิกาทุก 1 วิ เฉพาะตอนมีงาน "รอลองใหม่" (retry_wait) — ให้ตัวนับถอยหลังขยับเห็นชัด
+
+  // นาฬิกาวินาที — เดินเฉพาะตอนมีงานรอนับถอยหลัง (ลดงานเรนเดอร์)
   useEffect(() => {
-    if (queueJob?.status !== 'retry_wait' || !queueJob?.nextRetryAt) return;
+    const needClock = (queueJob && queueJob.status === 'retry_wait') ||
+      (queueList && queueList.active && queueList.active.some(j => j.status === 'retry_wait'));
+    if (!needClock) return;
     const t = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(t);
-  }, [queueJob?.status, queueJob?.nextRetryAt]);
+  }, [queueJob, queueList]);
 
-  const platformIcon = (p) => p === 'youtube' ? '📺' : p === 'tiktok' ? '🎵' : p === 'meta' ? '📘' : '🎬';
+  const saveUser = (v) => {
+    const name = String(v || '').trim().slice(0, 40);
+    setCurrentUser(name);
+    try { localStorage.setItem('clip_user', name); } catch {}
+    setEditUser(false);
+  };
 
+  const platformIcon = (p) => platIcon(p);
+
+  // signature (key, text) — ตรงกับสัญญา onCopy(key,text) ของ InsightCard (แก้บั๊ก UI-01 คัดลอกกลับด้าน)
+  const copy = (key, text) => { navigator.clipboard?.writeText(text); setCopied(key); setTimeout(() => setCopied(''), 2000); };
+
+  // ── กลไก API (คงพฤติกรรมเดิมทุกเส้น) ──
   const extract = async () => {
     if (!url.trim()) { setErr('วางลิงก์คลิปก่อน'); return; }
-    setLoading(true); setErr(''); setOut(null);
+    setLoading(true); setErr(''); setNotice(''); setOut(null);
     try {
       const r = await fetch('/api/clip-transcript', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), tidy }) });
       const d = await safeJson(r);
-      if (!d.success) { setErr(d.error || 'ถอดไม่สำเร็จ'); }
+      if (!aliveRef.current) return;
+      if (!d.success) setErr(d.error || 'ถอดไม่สำเร็จ');
       else { setOut(d.data); setView(d.data.tidyText ? 'tidy' : 'raw'); }
     } catch (e) { setErr(e.message); }
     setLoading(false);
   };
 
-  // ★ ถอดประเด็นข่าว → ข้อมูลดิบ (Gemini ดูคลิป YouTube / ถอดเสียง+LLM สำหรับ TikTok-FB)
-  //   ★ 8 ก.ค.: force=true (ปุ่ม "ถอดใหม่") ข้ามผลจากคลัง ถอดสดเสมอ + ส่ง user เก็บ metadata คลัง
-  const extractInsight = async (force = false) => {
-    if (!url.trim()) { setErr('วางลิงก์คลิปก่อน'); return; }
-    setInsightLoading(true); setErr(''); setInsight(null); setQueueJob(null);
+  const extractInsight = async (force = false, targetUrl = null) => {
+    const target = (targetUrl != null ? targetUrl : url).trim();  // UI-03: รับ URL ตรง กันใช้ state เก่าตอน "ถอดใหม่" จากคลัง
+    if (!target) { setErr('วางลิงก์คลิปก่อน'); return; }
+    if (targetUrl != null) setUrl(target);
+    setInsightLoading(true); setErr(''); setNotice(''); setInsight(null); setQueueJob(null);
     try {
-      const me = (typeof window !== 'undefined' && localStorage.getItem('clip_user')) || '';
-      const r = await fetch('/api/clip-transcript/insight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), force: !!force, user: me }) });
+      const r = await fetch('/api/clip-transcript/insight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: target, force: !!force, user: currentUser }) });
       const d = await safeJson(r);
-      if (d.success) { setInsight(d.data); loadInsightCases(); }   // ★ รีเฟรชคลังประเด็นทันทีที่ถอดสำเร็จ
-      // กดถอดทันทีแล้ว Gemini แน่น → ส่งเข้าคิวให้เครื่องทีมลองหนึ่งครั้งเมื่อรับงาน
-      // งานล้มต้องให้พนักงานกดใหม่เอง ห้ามสื่อว่าระบบวน inference จนสำเร็จ
+      if (!aliveRef.current) return;
+      if (d.success) { setInsight(d.data); loadInsightCases(0); setInsightOffset(0); }
       else if (/Gemini มีคนใช้งานหนัก|แน่นชั่วคราว|503|overload/i.test(String(d.error || ''))) {
-        setErr('⏳ ตอนนี้ Gemini แน่น ถอดทันทีไม่ผ่าน — กดปุ่ม "📥 ส่งเข้าคิว" เพื่อให้เครื่องทีมลองหนึ่งครั้งเมื่อรับงาน (ปิดหน้าได้ หากล้มระบบจะแจ้งให้กดใหม่เอง ไม่วนถอดซ้ำอัตโนมัติ)');
+        setNotice('⏳ ตอนนี้ Gemini แน่น ถอดทันทีไม่ผ่าน — กด "ส่งเข้าคิว" ให้เครื่องทีมลองเมื่อรับงาน (ปิดหน้าได้ ถ้าล้มระบบจะไม่วนถอดซ้ำอัตโนมัติ)');
       }
       else setErr(d.error || 'ถอดประเด็นไม่สำเร็จ');
     } catch (e) { setErr(e.message); }
     setInsightLoading(false);
   };
 
-  // ★ 8 ก.ค.: ถอด+ค้นข่าวคล้าย — เนื้อดิบ (เครื่องถอดเดิม เคยถอด=ฟรีทันที) → สไตล์→คีย์ → ค้น Serper → คัด
-  //   ผลเก็บเข้า "คลังค้นประเด็นยูสเซอร์" ถาวร · FB/IG บนคลาวด์ → server ส่งคิวเครื่องทีมเอง (kind=hunt)
-  const isMetaUrl = (u) => /facebook\.com|fb\.watch|instagram\.com/i.test(u);
-  const isClipUrl = (u) => /youtube\.com|youtu\.be|tiktok\.com|facebook\.com|fb\.watch|instagram\.com/i.test(u);
   const extractHunt = async () => {
     if (!url.trim()) { setErr('วางลิงก์คลิปก่อน'); return; }
-    setHunting(true); setHuntPhase(1); setErr(''); setHunt(null); setQueueJob(null);
-    const me = (typeof window !== 'undefined' && localStorage.getItem('clip_user')) || '';
+    setHunting(true); setHuntPhase(1); setErr(''); setNotice(''); setHunt(null); setQueueJob(null);
     try {
-      // ขั้น 1 (เฉพาะ YouTube/TikTok — เห็นจังหวะจริง): ถอดเนื้อดิบก่อน · FB/IG ข้ามไปให้ server จัดคิวเอง
-      if (!isMetaUrl(url.trim())) {
-        const r1 = await fetch('/api/clip-transcript/insight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), user: me }) });
+      if (!link.platform || link.platform === 'article') { /* ปล่อยให้ backend ตัดสิน */ }
+      if (link.platform !== 'meta') {
+        const r1 = await fetch('/api/clip-transcript/insight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), user: currentUser }) });
         const d1 = await safeJson(r1);
+        if (!aliveRef.current) return;
         if (!d1.success) {
           setErr(/แน่น|503|overload|ใช้งานหนัก/i.test(String(d1.error || ''))
-            ? '⏳ Gemini แน่น ถอดเนื้อดิบไม่ผ่าน — รอสักครู่แล้วกดใหม่ (คลิปที่ถอดผ่านแล้วจะไม่ถอดซ้ำ ผ่านขั้นแรกทันที)'
+            ? '⏳ Gemini แน่น ถอดเนื้อดิบไม่ผ่าน — รอสักครู่แล้วกดใหม่ (คลิปที่ถอดผ่านแล้วจะผ่านขั้นแรกทันที)'
             : (d1.error || 'ถอดเนื้อดิบไม่สำเร็จ'));
           setHunting(false); setHuntPhase(0); return;
         }
       }
       setHuntPhase(2);
-      const r2 = await fetch('/api/clip-transcript/hunt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), user: me }) });
+      const r2 = await fetch('/api/clip-transcript/hunt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), user: currentUser }) });
       const d2 = await safeJson(r2);
+      if (!aliveRef.current) return;
       if (d2.success && d2.queued) {
-        // FB/IG บนคลาวด์ — เข้าคิวเครื่องทีมแล้ว poll จนเสร็จ (ปิดหน้าได้ ผลเข้าคลังเอง)
         setHuntPhase(3);
         let tries = 0;
-        const poll = setInterval(async () => {
+        if (pollRef.current) clearInterval(pollRef.current);
+        pollRef.current = setInterval(async () => {
           tries++;
           try {
             const q = await (await fetch(`/api/clip-transcript/job-status?id=${d2.jobId}`, { cache: 'no-store' })).json();
-            if (q.status === 'done') { clearInterval(poll); setHunt(q.result || null); setHuntPhase(0); setHunting(false); loadHuntCases(); loadInsightCases(); }
-            else if (q.status === 'error') { clearInterval(poll); setErr(q.error || 'ถอด+ค้นไม่สำเร็จ'); setHuntPhase(0); setHunting(false); }
-            else if (tries > 80) { clearInterval(poll); setErr('⏱️ งานยังทำต่อเบื้องหลัง — เสร็จแล้วผลจะโผล่ใน "🧭 คลังค้นประเด็นยูสเซอร์" ด้านล่างเอง'); setHuntPhase(0); setHunting(false); }
+            if (!aliveRef.current) { clearInterval(pollRef.current); return; }   // UI-02: callback ที่ค้างกลาง await
+            if (q.status === 'done') { clearInterval(pollRef.current); setHunt(q.result || null); setHuntPhase(0); setHunting(false); loadHuntCases(); loadInsightCases(0); }
+            else if (q.status === 'error') { clearInterval(pollRef.current); setErr(q.error || 'ถอด+ค้นไม่สำเร็จ'); setHuntPhase(0); setHunting(false); }
+            else if (q.status === 'cancelled') { clearInterval(pollRef.current); setNotice('🚫 งานถูกยกเลิกแล้ว'); setHuntPhase(0); setHunting(false); }
+            else if (tries > 80) { clearInterval(pollRef.current); setNotice('⏱️ งานยังทำต่อเบื้องหลัง — เสร็จแล้วผลจะโผล่ใน "คลังค้นประเด็น" ด้านล่างเอง'); setHuntPhase(0); setHunting(false); }
           } catch {}
         }, 15000);
         return;
       }
-      if (d2.success) { setHunt(d2.data); loadHuntCases(); loadInsightCases(); }
+      if (d2.success) { setHunt(d2.data); loadHuntCases(); loadInsightCases(0); }
       else setErr(d2.error || 'ค้นข่าวคล้ายไม่สำเร็จ');
     } catch (e) { setErr(e.message); }
     setHuntPhase(0); setHunting(false);
   };
-  // ★ 8 ก.ค.: วิจัยลิงก์ข่าว (เว็บข่าว ไม่ใช่คลิป) — ดึงเนื้อข่าว → วิจัยเชิงลึก → หาข่าวเสริม
-  //   คลังเดียวกับคลิป (user-topic-hunts) แต่ผลติดป้าย 📰 ลิงก์ข่าว แยกจาก 🎬 คลิป
+
   const extractNewsHunt = async () => {
     if (!url.trim()) { setErr('วางลิงก์ข่าวก่อน'); return; }
-    if (isClipUrl(url.trim())) { setErr('ลิงก์นี้เป็นคลิป — ใช้ปุ่ม "🧭 ถอด+ค้นข่าวคล้าย" แทน (ปุ่ม 📰 สำหรับลิงก์ข่าวเว็บ)'); return; }
-    setHunting(true); setHuntPhase(2); setErr(''); setHunt(null); setQueueJob(null);
+    if (link.isClip) { setErr('ลิงก์นี้เป็นคลิป — ใช้ปุ่ม "คลิป → ค้นข่าวคล้าย" แทน (ปุ่มข่าวสำหรับลิงก์ข่าวเว็บ)'); return; }
+    setHunting(true); setHuntPhase(2); setErr(''); setNotice(''); setHunt(null); setQueueJob(null);
     try {
-      const me = (typeof window !== 'undefined' && localStorage.getItem('clip_user')) || '';
-      const r = await fetch('/api/clip-transcript/news-hunt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), user: me }) });
+      const r = await fetch('/api/clip-transcript/news-hunt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), user: currentUser }) });
       const d = await safeJson(r);
+      if (!aliveRef.current) return;
       if (d.success) { setHunt(d.data); loadHuntCases(); }
       else setErr(d.error || 'วิจัยลิงก์ข่าวไม่สำเร็จ');
     } catch (e) { setErr(e.message); }
     setHuntPhase(0); setHunting(false);
   };
 
-  // ★ ค้นเพิ่มอีกรอบ — สมองคิดคีย์ชุดใหม่ ค้นแล้ว "รวมผล" เข้าเคสเดิม (ไม่สร้างเคสซ้ำ)
-  //   ★ 8 ก.ค.: รู้ที่มา — เคสข่าว (article) ยิง news-hunt · เคสคลิป ยิง hunt
   const huntMore = async (c) => {
-    setHunting(true); setHuntPhase(2); setErr('');
+    setHunting(true); setHuntPhase(2); setErr(''); setNotice('');
     try {
-      const me = (typeof window !== 'undefined' && localStorage.getItem('clip_user')) || '';
       const endpoint = c.sourceType === 'article' ? '/api/clip-transcript/news-hunt' : '/api/clip-transcript/hunt';
-      const r = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: c.sourceUrl, user: me, caseId: c.id }) });
+      const r = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: c.sourceUrl, user: currentUser, caseId: c.id }) });
       const d = await safeJson(r);
-      if (d.success && d.queued) setErr('⏳ ส่งเครื่องทีมค้นเพิ่มแล้ว — ผลรวมเข้าเคสเดิมในคลังเอง');
+      if (!aliveRef.current) return;
+      if (d.success && d.queued) setNotice('⏳ ส่งเครื่องทีมค้นเพิ่มแล้ว — ผลรวมเข้าเคสเดิมในคลังเอง');
       else if (d.success) { setHunt(d.data); loadHuntCases(); }
       else setErr(d.error || 'ค้นเพิ่มไม่สำเร็จ');
     } catch (e) { setErr(e.message); }
     setHuntPhase(0); setHunting(false);
   };
 
-  // ★ ส่งลิงก์เข้าคิว "เครื่องทีม" → poll สถานะจนเสร็จ (สำหรับ FB/IG หรือเมื่อทำในเว็บไม่ได้)
-  const submitToQueue = async () => {
-    if (!url.trim()) { setErr('วางลิงก์คลิปก่อน'); return; }
-    setSubmitting(true); setErr(''); setQueueJob(null);
+  const submitToQueue = async (forceUrl = null, force = false) => {
+    const target = (forceUrl || url).trim();
+    if (!target) { setErr('วางลิงก์คลิปก่อน'); return; }
+    setSubmitting(true); setErr(''); setNotice(''); setQueueJob(null);
     try {
-      const me = (typeof window !== 'undefined' && localStorage.getItem('clip_user')) || '';
-      const r = await fetch('/api/clip-transcript/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), kind: 'insight', tidy, user: me }) });
+      const r = await fetch('/api/clip-transcript/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: target, kind: 'insight', tidy, user: currentUser, force: !!force }) });
       const d = await safeJson(r);
+      if (!aliveRef.current) return;
       if (!d.success) { setErr(d.error || 'ส่งเข้าคิวไม่สำเร็จ'); setSubmitting(false); return; }
-      setQueueJob({ jobId: d.jobId, status: d.status || 'pending', position: d.position, platform: d.platform });
-      pollJob(d.jobId);
+      if (d.dup) setNotice('คลิปนี้อยู่ในคิวอยู่แล้ว — ติดตามสถานะได้ที่บอร์ดงานด้านล่าง');
+      setQueueJob({ jobId: d.jobId, status: d.status || 'pending', position: d.position, platform: d.platform, url: target });
+      loadQueueList();
+      pollJob(d.jobId, target);
     } catch (e) { setErr(e.message); }
     setSubmitting(false);
   };
-  const pollJob = async (jobId) => {
-    // poll นานพอครอบ ~4 ชม. (retry_wait หน่วง 15 วิ ลดภาระ) — ปิดหน้าได้ งานทำต่อเบื้องหลัง ผลเข้าคลังเอง
+
+  const pollJob = async (jobId, jobUrl = '') => {
     for (let i = 0; i < 2000; i++) {
+      if (!aliveRef.current) return;
       let st = 'pending';
       try {
         const r = await fetch('/api/clip-transcript/job-status?id=' + jobId, { cache: 'no-store' });
         const d = await safeJson(r);
+        if (!aliveRef.current) return;
+        if (!aliveRef.current) return;   // UI-02: กันอัปเดต state หลังผู้ใช้ปิดหน้า (in-flight callback)
         if (!d.success) { setQueueJob(j => ({ ...j, status: 'error', error: d.error || 'หางานในคิวไม่เจอ' })); return; }
         st = d.status;
-        // ★ 26 มิ.ย.: เก็บ statusNote/attempts/nextRetryAt → โชว์ตอน retry_wait (Gemini แน่น รอลองใหม่อัตโนมัติ + นับถอยหลัง)
-        setQueueJob({ jobId, status: d.status, position: d.position, platform: d.platform, result: d.result, error: d.error, statusNote: d.statusNote, attempts: d.attempts, nextRetryAt: d.nextRetryAt });
-        if (d.status === 'done') { setInsight(d.result); loadInsightCases(); return; }
-        if (d.status === 'error') return;
-        // 'pending' | 'processing' | 'retry_wait' → poll ต่อ (retry_wait = Gemini แน่น ระบบลองใหม่เองทุก ~3 นาที)
-      } catch { /* เน็ตสะดุด — รอบหน้าลองใหม่ */ }
+        setQueueJob({ jobId, status: d.status, position: d.position, platform: d.platform, result: d.result, error: d.error, statusNote: d.statusNote, lastError: d.lastError, attempts: d.attempts, nextRetryAt: d.nextRetryAt, startedAt: d.startedAt, url: jobUrl });
+        if (d.status === 'done') { setInsight(d.result); loadInsightCases(0); return; }
+        if (d.status === 'error' || d.status === 'cancelled') return;
+      } catch {}
       await new Promise(res => setTimeout(res, st === 'retry_wait' ? 15000 : 4000));
     }
-    // poll หมดเวลาแสดงผลสด — งานยัง "ทำต่อเบื้องหลัง" ผลจะเข้าคลังเอง (ไม่ใช่ error)
-    setQueueJob(j => ({ ...(j || {}), _pollEnded: true }));
+    if (aliveRef.current) setQueueJob(j => ({ ...(j || {}), _pollEnded: true }));
   };
 
-  const copy = (text, key) => { navigator.clipboard?.writeText(text); setCopied(key); setTimeout(() => setCopied(''), 2000); };
-  const deleteInsightCase = async (id) => { await fetch('/api/clip-transcript/cases?kind=insight&id=' + id, { method: 'DELETE' }); loadInsightCases(); };
-
-  // ข้อความคัดลอกของ "1 ประเด็น" (ใช้ทั้งคลิปยาวรายประเด็น)
-  const topicText = (t) => {
-    const lines = [`【${t.no}】 ${t.title || ''}${(t.timeStart || t.timeEnd) ? `  (${t.timeStart || '?'}–${t.timeEnd || '?'})` : ''}`];
-    if (t.summary) lines.push(t.summary);
-    if (t.keyPoints?.length) lines.push(t.keyPoints.map((k) => `• ${k}`).join('\n'));
-    if (t.quotes?.length) lines.push(t.quotes.map((q) => `“${q}”`).join('\n'));
-    return lines.join('\n');
+  // ── handlers ให้ JobBoard ──
+  const onCancel = async (jobId) => {
+    try {
+      const r = await fetch('/api/clip-transcript/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: jobId }) });
+      const d = await safeJson(r);
+      if (!aliveRef.current) return;
+      if (!d.success) setErr(d.error || 'ยกเลิกไม่สำเร็จ');
+      else setNotice('🚫 ยกเลิกงานแล้ว');
+    } catch (e) { setErr(e.message); }
+    loadQueueList();
   };
+  const onRetry = (job) => { if (job?.url) submitToQueue(job.url, true); };
+  const onViewResult = async (job) => {
+    try {
+      const r = await fetch('/api/clip-transcript/job-status?id=' + (job.jobId || job.id), { cache: 'no-store' });
+      const d = await safeJson(r);
+      if (!aliveRef.current) return;
+      if (d.success && d.result) { setInsight(d.result); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+      else setNotice('งานนี้ยังไม่มีผลให้แสดง');
+    } catch (e) { setErr(e.message); }
+  };
+  const deleteInsightCase = async (id) => {
+    if (!confirm('ลบเคสนี้ออกจากคลัง?')) return;
+    await fetch('/api/clip-transcript/cases?kind=insight&id=' + id, { method: 'DELETE' });
+    loadInsightCases();
+  };
+  const pinInsightCase = async (id, chosen) => {
+    try { await fetch('/api/clip-transcript/cases', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, chosen }) }); loadInsightCases(); } catch {}
+  };
+  const gotoPage = (offset) => { const o = Math.max(0, offset); setInsightOffset(o); loadInsightCases(o); };
 
-  // ข้อความพร้อมส่งเข้าระบบข่าว: เรื่องเดียวใช้ rawData; หลายเรื่องใช้แต่ละ subStory โดยไม่ต่อข้อมูลซ้ำทุกชั้น
-  const insightCaseText = (ins) => buildClipNewsReadyText(ins);
+  // myJob ให้ JobBoard (จาก queueJob)
+  const busy = loading || insightLoading || hunting;
+  const primaryAction = recommendAction(url);
 
-  // ★ 8 ก.ค. rev.2: จัดหมวดผล — dna(คนละคน แยกระดับ ใกล้/กลาง/กว้าง) vs same(คนเดิม)
-  //   รองรับเคสเก่า: tag 'follow'→คนเดิม · 'theme'→แนวเดียวกันกว้าง
-  const resultKind = (r) => {
+  return (
+    <div style={{ minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'inherit' }}>
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '24px 18px 60px' }}>
+
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 6 }}>
+          <h1 style={{ fontSize: 20, fontWeight: 800, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>🎬 ระบบถอดคลิป</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            {editUser ? (
+              <input autoFocus defaultValue={currentUser} placeholder="ชื่อผู้ใช้"
+                onBlur={e => saveUser(e.target.value)} onKeyDown={e => e.key === 'Enter' && saveUser(e.target.value)}
+                style={{ padding: '5px 10px', borderRadius: 8, border: `1px solid ${C.accent}`, background: C.sub, color: C.text, fontSize: 12.5, fontFamily: 'inherit', width: 140 }} />
+            ) : (
+              <button onClick={() => setEditUser(true)} title="ตั้งชื่อผู้ใช้ (เก็บในเครื่องนี้ ติดไปกับเคสที่ถอด)"
+                style={{ padding: '5px 12px', borderRadius: 999, border: `1px solid ${C.line}`, background: C.sub, color: currentUser ? C.text : C.muted, fontSize: 12.5, cursor: 'pointer', fontFamily: 'inherit' }}>
+                👤 {currentUser || 'ตั้งชื่อผู้ใช้'}
+              </button>
+            )}
+            {gem && (() => {
+              const g = gem.light === 'green' ? { d: '#22c55e', t: 'Gemini พร้อม' } : gem.light === 'red' ? { d: '#ef4444', t: 'Gemini แน่น' } : { d: '#f59e0b', t: 'Gemini ช้า/ไม่แน่ใจ' };
+              return (
+                <span title={gem.msg || ''} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 999, border: `1px solid ${C.line}`, background: C.sub, fontSize: 12.5, color: C.muted }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: g.d, boxShadow: `0 0 6px ${g.d}` }} />
+                  {g.t}{gem.ms ? ` · ${(gem.ms / 1000).toFixed(1)}s` : ''}
+                </span>
+              );
+            })()}
+          </div>
+        </div>
+        <p style={{ fontSize: 13, color: C.muted, margin: '0 0 18px' }}>
+          วางลิงก์คลิป (YouTube / TikTok / Facebook / IG) หรือลิงก์ข่าวเว็บ → ถอดประเด็นเป็นข้อมูลพร้อมใช้ · แยกจากระบบทำข่าว 100%
+        </p>
+
+        {/* โซน 1 — งานใหม่ */}
+        <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 16, marginBottom: 16 }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ flex: 1, minWidth: 260, position: 'relative' }}>
+              <input value={url} onChange={e => setUrl(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !busy) { primaryAction === 'news-hunt' ? extractNewsHunt() : extractInsight(); } }}
+                placeholder="วางลิงก์ที่นี่…"
+                style={{ width: '100%', padding: '12px 14px', borderRadius: 10, border: `1px solid ${C.line}`, background: C.sub, color: C.text, fontSize: 14, fontFamily: 'inherit', boxSizing: 'border-box' }} />
+              {link.label && <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11.5, color: C.muted, background: C.card, padding: '2px 8px', borderRadius: 999, border: `1px solid ${C.line}` }}>{link.label}</span>}
+            </div>
+            {/* ปุ่มหลัก 1 ปุ่ม */}
+            <button onClick={() => (primaryAction === 'news-hunt' ? extractNewsHunt() : extractInsight())} disabled={busy}
+              style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: busy ? '#334155' : C.accent, color: busy ? C.muted : '#04263b', fontWeight: 800, fontSize: 14, cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
+              {insightLoading ? '⏳ กำลังถอด…' : primaryAction === 'news-hunt' ? '📰 วิจัยลิงก์ข่าว' : '🎯 ถอดประเด็น'}
+            </button>
+          </div>
+
+          {/* ปุ่มรอง ghost */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+            <button onClick={extract} disabled={busy || submitting} style={ghostBtn(busy)}>
+              {loading ? '⏳…' : '🎙️ ถอดบทสัมภาษณ์'}
+            </button>
+            <button onClick={extractHunt} disabled={busy || submitting} style={ghostBtn(busy)}>
+              {hunting ? '⏳…' : '🧭 คลิป → ค้นข่าวคล้าย'}
+            </button>
+            <button onClick={extractNewsHunt} disabled={busy || submitting} style={ghostBtn(busy)}>
+              {hunting ? '⏳…' : '📰 ลิงก์ข่าว → วิจัย'}
+            </button>
+            <button onClick={() => submitToQueue()} disabled={busy || submitting} style={ghostBtn(busy)}>
+              {submitting ? '⏳…' : '📥 ส่งเข้าคิว (เครื่องทีม)'}
+            </button>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: C.muted, marginLeft: 'auto' }}>
+              <input type="checkbox" checked={tidy} onChange={e => setTidy(e.target.checked)} /> เรียบเรียงให้อ่านลื่น
+            </label>
+          </div>
+
+          {notice && <div style={{ marginTop: 12, padding: '10px 13px', borderRadius: 10, fontSize: 13, lineHeight: 1.55, border: `1px solid ${C.accent}55`, background: 'rgba(56,189,248,.08)', color: '#bae6fd' }}>{notice}</div>}
+          {err && <div style={{ marginTop: 12, padding: '10px 13px', borderRadius: 10, fontSize: 13, lineHeight: 1.55, border: '1px solid #ef444455', background: 'rgba(239,68,68,.08)', color: '#fca5a5' }}>❌ {err}</div>}
+        </div>
+
+        {/* โซน 2 — บอร์ดงาน + สถิติ */}
+        <StatsStrip counts={queueList?.counts} casesTotal={insightTotal} cases={insightCases} />
+        <div style={{ marginBottom: 16 }}>
+          <JobBoard
+            myJob={queueJob}
+            queue={queueList}
+            nowMs={nowMs}
+            currentUser={currentUser}
+            onCancel={onCancel}
+            onRetry={onRetry}
+            onViewResult={onViewResult}
+          />
+        </div>
+
+        {/* โซน 3 — ผลลัพธ์ */}
+        {/* ผลถอดบทสัมภาษณ์ (out) */}
+        {out && (
+          <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 16, marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 15, fontWeight: 700 }}>🎙️ ผลถอดบทสัมภาษณ์</span>
+              {out.tidyText && (
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button onClick={() => setView('tidy')} style={tabBtn(view === 'tidy')}>เรียบเรียง</button>
+                  <button onClick={() => setView('raw')} style={tabBtn(view === 'raw')}>ดิบ</button>
+                </div>
+              )}
+              <button onClick={() => copy('out', view === 'tidy' && out.tidyText ? out.tidyText : out.rawText)} style={{ ...tabBtn(false), marginLeft: 'auto' }}>{copied === 'out' ? '✓ คัดลอกแล้ว' : '📋 คัดลอก'}</button>
+            </div>
+            <div style={{ fontSize: 13.5, lineHeight: 1.7, whiteSpace: 'pre-wrap', background: C.sub, borderRadius: 8, padding: 12, maxHeight: 420, overflowY: 'auto' }}>
+              {view === 'tidy' && out.tidyText ? out.tidyText : out.rawText}
+            </div>
+          </div>
+        )}
+
+        {/* ผลถอดประเด็นสด */}
+        {insightLoading && <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 20, marginBottom: 16, textAlign: 'center', color: C.muted, fontSize: 13.5 }}>⏳ Gemini กำลังดูคลิปและถอดประเด็น…</div>}
+        {insight && (
+          <div style={{ marginBottom: 16 }}>
+            <InsightCard
+              rec={insight.insight ? insight : { insight, url, platform: insight.platform }}
+              live
+              copiedKey={copied}
+              onCopy={copy}
+              onRetry={(u) => extractInsight(true, u)}
+            />
+          </div>
+        )}
+
+        {/* คลังถอดประเด็น (พับ default) */}
+        <Section title={`📚 คลังถอดประเด็น${insightTotal ? ` (${insightTotal})` : ''}`} open={insightOpen} onToggle={() => setInsightOpen(o => !o)} C={C}>
+          {insightCases.length === 0 && <div style={{ fontSize: 13, color: C.muted, padding: '4px 2px' }}>ยังไม่มีเคสในคลัง</div>}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {insightCases.map(rec => (
+              <InsightCard key={rec.id} rec={rec} copiedKey={copied}
+                onCopy={copy} onDelete={deleteInsightCase} onPin={pinInsightCase} onRetry={(u) => extractInsight(true, u)} />
+            ))}
+          </div>
+          {insightTotal > PAGE_SIZE && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 14 }}>
+              <button onClick={() => gotoPage(insightOffset - PAGE_SIZE)} disabled={insightOffset <= 0} style={pageBtn(insightOffset <= 0, C)}>‹ ก่อนหน้า</button>
+              <span style={{ fontSize: 12.5, color: C.muted }}>{Math.floor(insightOffset / PAGE_SIZE) + 1} / {Math.max(1, Math.ceil(insightTotal / PAGE_SIZE))}</span>
+              <button onClick={() => gotoPage(insightOffset + PAGE_SIZE)} disabled={insightOffset + PAGE_SIZE >= insightTotal} style={pageBtn(insightOffset + PAGE_SIZE >= insightTotal, C)}>ถัดไป ›</button>
+            </div>
+          )}
+        </Section>
+
+        {/* แถบขั้นตอน hunt ระหว่างทำ */}
+        {hunting && huntPhase > 0 && (
+          <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14, marginBottom: 16, fontSize: 13, color: C.muted }}>
+            {huntPhase === 1 && '① กำลังอ่านต้นทาง / ถอดเนื้อดิบ…'}
+            {huntPhase === 2 && '② กำลังวิเคราะห์ DNA แนวข่าว + ค้นข่าวคล้าย…'}
+            {huntPhase === 3 && '③ เครื่องทีมกำลังถอด + ค้น (ปิดหน้าได้ ผลเข้าคลังเอง)…'}
+          </div>
+        )}
+
+        {/* ผลค้นประเด็นสด */}
+        {hunt && (
+          <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 16, marginBottom: 16 }}>
+            {renderHuntCase(hunt, 'live')}
+          </div>
+        )}
+
+        {/* คลังค้นประเด็น (พับ default) */}
+        <Section title={`🧭 คลังค้นประเด็น${huntCases.length ? ` (${huntCases.length})` : ''}`} open={huntOpen} onToggle={() => setHuntOpen(o => !o)} C={C}>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+            {[['all', 'ทั้งหมด'], ['clip', '🎬 คลิป'], ['article', '📰 ลิงก์ข่าว']].map(([k, lb]) => (
+              <button key={k} onClick={() => setHuntFilter(k)} style={{ padding: '4px 12px', borderRadius: 999, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', border: `1px solid ${huntFilter === k ? C.accent : C.line}`, background: 'transparent', color: huntFilter === k ? C.accent : C.muted }}>{lb}</button>
+            ))}
+          </div>
+          {huntCases.filter(c => huntFilter === 'all' || (huntFilter === 'article' ? c.sourceType === 'article' : c.sourceType !== 'article')).map(c => (
+            <div key={c.id} style={{ border: `1px solid ${C.line}`, borderRadius: 10, marginBottom: 10, overflow: 'hidden' }}>
+              <button onClick={() => setHuntExpanded(huntExpanded === c.id ? null : c.id)} style={{ width: '100%', textAlign: 'left', padding: '10px 13px', background: 'transparent', border: 'none', color: C.text, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 600, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                <span>{c.sourceType === 'article' ? '📰' : '🎬'} {c.title || c.sourceUrl}</span>
+                <span style={{ color: C.muted }}>{huntExpanded === c.id ? '▲' : '▼'}</span>
+              </button>
+              {huntExpanded === c.id && <div style={{ padding: '0 13px 13px' }}>{renderHuntCase(c, c.id)}</div>}
+            </div>
+          ))}
+          {huntCases.length === 0 && <div style={{ fontSize: 13, color: C.muted }}>ยังไม่มีเคสค้นประเด็น</div>}
+        </Section>
+      </div>
+    </div>
+  );
+
+  // ── hunt rendering (คงของเดิม คอมโพเนนต์ใหม่ยังไม่ครอบส่วนนี้) ──
+  function resultKind(r) {
     if (r.tag === 'same' || r.tag === 'follow') return { group: 'same', level: 0 };
     const lvl = [1, 2, 3].includes(Number(r.level)) ? Number(r.level) : 3;
     return { group: 'dna', level: lvl };
-  };
-  const LEVEL_META = {
-    1: { label: '🎯 แนวเดียวกัน · ใกล้', color: '#34d399', bg: 'rgba(16,185,129,0.15)' },
-    2: { label: '🧬 แนวเดียวกัน · กลาง', color: '#22d3ee', bg: 'rgba(6,182,212,0.13)' },
-    3: { label: '🌐 แนวเดียวกัน · กว้าง', color: '#c084fc', bg: 'rgba(168,85,247,0.14)' },
-  };
-  const SAME_META = { label: '👤 คนเดิม/ตามต่อ', color: '#fbbf24', bg: 'rgba(245,158,11,0.16)' };
-  const levelText = (lv) => (lv === 1 ? 'ใกล้' : lv === 2 ? 'กลาง' : 'กว้าง');
-
-  // ★ ข้อความคัดลอก "ทั้งเคส" (ลิงก์ต้นทาง + เนื้อดิบ + ข่าวแนวเดียวกันคนละคน + คนเดิม)
-  const huntCaseText = (c) => {
+  }
+  function levelText(lv) { return lv === 1 ? 'ใกล้' : lv === 2 ? 'กลาง' : 'กว้าง'; }
+  function huntCaseText(c) {
     if (!c) return '';
-    const p = c.styleProfile || {};
-    const d = p.dna || {};
+    const d = (c.styleProfile || {}).dna || {};
     const results = c.results || [];
     const dnaR = results.filter(r => resultKind(r).group === 'dna');
     const sameR = results.filter(r => resultKind(r).group === 'same');
@@ -281,574 +510,80 @@ export default function ClipTranscriptPage() {
       `ลิงก์ต้นทาง: ${c.sourceUrl || ''}`,
       `DNA แนวข่าว: ${d.who || '-'} · ${d.what || '-'} · ${d.core || '-'} · ${d.emotion || '-'}`,
       '', `=== ${c.sourceType === 'article' ? 'ผลวิจัยเชิงลึก' : 'เนื้อดิบจากคลิป'} ===`, c.insight?.rawData || '-',
-      '', `=== ข่าวแนวเดียวกัน — คนละคน (${dnaR.length}) ===`,
-      ...dnaR.map(rowTxt),
+      '', `=== ข่าวแนวเดียวกัน — คนละคน (${dnaR.length}) ===`, ...dnaR.map(rowTxt),
     ];
     if (sameR.length) { lines.push('', `=== ข่าวคนเดิม/ตามต่อ (${sameR.length}) ===`, ...sameR.map(rowTxt)); }
     return lines.join('\n');
-  };
-
-  // แถวผล 1 รายการ
-  const huntRow = (r, key) => {
+  }
+  function huntRow(r, key) {
     const k = resultKind(r);
-    const meta = k.group === 'same' ? SAME_META : LEVEL_META[k.level];
+    const meta = k.group === 'same'
+      ? { label: '👤 คนเดิม/ตามต่อ', color: '#fbbf24' }
+      : { 1: { label: '🎯 ใกล้', color: '#34d399' }, 2: { label: '🧬 กลาง', color: '#22d3ee' }, 3: { label: '🌐 กว้าง', color: '#c084fc' } }[k.level];
     return (
       <div key={key} style={{ display: 'flex', gap: 7, alignItems: 'baseline', flexWrap: 'wrap', fontSize: 12.5 }}>
-        <span style={{ fontSize: 10.5, padding: '2px 8px', borderRadius: 20, background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontWeight: 800, flexShrink: 0 }}>{r.score}</span>
-        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: r.type === 'คลิป' ? 'rgba(124,58,237,0.15)' : 'rgba(255,255,255,0.08)', color: r.type === 'คลิป' ? '#a78bfa' : 'var(--text-muted,#aaa)', fontWeight: 700, flexShrink: 0 }}>{r.type}</span>
-        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: meta.bg, color: meta.color, fontWeight: 700, flexShrink: 0 }}>{meta.label}</span>
-        <a href={r.url} target="_blank" rel="noopener noreferrer" title={r.reason || ''} style={{ color: '#60a5fa', textDecoration: 'none', fontWeight: 600 }}>{r.title}</a>
-        <span style={{ fontSize: 10.5, color: 'var(--text-muted,#777)' }}>{r.source}</span>
-        <button onClick={() => copy(`${r.title}\n${r.url}`, key)} style={{ padding: '1px 8px', borderRadius: 6, border: 'none', background: 'rgba(255,255,255,0.06)', color: copied === key ? '#22c55e' : 'var(--text-muted,#999)', fontSize: 10.5, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === key ? '✅' : '📋'}</button>
+        <span style={{ fontSize: 10.5, padding: '2px 8px', borderRadius: 20, background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontWeight: 800 }}>{r.score}</span>
+        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: meta.color + '22', color: meta.color, fontWeight: 700 }}>{meta.label}</span>
+        <a href={r.url} target="_blank" rel="noopener noreferrer" title={r.reason || ''} style={{ color: C.accent, textDecoration: 'none', fontWeight: 600 }}>{r.title}</a>
+        <span style={{ fontSize: 10.5, color: C.muted }}>{r.source}</span>
+        <button onClick={() => copy(key, `${r.title}\n${r.url}`)} style={{ padding: '1px 8px', borderRadius: 6, border: 'none', background: C.sub, color: copied === key ? '#22c55e' : C.muted, fontSize: 10.5, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === key ? '✓' : '📋'}</button>
       </div>
     );
-  };
-
-  // ★ เนื้อการ์ดเคสค้นประเด็น — ใช้ทั้งผลสดและในคลัง (kp = key prefix กัน id ชนกัน)
-  const renderHuntCase = (c, kp) => {
-    const p = c.styleProfile || {};
-    const d = p.dna || {};
+  }
+  function renderHuntCase(c, kp) {
+    const d = (c.styleProfile || {}).dna || {};
     const isArticle = c.sourceType === 'article';
     const results = c.results || [];
     const dnaR = results.filter(r => resultKind(r).group === 'dna');
     const sameR = results.filter(r => resultKind(r).group === 'same');
-    const dnaChip = (v, c2) => v ? <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: c2.bg, color: c2.fg, fontWeight: 700 }}>{c2.icon} {v}</span> : null;
     return (
       <div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
-          <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, fontWeight: 800, background: isArticle ? 'rgba(37,99,235,0.18)' : 'rgba(124,58,237,0.18)', color: isArticle ? '#60a5fa' : '#a78bfa' }}>{isArticle ? '📰 จากลิงก์ข่าว' : '🎬 จากคลิป'}</span>
-          {c.insight?.category && <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(245,158,11,0.16)', color: '#f59e0b', fontWeight: 700 }}>📂 {c.insight.category}</span>}
-          <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontWeight: 800 }}>✅ คนละคน {dnaR.length}{sameR.length ? ` · คนเดิม ${sameR.length}` : ''}</span>
-          <button onClick={() => copy(huntCaseText(c), kp + '-all')} style={{ padding: '4px 11px', borderRadius: 8, border: 'none', background: copied === kp + '-all' ? 'rgba(34,197,94,0.2)' : 'rgba(59,130,246,0.15)', color: copied === kp + '-all' ? '#22c55e' : '#3b82f6', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === kp + '-all' ? '✅ คัดลอกแล้ว' : '📋 คัดลอกทั้งเคส'}</button>
-          <button onClick={() => huntMore(c)} disabled={hunting} style={{ padding: '4px 11px', borderRadius: 8, border: '1px solid rgba(13,148,136,0.5)', background: 'transparent', color: '#2dd4bf', fontSize: 11, fontWeight: 700, cursor: hunting ? 'wait' : 'pointer', fontFamily: 'inherit' }}>{hunting ? '⏳...' : '🔁 ค้นเพิ่มอีกรอบ'}</button>
+          <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, fontWeight: 700, background: C.sub, color: isArticle ? '#60a5fa' : '#a78bfa' }}>{isArticle ? '📰 จากลิงก์ข่าว' : '🎬 จากคลิป'}</span>
+          {c.insight?.category && <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, background: C.sub, color: C.muted }}>📂 {c.insight.category}</span>}
+          <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, background: 'rgba(34,197,94,0.12)', color: '#22c55e', fontWeight: 700 }}>คนละคน {dnaR.length}{sameR.length ? ` · คนเดิม ${sameR.length}` : ''}</span>
+          <button onClick={() => copy(kp + '-all', huntCaseText(c))} style={{ padding: '4px 11px', borderRadius: 8, border: `1px solid ${C.line}`, background: 'transparent', color: copied === kp + '-all' ? '#22c55e' : C.accent, fontSize: 11.5, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === kp + '-all' ? '✓ คัดลอกแล้ว' : '📋 คัดลอกทั้งเคส'}</button>
+          <button onClick={() => huntMore(c)} disabled={hunting} style={{ padding: '4px 11px', borderRadius: 8, border: `1px solid ${C.line}`, background: 'transparent', color: '#2dd4bf', fontSize: 11.5, cursor: hunting ? 'wait' : 'pointer', fontFamily: 'inherit' }}>{hunting ? '⏳…' : '🔁 ค้นเพิ่ม'}</button>
         </div>
-        <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 6 }}>{isArticle ? '📰 ข่าวต้นทาง' : '🎬 คลิปต้นทาง'}: {c.title} <a href={c.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: '#3b82f6', fontWeight: 400 }}>🔗 {isArticle ? 'เปิดข่าว' : 'เปิดคลิป'}</a></div>
-        {/* ★ DNA แนวข่าว (สกัดจากต้นทาง) */}
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>{c.title} <a href={c.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11.5, color: C.accent, fontWeight: 400 }}>🔗 เปิด</a></div>
         {(d.who || d.what || d.core || d.emotion) && (
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
-            <span style={{ fontSize: 11, color: 'var(--text-muted,#888)', fontWeight: 700 }}>🧬 DNA:</span>
-            {dnaChip(d.who, { icon: '👤', bg: 'rgba(124,58,237,0.15)', fg: '#a78bfa' })}
-            {dnaChip(d.what, { icon: '⚡', bg: 'rgba(16,185,129,0.13)', fg: '#34d399' })}
-            {dnaChip(d.core, { icon: '🎯', bg: 'rgba(217,90,48,0.14)', fg: '#fb923c' })}
-            {dnaChip(d.emotion, { icon: '💗', bg: 'rgba(236,72,153,0.13)', fg: '#f472b6' })}
-          </div>
+          <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 10 }}>🧬 DNA: {[d.who, d.what, d.core, d.emotion].filter(Boolean).join(' · ')}</div>
         )}
         {c.insight?.rawData && (
           <details style={{ marginBottom: 10 }} open={isArticle}>
-            <summary style={{ fontSize: 12, color: 'var(--text-muted,#888)', cursor: 'pointer' }}>{isArticle ? '🔬 ผลวิจัยเชิงลึก' : '📄 เนื้อดิบที่ถอดได้'} ({c.insight.rawData.length} ตัวอักษร) — กดกาง/คัดลอก</summary>
-            <div style={{ fontSize: 12.5, lineHeight: 1.7, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 11, maxHeight: 240, overflowY: 'auto', marginTop: 6 }}>{c.insight.rawData}</div>
-            <button onClick={() => copy(c.insight.rawData, kp + '-raw')} style={{ marginTop: 5, padding: '3px 10px', borderRadius: 7, border: 'none', background: 'rgba(59,130,246,0.15)', color: copied === kp + '-raw' ? '#22c55e' : '#3b82f6', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === kp + '-raw' ? '✅' : '📋 คัดลอกเนื้อดิบ'}</button>
+            <summary style={{ fontSize: 12, color: C.muted, cursor: 'pointer' }}>{isArticle ? '🔬 ผลวิจัยเชิงลึก' : '📄 เนื้อดิบ'} ({c.insight.rawData.length} ตัวอักษร)</summary>
+            <div style={{ fontSize: 12.5, lineHeight: 1.7, whiteSpace: 'pre-wrap', background: C.sub, borderRadius: 8, padding: 11, maxHeight: 240, overflowY: 'auto', marginTop: 6 }}>{c.insight.rawData}</div>
           </details>
         )}
-        {(c.searchKeys || []).length > 0 && <div style={{ fontSize: 11.5, color: 'var(--text-muted,#888)', marginBottom: 10 }}>🔑 คีย์ที่สมองใช้ค้น (คนละคน): {c.searchKeys.join(' · ')}</div>}
-        {/* ★ ผลหลัก: ข่าวแนวเดียวกัน คนละคน (เรียงใกล้→กว้าง) */}
-        <div style={{ borderTop: '1px solid var(--border,#2a2a3e)', paddingTop: 10 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 800, color: '#34d399', marginBottom: 7 }}>🎯 ข่าวแนวเดียวกัน — คนละคน ({dnaR.length}) <span style={{ fontSize: 10.5, fontWeight: 400, color: 'var(--text-muted,#888)' }}>เรียงจากใกล้ DNA → กว้างขึ้น</span></div>
+        <div style={{ borderTop: `1px solid ${C.line}`, paddingTop: 10 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: '#34d399', marginBottom: 7 }}>🎯 ข่าวแนวเดียวกัน — คนละคน ({dnaR.length})</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
             {dnaR.map((r, i) => huntRow(r, kp + '-d' + i))}
-            {!dnaR.length && <div style={{ fontSize: 12, color: 'var(--text-muted,#888)' }}>ยังไม่เจอข่าวแนวเดียวกันคนละคนที่ผ่านเกณฑ์ — ลองกด &quot;ค้นเพิ่มอีกรอบ&quot; ให้สมองคิดคีย์ชุดใหม่</div>}
+            {!dnaR.length && <div style={{ fontSize: 12, color: C.muted }}>ยังไม่เจอที่ผ่านเกณฑ์ — กด &quot;ค้นเพิ่ม&quot; ให้สมองคิดคีย์ชุดใหม่</div>}
           </div>
-          {/* กลุ่มเล็ก: ข่าวคนเดิม/ตามต่อ */}
           {sameR.length > 0 && (
             <div style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: '#fbbf24', marginBottom: 6 }}>👤 ข่าวคนเดิม/ตามต่อ ({sameR.length}) <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-muted,#888)' }}>— เผื่ออยากได้มุมเพิ่มของเรื่องเดิม</span></div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, opacity: 0.9 }}>
-                {sameR.map((r, i) => huntRow(r, kp + '-s' + i))}
-              </div>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: '#fbbf24', marginBottom: 6 }}>👤 ข่าวคนเดิม/ตามต่อ ({sameR.length})</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, opacity: 0.9 }}>{sameR.map((r, i) => huntRow(r, kp + '-s' + i))}</div>
             </div>
           )}
         </div>
       </div>
     );
-  };
+  }
+}
 
-  const shown = out ? (view === 'tidy' && out.tidyText ? out.tidyText : out.rawText) : '';
-
+// ── helper components ──
+function Section({ title, open, onToggle, C, children }) {
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg-primary, #0d0d1a)', color: 'var(--text-primary, #e8e8f0)', fontFamily: 'inherit' }}>
-      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '28px 20px' }}>
-        <h1 style={{ fontSize: 24, fontWeight: 900, margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>🎙️ ถอดบทสัมภาษณ์จากคลิป</h1>
-        <p style={{ fontSize: 13, color: 'var(--text-muted, #888)', margin: '6px 0 22px' }}>
-          วางลิงก์ TikTok / YouTube / Facebook → ถอดบทพูด-บทสัมภาษณ์เป็นข้อความ → เก็บเข้าคลัง หยิบไปเรียบเรียงเป็นข่าวเอง (แยกจากระบบทำข่าว)
-        </p>
-
-        {/* Input */}
-        <div className="card" style={{ background: 'var(--bg-card, #1a1a2e)', border: '1px solid var(--border, #2a2a3e)', borderRadius: 14, padding: 18, marginBottom: 18 }}>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <input value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && !loading && extract()}
-              placeholder="วางลิงก์คลิป (TikTok/YouTube/FB) หรือลิงก์ข่าวเว็บ (เช่น TrueID) แล้วเลือกปุ่มด้านขวา"
-              style={{ flex: 1, minWidth: 280, padding: '12px 14px', borderRadius: 10, border: '1px solid var(--border, #2a2a3e)', background: 'rgba(0,0,0,0.2)', color: 'inherit', fontSize: 14, fontFamily: 'inherit' }} />
-            <button onClick={extract} disabled={loading || insightLoading}
-              style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: loading ? '#4b5563' : 'linear-gradient(135deg,#f91880,#7c3aed)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: loading ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
-              {loading ? '⏳ กำลังถอด...' : '🎙️ ถอดบทสัมภาษณ์'}
-            </button>
-            <button onClick={() => extractInsight()} disabled={loading || insightLoading || hunting}
-              style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: insightLoading ? '#4b5563' : 'linear-gradient(135deg,#2563eb,#0891b2)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: insightLoading ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
-              {insightLoading ? '⏳ Gemini กำลังดูคลิป...' : '🎯 ถอดประเด็นข่าว (ข้อมูลดิบ)'}
-            </button>
-            {/* ★ 8 ก.ค.: สองปุ่ม "หาข่าวเสริม" อยู่ติดกัน — คลิป (🧭) / ลิงก์ข่าวเว็บ (📰) · คลังเดียวกัน ผลแยกป้าย */}
-            <button onClick={extractHunt} disabled={loading || insightLoading || hunting}
-              title="สำหรับลิงก์คลิป (YouTube/TikTok/FB/IG) — ถอดเนื้อดิบแล้วหาข่าว/คลิปคล้าย"
-              style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: hunting ? '#4b5563' : 'linear-gradient(135deg,#059669,#0d9488)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: hunting ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
-              {hunting ? '⏳ กำลังทำ...' : '🧭 คลิป → ค้นข่าวคล้าย'}
-            </button>
-            <button onClick={extractNewsHunt} disabled={loading || insightLoading || hunting}
-              title="สำหรับลิงก์ข่าวเว็บ (เช่น TrueID, ข่าวสด) — วิจัยเชิงลึกแล้วหาข่าวเสริม"
-              style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: hunting ? '#4b5563' : 'linear-gradient(135deg,#2563eb,#1d4ed8)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: hunting ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
-              {hunting ? '⏳ กำลังทำ...' : '📰 ลิงก์ข่าว → วิจัย+หาเสริม'}
-            </button>
-            <button onClick={submitToQueue} disabled={loading || insightLoading || submitting || (queueJob && !queueJob._pollEnded && queueJob.status !== 'done' && queueJob.status !== 'error')}
-              title="ส่งลิงก์ให้เครื่องทีมถอดให้ — เหมาะกับ Facebook/IG หรือเมื่อทำในเว็บไม่ได้"
-              style={{ padding: '12px 22px', borderRadius: 10, border: '1px solid #f59e0b', background: submitting ? '#4b5563' : 'rgba(245,158,11,0.12)', color: '#fbbf24', fontWeight: 800, fontSize: 14, cursor: submitting ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
-              {submitting ? '⏳ กำลังส่ง...' : '📥 ส่งเข้าคิว (เครื่องทีม)'}
-            </button>
-          </div>
-
-          {/* ★ 26 มิ.ย.: ไฟสัญญาณ Gemini เรียลไทม์ — งานจะได้รู้ว่าควรกดถอดตอนนี้ไหม */}
-          {gem && (() => {
-            const c = gem.light === 'green' ? { dot: '#22c55e', bg: 'rgba(34,197,94,0.10)', bd: '#22c55e', label: '🟢 Gemini พร้อม' }
-              : gem.light === 'red' ? { dot: '#ef4444', bg: 'rgba(239,68,68,0.10)', bd: '#ef4444', label: '🔴 Gemini แน่น' }
-              : { dot: '#f59e0b', bg: 'rgba(245,158,11,0.10)', bd: '#f59e0b', label: '🟡 Gemini ช้า/ไม่แน่ใจ' };
-            return (
-              <div style={{ marginTop: 10, padding: '9px 13px', borderRadius: 10, fontSize: 12.5, lineHeight: 1.5,
-                display: 'flex', alignItems: 'center', gap: 9, border: '1px solid ' + c.bd, background: c.bg }}>
-                <span style={{ width: 10, height: 10, borderRadius: '50%', background: c.dot, flexShrink: 0, boxShadow: `0 0 7px ${c.dot}` }} />
-                <span><b>{c.label}</b> — {gem.msg || ''}{gem.ms ? ` (${(gem.ms / 1000).toFixed(1)} วิ)` : ''}
-                  {gem.light === 'red' && <span style={{ opacity: 0.85 }}> · รอไฟเขียว หรือส่งเข้าคิวให้เครื่องทีมลองหนึ่งครั้ง</span>}
-                  {gem.light === 'green' && <span style={{ opacity: 0.85 }}> · กดถอดประเด็นได้เลย</span>}
-                </span>
-              </div>
-            );
-          })()}
-
-          {/* ★ สถานะงานในคิวเครื่องทีม */}
-          {queueJob && (
-            <div style={{ marginTop: 12, padding: '12px 14px', borderRadius: 10, fontSize: 13, lineHeight: 1.6,
-              border: '1px solid ' + (queueJob.status === 'error' ? '#ef4444' : queueJob.status === 'done' ? '#22c55e' : '#f59e0b'),
-              background: queueJob.status === 'error' ? 'rgba(239,68,68,0.08)' : queueJob.status === 'done' ? 'rgba(34,197,94,0.08)' : 'rgba(245,158,11,0.08)' }}>
-              {queueJob.status === 'pending' && <>⏳ <b>อยู่ในคิวเครื่องทีม</b> — ลำดับที่ {queueJob.position || '?'} · {platformIcon({ youtube: 'youtube', tiktok: 'tiktok', meta: 'meta' }[queueJob.platform])} กำลังรอเครื่องทีมดึงไปถอด (เปิดหน้านี้ค้างไว้ ผลจะเด้งขึ้นเอง)</>}
-              {queueJob.status === 'processing' && <>🔧 <b>เครื่องทีมกำลังถอดอยู่...</b>{queueJob.attempts > 0 ? <span style={{ color: '#fbbf24' }}> (รอบที่ {queueJob.attempts + 1} — รอบก่อนเซิร์ฟเวอร์ยืนยันว่ายังไม่เริ่มประมวลผล)</span> : ''} {platformIcon(queueJob.platform)} (อาจใช้เวลา 1-3 นาทีต่อคลิป)</>}
-              {/* retry_wait มีได้เฉพาะเมื่อ endpoint ยืนยัน retrySafe ว่ายังไม่เริ่มงานเสียเงิน */}
-              {queueJob.status === 'retry_wait' && (() => {
-                const remainS = Math.max(0, Math.round(((queueJob.nextRetryAt ? new Date(queueJob.nextRetryAt).getTime() : nowMs) - nowMs) / 1000));
-                const mm = Math.floor(remainS / 60), ss = remainS % 60;
-                return <>🟡 <b>งานยังไม่เริ่มประมวลผล — เซิร์ฟเวอร์ยืนยันว่าลองส่งใหม่ได้อย่างปลอดภัย</b><br />
-                  ✅ ส่งไปแล้ว <b>{queueJob.attempts || 0}</b> ครั้ง · {remainS > 0
-                    ? <>⏱️ รอบถัดไปในอีก <b>{mm > 0 ? `${mm} นาที ` : ''}{ss} วินาที</b></>
-                    : <>🔄 <b>กำลังลองใหม่เดี๋ยวนี้…</b></>}
-                  <br /><span style={{ fontSize: 11.5, opacity: 0.85 }}>👉 สถานะนี้ไม่ใช่การถอดซ้ำ — ระบบจะเริ่ม inference เมื่อรับงานได้เท่านั้น และถ้าประมวลผลล้มจะหยุดให้พนักงานตัดสินใจ</span></>;
-              })()}
-              {queueJob.status === 'done' && <>✅ <b>ถอดเสร็จแล้ว</b> — ผลอยู่ด้านล่าง + เก็บเข้าคลังประเด็นข่าวให้แล้ว</>}
-              {queueJob.status === 'error' && <>❌ <b>ถอดไม่สำเร็จ</b> — {queueJob.error || 'ลองส่งใหม่อีกครั้ง'}</>}
-              {queueJob._pollEnded && queueJob.status !== 'done' && queueJob.status !== 'error' && <><br /><span style={{ fontSize: 11.5, opacity: 0.85 }}>⏱️ หยุดอัปเดตสดแล้ว แต่ <b>งานยังทำต่อเบื้องหลัง</b> — เสร็จแล้วระบบเก็บผลเข้าคลังให้อัตโนมัติ</span></>}
-            </div>
-          )}
-          {/* ★ 26 มิ.ย.: แผงคิวรวม — เห็นทุกคลิปที่ส่งเข้าคิว (รออยู่/รอ Gemini หาย/ถอดอยู่/เสร็จล่าสุด) */}
-          {queueList && (queueList.counts.active > 0 || (queueList.recent && queueList.recent.length > 0)) && (
-            <div style={{ marginTop: 14, border: '1px solid rgba(245,158,11,0.25)', borderRadius: 12, background: 'rgba(245,158,11,0.04)', overflow: 'hidden' }}>
-              <button onClick={() => setQueueListOpen(o => !o)} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '10px 14px', background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 800 }}>
-                <span>📋 คิวคลิป {queueList.counts.active > 0 ? `— รออยู่ ${queueList.counts.active} คลิป` : '— ว่าง'}{queueList.counts.retry_wait > 0 ? ` · 🟡 รอ Gemini ${queueList.counts.retry_wait}` : ''}{queueList.counts.processing > 0 ? ` · 🔧 ถอดอยู่ ${queueList.counts.processing}` : ''}</span>
-                <span style={{ opacity: 0.6 }}>{queueListOpen ? '▲' : '▼'}</span>
-              </button>
-              {queueListOpen && (
-                <div style={{ padding: '0 12px 12px' }}>
-                  {queueList.active.length === 0 && <div style={{ fontSize: 12, opacity: 0.7, padding: '4px 2px' }}>ไม่มีคลิปรออยู่ — ส่งลิงก์เข้าคิวได้เลย</div>}
-                  {queueList.active.map(j => {
-                    const remainS = j.status === 'retry_wait' && j.nextRetryAt ? Math.max(0, Math.round((new Date(j.nextRetryAt).getTime() - nowMs) / 1000)) : 0;
-                    const badge = j.status === 'retry_wait'
-                      ? `🟡 รอ Gemini (ลอง ${j.attempts} ครั้ง${remainS > 0 ? ` · อีก ${Math.floor(remainS / 60) > 0 ? `${Math.floor(remainS / 60)}น ` : ''}${remainS % 60}ว` : ' · กำลังลอง'})`
-                      : j.status === 'processing' ? `🔧 กำลังถอด${j.attempts > 0 ? ` (รอบ ${j.attempts + 1})` : ''}` : '⏳ รอคิว';
-                    return (
-                      <div key={j.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px', borderTop: '1px solid rgba(255,255,255,0.05)', fontSize: 12 }}>
-                        <span>{platformIcon(j.platform)}</span>
-                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: 0.85 }}>{String(j.url).replace(/^https?:\/\/(www\.)?/, '').slice(0, 40)}</span>
-                        <span style={{ fontWeight: 700, color: j.status === 'retry_wait' ? '#fbbf24' : j.status === 'processing' ? '#60a5fa' : '#9ca3af', whiteSpace: 'nowrap' }}>{badge}</span>
-                        {/* ★ 27 มิ.ย.: retry ≥3 รอบ = น่าจะลิงก์เสีย/ไม่พบคอนเทนต์ → เตือน + ปุ่มลบ */}
-                        {(j.attempts || 0) >= 3 && <span style={{ fontSize: 10.5, color: '#f87171', whiteSpace: 'nowrap' }}>· อาจลิงก์เสีย</span>}
-                        <button onClick={() => cancelClip(j.id)} title="ลบออกจากคิว (หยุดถอด/หยุดลองใหม่)"
-                          style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.35)', borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>🗑️ ลบ</button>
-                      </div>
-                    );
-                  })}
-                  {queueList.recent && queueList.recent.length > 0 && (
-                    <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px dashed rgba(255,255,255,0.1)' }}>
-                      <div style={{ fontSize: 10.5, opacity: 0.55, marginBottom: 3 }}>เสร็จ/ล้ม ล่าสุด</div>
-                      {queueList.recent.map(j => (
-                        <div key={j.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 2px', fontSize: 11.5, opacity: 0.7 }}>
-                          <span>{j.status === 'done' ? '✅' : '❌'}</span>
-                          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(j.url).replace(/^https?:\/\/(www\.)?/, '').slice(0, 36)}</span>
-                          {/* ★ 27 มิ.ย.: โชว์เหตุผลที่ล้ม (ไม่พบคอนเทนต์/ลิงก์เสีย ฯลฯ) ให้รู้ว่าลิงก์เสียจริง */}
-                          {j.status === 'error' && j.error && <span title={j.error} style={{ fontSize: 10.5, color: '#f87171', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{j.error.slice(0, 34)}</span>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-          <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-muted, #888)', lineHeight: 1.6 }}>
-            🎙️ <b>ถอดบทสัมภาษณ์</b> = ได้บทพูดเต็ม + บอกประเภทคลิป (สัมภาษณ์/พูดเดี่ยว/อ่านข่าว) · 🎯 <b>ถอดประเด็นข่าว</b> = Gemini ดูคลิปจริง (YouTube/TikTok/Reels — เห็นภาพ+ตัวหนังสือบนจอ) → ข้อมูลดิบ (ประเด็น+คำพูด+ช่วงเวลา) · FB/IG ทำได้บนเครื่องทีม
-          </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 13, color: 'var(--text-muted, #888)', cursor: 'pointer' }}>
-            <input type="checkbox" checked={tidy} onChange={e => setTidy(e.target.checked)} />
-            ✨ เรียบเรียงให้อ่านลื่น (จัดลำดับ ตัดคำซ้ำ/เสียงเอ้อ — ไม่สรุป ไม่ตัดเนื้อหา) — ปิดถ้าอยากได้บทดิบเป๊ะ
-          </label>
-          {err && <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: 'rgba(239,68,68,0.12)', color: '#ef4444', fontSize: 13 }}>❌ {err}</div>}
-        </div>
-
-        {/* Output */}
-        {out && (
-          <div className="card" style={{ background: 'var(--bg-card, #1a1a2e)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 14, padding: 18, marginBottom: 22 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-              <div style={{ fontSize: 14, fontWeight: 800 }}>{platformIcon(out.platform)} บทถอด {out.caption ? `— ${out.caption.slice(0, 60)}` : ''}</div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {out.tidyText && <>
-                  <button onClick={() => setView('tidy')} style={{ padding: '5px 12px', borderRadius: 8, border: 'none', background: view === 'tidy' ? 'rgba(124,58,237,0.25)' : 'rgba(255,255,255,0.06)', color: view === 'tidy' ? '#a78bfa' : 'var(--text-muted)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>✨ เรียบเรียงแล้ว</button>
-                  <button onClick={() => setView('raw')} style={{ padding: '5px 12px', borderRadius: 8, border: 'none', background: view === 'raw' ? 'rgba(124,58,237,0.25)' : 'rgba(255,255,255,0.06)', color: view === 'raw' ? '#a78bfa' : 'var(--text-muted)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>📄 บทดิบ</button>
-                </>}
-                <button onClick={() => copy(shown, 'out')} style={{ padding: '5px 12px', borderRadius: 8, border: 'none', background: copied === 'out' ? 'rgba(34,197,94,0.2)' : 'rgba(59,130,246,0.15)', color: copied === 'out' ? '#22c55e' : '#3b82f6', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'out' ? '✅ คัดลอกแล้ว' : '📋 Copy'}</button>
-              </div>
-            </div>
-            {out.classify && out.classify.clipType !== 'other' && (
-              <div style={{ marginBottom: 12, padding: '10px 14px', borderRadius: 10, background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 800, color: '#a78bfa' }}>{out.classify.emoji} ประเภท: {out.classify.clipTypeLabel}</span>
-                  {out.classify.speakerCount > 0 && <span style={{ fontSize: 11.5, color: 'var(--text-muted,#888)' }}>· {out.classify.speakerCount} คนพูด</span>}
-                  {out.classify.speakers?.length > 0 && <span style={{ fontSize: 11.5, color: 'var(--text-muted,#888)' }}>· 🗣️ {out.classify.speakers.join(', ')}</span>}
-                </div>
-                {out.classify.usageNote && <div style={{ fontSize: 11.5, color: 'var(--text-muted,#888)', marginTop: 5, lineHeight: 1.5 }}>💡 {out.classify.usageNote}</div>}
-              </div>
-            )}
-            <div style={{ fontSize: 14, lineHeight: 1.8, whiteSpace: 'pre-wrap', maxHeight: 420, overflowY: 'auto', background: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: 14 }}>{shown}</div>
-          </div>
-        )}
-
-        {/* ★ ถอดประเด็นข่าว → ข้อมูลดิบ (Gemini ดูคลิป) */}
-        {insightLoading && (
-          <div className="card" style={{ background: 'var(--bg-card,#1a1a2e)', border: '1px solid rgba(37,99,235,0.3)', borderRadius: 14, padding: 24, marginBottom: 22, textAlign: 'center' }}>
-            <div style={{ fontSize: 14, color: '#60a5fa', fontWeight: 700 }}>🎯 Gemini กำลังดูคลิปและถอดประเด็น... (คลิปยาวอาจ 1-2 นาที)</div>
-          </div>
-        )}
-        {insight && !insightLoading && (
-          <div className="card" style={{ background: 'var(--bg-card,#1a1a2e)', border: '1px solid rgba(37,99,235,0.35)', borderRadius: 14, padding: 18, marginBottom: 22 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-              <div style={{ fontSize: 15, fontWeight: 800, color: '#60a5fa' }}>🎯 ข้อมูลดิบจากคลิป</div>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontWeight: 700 }}>{insight.emoji} {insight.clipTypeLabel}</span>
-                {insight.category && <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(245,158,11,0.16)', color: '#f59e0b', fontWeight: 800 }}>📂 {insight.category}</span>}
-                {insight.multiTopic && <span style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 20, background: 'rgba(245,158,11,0.18)', color: '#fbbf24', fontWeight: 800 }}>📚 คลิปยาว · {insight.totalTopics || insight.topics?.length || 0} ประเด็น</span>}
-                <span style={{ fontSize: 10, color: 'var(--text-muted,#888)' }}>{String(insight.engine || '').includes('gemini-video') ? '👁️ Gemini ดูคลิป' : '📝 จากบทถอดเสียง'}</span>
-                <button onClick={() => copy(insightCaseText(insight), 'insight-raw')} style={{ padding: '4px 11px', borderRadius: 8, border: 'none', background: copied === 'insight-raw' ? 'rgba(34,197,94,0.2)' : 'rgba(59,130,246,0.15)', color: copied === 'insight-raw' ? '#22c55e' : '#3b82f6', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'insight-raw' ? '✅ คัดลอกแล้ว' : '📋 คัดลอกเนื้อพร้อมใช้'}</button>
-              </div>
-            </div>
-
-            {/* ★ 8 ก.ค.: dedup — คลิปนี้เคยถอดแล้ว ระบบคืนผลจากคลังทันที (ฟรี ไม่เสียเวลา Gemini) + ปุ่มถอดสดใหม่ */}
-            {insight.cached && (
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: 12, padding: '9px 12px', borderRadius: 9, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.3)', color: '#22c55e', marginBottom: 12 }}>
-                <span>⚡ <b>ผลจากคลัง</b> — คลิปนี้เคยถอดไว้เมื่อ {insight.cachedAt ? new Date(insight.cachedAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'ก่อนหน้านี้'} (ไม่เสียเวลา/ค่าถอดซ้ำ)</span>
-                <button onClick={() => extractInsight(true)} style={{ padding: '4px 12px', borderRadius: 7, border: '1px solid rgba(34,197,94,0.5)', background: 'transparent', color: '#22c55e', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>🔁 ถอดใหม่</button>
-              </div>
-            )}
-            {/* ด่านตรวจคุณภาพแบบไม่ถอดซ้ำอัตโนมัติ — พนักงานเห็นธงแล้วเลือกตรวจหรือกดใหม่เอง */}
-            {insight.lowQuality && (
-              <div style={{ fontSize: 12, padding: '9px 12px', borderRadius: 9, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.35)', color: '#f87171', marginBottom: 12 }}>
-                ⚠️ <b>{insight.qualityNote || 'ผลอาจไม่สมบูรณ์ — แนะนำกดถอดใหม่'}</b>
-              </div>
-            )}
-            {insight.editorialWarnings?.length > 0 && (
-              <div style={{ fontSize: 12, lineHeight: 1.65, padding: '9px 12px', borderRadius: 9, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.35)', color: '#fbbf24', marginBottom: 12 }}>
-                <b>✍️ จุดให้พนักงานตรวจประโยคเปิด</b>
-                {insight.editorialWarnings.map((warning, index) => <div key={index}>• {warning}</div>)}
-              </div>
-            )}
-
-            {/* ★ 24 มิ.ย.: คลิปยาว = แยกทุกประเด็น (รายงานทุกช่วง) · คลิปสั้น = แสดงแบบเดิม */}
-            {insight.multiTopic ? (
-              <>
-                {insight.headline && <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 6 }}>📌 {insight.headline}</div>}
-                {insight.overview && <div style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-muted,#bbb)', marginBottom: 14, whiteSpace: 'pre-wrap' }}>{insight.overview}</div>}
-                <div style={{ fontSize: 12, fontWeight: 800, color: '#fbbf24', marginBottom: 10 }}>📚 แยกได้ {insight.topics?.length || 0} ประเด็น (เรียงตามเวลาในคลิป)</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {(insight.topics || []).map((t, i) => (
-                    <div key={i} style={{ borderRadius: 11, background: 'rgba(0,0,0,0.22)', border: '1px solid rgba(245,158,11,0.25)', padding: '12px 14px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
-                        <div style={{ fontSize: 13.5, fontWeight: 800, flex: 1, minWidth: 160 }}><span style={{ color: '#fbbf24' }}>【{t.no}】</span> {t.title}</div>
-                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                          {(t.timeStart || t.timeEnd) && <span style={{ fontSize: 11, color: '#60a5fa', fontWeight: 700, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>⏱️ {t.timeStart || '?'}–{t.timeEnd || '?'}</span>}
-                          <button onClick={() => copy(topicText(t), 'tp-' + i)} style={{ padding: '3px 9px', borderRadius: 7, border: 'none', background: copied === 'tp-' + i ? 'rgba(34,197,94,0.2)' : 'rgba(255,255,255,0.07)', color: copied === 'tp-' + i ? '#22c55e' : 'var(--text-muted,#aaa)', fontSize: 10.5, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'tp-' + i ? '✅' : '📋'}</button>
-                        </div>
-                      </div>
-                      {t.summary && <div style={{ fontSize: 13, lineHeight: 1.75, whiteSpace: 'pre-wrap', marginBottom: (t.keyPoints?.length || t.quotes?.length) ? 8 : 0 }}>{t.summary}</div>}
-                      {t.keyPoints?.length > 0 && <ul style={{ margin: '0 0 6px', paddingLeft: 18, fontSize: 12.5, lineHeight: 1.7, color: 'var(--text-muted,#bbb)' }}>{t.keyPoints.map((k, j) => <li key={j}>{k}</li>)}</ul>}
-                      {t.quotes?.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>{t.quotes.map((q, j) => <div key={j} style={{ fontSize: 12, lineHeight: 1.55, padding: '5px 9px', borderRadius: 7, background: 'rgba(34,197,94,0.06)', borderLeft: '2px solid #22c55e' }}>&ldquo;{q}&rdquo;</div>)}</div>}
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : (<>
-            {insight.headline && <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 6 }}>📌 {insight.headline}</div>}
-            {insight.speakers?.length > 0 && <div style={{ fontSize: 11.5, color: 'var(--text-muted,#888)', marginBottom: 10 }}>🗣️ ผู้พูด: {insight.speakers.join(', ')}</div>}
-            {insight.usageNote && <div style={{ fontSize: 11.5, color: '#a78bfa', marginBottom: 12, padding: '7px 11px', borderRadius: 8, background: 'rgba(124,58,237,0.07)' }}>💡 {insight.usageNote}</div>}
-
-            {insight.overview && (
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted,#888)', marginBottom: 5 }}>ภาพรวม</div>
-                <div style={{ fontSize: 13.5, lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>{insight.overview}</div>
-              </div>
-            )}
-
-            {insight.keyPoints?.length > 0 && (
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted,#888)', marginBottom: 6 }}>🎯 ประเด็นสำคัญ ({insight.keyPoints.length})</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {insight.keyPoints.map((k, i) => (
-                    <div key={i} style={{ padding: '10px 12px', borderRadius: 9, background: 'rgba(0,0,0,0.2)', borderLeft: '3px solid #2563eb' }}>
-                      <div style={{ fontSize: 13, fontWeight: 700 }}>{i + 1}. {k.point}</div>
-                      {k.detail && <div style={{ fontSize: 12.5, color: 'var(--text-muted,#aaa)', marginTop: 4, lineHeight: 1.6 }}>{k.detail}</div>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {insight.quotes?.length > 0 && (
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted,#888)', marginBottom: 6 }}>💬 คำพูดสำคัญ</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {insight.quotes.map((q, i) => (<div key={i} style={{ fontSize: 12.5, lineHeight: 1.6, padding: '7px 11px', borderRadius: 8, background: 'rgba(34,197,94,0.06)', borderLeft: '3px solid #22c55e' }}>&ldquo;{q}&rdquo;</div>))}
-                </div>
-              </div>
-            )}
-
-            {insight.timeline?.length > 0 && (
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted,#888)', marginBottom: 6 }}>⏱️ ช่วงจังหวะในคลิป</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                  {insight.timeline.map((t, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 10, fontSize: 12.5 }}>
-                      <span style={{ color: '#60a5fa', fontWeight: 700, minWidth: 84, flexShrink: 0 }}>{t.time || '—'}</span>
-                      <span style={{ color: 'var(--text-muted,#aaa)' }}>{t.topic}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {insight.rawData && (
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted,#888)', marginBottom: 5 }}>📄 ข้อมูลดิบรวม (ภาพรวมทั้งคลิป)</div>
-                <div style={{ fontSize: 13.5, lineHeight: 1.8, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: 14, maxHeight: 360, overflowY: 'auto' }}>{insight.rawData}</div>
-              </div>
-            )}
-            {/* ★ 25 มิ.ย.: เนื้อดิบแยกประเด็น (เพิ่มจากของรวม) — คลิปหลายประเด็นเท่านั้น */}
-            {insight.subStories?.length > 0 && (
-              <div style={{ marginTop: 16 }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: '#fbbf24', marginBottom: 9 }}>🧩 เนื้อดิบแยกประเด็น ({insight.subStories.length}) — แต่ละอันเจาะลึก พร้อมเขียนเป็นข่าวเดี่ยว</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {insight.subStories.map((s, i) => (
-                    <div key={i} style={{ border: '1px solid rgba(245,158,11,0.3)', borderRadius: 10, padding: 12, background: 'rgba(245,158,11,0.04)' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 7 }}>
-                        <div style={{ fontSize: 13.5, fontWeight: 800 }}>
-                          <span style={{ color: '#fbbf24' }}>ประเด็น {s.no || i + 1}:</span> {s.topic}
-                          {s.timeRange && <span style={{ fontSize: 11, color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600, marginLeft: 6 }}>⏱️ {s.timeRange}</span>}
-                        </div>
-                        <button onClick={() => navigator.clipboard?.writeText(buildClipSubStoryText(s, i))}
-                          style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid rgba(245,158,11,0.4)', background: 'transparent', color: '#fbbf24', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>📋 คัดลอก</button>
-                      </div>
-                      <div style={{ fontSize: 13, lineHeight: 1.75, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 11 }}>{s.rawData}</div>
-                      {s.keyPoints?.length > 0 && <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12.5, lineHeight: 1.7, color: 'var(--text-muted,#bbb)' }}>{s.keyPoints.map((k, j) => <li key={j}>{k}</li>)}</ul>}
-                      {s.quotes?.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 }}>{s.quotes.map((q, j) => <div key={j} style={{ fontSize: 12, lineHeight: 1.55, padding: '5px 9px', borderRadius: 7, background: 'rgba(34,197,94,0.06)', borderLeft: '2px solid #22c55e' }}>&ldquo;{q}&rdquo;</div>)}</div>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            </>)}
-          </div>
-        )}
-
-        {/* ★ 8 ก.ค.: ถอด+ค้นข่าวคล้าย — แถบสถานะ 3 ขั้น + การ์ดผลลัพธ์ */}
-        {hunting && (
-          <div className="card" style={{ background: 'var(--bg-card,#1a1a2e)', border: '1px solid rgba(13,148,136,0.4)', borderRadius: 14, padding: 18, marginBottom: 22 }}>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <div style={{ flex: 1, minWidth: 150, padding: '9px 12px', borderRadius: 9, fontSize: 12, fontWeight: 700, background: huntPhase > 1 ? 'rgba(34,197,94,0.12)' : 'rgba(13,148,136,0.15)', color: huntPhase > 1 ? '#22c55e' : '#2dd4bf', border: '1px solid ' + (huntPhase > 1 ? 'rgba(34,197,94,0.35)' : 'rgba(13,148,136,0.45)') }}>
-                {huntPhase > 1 ? '✅' : '⏳'} 1. อ่านเนื้อหาต้นทาง (คลิป=Gemini ดู · ข่าว=ดึงเนื้อ){huntPhase === 1 ? ' — ที่เคยทำผ่านทันที' : ''}
-              </div>
-              <div style={{ flex: 1, minWidth: 150, padding: '9px 12px', borderRadius: 9, fontSize: 12, fontWeight: 700, background: huntPhase === 2 ? 'rgba(13,148,136,0.15)' : 'rgba(255,255,255,0.04)', color: huntPhase === 2 ? '#2dd4bf' : 'var(--text-muted,#777)', border: '1px solid ' + (huntPhase === 2 ? 'rgba(13,148,136,0.45)' : 'var(--border,#2a2a3e)') }}>
-                {huntPhase === 2 ? '⏳' : '·'} 2. วิเคราะห์สไตล์ → สร้างคีย์ → ค้นทุกแหล่ง → คัด (~1-2 นาที)
-              </div>
-              {huntPhase === 3 && (
-                <div style={{ flex: 1, minWidth: 150, padding: '9px 12px', borderRadius: 9, fontSize: 12, fontWeight: 700, background: 'rgba(245,158,11,0.12)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.4)' }}>
-                  ⏳ เครื่องทีมกำลังถอด+ค้น (FB/IG) — ปิดหน้าได้ ผลเข้าคลังเอง
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-        {hunt && !hunting && (
-          <div className="card" style={{ background: 'var(--bg-card,#1a1a2e)', border: '1px solid rgba(13,148,136,0.4)', borderRadius: 14, padding: 18, marginBottom: 22 }}>
-            <div style={{ fontSize: 15, fontWeight: 800, color: '#2dd4bf', marginBottom: 10 }}>{hunt.sourceType === 'article' ? '📰 ผลวิจัยลิงก์ข่าว + ข่าวเสริม' : '🧭 ผลถอด+ค้นข่าวคล้าย'} <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted,#888)' }}>— เก็บเข้า &quot;คลังค้นประเด็นยูสเซอร์&quot; ให้แล้ว</span></div>
-            {renderHuntCase(hunt, 'hl')}
-          </div>
-        )}
-
-        {/* (★ 14 ส.ค. 69 เจ้าของสั่ง: แผง "คลังบทถอด" ถูกถอดออก — ไม่ได้ใช้) */}
-
-        {/* ★ 22 มิ.ย.: คลังถอดประเด็นข่าว (ข้อมูลดิบ) — เก็บทุกครั้งที่ถอดสำเร็จ */}
-        <button onClick={() => setInsightCasesOpen(!insightCasesOpen)} style={{ marginTop: 16, padding: '10px 18px', borderRadius: 10, border: '1px solid rgba(37,99,235,0.3)', background: insightCasesOpen ? 'rgba(37,99,235,0.12)' : 'var(--bg-card, #1a1a2e)', color: insightCasesOpen ? '#60a5fa' : 'inherit', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-          🎯 คลังถอดประเด็นข่าว ({insightCases.length}) {insightCasesOpen ? '▲' : '▼'}
-        </button>
-        {insightCasesOpen && (
-          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {insightCases.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted, #888)', fontSize: 13 }}>ยังไม่มีประเด็นข่าว — กด &ldquo;ถอดประเด็นข่าว&rdquo; สักครั้งแล้วจะเก็บที่นี่อัตโนมัติ</div>}
-            {insightCases.map((c) => {
-              const ins = c.insight || {};
-              return (
-                <div key={c.id} style={{ border: '1px solid rgba(37,99,235,0.25)', borderRadius: 10, overflow: 'hidden' }}>
-                  <div onClick={() => setInsightExpanded(insightExpanded === c.id ? null : c.id)} style={{ padding: '11px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: 'var(--bg-card, #1a1a2e)' }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 3, flexWrap: 'wrap' }}>
-                        {ins.clipTypeLabel && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontWeight: 700 }}>{ins.emoji || '🎬'} {ins.clipTypeLabel}</span>}
-                        {(c.category || ins.category) && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(245,158,11,0.16)', color: '#f59e0b', fontWeight: 800 }}>📂 {c.category || ins.category}</span>}
-                        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(37,99,235,0.15)', color: '#60a5fa', fontWeight: 700 }}>{String(ins.engine || '').includes('gemini-video') ? '👁️ ดูคลิป' : '📝 บทถอด'}</span>
-                        {/* ธงคุณภาพ — เคสที่ไม่ผ่านเกณฑ์ขั้นต่ำ เห็นชัดและไม่เสีย Gemini รอบสองอัตโนมัติ */}
-                        {c.lowQuality && <span title={c.qualityNote || ''} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(239,68,68,0.14)', color: '#f87171', fontWeight: 800 }}>⚠️ ไม่สมบูรณ์</span>}
-                        {ins.editorialWarnings?.length > 0 && <span title={ins.editorialWarnings.join('\n')} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(245,158,11,0.14)', color: '#fbbf24', fontWeight: 800 }}>✍️ ตรวจคำเปิด</span>}
-                      </div>
-                      <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{platformIcon(c.platform)} {ins.headline || c.title || c.url}</div>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted, #888)', marginTop: 3 }}>{c.platform} · {ins.multiTopic ? `📚 ${ins.topics?.length || 0} ประเด็น (คลิปยาว)` : `${ins.keyPoints?.length || 0} ประเด็น${ins.subStories?.length ? ` · 🧩 ${ins.subStories.length} เนื้อดิบแยก` : ''}`}{c.user ? ` · 👤 ${c.user}` : ''} · {new Date(c.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
-                    </div>
-                    <button onClick={(e) => { e.stopPropagation(); deleteInsightCase(c.id); }} style={{ marginLeft: 10, padding: '4px 10px', borderRadius: 6, border: 'none', background: 'rgba(239,68,68,0.1)', color: '#ef4444', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>ลบ</button>
-                  </div>
-                  {insightExpanded === c.id && (
-                    <div style={{ padding: 14, borderTop: '1px solid rgba(37,99,235,0.2)' }}>
-                      <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-                        <a href={c.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: '#3b82f6' }}>🔗 เปิดคลิป</a>
-                        {ins.rawData && <button onClick={() => copy(ins.rawData, 'ic-raw-' + c.id)} style={{ padding: '3px 10px', borderRadius: 6, border: 'none', background: 'rgba(59,130,246,0.15)', color: '#3b82f6', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'ic-raw-' + c.id ? '✅' : '📋 คัดลอกก้อนรวมเดิม'}</button>}
-                        <button onClick={() => copy(insightCaseText(ins), 'ic-all-' + c.id)} style={{ padding: '3px 10px', borderRadius: 6, border: 'none', background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === 'ic-all-' + c.id ? '✅' : '📋 คัดลอกเนื้อพร้อมใช้'}</button>
-                      </div>
-                      {ins.editorialWarnings?.length > 0 && (
-                        <div style={{ fontSize: 11.5, lineHeight: 1.6, padding: '8px 10px', borderRadius: 8, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)', color: '#fbbf24', marginBottom: 10 }}>
-                          <b>✍️ จุดให้พนักงานตรวจประโยคเปิด</b>
-                          {ins.editorialWarnings.map((warning, index) => <div key={index}>• {warning}</div>)}
-                        </div>
-                      )}
-                      {ins.overview && <div style={{ fontSize: 13, lineHeight: 1.7, marginBottom: 10, whiteSpace: 'pre-wrap' }}>{ins.overview}</div>}
-                      {ins.multiTopic && ins.topics?.length > 0 && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
-                          {ins.topics.map((t, i) => (
-                            <div key={i} style={{ padding: '9px 11px', borderRadius: 8, background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(245,158,11,0.2)' }}>
-                              <div style={{ fontSize: 12.5, fontWeight: 800 }}><span style={{ color: '#fbbf24' }}>【{t.no}】</span> {t.title} {(t.timeStart || t.timeEnd) && <span style={{ fontSize: 10.5, color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600 }}>⏱️{t.timeStart || '?'}–{t.timeEnd || '?'}</span>}</div>
-                              {t.summary && <div style={{ fontSize: 12, color: 'var(--text-muted,#aaa)', marginTop: 3, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{t.summary}</div>}
-                              {t.keyPoints?.length > 0 && <ul style={{ margin: '5px 0 0', paddingLeft: 18, fontSize: 11.5, lineHeight: 1.6, color: 'var(--text-muted,#aaa)' }}>{t.keyPoints.map((k, j) => <li key={j}>{k}</li>)}</ul>}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {ins.keyPoints?.length > 0 && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
-                          {ins.keyPoints.map((k, i) => (
-                            <div key={i} style={{ padding: '8px 11px', borderRadius: 8, background: 'rgba(0,0,0,0.2)', borderLeft: '3px solid #2563eb' }}>
-                              <div style={{ fontSize: 12.5, fontWeight: 700 }}>{i + 1}. {k.point}</div>
-                              {k.detail && <div style={{ fontSize: 12, color: 'var(--text-muted,#aaa)', marginTop: 3, lineHeight: 1.6 }}>{k.detail}</div>}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {ins.rawData && <div style={{ fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap', maxHeight: 280, overflowY: 'auto', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 12 }}>{ins.rawData}</div>}
-                      {/* ★ 26 มิ.ย.: เติมให้คลังแสดงครบเท่าเรียลไทม์ — คำพูด + ช่วงเวลา + เนื้อดิบแยกประเด็น (รองรับทุกทรงผลลัพธ์) */}
-                      {ins.quotes?.length > 0 && (
-                        <div style={{ marginTop: 10 }}>
-                          <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted,#888)', marginBottom: 5 }}>💬 คำพูดสำคัญ ({ins.quotes.length})</div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                            {ins.quotes.map((q, i) => <div key={i} style={{ fontSize: 12, lineHeight: 1.55, padding: '6px 10px', borderRadius: 7, background: 'rgba(34,197,94,0.06)', borderLeft: '2px solid #22c55e' }}>&ldquo;{q}&rdquo;</div>)}
-                          </div>
-                        </div>
-                      )}
-                      {ins.timeline?.length > 0 && (
-                        <div style={{ marginTop: 10 }}>
-                          <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted,#888)', marginBottom: 5 }}>⏱️ ช่วงจังหวะในคลิป</div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            {ins.timeline.map((t, i) => <div key={i} style={{ display: 'flex', gap: 10, fontSize: 12 }}><span style={{ color: '#60a5fa', fontWeight: 700, minWidth: 80, flexShrink: 0 }}>{t.time || '—'}</span><span style={{ color: 'var(--text-muted,#aaa)' }}>{t.topic}</span></div>)}
-                          </div>
-                        </div>
-                      )}
-                      {ins.subStories?.length > 0 && (
-                        <div style={{ marginTop: 14 }}>
-                          <div style={{ fontSize: 12.5, fontWeight: 800, color: '#fbbf24', marginBottom: 8 }}>🧩 เนื้อดิบแยกประเด็น ({ins.subStories.length}) — แต่ละอันพร้อมเขียนเป็นข่าวเดี่ยว</div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                            {ins.subStories.map((s, i) => (
-                              <div key={i} style={{ border: '1px solid rgba(245,158,11,0.3)', borderRadius: 9, padding: 11, background: 'rgba(245,158,11,0.04)' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
-                                  <div style={{ fontSize: 13, fontWeight: 800 }}><span style={{ color: '#fbbf24' }}>ประเด็น {s.no || i + 1}:</span> {s.topic}{s.timeRange && <span style={{ fontSize: 10.5, color: '#60a5fa', fontFamily: 'monospace', fontWeight: 600, marginLeft: 6 }}>⏱️ {s.timeRange}</span>}</div>
-                                  <button onClick={() => copy(buildClipSubStoryText(s, i), 'ic-sub-' + c.id + '-' + i)} style={{ padding: '3px 9px', borderRadius: 7, border: '1px solid rgba(245,158,11,0.4)', background: 'transparent', color: '#fbbf24', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}>{copied === 'ic-sub-' + c.id + '-' + i ? '✅' : '📋'}</button>
-                                </div>
-                                <div style={{ fontSize: 12.5, lineHeight: 1.7, whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 10 }}>{s.rawData}</div>
-                                {s.keyPoints?.length > 0 && <ul style={{ margin: '7px 0 0', paddingLeft: 18, fontSize: 12, lineHeight: 1.65, color: 'var(--text-muted,#bbb)' }}>{s.keyPoints.map((k, j) => <li key={j}>{k}</li>)}</ul>}
-                                {s.quotes?.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 }}>{s.quotes.map((q, j) => <div key={j} style={{ fontSize: 11.5, lineHeight: 1.5, padding: '5px 9px', borderRadius: 7, background: 'rgba(34,197,94,0.06)', borderLeft: '2px solid #22c55e' }}>&ldquo;{q}&rdquo;</div>)}</div>}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* ★ 8 ก.ค.: คลังค้นประเด็นยูสเซอร์ — คลังเดียว เก็บทั้งคลิป+ลิงก์ข่าว (ผลแยกด้วยป้าย+ตัวกรอง) */}
-        <button onClick={() => setHuntCasesOpen(!huntCasesOpen)} style={{ marginTop: 16, padding: '10px 18px', borderRadius: 10, border: '1px solid rgba(13,148,136,0.4)', background: huntCasesOpen ? 'rgba(13,148,136,0.12)' : 'var(--bg-card, #1a1a2e)', color: huntCasesOpen ? '#2dd4bf' : 'inherit', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-          🗂️ คลังค้นประเด็นยูสเซอร์ ({huntCases.length}) {huntCasesOpen ? '▲' : '▼'}
-        </button>
-        {huntCasesOpen && (() => {
-          const clipN = huntCases.filter(c => c.sourceType !== 'article').length;
-          const artN = huntCases.filter(c => c.sourceType === 'article').length;
-          const shownCases = huntCases.filter(c => huntFilter === 'all' || (huntFilter === 'article' ? c.sourceType === 'article' : c.sourceType !== 'article'));
-          const chip = (key, label) => (
-            <button onClick={() => setHuntFilter(key)} style={{ padding: '5px 13px', borderRadius: 999, cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: 'inherit', border: '1px solid ' + (huntFilter === key ? 'rgba(13,148,136,0.6)' : 'var(--border,#2a2a3e)'), background: huntFilter === key ? 'rgba(13,148,136,0.18)' : 'transparent', color: huntFilter === key ? '#2dd4bf' : 'var(--text-muted,#999)' }}>{label}</button>
-          );
-          return (
-          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {/* ตัวกรองที่มา */}
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
-              {chip('all', `ทั้งหมด (${huntCases.length})`)}
-              {chip('clip', `🎬 จากคลิป (${clipN})`)}
-              {chip('article', `📰 จากลิงก์ข่าว (${artN})`)}
-            </div>
-            {huntCases.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted, #888)', fontSize: 13 }}>ยังไม่มีเคส — กด &ldquo;🧭 คลิป → ค้นข่าวคล้าย&rdquo; หรือ &ldquo;📰 ลิงก์ข่าว → วิจัย+หาเสริม&rdquo; สักครั้งแล้วจะเก็บที่นี่ถาวร</div>}
-            {huntCases.length > 0 && shownCases.length === 0 && <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted, #888)', fontSize: 12.5 }}>ยังไม่มีเคสในหมวดนี้</div>}
-            {shownCases.map((c) => {
-              const isArticle = c.sourceType === 'article';
-              return (
-              <div key={c.id} style={{ border: '1px solid ' + (isArticle ? 'rgba(37,99,235,0.3)' : 'rgba(124,58,237,0.3)'), borderRadius: 10, overflow: 'hidden' }}>
-                <div onClick={() => setHuntExpanded(huntExpanded === c.id ? null : c.id)} style={{ padding: '11px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: 'var(--bg-card, #1a1a2e)' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 3, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, fontWeight: 800, background: isArticle ? 'rgba(37,99,235,0.18)' : 'rgba(124,58,237,0.18)', color: isArticle ? '#60a5fa' : '#a78bfa' }}>{isArticle ? '📰 ลิงก์ข่าว' : '🎬 คลิป'}</span>
-                      {c.styleProfile?.theme && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(124,58,237,0.15)', color: '#a78bfa', fontWeight: 700 }}>🧬 {c.styleProfile.theme}</span>}
-                      <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontWeight: 800 }}>เจอ {(c.results || []).length} เรื่อง</span>
-                    </div>
-                    <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{isArticle ? '📰' : platformIcon(c.platform)} {c.title || c.sourceUrl}</div>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted, #888)', marginTop: 3 }}>{isArticle ? 'ลิงก์ข่าว' : c.platform}{c.user ? ` · 👤 ${c.user}` : ''} · {new Date(c.updatedAt || c.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
-                  </div>
-                  <button onClick={(e) => { e.stopPropagation(); if (confirm('ลบเคสนี้ออกจากคลัง?')) fetch('/api/clip-transcript/cases?kind=hunt&id=' + c.id, { method: 'DELETE' }).then(loadHuntCases); }} style={{ marginLeft: 10, padding: '4px 10px', borderRadius: 6, border: 'none', background: 'rgba(239,68,68,0.1)', color: '#ef4444', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>ลบ</button>
-                </div>
-                {huntExpanded === c.id && (
-                  <div style={{ padding: 14, borderTop: '1px solid rgba(13,148,136,0.25)' }}>
-                    {renderHuntCase(c, 'hc-' + c.id)}
-                  </div>
-                )}
-              </div>
-              );
-            })}
-          </div>
-          );
-        })()}
-      </div>
+    <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, marginBottom: 16, overflow: 'hidden' }}>
+      <button onClick={onToggle} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '13px 16px', background: 'transparent', border: 'none', color: C.text, cursor: 'pointer', fontFamily: 'inherit', fontSize: 15, fontWeight: 700 }}>
+        <span>{title}</span><span style={{ color: C.muted }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && <div style={{ padding: '0 16px 16px' }}>{children}</div>}
     </div>
   );
 }
+const ghostBtn = (busy) => ({ padding: '8px 14px', borderRadius: 9, border: '1px solid #374151', background: 'transparent', color: '#9ca3af', fontSize: 12.5, fontWeight: 600, cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit' });
+const tabBtn = (active) => ({ padding: '5px 12px', borderRadius: 8, fontSize: 12.5, cursor: 'pointer', fontFamily: 'inherit', border: `1px solid ${active ? '#38bdf8' : '#374151'}`, background: 'transparent', color: active ? '#38bdf8' : '#9ca3af', fontWeight: 600 });
+const pageBtn = (disabled, C) => ({ padding: '6px 14px', borderRadius: 8, fontSize: 12.5, cursor: disabled ? 'default' : 'pointer', fontFamily: 'inherit', border: `1px solid ${C.line}`, background: 'transparent', color: disabled ? '#4b5563' : C.text, opacity: disabled ? 0.5 : 1 });

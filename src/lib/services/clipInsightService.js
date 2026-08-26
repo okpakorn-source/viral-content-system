@@ -187,7 +187,7 @@ ${SUBSTORY_DEPTH_LINE}
 - ⛔ ถ้าคลิปเป็น "เรื่องเดียวต่อเนื่องทั้งคลิป" จริงๆ (เช่น คลิปเหตุการณ์สั้นเหตุการณ์เดียว) → subStories = [] (เว้นว่าง)`;
 
 // พรอมต์ "ดูคลิปทั้งเรื่อง → ข้อมูลดิบ" — ใช้ร่วมทั้งดูลิงก์ YouTube และดูไฟล์วิดีโอ (TikTok/FB)
-const VIDEO_INSIGHT_PROMPT = `คุณเป็นบรรณาธิการข่าว ดู "คลิปนี้ทั้งคลิป" (ภาพ + เสียง) แล้วถอดประเด็นข่าวออกมาเป็น "ข้อมูลดิบ"
+export const VIDEO_INSIGHT_PROMPT = `คุณเป็นบรรณาธิการข่าว ดู "คลิปนี้ทั้งคลิป" (ภาพ + เสียง) แล้วถอดประเด็นข่าวออกมาเป็น "ข้อมูลดิบ"
 
 หน้าที่: ดูคลิปตั้งแต่ต้นจนจบ จับใจความว่าคลิปนี้ต้องการสื่อสารข่าวเรื่องอะไร เก็บทั้งเนื้อหา–คำพูด–บริบท แล้วสรุปเป็นข้อมูลดิบให้คนที่ "ยังไม่ได้ดูคลิป" อ่านแล้วเข้าใจว่าข่าวนี้คืออะไร
 
@@ -289,7 +289,7 @@ function cutList(arr, max, what) {
   return a.slice(0, max);
 }
 
-function normalizeInsight(p, engine) {
+export function normalizeInsight(p, engine) {
   const t = pickType(p.clipType);
   const directLead = cut(p.directLead, LIM.directLead, 'ประโยคเปิด');
   const interviewEventIsNews = p.interviewEventIsNews === true;

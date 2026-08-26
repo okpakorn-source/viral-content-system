@@ -81,7 +81,8 @@ async function processJob(job, { signal } = {}) {
   const body = job.kind === 'transcript' ? { url: job.url, tidy: !!job.tidy }
     : job.kind === 'hunt' ? { url: job.url, user: job.user || '', _fromWorker: true }
     // (★ 14 ส.ค. 69: ถอด smooth ออก · ส่ง model ต่อเมื่อเป็นใบงานเทสสองโมเดล — ใบงานปกติไม่มีฟิลด์นี้)
-    : { url: job.url, user: job.user || '', ...(job.model ? { model: job.model, force: true } : {}) };
+    // (★ 26 ส.ค. 69: ปุ่ม "ทำใหม่" ติด force มากับใบงาน → ส่งต่อให้ /insight ถอดใหม่ ไม่คืนของเดิมในคลัง)
+    : { url: job.url, user: job.user || '', ...(job.force ? { force: true } : {}), ...(job.model ? { model: job.model, force: true } : {}) };
   const r = await fetch(`${BASE}${endpoint}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal,
     ...(longDispatcher ? { dispatcher: longDispatcher } : {}), // ★ timeout ยาว — กัน fetch failed ที่ 5 นาที

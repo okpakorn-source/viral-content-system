@@ -34,7 +34,9 @@ async function downloadMetaBuffer(url, fmt) {
   if (!existsSync(exe)) throw new Error('ไม่พบ bin/yt-dlp.exe');
   const cookies = join(process.cwd(), 'bin', 'cookies.txt');
   const out = join(tmpdir(), `meta_${Date.now()}.mp4`);
-  const args = ['-f', fmt || 'mp4/best[ext=mp4]/best', '-o', out, '--no-warnings', '--no-playlist'];
+  // ★ 25 ส.ค. 69 (ยังไม่ push): --merge-output-format mp4 — จำเป็นเมื่อสูตรเป็น DASH (ภาพ+เสียงคนละสตรีม)
+  //   ไม่กระทบกรณีไฟล์รวมอยู่แล้ว (yt-dlp ข้ามขั้นรวมเอง)
+  const args = ['-f', fmt || 'mp4/best[ext=mp4]/best', '--merge-output-format', 'mp4', '-o', out, '--no-warnings', '--no-playlist'];
   if (existsSync(cookies)) args.push('--cookies', cookies);
   args.push(url);
   try {
@@ -190,7 +192,11 @@ async function buildInsight({ url, type, model = '' }) {
     // หนึ่งคำขอเลือกทางเดียวเท่านั้น เพื่อไม่ให้ URL inference และ file inference ซ้อนกัน:
     //   - Windows ทีมงาน: โหลดคลิปแล้วส่งไฟล์ให้ Gemini หนึ่งครั้ง
     //   - cloud: ส่ง URL ให้ Gemini หนึ่งครั้ง
-    const YT_FMT = 'best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best';
+    // ★ 25 ส.ค. 69 (ยังไม่ push): YouTube เลิกให้ไฟล์รวมภาพ+เสียงในไฟล์เดียว (เหลือ 360p ที่ตอนนี้ 403)
+    //   สูตรเดิม (best[...] ล้วน) จึงตายด้วย "Requested format is not available" — ยิงจริงตาย 15/15 ลิงก์
+    //   → เติมท่า DASH (bv*+ba = โหลดภาพกับเสียงแยกแล้วรวมด้วย ffmpeg) ไว้หน้าสุด
+    //   ⚠️ ต้องใช้คู่กับ yt-dlp ≥ 2026.08 (เครื่องทีม runtime-r133 อัปแล้ว 25 ส.ค. · สำรอง .bak-2026aug25)
+    const YT_FMT = 'bv*[height<=480]+ba/b[height<=480]/bv*+ba/b';
     const downloadAndExtract = async () => {
       const buf = await _fitForInline(await downloadMetaBuffer(url, YT_FMT), url); // ★ 14 ส.ค.: >19MB บีบก่อนแนบ inline
       return await extractInsightFromVideoBuffer(buf, 'video/mp4', model);

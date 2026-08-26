@@ -250,6 +250,7 @@ export async function GET(request) {
           platform: job.platform,
           user: job.user || '',
           model: job.model || '',
+          force: !!job.force, // ★ 26 ส.ค. 69: ใบ "ทำใหม่" — worker ส่งต่อ force เข้า /insight
           claimToken: job.claimToken,
           leaseExpiresAt: job.leaseExpiresAt,
         },
@@ -282,6 +283,13 @@ export async function POST(request) {
         success: false,
         error: 'ต้องระบุ id + claimToken + status (heartbeat|done|error|retry)',
       }, { status: 400 });
+    }
+
+    // ★ 26 ส.ค. 69: ใบถูกผู้ใช้ยกเลิกระหว่างทาง → รับทราบแล้วทิ้งผลเงียบ ไม่เขียนทับใบ
+    //   (ตอบ ok เพื่อไม่ให้ worker วนรายงานซ้ำ — ใบยกเลิกไม่ถูก claim อยู่แล้ว)
+    const currentJob = await readSupabaseJob(id);
+    if (currentJob?.status === 'cancelled') {
+      return NextResponse.json({ success: true, ignored: true, reason: 'cancelled' });
     }
 
     let updated;
