@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import JobBoard from './ui/JobBoard';
 import StatsStrip from './ui/StatsStrip';
 import InsightCard from './ui/InsightCard';
-import { detectLink, recommendAction, platformIcon as platIcon } from './ui/statusMeta';
+import { detectLink, recommendAction, platformIcon as platIcon, getBrainMeta, fmtDurSec, fmtClock } from './ui/statusMeta';
 
 // โทนทั้งหน้า (พิมพ์เขียวข้อ 8) — สีเน้นเดียว #38bdf8 · เขียว/เหลือง/แดงสงวนให้สถานะ
 const C = {
@@ -47,6 +47,7 @@ export default function ClipTranscriptPage() {
   const [insightTotal, setInsightTotal] = useState(0);
   const [insightOffset, setInsightOffset] = useState(0);
   const [insightOpen, setInsightOpen] = useState(false); // พับ default (พิมพ์เขียวข้อ 8 ลดรก)
+  const [insightExpanded, setInsightExpanded] = useState(null); // เคสที่กางอยู่ในคลัง (ทีละใบ)
   const [copied, setCopied] = useState('');
 
   // คิวเครื่องทีม
@@ -438,11 +439,44 @@ export default function ClipTranscriptPage() {
         {/* คลังถอดประเด็น (พับ default) */}
         <Section title={`📚 คลังถอดประเด็น${insightTotal ? ` (${insightTotal})` : ''}`} open={insightOpen} onToggle={() => setInsightOpen(o => !o)} C={C}>
           {insightCases.length === 0 && <div style={{ fontSize: 13, color: C.muted, padding: '4px 2px' }}>ยังไม่มีเคสในคลัง</div>}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {insightCases.map(rec => (
-              <InsightCard key={rec.id} rec={rec} copiedKey={copied}
-                onCopy={copy} onDelete={deleteInsightCase} onPin={pinInsightCase} onRetry={(u) => extractInsight(true, u)} />
-            ))}
+          {/* ★ 26 ส.ค. 69 (เจ้าของแจ้ง): เดิมกางเต็มทุกใบเรียงลงมา เลื่อนหายาก
+              → เป็นลิสต์สั้นให้กดเลือกก่อน กางทีละใบ (แบบเดียวกับคลังค้นประเด็น) */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {insightCases.map(rec => {
+              const open = insightExpanded === rec.id;
+              const ins = rec.insight || {};
+              const bm = getBrainMeta(ins.brain?.status);
+              return (
+                <div key={rec.id} style={{ border: `1px solid ${open ? C.accent + '66' : C.line}`, borderRadius: 10, overflow: 'hidden' }}>
+                  <button
+                    onClick={() => setInsightExpanded(open ? null : rec.id)}
+                    style={{ width: '100%', textAlign: 'left', padding: '11px 13px', background: open ? 'rgba(56,189,248,.06)' : 'transparent', border: 'none', color: C.text, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', gap: 10, alignItems: 'flex-start' }}
+                  >
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.5, display: 'block' }}>
+                        {platformIcon(rec.platform)} {ins.headline || rec.title || rec.url}
+                      </span>
+                      <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 5, fontSize: 11.5, color: C.muted }}>
+                        {ins.category && <span>📂 {ins.category}</span>}
+                        {rec.clipDurationSec > 0 && <span>⏱️ {fmtDurSec(rec.clipDurationSec)}</span>}
+                        <span>🕒 {fmtClock(rec.createdAt)}</span>
+                        {rec.user && <span>👤 {rec.user}</span>}
+                        {bm && <span style={{ color: bm.color }}>{bm.emoji} {ins.brain.status}</span>}
+                        {rec.lowQuality && <span style={{ color: '#f59e0b' }}>⚠️ ไม่สมบูรณ์</span>}
+                        {rec.chosen && <span style={{ color: '#fbbf24' }}>📌 ปักไว้</span>}
+                      </span>
+                    </span>
+                    <span style={{ color: C.muted, flexShrink: 0, fontSize: 12 }}>{open ? '▲ ย่อ' : '▼ เปิด'}</span>
+                  </button>
+                  {open && (
+                    <div style={{ padding: '0 13px 13px' }}>
+                      <InsightCard rec={rec} copiedKey={copied}
+                        onCopy={copy} onDelete={deleteInsightCase} onPin={pinInsightCase} onRetry={(u) => extractInsight(true, u)} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
           {insightTotal > PAGE_SIZE && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 14 }}>
