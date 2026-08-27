@@ -97,33 +97,69 @@ export function recommendAction(url) {
 }
 
 /**
- * ★ 26 ส.ค. 69 (เจ้าของสั่ง): "ทุกช่องทางถอดเครื่องทีมปุ่มเดียว · เครื่องทีมปิดค่อยถอดสำรองบน Vercel เฉพาะอันที่ถอดได้"
- * ตัดสินให้ปุ่มเดียวว่าจะไปทางไหน — ไม่ให้พนักงานต้องจำเอง
- *   queue  = ส่งเครื่องทีม (ทางหลักทุกแพลตฟอร์ม — เครื่องทีมโหลดคลิปได้ทุกช่องทาง)
- *   direct = ถอดสดบนคลาวด์ (สำรอง เฉพาะ YouTube/TikTok ที่คลาวด์ทำได้)
- *   blocked = เครื่องทีมปิด และคลาวด์ทำแพลตฟอร์มนี้ไม่ได้ (Facebook/IG ต้องใช้ yt-dlp บนเครื่องทีม)
+ * ★★ 27 ส.ค. 69 (เจ้าของสั่ง — กติกาใหม่ ทับของ 26 ส.ค.):
+ *    "บังคับรันในเครื่องทีมเท่านั้น เหลือ 2 ปุ่มพอ · ถอดผ่านคอมฉันเป็นหลัก
+ *     แต่ถ้าคอมฉันดับ ล่ม ให้ถอดปุ่มสำรอง (บน Vercel)"
+ *
+ * 🔴 สิ่งที่เปลี่ยนจากเดิม — และเหตุผลที่ต้องเป็นแบบนี้:
+ *    เดิมระบบ "สลับไปคลาวด์ให้เอง" เมื่อเครื่องแอดมินปิด → พนักงานไม่รู้ตัวว่าได้ของด้อยคุณภาพ
+ *    (คลาวด์รัน CLI ไม่ได้ = ไม่มีผู้ตรวจ ไม่มีตัวซ่อม — พิสูจน์แล้วจากใบ 27 ส.ค. 08:31 ที่โควตาสมอง = 0)
+ *    ใหม่: ปุ่มหลัก **ไปเครื่องแอดมินเสมอ ไม่มีข้อยกเว้น** เครื่องปิดก็รอในคิว
+ *          จะใช้คลาวด์ต้อง "กดปุ่มสำรองเอง" เท่านั้น และกดได้เฉพาะตอนเครื่องแอดมินดับจริง
+ *
+ * คืนแผน 2 ปุ่มให้หน้าเว็บวาดตรงๆ (หน้าเว็บไม่ต้องตัดสินใจเอง — ตรรกะอยู่ที่เดียว เทสได้):
+ *   primary = { action:'queue'|'news-hunt'|'none', label, enabled, why }
+ *   backup  = { action:'cloud'|'none', label, enabled, why }
  */
 const CLOUD_CAPABLE = new Set(['youtube', 'tiktok']);
+const MACHINE = 'เครื่องแอดมิน';
+
 export function planClipRoute(url, workerAlive) {
   const d = detectLink(url);
-  if (!d.isClip) return { mode: 'not-clip', platform: d.platform, label: '' };
-  if (workerAlive) {
-    return { mode: 'queue', platform: d.platform, label: 'ส่งเครื่องทีมถอด', why: 'เครื่องทีมพร้อม — ถอดได้ทุกช่องทาง คุณภาพสูงสุด' };
+  const alive = !!workerAlive;
+
+  // ยังไม่วางลิงก์ / ลิงก์ที่อ่านไม่ออก — ปุ่มยังกดได้ (จะขึ้นเตือนให้วางลิงก์)
+  if (!d.platform) {
+    return {
+      mode: 'not-clip', platform: null, isClip: false,
+      primary: { action: 'queue', label: `🎯 ถอดด้วย${MACHINE}`, enabled: true, why: '' },
+      backup: { action: 'none', enabled: false, label: '☁️ ถอดสำรอง (Vercel)', why: 'วางลิงก์คลิปก่อน' },
+    };
   }
-  if (CLOUD_CAPABLE.has(d.platform)) {
-    return { mode: 'direct', platform: d.platform, label: 'ถอดสำรองบนคลาวด์', why: 'เครื่องทีมปิดอยู่ — ลิงก์นี้คลาวด์ถอดแทนได้' };
+
+  // ลิงก์ข่าวเว็บ ไม่ใช่คลิป — ปุ่มหลักเปลี่ยนหน้าที่เป็น "วิจัยลิงก์ข่าว" (ไม่ต้องเพิ่มปุ่มที่ 3)
+  if (!d.isClip) {
+    return {
+      mode: 'not-clip', platform: d.platform, isClip: false,
+      primary: { action: 'news-hunt', label: '📰 วิจัยลิงก์ข่าว', enabled: true, why: 'ลิงก์นี้เป็นข่าวเว็บ ไม่ใช่คลิป — ปุ่มหลักจะวิจัยข่าวให้แทน' },
+      backup: { action: 'none', enabled: false, label: '☁️ ถอดสำรอง (Vercel)', why: 'ใช้กับลิงก์คลิปเท่านั้น' },
+    };
   }
-  return {
-    mode: 'blocked', platform: d.platform, label: 'รอเครื่องทีมเปิด',
-    why: 'เครื่องทีมปิดอยู่ และลิงก์ Facebook/IG ต้องโหลดไฟล์จากเครื่องทีมเท่านั้น — กดส่งเข้าคิวไว้ได้ เครื่องทีมเปิดเมื่อไหร่จะถอดให้เอง',
-  };
+
+  // ── ลิงก์คลิป: ปุ่มหลักไปเครื่องแอดมินเสมอ ────────────────────────────
+  const primary = alive
+    ? { action: 'queue', label: `🎯 ถอดด้วย${MACHINE}`, enabled: true, why: `${MACHINE}พร้อม — ถอดได้ทุกช่องทาง ผ่านผู้ตรวจครบ คุณภาพสูงสุด` }
+    : { action: 'queue', label: `📥 ส่งเข้าคิว (${MACHINE}ดับอยู่)`, enabled: true, why: `${MACHINE}ดับอยู่ — กดแล้วงานจะรอในคิว เปิดเครื่องเมื่อไหร่ถอดให้เองทันที (งานไม่หาย)` };
+
+  // ── ปุ่มสำรอง: เปิดให้กดเฉพาะตอนเครื่องแอดมินดับจริง ─────────────────
+  const backupLabel = '☁️ ถอดสำรอง (Vercel)';
+  let backup;
+  if (alive) {
+    backup = { action: 'none', enabled: false, label: backupLabel, why: `${MACHINE}ยังเปิดอยู่ — ปุ่มนี้มีไว้ตอนเครื่องดับเท่านั้น` };
+  } else if (!CLOUD_CAPABLE.has(d.platform)) {
+    backup = { action: 'none', enabled: false, label: backupLabel, why: `ลิงก์ Facebook/IG ต้องโหลดไฟล์จาก${MACHINE} — Vercel ทำแทนไม่ได้ ต้องรอเปิดเครื่อง` };
+  } else {
+    backup = { action: 'cloud', enabled: true, label: backupLabel, why: '⚠️ ของสำรองไม่ผ่านผู้ตรวจและตัวซ่อม (Vercel รันสมองไม่ได้) — ใช้เฉพาะตอนจำเป็น' };
+  }
+
+  return { mode: alive ? 'queue' : (backup.enabled ? 'queue-offline' : 'queue-blocked'), platform: d.platform, isClip: true, primary, backup };
 }
 
-/** ข้อความ + สีของชิปสถานะเครื่องทีมบนหัวหน้า */
+/** ข้อความ + สีของชิปสถานะเครื่องแอดมินบนหัวหน้า */
 export function workerChip(worker) {
-  if (!worker || !worker.known) return { text: 'เครื่องทีม: ไม่ทราบสถานะ', color: '#9ca3af', dot: '#9ca3af' };
-  if (worker.alive) return { text: 'เครื่องทีมพร้อม', color: '#22c55e', dot: '#22c55e' };
+  if (!worker || !worker.known) return { text: `${MACHINE}: ไม่ทราบสถานะ`, color: '#9ca3af', dot: '#9ca3af' };
+  if (worker.alive) return { text: `${MACHINE}พร้อม`, color: '#22c55e', dot: '#22c55e' };
   const s = Number(worker.secondsAgo) || 0;
   const ago = s < 3600 ? `${Math.round(s / 60)} นาที` : `${Math.round(s / 3600)} ชม.`;
-  return { text: `เครื่องทีมปิด (เงียบไป ${ago})`, color: '#ef4444', dot: '#ef4444' };
+  return { text: `${MACHINE}ดับ (เงียบไป ${ago})`, color: '#ef4444', dot: '#ef4444' };
 }

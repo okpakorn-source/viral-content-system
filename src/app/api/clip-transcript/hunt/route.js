@@ -36,8 +36,13 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'ลิงก์ไม่รองรับ — ใช้ได้เฉพาะ TikTok / YouTube / Facebook(IG)', errorType: 'UNSUPPORTED_URL' }, { status: 400 });
     }
 
-    // ★ FB/IG บนคลาวด์ → เข้าคิวเครื่องทีม kind='hunt' (โครงคิว+auto-retry เดียวกับถอดประเด็นทุกอย่าง)
-    if (process.platform !== 'win32' && type === 'meta' && !_fromWorker) {
+    // ★★ 27 ส.ค. 69 (เจ้าของสั่ง "บังคับรันในเครื่องทีมเท่านั้น"):
+    //    เดิมด่านนี้กันแค่ FB/IG → YouTube/TikTok ที่กด "ค้นเพิ่ม" บนคลาวด์จะแอบถอดคลิปบน Vercel
+    //    (ข้างล่างบรรทัด ~53 ยิงเข้า /insight ภายใน — ปกติได้แคชฟรี แต่ถ้าเคสถูกลบจากคลังจะจ่ายจริงบน Vercel
+    //     ซึ่งไม่มีผู้ตรวจ ไม่มีตัวซ่อม = ของด้อยคุณภาพหลุดเข้าคลังโดยไม่มีใครรู้)
+    //    ใหม่: อยู่บนคลาวด์เมื่อไหร่ → เข้าคิวเครื่องแอดมินทุกแพลตฟอร์ม · เครื่องแอดมิน (win32) รันเองเหมือนเดิม
+    //    หมายเหตุ: caseId ไม่ติดไปกับใบงาน แต่ข้างล่างรวมผลเข้าเคสเดิมด้วย sourceUrl อยู่แล้ว (พฤติกรรมเดิมของเส้น FB/IG)
+    if (process.platform !== 'win32' && !_fromWorker) {
       const jobs = createStore('clip-jobs');
       const all = await jobs.getAll();
       const recent = all.find(j => j.url === url && j.kind === 'hunt'

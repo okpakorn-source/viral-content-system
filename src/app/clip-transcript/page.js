@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import JobBoard from './ui/JobBoard';
 import StatsStrip from './ui/StatsStrip';
 import InsightCard from './ui/InsightCard';
-import { detectLink, recommendAction, platformIcon as platIcon, getBrainMeta, fmtDurSec, fmtClock, planClipRoute, workerChip } from './ui/statusMeta';
+import { detectLink, platformIcon as platIcon, getBrainMeta, fmtDurSec, fmtClock, planClipRoute, workerChip } from './ui/statusMeta';
 
 // โทนทั้งหน้า (พิมพ์เขียวข้อ 8) — สีเน้นเดียว #38bdf8 · เขียว/เหลือง/แดงสงวนให้สถานะ
 const C = {
@@ -172,22 +172,17 @@ export default function ClipTranscriptPage() {
     if (aliveRef.current) setInsightLoading(false);
   };
 
+  // 🅿️ ปุ่มจอดไว้ (เจ้าของสั่ง 27 ส.ค. 69 "ทั้งหน้าเหลือ 2 ปุ่ม") — ฟังก์ชันยังอยู่ครบ
+  //    อยากได้คืนเมื่อไหร่ เติมปุ่มเรียก extract() / extractHunt() กลับเข้าแถวปุ่มได้ทันที ไม่ต้องเขียนใหม่
+  //
+  //    🔴 27 ส.ค. 69 — ถอด "ขั้นที่ 1 ยิง /insight ตรง" ออกจาก extractHunt แล้ว
+  //       เดิมมันยิงถอดสดก่อนเพื่อโชว์ความคืบหน้าเป็น 2 ขั้น แต่ /hunt ยิง /insight ให้เองอยู่แล้ว (ซ้ำซ้อน)
+  //       และมันเป็น "ช่องลัดไป Vercel" ที่ค้างไว้ให้คนมาเติมปุ่มคืนแล้วเผลอเปิดใช้โดยไม่รู้ตัว
+  //       ตอนนี้ /hunt มีด่านของตัวเอง: อยู่บนคลาวด์ → เข้าคิวเครื่องแอดมินให้เอง (hunt/route.js)
   const extractHunt = async () => {
     if (!url.trim()) { setErr('วางลิงก์คลิปก่อน'); return; }
     setHunting(true); setHuntPhase(1); setErr(''); setNotice(''); setHunt(null); setQueueJob(null);
     try {
-      if (!link.platform || link.platform === 'article') { /* ปล่อยให้ backend ตัดสิน */ }
-      if (link.platform !== 'meta') {
-        const r1 = await fetch('/api/clip-transcript/insight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), user: currentUser }) });
-        const d1 = await safeJson(r1);
-        if (!aliveRef.current) return;
-        if (!d1.success) {
-          setErr(/แน่น|503|overload|ใช้งานหนัก/i.test(String(d1.error || ''))
-            ? '⏳ Gemini แน่น ถอดเนื้อดิบไม่ผ่าน — รอสักครู่แล้วกดใหม่ (คลิปที่ถอดผ่านแล้วจะผ่านขั้นแรกทันที)'
-            : (d1.error || 'ถอดเนื้อดิบไม่สำเร็จ'));
-          setHunting(false); setHuntPhase(0); return;
-        }
-      }
       setHuntPhase(2);
       const r2 = await fetch('/api/clip-transcript/hunt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), user: currentUser }) });
       const d2 = await safeJson(r2);
@@ -313,33 +308,30 @@ export default function ClipTranscriptPage() {
 
   // myJob ให้ JobBoard (จาก queueJob)
   const busy = loading || insightLoading || hunting;
-  const primaryAction = recommendAction(url);
-  // ★ 26 ส.ค. 69 (เจ้าของสั่ง): ปุ่มเดียว — เครื่องทีมเป็นทางหลักทุกช่องทาง · เครื่องทีมปิดค่อยถอดสำรองบนคลาวด์
+  // ★★ 27 ส.ค. 69 (เจ้าของสั่ง — ทับกติกา 26 ส.ค.):
+  //    "บังคับรันในเครื่องทีมเท่านั้น เหลือ 2 ปุ่มพอ · ถ้าคอมฉันดับ ค่อยกดปุ่มสำรอง (Vercel)"
+  //    🔴 เลิกสลับไปคลาวด์อัตโนมัติ — ปุ่มหลักไปเครื่องแอดมินเสมอ · คลาวด์ต้องกดเอง
   const worker = queueList?.worker;
   const route = planClipRoute(url, !!worker?.alive);
   const wchip = workerChip(worker);
 
-  /** ปุ่มหลัก: ระบบเลือกเส้นทางให้เอง ไม่ให้พนักงานต้องจำ */
+  /** ปุ่ม 1 — ทางหลัก: เข้าคิวเครื่องแอดมินเสมอ (ลิงก์ข่าวเว็บเปลี่ยนเป็นวิจัยข่าวให้) */
   const runPrimary = () => {
     if (!url.trim()) { setErr('วางลิงก์คลิปก่อน'); return; }
-    if (primaryAction === 'news-hunt') return extractNewsHunt();
-    if (route.mode === 'direct') {
-      setNotice('☁️ เครื่องทีมปิดอยู่ — ถอดสำรองบนคลาวด์ให้แทน (ลิงก์นี้คลาวด์ทำได้)');
-      return extractInsight();
-    }
-    // queue และ blocked ใช้เส้นเดียวกัน: เข้าคิวเครื่องทีม
-    // blocked = เครื่องทีมปิด + เป็น FB/IG → งานจะรอในคิวจนเครื่องทีมเปิด (ไม่หาย ไม่เงียบ)
-    if (route.mode === 'blocked') setNotice('🔴 เครื่องทีมปิดอยู่ — ส่งเข้าคิวไว้แล้ว เครื่องทีมเปิดเมื่อไหร่จะถอดให้เอง (ลิงก์ Facebook/IG ต้องใช้เครื่องทีมเท่านั้น)');
+    if (route.primary.action === 'news-hunt') return extractNewsHunt();
+    if (!worker?.alive) setNotice('🔴 เครื่องแอดมินดับอยู่ — ส่งเข้าคิวไว้แล้ว เปิดเครื่องเมื่อไหร่จะถอดให้เองทันที (งานไม่หาย)');
     return submitToQueue();
+  };
+  /** ปุ่ม 2 — สำรอง: ต้องกดเอง และกดได้เฉพาะตอนเครื่องแอดมินดับจริง */
+  const runBackup = () => {
+    if (!route.backup.enabled) return;
+    setNotice('☁️ ถอดสำรองบน Vercel — ของชุดนี้ไม่ผ่านผู้ตรวจและตัวซ่อม (Vercel รันสมองไม่ได้) ใช้ตรวจสอบก่อนเอาไปใช้');
+    return extractInsight();
   };
   const primaryLabel = () => {
     if (submitting) return '⏳ กำลังส่ง…';
-    if (insightLoading) return '⏳ กำลังถอด…';
-    if (primaryAction === 'news-hunt') return '📰 วิจัยลิงก์ข่าว';
-    if (!url.trim()) return '🎯 ถอดประเด็น';
-    if (route.mode === 'direct') return '☁️ ถอดสำรองบนคลาวด์';
-    if (route.mode === 'blocked') return '📥 ส่งเข้าคิว (รอเครื่องทีมเปิด)';
-    return '🎯 ถอดประเด็น (เครื่องทีม)';
+    if (hunting) return '⏳ กำลังวิจัย…';
+    return route.primary.label;
   };
 
   return (
@@ -391,37 +383,44 @@ export default function ClipTranscriptPage() {
                 style={{ width: '100%', padding: '12px 14px', borderRadius: 10, border: `1px solid ${C.line}`, background: C.sub, color: C.text, fontSize: 14, fontFamily: 'inherit', boxSizing: 'border-box' }} />
               {link.label && <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11.5, color: C.muted, background: C.card, padding: '2px 8px', borderRadius: 999, border: `1px solid ${C.line}` }}>{link.label}</span>}
             </div>
-            {/* ปุ่มหลัก 1 ปุ่ม — ระบบเลือกเส้นทางให้เอง (เครื่องทีมก่อนเสมอ) */}
-            <button onClick={runPrimary} disabled={busy || submitting}
-              style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: (busy || submitting) ? '#334155' : (route.mode === 'blocked' ? '#f59e0b' : C.accent), color: (busy || submitting) ? C.muted : '#04263b', fontWeight: 800, fontSize: 14, cursor: (busy || submitting) ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
+            {/* ปุ่ม 1 — ทางหลัก: เครื่องแอดมินเสมอ */}
+            <button onClick={runPrimary} disabled={busy || submitting} data-testid="btn-primary"
+              style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: (busy || submitting) ? '#334155' : (worker?.alive ? C.accent : '#f59e0b'), color: (busy || submitting) ? C.muted : '#04263b', fontWeight: 800, fontSize: 14, cursor: (busy || submitting) ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
               {primaryLabel()}
             </button>
           </div>
-          {/* บอกล่วงหน้าว่าลิงก์นี้จะไปทางไหน — พนักงานไม่ต้องเดา */}
-          {route.why && url.trim() && (
-            <div style={{ marginTop: 8, fontSize: 12, color: route.mode === 'blocked' ? '#fbbf24' : C.muted }}>
-              {route.mode === 'queue' ? '🖥️' : route.mode === 'direct' ? '☁️' : '⏳'} {route.why}
-            </div>
-          )}
 
-          {/* ปุ่มรอง ghost */}
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
-            <button onClick={extract} disabled={busy || submitting} style={ghostBtn(busy)}>
-              {loading ? '⏳…' : '🎙️ ถอดบทสัมภาษณ์'}
-            </button>
-            <button onClick={extractHunt} disabled={busy || submitting} style={ghostBtn(busy)}>
-              {hunting ? '⏳…' : '🧭 คลิป → ค้นข่าวคล้าย'}
-            </button>
-            <button onClick={extractNewsHunt} disabled={busy || submitting} style={ghostBtn(busy)}>
-              {hunting ? '⏳…' : '📰 ลิงก์ข่าว → วิจัย'}
-            </button>
-            <button onClick={() => submitToQueue()} disabled={busy || submitting} style={ghostBtn(busy)}>
-              {submitting ? '⏳…' : '📥 ส่งเข้าคิว (เครื่องทีม)'}
+          {/* ปุ่ม 2 — สำรองบน Vercel: กดได้เฉพาะตอนเครื่องแอดมินดับ (ไม่มีการสลับอัตโนมัติ) */}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 }}>
+            <button onClick={runBackup} data-testid="btn-backup"
+              disabled={busy || submitting || !route.backup.enabled}
+              title={route.backup.why}
+              style={{
+                padding: '9px 16px', borderRadius: 10, fontSize: 13, fontWeight: 700, fontFamily: 'inherit',
+                border: `1px solid ${route.backup.enabled ? '#f59e0b' : C.line}`,
+                background: 'transparent',
+                color: route.backup.enabled ? '#fbbf24' : C.muted,
+                cursor: (busy || submitting || !route.backup.enabled) ? 'not-allowed' : 'pointer',
+                opacity: route.backup.enabled ? 1 : .55,
+              }}>
+              {insightLoading ? '⏳ กำลังถอดสำรอง…' : route.backup.label}
             </button>
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: C.muted, marginLeft: 'auto' }}>
               <input type="checkbox" checked={tidy} onChange={e => setTidy(e.target.checked)} /> เรียบเรียงให้อ่านลื่น
             </label>
           </div>
+
+          {/* บอกล่วงหน้าว่าลิงก์นี้จะไปทางไหน — พนักงานไม่ต้องเดา */}
+          {url.trim() && (
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ fontSize: 12, color: worker?.alive ? C.muted : '#fbbf24' }}>
+                {worker?.alive ? '🖥️' : '⏳'} {route.primary.why}
+              </div>
+              <div style={{ fontSize: 12, color: route.backup.enabled ? '#fbbf24' : C.muted }}>
+                ☁️ {route.backup.why}
+              </div>
+            </div>
+          )}
 
           {notice && <div style={{ marginTop: 12, padding: '10px 13px', borderRadius: 10, fontSize: 13, lineHeight: 1.55, border: `1px solid ${C.accent}55`, background: 'rgba(56,189,248,.08)', color: '#bae6fd' }}>{notice}</div>}
           {err && <div style={{ marginTop: 12, padding: '10px 13px', borderRadius: 10, fontSize: 13, lineHeight: 1.55, border: '1px solid #ef444455', background: 'rgba(239,68,68,.08)', color: '#fca5a5' }}>❌ {err}</div>}
@@ -470,7 +469,7 @@ export default function ClipTranscriptPage() {
               live
               copiedKey={copied}
               onCopy={copy}
-              onRetry={(u) => extractInsight(true, u)}
+              onRetry={(u) => submitToQueue(u, true)}
             />
           </div>
         )}
@@ -510,7 +509,7 @@ export default function ClipTranscriptPage() {
                   {open && (
                     <div style={{ padding: '0 13px 13px' }}>
                       <InsightCard rec={rec} copiedKey={copied}
-                        onCopy={copy} onDelete={deleteInsightCase} onPin={pinInsightCase} onRetry={(u) => extractInsight(true, u)} />
+                        onCopy={copy} onDelete={deleteInsightCase} onPin={pinInsightCase} onRetry={(u) => submitToQueue(u, true)} />
                     </div>
                   )}
                 </div>
@@ -657,6 +656,7 @@ function Section({ title, open, onToggle, C, children }) {
     </div>
   );
 }
+// 🅿️ สไตล์ปุ่มรอง — จอดไว้คู่กับปุ่มที่ถอดออก 27 ส.ค. 69 (ดูหมายเหตุ 🅿️ ข้างบน)
 const ghostBtn = (busy) => ({ padding: '8px 14px', borderRadius: 9, border: '1px solid #374151', background: 'transparent', color: '#9ca3af', fontSize: 12.5, fontWeight: 600, cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit' });
 const tabBtn = (active) => ({ padding: '5px 12px', borderRadius: 8, fontSize: 12.5, cursor: 'pointer', fontFamily: 'inherit', border: `1px solid ${active ? '#38bdf8' : '#374151'}`, background: 'transparent', color: active ? '#38bdf8' : '#9ca3af', fontWeight: 600 });
 const pageBtn = (disabled, C) => ({ padding: '6px 14px', borderRadius: 8, fontSize: 12.5, cursor: disabled ? 'default' : 'pointer', fontFamily: 'inherit', border: `1px solid ${C.line}`, background: 'transparent', color: disabled ? '#4b5563' : C.text, opacity: disabled ? 0.5 : 1 });
