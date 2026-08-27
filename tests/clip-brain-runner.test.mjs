@@ -832,3 +832,29 @@ test('รายการบัญชีใช้คำว่า default = ปล
     assert.equal(r.json.accountDir, '(ไม่ได้รับโฟลเดอร์บัญชี)');
   });
 });
+
+test('จับโควตาหมดต้องไม่ตีผิดจากเลข 429 ที่ลอยอยู่ในข้อความปกติ', async () => {
+  const { isQuotaMessage } = await import(
+    new URL('../src/lib/services/clipBrain/brainRunner.js', import.meta.url).href
+  );
+  // 🔴 บั๊กจริง 27 ส.ค. 69: session id ที่มีเลข 429 ทำให้ Codex ที่ใช้งานได้ถูกตีว่าโควตาหมด
+  const ปกติ = [
+    'session_id: a1b2-429f-9c3d',
+    'tokens used 4,290',
+    'conversation 429e8f10-...',
+    'อ่านไฟล์ 429 บรรทัด',
+    'ราคา 429 บาท',
+  ];
+  for (const s of ปกติ) assert.equal(isQuotaMessage(s), false, `ห้ามตีว่าโควตาหมด: ${s}`);
+
+  const โควตาหมดจริง = [
+    'Claude usage limit reached. Your limit will reset at 3pm.',
+    'Error: 429 Too Many Requests',
+    'HTTP 429',
+    'status: 429',
+    'rate limit exceeded',
+    'Your credit balance is too low',
+    'quota exhausted',
+  ];
+  for (const s of โควตาหมดจริง) assert.equal(isQuotaMessage(s), true, `ต้องจับได้: ${s}`);
+});

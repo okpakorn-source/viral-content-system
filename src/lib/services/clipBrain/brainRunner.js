@@ -269,7 +269,12 @@ export function accountList(brain) {
  * จับ "โควตาหมด/ถูกจำกัดอัตรา" ให้แยกจากพังทั่วไป — ของเดิมตกไปเป็น BRAIN_EXIT ปนสาเหตุอื่น = ล่มเงียบ
  * ตรวจจากข้อความที่ CLI พ่นออกมา (ทั้ง stdout/stderr) ครอบทั้งฝั่ง Claude และ Codex
  */
-const QUOTA_RE = /usage limit reached|rate.?limit|quota (?:exceeded|exhausted)|out of (?:credits?|quota)|insufficient (?:credits?|quota)|429|too many requests|upgrade to increase|limit will reset|credit balance is too low|plan limit/i;
+// 🔴 27 ส.ค. 69 — แก้ false positive ที่พิสูจน์ได้จริง:
+//    ของเดิมมีคำว่า `429` ลอยๆ → ไปแมชกับ **session id ที่บังเอิญมีเลข 429** (เช่น a1b2-429f-…)
+//    ผลคือ Codex ที่ใช้งานได้ปกติถูกตีว่า "โควตาหมด" แล้วสลับบัญชีทิ้งทั้งที่ไม่ต้อง
+//    (ทดสอบยืนยัน: ยิง codex ตรงๆ ตอบ ok ปกติ แต่ runBrain คืน BRAIN_QUOTA)
+//    → เลข 429 ต้องมาพร้อมบริบท HTTP/สถานะเท่านั้น ห้ามลอยเดี่ยว
+const QUOTA_RE = /usage limit reached|rate.?limit|quota (?:exceeded|exhausted)|out of (?:credits?|quota)|insufficient (?:credits?|quota)|(?:status|code|http|error)\s*[:=]?\s*429\b|\b429\s*(?:too many|rate|error)|too many requests|upgrade to increase|limit will reset|credit balance is too low|plan limit/i;
 export function isQuotaMessage(s) { return QUOTA_RE.test(String(s || '')); }
 
 /**
