@@ -884,3 +884,19 @@ test('มีแถวชีพจรปนอยู่ ต้องยังห�
   assert.ok(body.job, 'ต้องหยิบงานจริงได้ ไม่ถูกแถวชีพจรบัง');
   assert.notEqual(body.job.id, '__clip_worker_heartbeat__');
 });
+
+test('POST (รายงานผล/heartbeat) ต้องแตะชีพจรด้วย — ไม่ใช่แค่ GET', async () => {
+  // 🔴 บั๊กจริง 27 ส.ค. 69: ตอน worker กำลังถอดงาน มันหยุดขอคิว (GET) แล้วส่ง heartbeat ทาง POST
+  //    ถ้าแตะชีพจรเฉพาะ GET → ระหว่างถอดคลิปยาว ชีพจรค้าง → หน้าเว็บขึ้น "เครื่องทีมปิด" ทั้งที่ทำงานอยู่
+  const route = await loadRoute({ jobs: [makeJob()] });
+  const claimed = await responseBody(await route.GET(makeRequest()));
+  assert.ok(claimed.job, 'ต้อง claim งานได้ก่อน');
+
+  globalThis.__heartbeatTouches = 0;   // นับเฉพาะช่วง POST
+  const res = await route.POST(makeRequest({
+    id: claimed.job.id, status: 'heartbeat', claimToken: claimed.job.claimToken,
+  }));
+  const body = await responseBody(res);
+  assert.equal(body.success, true, 'heartbeat ต้องผ่าน');
+  assert.ok(globalThis.__heartbeatTouches > 0, 'POST ต้องแตะชีพจรเครื่องทีม (ไม่งั้นระหว่างถอดงานจะขึ้นว่าเครื่องปิด)');
+});

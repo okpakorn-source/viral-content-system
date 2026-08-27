@@ -281,6 +281,12 @@ export async function POST(request) {
   }
   if (!isSupabaseReady()) return primaryUnavailableResponse();
 
+  // 💓 แตะชีพจรจากฝั่ง POST ด้วย (บั๊กที่เจอ 27 ส.ค. 69)
+  //    ตอน worker "กำลังถอดงาน" มันหยุดขอคิว (GET) แล้วส่ง heartbeat ทาง POST ทุก 60 วิแทน
+  //    ถ้าแตะเฉพาะ GET → ชีพจรค้างระหว่างถอดคลิปยาว → หน้าเว็บขึ้น "เครื่องทีมปิด" ทั้งที่ทำงานหนักอยู่
+  //    (พิสูจน์สด: งานถอดมา 207 วิ ชีพจรค้าง 209 วิ ตรงกันเป๊ะ)
+  touchWorkerHeartbeat({ host: request.headers.get('x-clip-worker-host') || '', version: WORKER_PROTOCOL });
+
   try {
     const { id, status, claimToken, result = null, error = '' } = await request.json();
     if (!id || !claimToken || !['heartbeat', 'done', 'error', 'retry'].includes(status)) {
