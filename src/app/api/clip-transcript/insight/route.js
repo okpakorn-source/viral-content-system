@@ -201,6 +201,22 @@ async function _tryDownloadYouTube(url, fmt) {
 // ★ 22 มิ.ย.: รวมตรรกะสกัด "ข้อมูลดิบ" ไว้ในฟังก์ชันเดียว (ดูคลิป→fallback ถอดเสียง) — โยน error ที่มี .code
 //   เพื่อให้ห่อด้วยคิวได้สะอาด (ไม่ปน NextResponse กับงานหนัก)
 // ★ 14 ส.ค. 69 (เจ้าของสั่งเทียบสองโมเดล): model (optional) — ไม่ส่ง = VIDEO_MODEL ตามเดิมเป๊ะ
+/**
+ * 🚪 ประตูเดียวของการถอดคลิป — เครื่องยนต์ใหม่ก่อน ล้มแล้วถอยไปเครื่องยนต์เดิม
+ *   (เจ้าของสั่ง 27 ส.ค. 69) · หนึ่งคำขอ = เริ่มงานที่นี่ครั้งเดียวเท่านั้น
+ */
+async function buildInsightWithBrain({ url, type, model = '', durationSec = 0 }) {
+  if (_brainPipelineEnabled(durationSec)) {
+    const fromBrain = await _tryBrainPipeline({ url, type, model, durationSec });
+    if (fromBrain) return fromBrain;                       // ✅ เครื่องยนต์ใหม่สำเร็จ
+  }
+  const legacy = await buildInsight({ url, type, model }); // 🔁 ตัวสำรอง = เครื่องยนต์เดิม
+  if (legacy && typeof legacy === 'object' && _brainPipelineEnabled(durationSec)) {
+    legacy.brainFallback = true;   // ติดธงให้รู้ว่ารอบนี้ไม่ได้ผ่านการตรวจสอบ
+  }
+  return legacy;
+}
+
 async function buildInsight({ url, type, model = '' }) {
   // ★ 25 มิ.ย.: ใช้ insight เดียว (enhanced) เสมอ — Gemini "ตัดสินเอง" (content-aware) ว่าคลิปมีหลายประเด็นไหม
   //   มีหลายประเด็น → ใส่ subStories (เนื้อดิบแยกประเด็น) เพิ่มจาก rawData รวม · เรื่องเดียว → subStories ว่าง
@@ -240,6 +256,44 @@ async function buildInsight({ url, type, model = '' }) {
   const raw = type === 'tiktok' ? await downloadTiktokBuffer(url) : await downloadMetaBuffer(url);
   const buf = await _fitForInline(raw, url); // ★ 14 ส.ค.: >19MB บีบก่อนแนบ inline (เส้น Files API โดน Google ตัดสิทธิ์)
   return await extractInsightFromVideoBuffer(buf, 'video/mp4', model);
+}
+
+/**
+ * 🧠 เครื่องยนต์ใหม่เป็นตัวหลัก · เครื่องยนต์เดิมเป็นตัวสำรองอัตโนมัติ (เจ้าของสั่ง 27 ส.ค. 69)
+ *   "เสียบโค้ดใหม่ให้รันได้เลย แต่เอาเครื่องยนต์เดิมเป็นตัวสำรอง เวลามีปัญหาให้กลับไปเหมือนเดิมก่อน"
+ *
+ * สวิตช์ (ตั้งใน .env.local):
+ *   CLIP_BRAIN_PIPELINE=0        ปิดเครื่องยนต์ใหม่ทั้งหมด → กลับไปใช้ของเดิม 100% (ถอยฉุกเฉิน)
+ *   CLIP_BRAIN_MIN_SEC=600       ใช้เครื่องยนต์ใหม่เฉพาะคลิปยาวเกินกี่วินาที (ค่าเริ่มต้น 0 = ทุกคลิป)
+ *
+ * 🔴 ตัวสำรองทำงานเมื่อ: เครื่องยนต์ใหม่คืน ok:false ทุกกรณี (โควตาหมด · เซิร์ฟเวอร์ล่ม · โหลดคลิปพลาด ฯลฯ)
+ *    ผลจากเครื่องยนต์เดิมจะติดธง brainFallback ไว้ให้รู้ว่ารอบนี้ไม่ได้ผ่านการตรวจสอบ
+ */
+function _brainPipelineEnabled(durationSec) {
+  if (process.env.CLIP_BRAIN_PIPELINE === '0') return false;
+  const min = parseInt(process.env.CLIP_BRAIN_MIN_SEC || '0', 10);
+  if (Number.isFinite(min) && min > 0) {
+    const d = Number(durationSec) || 0;
+    if (d > 0 && d < min) return false;   // คลิปสั้นกว่าเกณฑ์ → ใช้ของเดิม (ประหยัด)
+  }
+  return true;
+}
+
+/** เรียกเครื่องยนต์ใหม่แบบไม่โยน — สำเร็จคืน insight · ล้มคืน null (ให้ผู้เรียกถอยไปของเดิม) */
+async function _tryBrainPipeline({ url, type, model, durationSec, videoBuffer }) {
+  try {
+    const { runClipBrainPipeline } = await import('@/lib/services/clipBrain/clipBrainPipeline');
+    const r = await runClipBrainPipeline({
+      url, isYouTube: type === 'youtube', videoBuffer, durationSec, model, caption: '',
+    });
+    if (r.ok && r.insight) return r.insight;
+    console.warn(`[clip-insight] เครื่องยนต์ใหม่ล้ม (${r.errorType}) ใช้ไป ${r.spentTokens || 0} token → ถอยไปเครื่องยนต์เดิม:`,
+      String(r.error || '').slice(0, 160));
+    return null;
+  } catch (e) {
+    console.warn('[clip-insight] เครื่องยนต์ใหม่พังผิดคาด → ถอยไปเครื่องยนต์เดิม:', String(e?.message || e).slice(0, 160));
+    return null;
+  }
 }
 
 // ★ (เลิกใช้ชั่วคราว 26 มิ.ย. — เก็บไว้เผื่อเปิด fallback ถอดเสียงภายหลัง)
@@ -303,8 +357,14 @@ export async function POST(request) {
     const startedAt = Date.now();
     let insight;
     const attempts = 1;
+    // ความยาวคลิป — ใช้เฉพาะตอนตั้งเกณฑ์ CLIP_BRAIN_MIN_SEC เท่านั้น (ไม่ตั้ง = ไม่ต้องเสียเวลาถาม yt-dlp)
+    //   รู้ไม่ได้ = 0 → ปล่อยผ่านเข้าเครื่องยนต์ใหม่ (มันถามความยาวจาก AI เองอยู่แล้ว)
+    let durationSec = 0;
+    if (parseInt(process.env.CLIP_BRAIN_MIN_SEC || '0', 10) > 0) {
+      durationSec = await getClipDurationSec(url).catch(() => 0);
+    }
     try {
-      insight = await getClipVideoQueue().run(() => buildInsight({ url, type, model: modelOverride }), { label: `insight:${type}${modelOverride ? `@${modelOverride}` : ''}` });
+      insight = await getClipVideoQueue().run(() => buildInsightWithBrain({ url, type, model: modelOverride, durationSec }), { label: `insight:${type}${modelOverride ? `@${modelOverride}` : ''}` });
     } catch (e) {
       const code = e.code || 'INSIGHT_FAILED';
       return NextResponse.json({ success: false, error: humanizeErr(e.message), errorType: code }, { status: 422 });
