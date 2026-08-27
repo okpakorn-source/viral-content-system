@@ -427,10 +427,22 @@ function assertSinglePaidInsightCall(source) {
   assert.match(post, /if \(issues\.length\)[\s\S]*lowQuality = true/, 'ผลไม่สมบูรณ์ต้องติดธงให้พนักงานตัดสินใจ ไม่ยิงใหม่เอง');
 
   const build = source.slice(source.indexOf('async function buildInsight'), source.indexOf('// TikTok/FB/IG'));
+  // 🔴 เจตนาของด่านนี้ (ห้ามเปลี่ยน): หนึ่งคำขอ = ยิง Gemini ได้ครั้งเดียว ห้ามยิงไฟล์แล้วยิง URL ซ้ำ
   assert.doesNotMatch(build, /_raceTimeout|_ytUrlBrokenUntil|catch\s*\(/, 'ห้ามลอง URL แล้ว fallback ไปยิงไฟล์ซ้ำในคำขอเดียว');
-  assert.match(build, /if \(process\.platform === 'win32'\) return await downloadAndExtract\(\);/);
   assert.equal((build.match(/extractClipInsight\(/g) || []).length, 1, 'cloud URL inference ต้องมีทางเดียว');
   assert.equal((build.match(/extractInsightFromVideoBuffer\(/g) || []).length, 1, 'Windows file inference ต้องมีทางเดียว');
+  // ★ 27 ส.ค. 69: เดิมข้อนี้ล็อก "ข้อความบรรทัดเป๊ะ" (`if (win32) return await downloadAndExtract();`)
+  //   ทำให้แก้โครงไม่ได้เลยแม้เจตนาเดิมยังอยู่ครบ — เปลี่ยนมาตรวจ "เจตนา" แทน:
+  //   เส้น Windows ต้องเลือกทางเดียวจากผลการโหลด (ได้ไฟล์ = ยิงไฟล์ · โหลดพลาด = ยิง URL) ไม่ใช่ยิงทั้งคู่
+  //   เหตุที่ต้องแก้: 27 ส.ค. YouTube ขึ้นด่านกันบอท yt-dlp โหลดไม่ได้เลย → ถ้าไม่มีเส้นสำรอง งานล้มทั้งหมด
+  assert.match(build, /_tryDownloadYouTube\(/, 'เส้น Windows ต้องผ่านตัวโหลดที่คืน null เมื่อพลาด (ไม่โยน)');
+  assert.match(build, /if \(buf\) return await extractInsightFromVideoBuffer\(/, 'ได้ไฟล์ = ยิงไฟล์ทางเดียว');
+  assert.doesNotMatch(build, /await downloadMetaBuffer\(/, 'buildInsight ต้องไม่เรียกตัวโหลดตรงๆ (ต้องผ่านตัวที่จับความพลาดแล้ว)');
+  // ตัวจับความพลาดของการโหลดต้องอยู่นอก buildInsight และต้องไม่ยิง Gemini เอง
+  const helper = source.slice(source.indexOf('async function _tryDownloadYouTube'), source.indexOf('async function buildInsight'));
+  assert.ok(helper.length > 0, 'ต้องมีตัวโหลดแยก _tryDownloadYouTube');
+  assert.doesNotMatch(helper, /extractClipInsight\(|extractInsightFromVideoBuffer\(/, 'ตัวโหลดห้ามยิง Gemini เอง (กันยิงซ้ำ)');
+  assert.match(helper, /return null/, 'โหลดพลาดต้องคืน null ไม่โยน');
 }
 
 function assertStrictClipVideoPolicy(serviceSource, geminiSource) {
