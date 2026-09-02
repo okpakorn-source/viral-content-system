@@ -26,6 +26,19 @@
 //   MJ อ่านสมุด `.select('data->picks')` → `.select('data')`      → ข้อ 13ก แดง (เส้นลวดขอ data ทั้งก้อน)
 //   MK อ่านสมุด `r?.picks ?? r?.data?.picks` → `r?.data?.picks`   → ข้อ 13จ แดง (นับใช้ซ้ำไม่ได้ → ใบติด cap ถูกหยิบ)
 //   ML สวิตช์ `LIB_CLASSIFIER_V2 !== '0'` → `=== '0'`            → ข้อ 13ก/13ง แดง (สมุดจดหมวดสลับตัว)
+//   ── ★ รอบ 2 (2 ก.ย. 69 — เคสศรรามบนสนามจริง: โผ 8 ใบถูกข้ามหมด (cap 2 · ต่ำกว่าพื้น 6) แล้วเติมกลับใบติด cap ที่ใช้ไป 64/49 ครั้ง) ──
+//   แก้: (1) โผ K=16 เมื่อ rank-v2 เปิด + ไม่ตั้ง VIRAL_SHORTLIST_K (RANK_V2.poolK) · (2) เติมทีละชั้น ก (ต่ำกว่าพื้นแต่ ≥ floor×0.4 = 20k ไม่ติด cap) → ข (ติด cap) → ค (ที่เหลือ)
+//   ทุบ (harness: scratchpad/mutate-round3.mjs — คืนไบต์เดิม + ตรวจ md5 ทุกตัว · baseline 24/24 · รันซ้ำ 5 ครั้ง 24/24):
+//   N1 สลับลำดับชั้นเติม ก↔ข (= พฤติกรรมเดิม ใบติด cap มาก่อน)          → ข้อ 6, 6ข, 6ง แดง
+//   N2 ปิดการขยายโผ (`if (!_rankV2On())` → `if (true)` = K 8 เสมอ)       → ข้อ 6จ, 13ก แดง
+//   N3 ชั้น ก ไม่กันใบติด cap (ตัด `&& !capHit`)                         → ข้อ 6ง แดง (ยอดน้อย+ใช้บ่อย แซงชั้น ข)
+//   N4 ขอบพื้นชั้น ก `>= minLikes` → `> minLikes`                         → ข้อ 6ข, 6ง แดง (20,000 พอดีตกชั้น ค)
+//   N5 RANK_V2.poolK 16 → 8                                              → ข้อ 6จ, 13ก แดง
+//   N6 สลับชั้น ข↔ค (ที่เหลือมาก่อนใบติด cap)                            → ข้อ 6, 6ข, 6ค, 6ง แดง
+//   N7 ถอดสายส่ง `backfillMinRatio: RANK_V2.backfillMinRatio` ที่ท่อจริง  → ⚠️ ไม่แดง (ค่าเท่า RANK_DEFAULTS 0.4 — สายส่งเป็นเข็มขัดเผื่อปรับ RANK_V2 ทีหลัง · จดตามจริง)
+//   N8 ชั้น ก ไม่มีพื้นไลก์ (ตัด `x.likes >= minLikes`)                    → ข้อ 6, 6ข, 6ค, 6ง แดง
+//   N9 reason นับ cap ผิด (`nCap = 0`)                                    → ข้อ 6ข, 13จ แดง
+//   ⚠️ harness รอบแรก baseline 23/24 ครั้งเดียว ไม่ได้จับชื่อข้อ (รันตรง 7 ครั้ง + harness รอบสอง = 24/24 ทุกครั้ง) — ถ้าเจออีกให้สงสัยสนามจำลอง (spawn ลูก + พอร์ตสุ่ม) ก่อนสงสัยกติกา
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -33,7 +46,7 @@ import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { rankTeachers, likesFromMap, RANK_DEFAULTS } from '../src/lib/services/teacherRank.js';
-import { shortlistExamples, getViralFewshotBlock, pickLibraryCategory, pickLibraryCategoryV2 } from '../src/lib/services/viralFewshot.js';
+import { shortlistExamples, getViralFewshotBlock, pickLibraryCategory, pickLibraryCategoryV2, _shortlistK } from '../src/lib/services/viralFewshot.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url)); // รากรีโป — viralFewshot อ่าน data/*.json ผ่าน process.cwd()
 const SELF = fileURLToPath(import.meta.url);
@@ -113,7 +126,8 @@ test('5 พื้นคุณภาพ: มีใบ ≥ floor อยู่ → 
   assert.deepEqual(ids(r), ['P', 'R'], 'เติมใบที่ข้ามตามลำดับไลก์ (R 40k ก่อน Q 30k)');
   assert.deepEqual(r.debug.skipped.map((s) => s.id), ['R', 'Q']);
   assert.ok(r.debug.skipped.every((s) => /ต่ำกว่าพื้น/u.test(s.why)));
-  assert.deepEqual(r.debug.backfilled, ['R']);
+  assert.deepEqual(r.debug.backfilled.map((b) => b.id), ['R']);
+  assert.match(r.debug.backfilled[0].why, /^ชั้น ก/u, 'R 40k ≥ 20k ไม่ติด cap = เติมจากชั้น ก (★ รอบ 2: backfilled บอกชั้น)');
   // ไม่มีใบไหนถึงพื้น → ไม่บังคับพื้น ไม่ข้ามใคร
   const r2 = rankTeachers(cands, { likesById: { P: 45000, Q: 30000, R: 40000 }, rotate: 1, cap: 0, floor: 50000 });
   assert.equal(r2.debug.hasGood, false);
@@ -127,14 +141,14 @@ test('5 พื้นคุณภาพ: มีใบ ≥ floor อยู่ → 
   assert.equal(edgeOnly.debug.hasGood, true, 'ใบ 50,000 พอดีใบเดียวก็ทำให้พื้นบังคับ');
   assert.deepEqual(ids(edgeOnly), ['E', 'R']);
   assert.deepEqual(edgeOnly.debug.skipped.map((s) => s.id), ['R', 'Q'], 'E (50,000 พอดี) ห้ามถูกข้าม');
-  assert.deepEqual(edgeOnly.debug.backfilled, ['R']);
+  assert.deepEqual(edgeOnly.debug.backfilled.map((b) => b.id), ['R']);
   const edgeMix = rankTeachers([...cands, C('E', 2, { theme: ['a'] })], { likesById: { P: 60000, E: 50000, Q: 30000, R: 40000 }, rotate: 1, cap: 0, floor: 50000 });
   assert.deepEqual(ids(edgeMix), ['P', 'E']);
   assert.deepEqual(edgeMix.debug.skipped.map((s) => s.id), ['R', 'Q']);
   assert.deepEqual(edgeMix.debug.backfilled, [], 'E ถึงพื้น → ครบ 2 ใบโดยไม่ต้องเติมจากใบที่ข้าม');
 });
 
-test('6 กันซ้ำ: ใช้ไป ≥ cap ใน 7 วัน → ข้าม · เหลือไม่พอค่อยยอม (เติมใบแรงที่ติด cap ก่อนใบต่ำกว่าพื้น) · cap=0 ปิด', () => {
+test('6 กันซ้ำ: ใช้ไป ≥ cap ใน 7 วัน → ข้าม · เหลือไม่พอค่อยยอม (เติมทีละชั้น ก→ข→ค — ★ รอบ 2 กลับลำดับจากเดิม) · cap=0 ปิด', () => {
   const cands = [C('H', 2, { theme: ['a'] }), C('I', 2, { theme: ['a'] }), C('J', 2, { theme: ['a'] })];
   const likes = { H: 200000, I: 150000, J: 120000 };
   const r = rankTeachers(cands, { likesById: likes, recentUsageById: { H: 8, I: 2 }, rotate: 1, cap: 8, floor: 0 });
@@ -145,12 +159,103 @@ test('6 กันซ้ำ: ใช้ไป ≥ cap ใน 7 วัน → ข�
   // ติด cap หมด → ยอม (เติมตามลำดับไลก์)
   const all = rankTeachers(cands, { likesById: likes, recentUsageById: { H: 9, I: 8, J: 20 }, rotate: 1, cap: 8, floor: 0 });
   assert.deepEqual(ids(all), ['H', 'I']);
-  assert.deepEqual(all.debug.backfilled, ['H', 'I']);
-  // ใบแรงติด cap มาก่อนใบต่ำกว่าพื้น เมื่อต้องเติม
+  assert.deepEqual(all.debug.backfilled.map((b) => b.id), ['H', 'I']);
+  for (const b of all.debug.backfilled) assert.match(b.why, /^ชั้น ข/u);
+  // ★ รอบ 2 (เคสศรราม): ใบต่ำกว่าพื้นที่ยัง ≥ 20k (ชั้น ก) มาก่อนใบแรงที่ติด cap (ชั้น ข) — เดิม (ad8df3a1) กลับกัน
   const mix = rankTeachers([...cands, C('K', 2, { theme: ['a'] })], { likesById: { ...likes, K: 30000 }, recentUsageById: { H: 9, I: 9 }, rotate: 1, cap: 8, floor: 50000 });
-  assert.deepEqual(ids(mix), ['J', 'H'], 'J ผ่าน · เติม H (ติด cap แต่ 200k) ก่อน K (30k ต่ำกว่าพื้น)');
+  assert.deepEqual(ids(mix), ['J', 'K'], 'J ผ่าน · เติม K (30k ต่ำกว่าพื้นแต่ ≥ 20k ไม่ติด cap) ก่อน H (200k แต่ติด cap)');
+  assert.match(mix.debug.backfilled[0].why, /^ชั้น ก/u);
+  // K ต่ำกว่า 20k → ตกชั้น ค → H (ชั้น ข) กลับมาก่อน
+  const mixLow = rankTeachers([...cands, C('K', 2, { theme: ['a'] })], { likesById: { ...likes, K: 19999 }, recentUsageById: { H: 9, I: 9 }, rotate: 1, cap: 8, floor: 50000 });
+  assert.deepEqual(ids(mixLow), ['J', 'H']);
+  assert.match(mixLow.debug.backfilled[0].why, /^ชั้น ข/u);
   // cap=0 = ปิดกันซ้ำ
   assert.deepEqual(ids(rankTeachers(cands, { likesById: likes, recentUsageById: { H: 99 }, rotate: 1, cap: 0, floor: 0 })), ['H', 'I']);
+});
+
+// ═══ ★ 2 ก.ย. 69 รอบ 2 — ลำดับเติมทีละชั้น (เคสศรรามบนสนามจริง: โผ 8 ถูกข้ามหมด แล้วเติมกลับใบติด cap ที่ใช้ไป 64/49) ═══
+const SORRAM = [ // โผ 8 ใบ ผ่านด่านแมตช์ทุกใบ: 2 ติด cap ไลก์สูง + 6 ต่ำกว่าพื้น (3 ใบ ≥ 20k · 3 ใบต่ำกว่า/ไม่มีไลก์)
+  C('X1-cap', 3, { theme: ['a'] }), C('X2-cap', 3, { theme: ['a'] }),
+  C('Y1', 2.5, { theme: ['a'] }), C('Y2', 2.5, { theme: ['a'] }), C('Y3-edge', 2.5, { theme: ['a'] }),
+  C('Z1', 2, { theme: ['a'] }), C('Z2', 2, { theme: ['a'] }), C('Z3-nolikes', 2, { theme: ['a'] }),
+];
+const SORRAM_LIKES = { 'X1-cap': 168000, 'X2-cap': 72000, Y1: 40000, Y2: 30000, 'Y3-edge': 20000, Z1: 15000, Z2: 5000 };
+const SORRAM_USAGE = { 'X1-cap': 64, 'X2-cap': 49 };
+const PROD = { k: 2, cap: 8, floor: 50000, rotate: 3 }; // ค่าจริงในท่อ (RANK_V2) · rnd ไม่มีผลเพราะ elig ว่าง
+
+test('6ข เคสศรราม: โผ 8 ใบ 2 ติด cap ไลก์สูง + 6 ต่ำกว่าพื้น (3 ใบ ≥ 20k) → ต้องได้ 2 ใบจากกลุ่ม ≥ 20k (ชั้น ก) ไม่ใช่ใบติด cap · ขอบ 20,000 พอดี = ชั้น ก', () => {
+  const r = rankTeachers(SORRAM, { likesById: SORRAM_LIKES, recentUsageById: SORRAM_USAGE, ...PROD, rnd: () => 0 });
+  assert.equal(r.debug.gate, 'strict');
+  assert.equal(r.debug.skipped.length, 8, 'ทุกใบถูกข้าม (cap 2 · ต่ำกว่าพื้น 6)');
+  assert.deepEqual(ids(r), ['Y1', 'Y2'], 'เติมจากชั้น ก เรียงไลก์มาก→น้อย — ห้ามได้ X1/X2 ที่ติด cap');
+  assert.deepEqual(r.debug.backfilled.map((b) => b.id), ['Y1', 'Y2']);
+  for (const b of r.debug.backfilled) assert.match(b.why, /^ชั้น ก/u, `ต้องบอกว่าเติมจากชั้น ก: ${b.why}`);
+  assert.match(r.debug.reason, /ข้าม 8 \(cap 2 · ต่ำกว่าพื้น 6\)/u);
+  assert.match(r.debug.reason, /เติมจากใบที่ข้าม 2 \(ชั้น ก/u, 'reason ต้องบอกชั้นที่เติม');
+  assert.ok(!/X1-cap|X2-cap/u.test(r.debug.reason.split('หยิบ')[1]), 'บรรทัดหยิบต้องไม่มีใบติด cap');
+  // ขอบ: ตัด Y1 ออก → Y2 + Y3 (20,000 พอดี = ≥ 20k = ชั้น ก) · ไม่ใช่ X1
+  const edge = rankTeachers(SORRAM.filter((c) => c.id !== 'Y1'), { likesById: SORRAM_LIKES, recentUsageById: SORRAM_USAGE, ...PROD, rnd: () => 0 });
+  assert.deepEqual(ids(edge), ['Y2', 'Y3-edge']);
+  // ชั้น ก มีใบเดียว → ใบที่ 2 มาจากชั้น ข (ใบติด cap ไลก์สูงสุด) ไม่ใช่ชั้น ค
+  const one = rankTeachers(SORRAM.filter((c) => !/^Y[12]/.test(c.id)), { likesById: SORRAM_LIKES, recentUsageById: SORRAM_USAGE, ...PROD, rnd: () => 0 });
+  assert.deepEqual(ids(one), ['Y3-edge', 'X1-cap']);
+  assert.match(one.debug.backfilled[1].why, /^ชั้น ข/u);
+});
+
+test('6ค ทุกใบต่ำกว่า 20k + 2 ติด cap → ได้ใบติด cap (ชั้น ข) เรียงไลก์ · ติด cap ใบเดียว → ใบที่ 2 จากชั้น ค เรียงไลก์ (ไม่มีไลก์ท้ายสุด) · ไม่มีใบถึงพื้น = ไม่ต้องเติม', () => {
+  const cands = SORRAM.filter((c) => !/^Y/.test(c.id)); // X1 X2 Z1 Z2 Z3
+  const r = rankTeachers(cands, { likesById: SORRAM_LIKES, recentUsageById: SORRAM_USAGE, ...PROD, rnd: () => 0 });
+  assert.deepEqual(ids(r), ['X1-cap', 'X2-cap']);
+  for (const b of r.debug.backfilled) assert.match(b.why, /^ชั้น ข/u);
+  assert.match(r.debug.reason, /เติมจากใบที่ข้าม 2 \(ชั้น ข ติด cap ×2\)/u);
+  const oneCap = rankTeachers(cands.filter((c) => c.id !== 'X2-cap'), { likesById: SORRAM_LIKES, recentUsageById: SORRAM_USAGE, ...PROD, rnd: () => 0 });
+  assert.deepEqual(ids(oneCap), ['X1-cap', 'Z1'], 'ชั้น ข หมด → ชั้น ค เรียงไลก์ (Z1 15k ก่อน Z2 5k ก่อน Z3 ไม่มีไลก์)');
+  assert.match(oneCap.debug.backfilled[1].why, /^ชั้น ค/u);
+  const noCap = rankTeachers(cands.filter((c) => !/-cap$/.test(c.id)), { likesById: SORRAM_LIKES, recentUsageById: {}, ...PROD, rnd: () => 0 });
+  assert.equal(noCap.debug.hasGood, false, 'ไม่มีใบถึงพื้น = ไม่บังคับพื้น → ไม่ต้องเติม');
+  assert.deepEqual(ids(noCap), ['Z1', 'Z2']);
+  assert.deepEqual(noCap.debug.backfilled, []);
+});
+
+test('6ง ยอดน้อย "และ" ใช้บ่อย (ต่ำกว่าพื้น+ติด cap) ตกชั้น ค — ไม่แซงชั้น ก/ข · backfillMinRatio ปรับได้ (0.8 → พื้นชั้น ก 40k) · ค่าขยะใช้ 0.4', () => {
+  const cands = [C('P', 2, { theme: ['a'] }), C('X1-cap', 2, { theme: ['a'] }), C('W-low-cap', 2, { theme: ['a'] }), C('Y', 2, { theme: ['a'] })];
+  const likes = { P: 60000, 'X1-cap': 168000, 'W-low-cap': 30000, Y: 25000 };
+  const usage = { 'X1-cap': 9, 'W-low-cap': 9 };
+  const r = rankTeachers(cands, { likesById: likes, recentUsageById: usage, ...PROD, rotate: 1 });
+  assert.deepEqual(ids(r), ['P', 'Y'], 'P ผ่าน · เติม Y (ชั้น ก) — W 30k ติด cap ห้ามแซงแม้ไลก์มากกว่า Y');
+  const noY = rankTeachers(cands.filter((c) => c.id !== 'Y'), { likesById: likes, recentUsageById: usage, ...PROD, rotate: 1 });
+  assert.deepEqual(ids(noY), ['P', 'X1-cap'], 'ไม่มีชั้น ก → ชั้น ข (X1 ติด cap แต่ถึงพื้น) ก่อน W (ชั้น ค)');
+  assert.match(noY.debug.backfilled[0].why, /^ชั้น ข/u);
+  const onlyW = rankTeachers(cands.filter((c) => /^(P|W)/.test(c.id)), { likesById: likes, recentUsageById: usage, ...PROD, rotate: 1 });
+  assert.deepEqual(ids(onlyW), ['P', 'W-low-cap']);
+  assert.match(onlyW.debug.backfilled[0].why, /^ชั้น ค/u);
+  assert.match(onlyW.debug.skipped[0].why, /ต่ำกว่าพื้น 50,000 \(30k\) \+ ใช้ไป 9 ครั้ง/u, 'why บอกทั้งสองเหตุ');
+  // ratio 0.8 → พื้นชั้น ก = 40,000: Y1 40k ยังชั้น ก · Y2 30k ตกชั้น ค → ใบที่ 2 = X1 (ชั้น ข)
+  const hi = rankTeachers(SORRAM, { likesById: SORRAM_LIKES, recentUsageById: SORRAM_USAGE, ...PROD, backfillMinRatio: 0.8, rnd: () => 0 });
+  assert.deepEqual(ids(hi), ['Y1', 'X1-cap']);
+  assert.match(hi.debug.backfilled[0].why, /≥ 40,000/u);
+  // ค่าขยะ/ติดลบ/ไม่ส่ง → 0.4 เดิม
+  for (const bad of ['x', -1, undefined]) assert.deepEqual(ids(rankTeachers(SORRAM, { likesById: SORRAM_LIKES, recentUsageById: SORRAM_USAGE, ...PROD, backfillMinRatio: bad, rnd: () => 0 })), ['Y1', 'Y2'], `ratio=${bad}`);
+  assert.equal(RANK_DEFAULTS.backfillMinRatio, 0.4);
+});
+
+// ═══ ★ รอบ 2 — ขนาดโผสำหรับ rank-v2 (_shortlistK ตัวจริงใน viralFewshot.js · ข้อ 13ก/13ข/13ฉ พิสูจน์บนท่อจริงอีกชั้น) ═══
+const withEnvs = (pairs, fn) => {
+  const saved = Object.keys(pairs).map((n) => [n, Object.prototype.hasOwnProperty.call(process.env, n), process.env[n]]);
+  for (const [n, v] of Object.entries(pairs)) { if (v === undefined) delete process.env[n]; else process.env[n] = v; }
+  try { return fn(); } finally { for (const [n, had, old] of saved) { if (had) process.env[n] = old; else delete process.env[n]; } }
+};
+test('6จ โผ K: สวิตช์เปิด + ไม่ตั้ง VIRAL_SHORTLIST_K = 16 · TEACHER_RANK_V2=0 = 8 เดิม · ตั้ง env = env ชนะ (พื้น 6/เพดาน 40/อ่านไม่ออก=8 เดิม) ทั้งสองสวิตช์', () => {
+  assert.equal(withEnvs({ TEACHER_RANK_V2: undefined, VIRAL_SHORTLIST_K: undefined }, () => _shortlistK()), 16);
+  assert.equal(withEnvs({ TEACHER_RANK_V2: 'off', VIRAL_SHORTLIST_K: undefined }, () => _shortlistK()), 16, "'off' ไม่ใช่ '0' = ยังเปิด");
+  assert.equal(withEnvs({ TEACHER_RANK_V2: '0', VIRAL_SHORTLIST_K: undefined }, () => _shortlistK()), 8);
+  for (const sw of [undefined, '0']) {
+    assert.equal(withEnvs({ TEACHER_RANK_V2: sw, VIRAL_SHORTLIST_K: '10' }, () => _shortlistK()), 10, `env ชนะ (สวิตช์=${sw})`);
+    assert.equal(withEnvs({ TEACHER_RANK_V2: sw, VIRAL_SHORTLIST_K: '"12"' }, () => _shortlistK()), 12, 'ทนอัญประกาศ');
+    assert.equal(withEnvs({ TEACHER_RANK_V2: sw, VIRAL_SHORTLIST_K: '4' }, () => _shortlistK()), 6, 'พื้น 6 เดิม');
+    assert.equal(withEnvs({ TEACHER_RANK_V2: sw, VIRAL_SHORTLIST_K: '99' }, () => _shortlistK()), 40, 'เพดาน 40 เดิม');
+    assert.equal(withEnvs({ TEACHER_RANK_V2: sw, VIRAL_SHORTLIST_K: 'abc' }, () => _shortlistK()), 8, 'อ่านไม่ออก = 8 เดิม (env ถูกตั้งแล้ว ไม่ใช่ 16)');
+  }
 });
 
 test('7 หมุน: สุ่มถ่วง sqrt(likes) ในหัวแถว rotate ใบ — อันดับ 1 ไม่ผูกขาด แต่ยังได้บ่อยสุด · rotate=1 = ตายตัว', () => {
@@ -213,7 +318,7 @@ test('10 ทนอินพุตพิการ: ใบไม่มี id ถ�
   assert.equal(r.debug.gate, 'strict', 'hits ตัวเลข/บูลีนต้องนับเป็นแมตช์ → strict ผ่าน 3 ใบ ไม่ต้องผ่อน');
   assert.deepEqual(r.debug.sortedIds, ['arr', 'ok', 'ok2'], 'lo (score < 2) ต้องไม่อยู่ในแถว');
   assert.deepEqual(ids(r), ['arr', 'ok']);
-  assert.deepEqual(RANK_DEFAULTS, { k: 2, cap: 8, floor: 50000, rotate: 3 });
+  assert.deepEqual(RANK_DEFAULTS, { k: 2, cap: 8, floor: 50000, rotate: 3, backfillMinRatio: 0.4 });
   const r2 = rankTeachers([C('a', 3, { theme: ['x'] }), C('b', 3, { theme: ['x'] }), C('c', 3, { theme: ['x'] })]); // ไม่ส่ง opts เลย = Math.random
   assert.equal(r2.picks.length, 2);
 });
@@ -296,11 +401,12 @@ const EXP = {
   libV2: pickLibraryCategoryV2({ category: FIELD_BRIEF.category, emotionalTags: FIELD_BRIEF.emotionalTags, archetype: FIELD_BRIEF.archetype }),
   libOld: pickLibraryCategory({ category: FIELD_BRIEF.category, emotionalTags: FIELD_BRIEF.emotionalTags, archetype: FIELD_BRIEF.archetype }),
 };
-const fieldExpect = (libCat) => {
+// ★ รอบ 2: K ต้องตรงกับที่ท่อจริงใช้ — rank-v2 เปิด + ไม่ตั้ง env = 16 · TEACHER_RANK_V2=0 = 8 (ข้อ 13ข) · ตั้ง env = ค่านั้น (ข้อ 13ฉ)
+const fieldExpect = (libCat, K = 16) => {
   const sl = shortlistExamples(
     { title: FIELD_BRIEF.newsTitle, category: FIELD_BRIEF.category, emotionalTags: FIELD_BRIEF.emotionalTags, archetype: FIELD_BRIEF.archetype, libCat,
       coreStory: FIELD_BRIEF.newsBrief.coreStory, excerpt: FIELD_BRIEF.newsBrief.excerpt, cardEssence: '' },
-    FIELD_ROWS, ESS_FILE, 8,
+    FIELD_ROWS, ESS_FILE, K,
   );
   const rk = rankTeachers(sl.cands || [], { likesById: LIKES_FILE, recentUsageById: {}, k: 2, cap: 8, floor: 50000, rotate: 1 });
   return { listIds: sl.list.map((r) => r.id), gate: rk.debug.gate, sortedIds: rk.debug.sortedIds };
@@ -401,6 +507,8 @@ test('13ก สนาม (สวิตช์ค่าเริ่มต้น): 
     for (const id of picked) assert.ok(ex.sortedIds.includes(id), `ใบที่หยิบต้องอยู่ในแถวผ่านด่าน: ${id}`);
     assertBlockHasTeachers(out.block, picked);
     assert.ok(out.logs.some((l) => l.includes('rank-v2 หยิบ') && l.includes('ด่านแมตช์')), 'log 1 บรรทัดพร้อมเหตุผลกติกา');
+    assert.ok(out.logs.some((l) => l.includes('คัดเข้ารอบ') && l.includes('(K=16)')), `★ รอบ 2: โผขยายเป็น 16 เมื่อ rank-v2 เปิด + ไม่ตั้ง env: ${out.logs.filter((l) => l.includes('K=')).join(' | ')}`);
+    assert.ok(out.logs.some((l) => l.includes('rank-v2 ขยายโผ K=16')), 'log บอกว่าขยายโผเพราะ rank-v2');
     const reads = historyReads(st);
     assert.equal(reads.length, 1, 'อ่านสมุดประวัติ 1 ครั้ง (หน้าเดียวเพราะสมุดว่าง)');
     assert.equal(reads[0].select, 'data->picks', 'ขอเฉพาะ picks ไม่ใช่ data ทั้งก้อน (ผู้ตรวจไขว้: ลดขนาด ~5 เท่า)');
@@ -410,8 +518,8 @@ test('13ก สนาม (สวิตช์ค่าเริ่มต้น): 
   });
 });
 
-test('13ข สนาม TEACHER_RANK_V2=0: ไม่อ่านสมุดประวัติเลย · สมุดจด mode shortlist · ไม่มีช่อง rank · ครูยังมาจากโผชั้นเฉพาะกิจและมีเนื้อจริง', async () => {
-  const ex = fieldExpect(EXP.libV2);
+test('13ข สนาม TEACHER_RANK_V2=0: ไม่อ่านสมุดประวัติเลย · สมุดจด mode shortlist · ไม่มีช่อง rank · ครูยังมาจากโผชั้นเฉพาะกิจ (K=8 เดิม) และมีเนื้อจริง', async () => {
+  const ex = fieldExpect(EXP.libV2, 8);
   await withMockDb({ rows: FIELD_ROWS }, async ({ port, st }) => {
     const out = await runFieldChild(port, { TEACHER_RANK_V2: '0' });
     const d = historyRow(st);
@@ -422,6 +530,8 @@ test('13ข สนาม TEACHER_RANK_V2=0: ไม่อ่านสมุดป
     for (const id of picked) assert.ok(ex.listIds.includes(id), `ตัวสุ่มเดิมหยิบจากโผชั้นเฉพาะกิจ: ${id}`);
     assertBlockHasTeachers(out.block, picked);
     assert.ok(!out.logs.some((l) => l.includes('rank-v2')), 'ไม่มี log rank-v2');
+    assert.ok(out.logs.some((l) => l.includes('คัดเข้ารอบ') && l.includes('(K=8)')), `★ รอบ 2: ปิดสวิตช์ = โผ 8 เดิม: ${out.logs.filter((l) => l.includes('K=')).join(' | ')}`);
+    assert.equal(d.poolSize, ex.listIds.length, 'poolSize = โผ K=8 เดิม');
   });
 });
 
@@ -467,5 +577,18 @@ test('13จ สนาม cap: ใบไลก์สูงสุดถูกใ�
     for (const id of picked) assert.ok(ex.sortedIds.includes(id), `ใบที่หยิบต้องอยู่ในแถวผ่านด่าน: ${id}`);
     assertBlockHasTeachers(out.block, picked);
     assert.ok(out.logs.some((l) => l.includes('rank-v2 หยิบ') && l.includes('cap 1')), 'log บอกว่าข้ามเพราะ cap 1 ใบ');
+  });
+});
+
+test('13ฉ สนาม VIRAL_SHORTLIST_K=10 + rank-v2: env ชนะ (โผ K=10 ไม่ใช่ 16) · ไม่มี log ขยายโผ · กติกายัง rank-v2', async () => {
+  const ex = fieldExpect(EXP.libV2, 10);
+  await withMockDb({ rows: FIELD_ROWS }, async ({ port, st }) => {
+    const out = await runFieldChild(port, { VIRAL_SHORTLIST_K: '10' });
+    const d = historyRow(st);
+    assert.equal(d.mode, 'rank-v2');
+    assert.equal(d.poolSize, ex.listIds.length);
+    assert.ok(out.logs.some((l) => l.includes('คัดเข้ารอบ') && l.includes('(K=10)')), `env ต้องชนะ: ${out.logs.filter((l) => l.includes('K=')).join(' | ')}`);
+    assert.ok(!out.logs.some((l) => l.includes('ขยายโผ')), 'ตั้ง env แล้วต้องไม่ประกาศขยายโผ');
+    assertBlockHasTeachers(out.block, d.picks.map((p) => p.id));
   });
 });

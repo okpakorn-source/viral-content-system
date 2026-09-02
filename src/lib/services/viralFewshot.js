@@ -530,7 +530,9 @@ function _cardTeacherOn() {
 //   ค่าเริ่มต้น = เปิด · ปิดคืน weightedSample เดิมทุกไบต์: TEACHER_RANK_V2=0 (รับเฉพาะ '0' ตรงตัว)
 //   ขอบเขต: ทำงานเฉพาะชั้นเฉพาะกิจที่คัดโผสำเร็จ (pickMode 'shortlist') — โหมด ai/score/rotate/top2/ถอย ไม่ถูกแตะ
 const _rankV2On = () => process.env.TEACHER_RANK_V2 !== '0';
-const RANK_V2 = { k: 2, cap: 8, floor: 50000, rotate: 3, usageDays: 7 };
+//   ★ รอบ 2 (เคสศรรามบนสนามจริง): poolK 16 = โผกว้างขึ้นเมื่อไม่ตั้ง VIRAL_SHORTLIST_K (โผ 8 เคยถูกข้ามหมดแล้วเติมกลับใบติด cap)
+//     backfillMinRatio 0.4 = พื้นชั้น ก ของการเติม (ไลก์ ≥ 20,000 เมื่อพื้น 50k) — ลำดับชั้นดู teacherRank.js ข้อ 6
+const RANK_V2 = { k: 2, cap: 8, floor: 50000, rotate: 3, usageDays: 7, poolK: 16, backfillMinRatio: 0.4 };
 
 // 📒 นับการใช้ครูซ้ำจากสมุดประวัติเดิม (store viral_pick_history — ไฟล์นี้จดเองใน _recordPickHistory) ย้อนหลัง 7 วัน · แคช 5 นาที
 //   อ่านล้ม/หมดเวลา → ถือว่าใช้ 0 ทุกใบ (ห้ามให้ท่อข่าวล้ม) และลองใหม่ใน 60 วิ (บทเรียน "ตำราว่างเงียบๆ" 2 ส.ค.: ห้ามแคชความล้มเหลวยาว)
@@ -579,9 +581,20 @@ async function _loadRecentUsage() {
 //   K=2 → weightedSample(2 ใบ, 2) คืนทั้งคู่เสมอ = "ครูตายตัว" (K=3 ก็ยังข้ามชั้นแค่ 27%)
 //   → ยกพื้นเป็น 6 (= OWN_FLOOR 2 + อีก 4 ใบให้ตัวสุ่มมีของจริงให้เลือก) และตะโกนบอกเมื่อค่าที่ตั้งถูกดันขึ้น
 const SL_K_MIN = 6, SL_K_MAX = 40, SL_K_DEFAULT = 8;
-function _shortlistK() {
+// 🎯 2 ก.ย. 69 รอบ 2: rank-v2 เปิด + ไม่ตั้ง env → โผกว้าง RANK_V2.poolK (16) ให้ด่านพื้น/cap มีของเหลือให้หยิบจริง
+//   ตั้ง VIRAL_SHORTLIST_K = เคารพ env ตามเดิม (พื้น 6 / เพดาน 40 เดิม · อ่านไม่ออก = 8 เดิม) · TEACHER_RANK_V2=0 = 8 เดิมทุกไบต์
+//   export ให้ข้อสอบยิงตรง (แบบแผนเดียวกับ _hasWord/_applyRealLikes) — ผู้เรียกในไฟล์นี้มีจุดเดียว (ชั้นเฉพาะกิจ)
+let _slKLogged = 0;
+export function _shortlistK() {
   const raw = _envTok('VIRAL_SHORTLIST_K');
-  if (!raw) return SL_K_DEFAULT;
+  if (!raw) {
+    if (!_rankV2On()) return SL_K_DEFAULT;
+    if (_slKLogged !== RANK_V2.poolK) {
+      _slKLogged = RANK_V2.poolK;
+      console.log(`[ViralFewshot] 🎯 rank-v2 ขยายโผ K=${RANK_V2.poolK} (ค่าเริ่มต้นเดิม ${SL_K_DEFAULT} · ตั้ง VIRAL_SHORTLIST_K ถ้าจะทับ)`);
+    }
+    return RANK_V2.poolK;
+  }
   const n = parseInt(raw, 10);
   if (!Number.isFinite(n)) {
     console.log(`[ViralFewshot] 🎚️ VIRAL_SHORTLIST_K="${raw}" อ่านเป็นตัวเลขไม่ได้ → ใช้ค่าเริ่มต้น ${SL_K_DEFAULT}`);
@@ -1169,6 +1182,7 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
           rk = rankTeachers(slCands, {
             likesById: _readRealLikesFile()?.byId || {}, recentUsageById: usage,
             k: RANK_V2.k, cap: RANK_V2.cap, floor: RANK_V2.floor, rotate: RANK_V2.rotate,
+            backfillMinRatio: RANK_V2.backfillMinRatio, // ★ รอบ 2: พื้นชั้น ก ของการเติม (≥ 20k) — เคสศรราม
           });
           if (!rk || !Array.isArray(rk.picks) || rk.picks.length < 2 || rk.picks.some((c) => !c?.row)) rk = null; // โผผิดรูป → ถอยตัวสุ่มเดิม
         } catch (e) { rk = null; console.log('[ViralFewshot] 🎯 rank-v2 ล้ม → ถอย weightedSample เดิม:', String(e?.message || e).slice(0, 60)); }

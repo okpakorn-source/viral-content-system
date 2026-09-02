@@ -20,14 +20,19 @@
  *   4) กันซ้ำ: recentUsageById[id] ≥ cap (นับใน 7 วันโดยผู้เรียก) → ข้าม
  *   5) หมุน: สุ่มถ่วงน้ำหนัก sqrt(likes) ในกลุ่มหัวแถว rotate ใบ — อันดับ 1 ไม่ผูกขาด
  *      🔴 ความสุ่มอยู่ตรงนี้จุดเดียว · ส่ง opts.rnd เอง = ผลนิ่ง 100% (ข้อสอบใช้)
- *   6) ยังไม่ครบ k → เติมจากใบที่ข้าม "ตามลำดับไลก์" (ใบแรงที่ติด cap มาก่อนใบต่ำกว่าพื้น) — ต้องได้ครูครบเสมอ
+ *   6) ยังไม่ครบ k → เติมจากใบที่ข้าม "ทีละชั้น" (★ 2 ก.ย. 69 รอบ 2 — เคสศรรามบนสนามจริง: โผ 8 ใบถูกข้ามหมด (cap 2 · ต่ำกว่าพื้น 6)
+ *      แล้วเติมกลับใบติด cap ที่ใช้ไป 64/49 ครั้ง = ครูดังที่ใช้ซ้ำมากสุดยังชนะ — ขัดหลักเจ้าของ "ไม่เอาแต่นิยม / ยอดน้อยแต่ใช้บ่อยไม่เหมาะ")
+ *      ชั้น ก) ใบผ่านด่านแมตช์ที่ต่ำกว่าพื้น แต่ไลก์ ≥ floor × backfillMinRatio (= 20,000 เมื่อพื้น 50k) และไม่ติด cap · เรียงไลก์มาก→น้อย
+ *      ชั้น ข) ใบติด cap (ถึงพื้นแต่ใช้ซ้ำเกิน) · เรียงไลก์มาก→น้อย
+ *      ชั้น ค) ที่เหลือ (ต่ำกว่า 20k / ไม่มีไลก์ / ต่ำกว่าพื้น "และ" ติด cap = ยอดน้อยแต่ใช้บ่อย) · เรียงไลก์มาก→น้อย
+ *      ต้องได้ครูครบเสมอเมื่อโผมีพอ · debug.backfilled[] = { id, why } บอกชั้นที่เติม · เดิม (ad8df3a1) เติมตามไลก์ล้วน = ใบติด cap มาก่อน
  *
  * @param {Array<{id:string, score:number, hitsTheme?:any[], hitsEmo?:any[], guard?:boolean}>} candidates โผจาก shortlistExamples (ใส่ช่องอื่นติดมาได้ เช่น row — คืนอ็อบเจกต์เดิมกลับไปใน picks)
- * @param {{likesById?:object, recentUsageById?:object, k?:number, cap?:number, floor?:number, rotate?:number, rnd?:()=>number}} opts
- * @returns {{picks: object[], debug: {gate:string, sortedIds:string[], skipped:{id:string, why:string}[], backfilled:string[], hasGood:boolean, reason:string}}}
+ * @param {{likesById?:object, recentUsageById?:object, k?:number, cap?:number, floor?:number, rotate?:number, backfillMinRatio?:number, rnd?:()=>number}} opts
+ * @returns {{picks: object[], debug: {gate:string, sortedIds:string[], skipped:{id:string, why:string}[], backfilled:{id:string, why:string}[], hasGood:boolean, reason:string}}}
  */
 
-export const RANK_DEFAULTS = Object.freeze({ k: 2, cap: 8, floor: 50000, rotate: 3 });
+export const RANK_DEFAULTS = Object.freeze({ k: 2, cap: 8, floor: 50000, rotate: 3, backfillMinRatio: 0.4 });
 
 const _cmpId = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 const _cnt = (v) => (Array.isArray(v) ? v.length : typeof v === 'number' ? (v > 0 ? v : 0) : v ? 1 : 0);
@@ -48,6 +53,9 @@ export function rankTeachers(candidates, opts = {}) {
   const cap = Math.max(0, _int(o.cap, RANK_DEFAULTS.cap));           // 0 = ปิดกันซ้ำ
   const floor = Math.max(0, _int(o.floor, RANK_DEFAULTS.floor));     // 0 = ปิดพื้น
   const rotate = Math.max(1, _int(o.rotate, RANK_DEFAULTS.rotate));  // 1 = ไม่หมุน (หยิบหัวแถวเสมอ)
+  const ratioRaw = Number(o.backfillMinRatio);
+  const backfillMinRatio = Number.isFinite(ratioRaw) && ratioRaw >= 0 ? ratioRaw : RANK_DEFAULTS.backfillMinRatio;
+  const minLikes = Math.floor(floor * backfillMinRatio); // พื้นของชั้น ก ตอนเติม (20,000 เมื่อ floor 50k · floor=0 → ไม่มีใบต่ำกว่าพื้นให้เติมอยู่แล้ว)
   const rnd = typeof o.rnd === 'function' ? o.rnd : Math.random;
   const likesById = o.likesById && typeof o.likesById === 'object' ? o.likesById : {};
   const usage = o.recentUsageById && typeof o.recentUsageById === 'object' ? o.recentUsageById : {};
@@ -75,13 +83,19 @@ export function rankTeachers(candidates, opts = {}) {
   // 2) เรียงไลก์ (ไม่มีข้อมูล = -1 = ท้ายแถว) · เสมอ → score → id
   pool.sort((a, b) => (b.likes ?? -1) - (a.likes ?? -1) || b.score - a.score || _cmpId(a.id, b.id));
 
-  // 3) พื้นคุณภาพ + 4) กันซ้ำ
+  // 3) พื้นคุณภาพ + 4) กันซ้ำ — จด "ชั้นเติม" (ก/ข/ค ตามหัวไฟล์ข้อ 6) ติดใบที่ข้ามไว้ด้วย
   const hasGood = floor > 0 && pool.some((x) => (x.likes ?? 0) >= floor);
   const elig = [];
-  const skipped = []; // คงลำดับไลก์ไว้ — ใช้เติมข้อ 6
+  const skipped = []; // คงลำดับไลก์ไว้ — ใช้เติมข้อ 6 (ในชั้นเดียวกันจึงเรียงไลก์มาก→น้อยเอง)
   for (const x of pool) {
-    if (hasGood && (x.likes ?? 0) < floor) { skipped.push({ x, why: `ต่ำกว่าพื้น ${floor.toLocaleString('en-US')} (${_kfmt(x.likes)})` }); continue; }
-    if (cap > 0 && x.used >= cap) { skipped.push({ x, why: `ใช้ไป ${x.used} ครั้ง/7วัน ≥ cap ${cap}` }); continue; }
+    const capHit = cap > 0 && x.used >= cap;
+    if (hasGood && (x.likes ?? 0) < floor) {
+      const capTxt = capHit ? ` + ใช้ไป ${x.used} ครั้ง/7วัน ≥ cap ${cap}` : '';
+      const tier = x.likes != null && x.likes >= minLikes && !capHit ? 'ก' : 'ค';
+      skipped.push({ x, why: `ต่ำกว่าพื้น ${floor.toLocaleString('en-US')} (${_kfmt(x.likes)})${capTxt}`, tier });
+      continue;
+    }
+    if (capHit) { skipped.push({ x, why: `ใช้ไป ${x.used} ครั้ง/7วัน ≥ cap ${cap}`, tier: 'ข' }); continue; }
     elig.push(x);
   }
 
@@ -99,15 +113,26 @@ export function rankTeachers(candidates, opts = {}) {
     elig.splice(elig.indexOf(chosen), 1);
   }
 
-  // 6) เติมจากใบที่ข้าม ตามลำดับไลก์ (ต้องได้ครูครบ k เสมอเมื่อโผมีพอ)
+  // 6) เติมทีละชั้น ก → ข → ค (ต้องได้ครูครบ k เสมอเมื่อโผมีพอ) — ห้ามสลับลำดับชั้น: สลับแล้วใบติด cap กลับมาชนะเหมือนเคสศรราม
+  const TIER_TXT = {
+    'ก': `ต่ำกว่าพื้นแต่ ≥ ${minLikes.toLocaleString('en-US')} ไม่ติด cap`,
+    'ข': 'ติด cap',
+    'ค': 'ที่เหลือ (ต่ำกว่าพื้นชั้น ก / ไม่มีไลก์ / ต่ำกว่าพื้น+ติด cap)',
+  };
+  const TIER_SHORT = { 'ก': `ต่ำกว่าพื้นแต่ ≥ ${_kfmt(minLikes)}`, 'ข': 'ติด cap', 'ค': 'ที่เหลือ' };
   const backfilled = [];
-  for (const s of skipped) {
-    if (picks.length >= k) break;
-    picks.push(s.x);
-    backfilled.push(s.x.id);
+  const nBf = { 'ก': 0, 'ข': 0, 'ค': 0 };
+  for (const tier of ['ก', 'ข', 'ค']) {
+    for (const s of skipped) {
+      if (picks.length >= k) break;
+      if (s.tier !== tier) continue;
+      picks.push(s.x);
+      nBf[tier] += 1;
+      backfilled.push({ id: s.x.id, why: `ชั้น ${tier}: ${TIER_TXT[tier]} (${_kfmt(s.x.likes)}${s.x.used ? ` ใช้${s.x.used}` : ''})` });
+    }
   }
 
-  const nCap = skipped.filter((s) => s.why.startsWith('ใช้ไป')).length;
+  const nCap = skipped.filter((s) => s.tier === 'ข').length;
   const nFloor = skipped.length - nCap;
   const reason = [
     `ด่านแมตช์ ${gate === 'strict' ? 'ผ่าน' : `ผ่อน(${gate})`} ${pool.length}/${cands.length} ใบ`,
@@ -116,7 +141,7 @@ export function rankTeachers(candidates, opts = {}) {
     skipped.length ? `ข้าม ${skipped.length} (cap ${nCap} · ต่ำกว่าพื้น ${nFloor})` : 'ไม่ข้ามใบไหน',
     `หมุนหัวแถว ${rotate}`,
     `หยิบ ${picks.map((x) => `${x.id.slice(0, 8)}(${_kfmt(x.likes)}${x.used ? ` ใช้${x.used}` : ''})`).join(' ')}`,
-    backfilled.length ? `เติมจากใบที่ข้าม ${backfilled.length}` : '',
+    backfilled.length ? `เติมจากใบที่ข้าม ${backfilled.length} (${['ก', 'ข', 'ค'].filter((t) => nBf[t]).map((t) => `ชั้น ${t} ${TIER_SHORT[t]} ×${nBf[t]}`).join(' · ')})` : '',
   ].filter(Boolean).join(' · ');
 
   return {
