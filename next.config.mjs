@@ -27,6 +27,7 @@ const nextConfig = {
     '/api/queue/worker': ['./data/card-essences.json', './data/viral-essences.json', './data/viral-likes-real.json', './data/writer-viral-rules.json'],
     // ★ ผู้ตรวจอิสระ S2 (14 ส.ค.): หน้าเว็บยิง /api/summarize ตรง (content/new) — ต้องได้ไฟล์ชุดเดียวกัน
     //   ไม่งั้นข่าวผ่านคิวได้ไลก์จริง แต่ผ่านหน้าเว็บไม่ได้ แบบเงียบๆ (ช่องนี้ viral-essences ก็เคยขาด)
+    '/api/feedback/score': ['./data/viral-score-model.json'],
     '/api/summarize': ['./data/card-essences.json', './data/viral-essences.json', './data/viral-likes-real.json', './data/writer-viral-rules.json'],
   },
 };
