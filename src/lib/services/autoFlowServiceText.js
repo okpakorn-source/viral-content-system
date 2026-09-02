@@ -804,6 +804,48 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   const groundingSourceText = (detectedType === 'text' || detectedType === 'plain_text')
     ? rawText
     : newsData.newsBody;
+
+  // ★ เฟส 2 "พรอมต์นักเขียน" (2 ก.ย. 69 · WRITER_TRIM_PASS=1 · ค่าเริ่มต้นปิด = ไม่ยิง AI ไม่แตะเวอร์ชันเลย):
+  //   ฉบับที่ยาวเกิน 220 คำ → luna ตัดเฉพาะประโยคที่ไม่มีข้อเท็จจริงใหม่ให้เหลือ ~180 คำ (src/lib/services/writerTrimPass.js)
+  //   fail-safe ในตัว: ข้อเท็จจริงหายเพิ่ม (findMissingFacts เทียบเนื้อดิบ) / สั้นกว่า 146 / ไม่สั้นลง / AI ล้ม / หมดเวลา = ใช้ร่างเดิม
+  //   จุดต่อสาย: หลังได้ร่างครบทุกมุม ก่อน correctionPipeline · งบ 25s ใต้ pipeline deadline เดิม (เหลือ < 60s = ข้าม ไม่เบียดด่านแก้ไข)
+  //   ผลอยู่ใน version._trimPass · provenance (usedModel/promptId/_source) คงเดิม · ทะเบียนสวิตช์: src/lib/config/newsSwitches.js
+  //   dependency โหลดแบบ dynamic ในบล็อก try — เทสสตับเดิมที่โหลดไฟล์นี้ไม่ต้องรู้จักโมดูลใหม่
+  if (process.env.WRITER_TRIM_PASS === '1') {
+    const _trimDeadline = getActivePipelineDeadline();
+    if (_trimDeadline && _trimDeadline.remainingMs() < 60_000) {
+      addLog('TrimPass', `⏭️ ข้าม trim pass — งบท่อเหลือ ${Math.round(_trimDeadline.remainingMs() / 1000)}s ไม่พอ (ต้องเหลือ ≥ 60s)`);
+    } else {
+      try {
+        const [{ trimIfTooLong }, { callAI }, { MODEL_FAST_CHEAP }, { findMissingFacts }, { countPublishableThaiWords }] = await Promise.all([
+          import('@/lib/services/writerTrimPass'),
+          import('@/lib/ai/openai'),
+          import('@/lib/ai/modelConfig'),
+          import('@/lib/correction/missingFactsGate'),
+          import('@/lib/utils/publishablePostText'),
+        ]);
+        const trimmedVersions = await withTimeoutSignal(
+          (requestSignal) => Promise.all(allVersions.map((version) => trimIfTooLong(version, {
+            raw: groundingSourceText,
+            callAI,
+            model: MODEL_FAST_CHEAP,
+            findMissingFacts,
+            countWords: (text) => countPublishableThaiWords({ content: text }),
+            signal: requestSignal,
+            timeoutMs: 24_000,
+          }))),
+          25_000, 'writer_trim_pass', _trimDeadline?.signal,
+        );
+        trimmedVersions.forEach((version, index) => { allVersions[index] = version; });
+        const trimmedCount = trimmedVersions.filter((version) => version?._trimPass?.applied).length;
+        addLog('TrimPass', `✂️ Trim pass: ตัด ${trimmedCount}/${trimmedVersions.length} ฉบับ (${trimmedVersions.map((version, index) => `V${index + 1} ${version?._trimPass?.before ?? '?'}→${version?._trimPass?.after ?? '?'} ${version?._trimPass?.reason || ''}`).join(' · ')})`);
+      } catch (trimErr) {
+        rethrowPipelineDeadline(trimErr, 'writer_trim_pass');
+        addLog('TrimPass', `⚠️ Trim pass ล้ม — ใช้ร่างนักเขียนเดิมทุกฉบับ (${trimErr?.message || trimErr})`);
+      }
+    }
+  }
+
   try {
     // ★ 14 ส.ค. 69: ส่งข้อเท็จจริงรีเสิร์ชให้ด่าน L1.8 — ของจริงจากรีเสิร์ชไม่ใช่ "ของเกิน"
     finalVersions = await runCorrectionPipeline(

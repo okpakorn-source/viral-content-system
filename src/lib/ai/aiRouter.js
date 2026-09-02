@@ -36,7 +36,8 @@ function runWriterAttempt(factory, timeoutMs, step, parentSignal) {
  * @param {object} options - { prompt, temperature, maxTokens, systemPrompt, textNewsLengthPolicy }
  */
 export async function callSmartAI(task, options) {
-  const { prompt, temperature, maxTokens, systemPrompt, signal, textNewsLengthPolicy = false } = options;
+  // ★ เฟส 2 นักเขียน (2 ก.ย. 69 · WRITER_PROMPT_CACHE_V2): promptBlocks = ก้อนพรอมต์ [{text, cache}] สำหรับแคช Claude — เลือกได้ ไม่ส่ง = พฤติกรรมเดิมทุกไบต์
+  const { prompt, temperature, maxTokens, systemPrompt, signal, textNewsLengthPolicy = false, promptBlocks } = options;
   // สิทธิ์พื้น 146/no-cap เป็นของนักเขียนข่าว TEXT เท่านั้น
   // ต่อให้ caller งานอื่นส่ง true ผิดมา Router ต้องตัดทิ้ง ไม่ให้รั่วเข้า Breakdown/การ์ด/Blueprint/QC
   const useTextNewsLengthPolicy = task === 'write' && textNewsLengthPolicy === true;
@@ -60,6 +61,8 @@ export async function callSmartAI(task, options) {
         systemPrompt,
         signal,
         textNewsLengthPolicy: useTextNewsLengthPolicy,
+        // ★ เฟส 2: ส่งต่อเฉพาะเมื่อมีก้อนจริง (สาย Claude ใช้ · Sol/Gemini ใช้ prompt สตริงเดิม) — ไม่มีคีย์เมื่อไม่ส่ง
+        ...(Array.isArray(promptBlocks) && promptBlocks.length > 0 ? { promptBlocks } : {}),
       });
       if (i > 0) {
         console.log(`[SmartAI] ✅ Fallback ${modelName} succeeded`);
@@ -132,10 +135,12 @@ function getStrategy(task) {
   return { chain, defaultTemp, defaultMaxTokens };
 }
 
-async function callModel(modelName, { prompt, temperature, maxTokens, systemPrompt, signal, textNewsLengthPolicy }) {
+async function callModel(modelName, { prompt, temperature, maxTokens, systemPrompt, signal, textNewsLengthPolicy, promptBlocks }) {
+  // ★ เฟส 2 (WRITER_PROMPT_CACHE_V2): ก้อนพรอมต์แคชส่งให้ callClaude เฉพาะเมื่อมี — ไม่มี = อาร์กิวเมนต์เดิมทุกคีย์
+  const _blocksArg = promptBlocks ? { promptBlocks } : {};
   switch (modelName) {
     case 'claude':
-      return callClaude({ prompt, temperature, maxTokens, systemPrompt, signal, textNewsLengthPolicy });
+      return callClaude({ prompt, temperature, maxTokens, systemPrompt, signal, textNewsLengthPolicy, ..._blocksArg });
 
     // ★ 21 ส.ค. 69 (เจ้าของเคาะจากศึกตาบอด R118): สายนักเขียนโดยเฉพาะ
     //   opus-4.8 ล้ม (refusal/HTTP/เนื้อว่าง/JSON พัง — โยนเป็น error จาก callClaude ทั้งหมด) → ถอย fable-5
@@ -154,7 +159,7 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
         return await runWriterAttempt(
           (requestSignal) => callClaude({
             prompt, temperature, maxTokens, systemPrompt, signal: requestSignal, model: _primary,
-            maxRetries: 0, retryWithoutEffort: false, textNewsLengthPolicy,
+            maxRetries: 0, retryWithoutEffort: false, textNewsLengthPolicy, ..._blocksArg,
           }),
           _primaryTimeout, 'writer_opus', signal
         );
@@ -165,7 +170,7 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
         return await runWriterAttempt(
           (requestSignal) => callClaude({
             prompt, temperature, maxTokens, systemPrompt, signal: requestSignal, model: _fb,
-            maxRetries: 0, retryWithoutEffort: false, textNewsLengthPolicy,
+            maxRetries: 0, retryWithoutEffort: false, textNewsLengthPolicy, ..._blocksArg,
           }),
           WRITER_ATTEMPT_TIMEOUT_MS.fable, 'writer_fable', signal
         );

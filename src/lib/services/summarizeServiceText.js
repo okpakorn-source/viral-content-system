@@ -1766,6 +1766,17 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       : '';
     if (formalModeRule) console.log('[Analyze-Service] 🏛️ Formal mode ON (ข่าวทางการ/พระราชพิธี)');
 
+    // ★ เฟส 2 "พรอมต์นักเขียน" (2 ก.ย. 69): บล็อกกฎใหม่ 3 สวิตช์ (ความยาวเป้าหมาย/ความซื่อตรง/กฎจากโพสต์ปัง) + สวิตช์แคชพรอมต์
+    //   อ่านสวิตช์ "จุดเดียว" ใน src/lib/services/writerPolicyText.js (ค่าเริ่มต้นปิดทั้งหมด = บล็อกว่าง + ไม่แตกก้อน = ใบสั่งเดิมไบต์ต่อไบต์)
+    //   โหลดแบบ dynamic ในบล็อก try: โหลดไม่ได้ (เช่นเทสสตับเดิม) = เหมือนปิด ห้ามล้มท่อเขียน · ทะเบียน: src/lib/config/newsSwitches.js
+    let _writerPolicy = null;
+    let _writerPolicyBlock = '';
+    try {
+      _writerPolicy = await import('@/lib/services/writerPolicyText');
+      _writerPolicyBlock = String(_writerPolicy.buildWriterPolicyBlock() || '');
+      if (_writerPolicyBlock) console.log(`[WriterPolicy] 📐 บล็อกกฎเฟส 2 ${_writerPolicyBlock.length}ch (length=${_writerPolicy.isWriterLengthTargetV2On() ? 'on' : 'off'} fidelity=${_writerPolicy.isWriterFidelityRulesV2On() ? 'on' : 'off'} viral=${_writerPolicy.isWriterViralRulesV2On() ? 'on' : 'off'})`);
+    } catch (e) { console.warn(`[WriterPolicy] skip: ${String(e?.message || e).slice(0, 80)}`); }
+
     // ★ 21 ส.ค. 69 เจ้าของกำหนด: วิธีเดิมทุกอย่างต้องอยู่ครบ แต่ Fable ต้องได้อ่าน
     //   ข้อความดิบที่ผู้ใช้วางก่อน แล้วจึงหยิบ Library/Payload/Fact/Quote/Research/
     //   Angle/Blueprint เดิมมาประกอบ ทำงานเฉพาะเมื่อสาย text/plain_text ส่ง raw มา
@@ -1774,7 +1785,12 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       && typeof rawSourceText === 'string'
       && rawSourceText.length > 0;
 
-    let multiPrompt = prompt + '\n\n=== คำสั่งสำคัญสำหรับการเขียน ===\n' +
+    // ★ เฟส 2 (2 ก.ย. 69): แยกใบสั่งเขียนเป็นก้อน "กฎคงที่" (_wpRulesHead/Quality/Craft/Final) กับ "วัตถุดิบผันตามข่าว"
+    //   (prompt · formalModeRule · viralFewshotBlock) แล้วต่อกันตามลำดับเดิมด้านล่าง = ใบสั่งเดิมไบต์ต่อไบต์เมื่อสวิตช์เฟสนี้ปิด
+    //   (สแนปช็อต sha256 เทียบโค้ดก่อนแก้: tests/writer-prompt-cache-v2.test.mjs) · ก้อนคงที่ใช้ทำแคชเมื่อ WRITER_PROMPT_CACHE_V2=1
+    //   บล็อกกฎใหม่ (_writerPolicyBlock — ว่างเมื่อสวิตช์ปิด) แทรกก่อน "✨ คำสั่งเด็ดขาด"/JSON = โซนกฎคงที่ ก่อน FINAL RAW AUTHORITY เสมอ
+    let multiPrompt = prompt;
+    const _wpRulesHead = '\n\n=== คำสั่งสำคัญสำหรับการเขียน ===\n' +
       (targetCount === 1
         ? 'คุณต้องสร้างเนื้อหา 1 เวอร์ชันที่ "ดีที่สุด" จากข่าวนี้ — มุมเล่าถูกล็อกตาม FOCUS ANGLE แต่ลีลา สำนวน และความคิดสร้างสรรค์ต้องจัดเต็มที่สุด ห้ามเขียนแข็งแบบรายงานข่าว\n'
         : 'คุณต้องสร้างเนื้อหาหลายเวอร์ชันจากข่าวนี้ โดยแต่ละเวอร์ชันใช้มุมเขียนต่างกัน\n') +
@@ -1808,9 +1824,9 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       '- ★ ข่าวสุขภาพ/อาหาร/ยา: ถ้าต้นฉบับบอกว่าเป็นคำบอกเล่าหรือคำแนะนำ ต้องเก็บที่มานั้นไว้ในประโยคเดียวกัน ห้ามเขียนให้กลายเป็นคำแนะนำทั่วไปของผู้เขียน และปริมาณ/โดส/จำนวนหน่วยของอาหาร เครื่องดื่ม ยา หรือวิตามิน ใช้ได้เฉพาะเมื่อต้นฉบับระบุจำนวนและหน่วยนั้นจริง ไม่แน่ใจให้ตัดจำนวนออก ห้ามกะหรือเติมเอง\n' +
       '- ★ เรื่องเวลานอน: คำว่า “ทุกคืน” ใช้ได้เฉพาะเมื่อต้นฉบับระบุคำนี้ตรงๆ ห้ามเติมเพื่อทำพาดหัวหรือเนื้อหาให้แรงขึ้น\n' +
       '- ★ จากข้อความดิบ ห้ามเสกอุปกรณ์/ท่าทางเพื่อสร้างประโยคแบบ "ภาพ..." เช่น ต้นฉบับมีแค่ "กวาดลาน" ห้ามเติม "ภาพเด็กถือไม้กวาด" ให้เล่าตรงตามกริยาที่มีเท่านั้น\n' +
-      '- ⚠️ ห้ามตั้งคำถามปิดท้ายเด็ดขาด ห้ามจบด้วย "คุณคิดยังไง?", "เห็นด้วยไหม?" หรือคำถามใดๆ\n\n' +
-      formalModeRule +
-      '=== 🔍 QUALITY + WRITING STYLE (MANDATORY) ===\n' +
+      '- ⚠️ ห้ามตั้งคำถามปิดท้ายเด็ดขาด ห้ามจบด้วย "คุณคิดยังไง?", "เห็นด้วยไหม?" หรือคำถามใดๆ\n\n';
+    // (formalModeRule — ผันตามข่าว — แทรกระหว่าง _wpRulesHead กับ _wpRulesQuality ตอนประกอบด้านล่าง ตำแหน่งเดิม)
+    const _wpRulesQuality = '=== 🔍 QUALITY + WRITING STYLE (MANDATORY) ===\n' +
       '1. ห้ามเปิดเรื่องซ้ำกัน — แต่ละเวอร์ชันต้องเปิดด้วยประโยคแรกที่ต่างกัน\n' +
       // 🎛️ 20 ส.ค. 69 (R3 ข้อ 2): "ไม่สรุปข้อคิดชีวิต" = วรรคที่ 4 ที่ขัดกับฝั่งสัจธรรม · ENDING_MODE=plain คืนกลับมาทุกไบต์
       `2. ย่อหน้าสุดท้ายกระชับ — ปิดท้ายไม่เกิน 2 ประโยค${isEndingPlain() ? ' ไม่สรุปข้อคิดชีวิต' : ''}\n` +
@@ -1837,9 +1853,9 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       '[ FORBIDDEN PATTERNS — คำห้าม 10 คำ ]\n' +
       '❌ ห้ามใช้: ซึ่ง, ดังกล่าว, ท่ามกลาง, สร้างความฮือฮา, อย่างไรก็ตาม, กล่าวได้ว่า, เป็นที่ทราบกันดีว่า, ไม่ว่าจะ...ก็ตาม, แม้จะ...แต่ก็\n' +
       '❌ ห้ามขึ้นต้นด้วย "ลองนึก/ลองคิด/ลองจินตนาการ" ทุกรูปแบบ (ลองนึกภาพว่า, ลองนึกถึง, ลองคิดดู, ลองจินตนาการ), Angle:, มุมมอง:, Focus:\n' +
-      '❌ ห้ามบอกอารมณ์แทนคนอ่าน: สะเทือนใจชาวเน็ต, ทำให้คนดูน้ำตาไหล, สร้างความตื่นเต้น\n\n' +
-      viralFewshotBlock +
-      '=== ✒️ PROSE CRAFT — ลายมือการเขียน (บังคับทุกย่อหน้า) ===\n' +
+      '❌ ห้ามบอกอารมณ์แทนคนอ่าน: สะเทือนใจชาวเน็ต, ทำให้คนดูน้ำตาไหล, สร้างความตื่นเต้น\n\n';
+    // (viralFewshotBlock — ครูตัวอย่างผันตามข่าว — แทรกระหว่าง _wpRulesQuality กับ _wpRulesCraft ตอนประกอบด้านล่าง ตำแหน่งเดิม)
+    const _wpRulesCraft = '=== ✒️ PROSE CRAFT — ลายมือการเขียน (บังคับทุกย่อหน้า) ===\n' +
       '- จังหวะ: สลับประโยคสั้น-ยาว และทุกย่อหน้าต้องมี "ประโยคทุบ" สั้นๆ ที่มีน้ำหนัก อย่างน้อย 1 ประโยค\n' +
       // 🎛️ 20 ส.ค. 69 (R3 ข้อ 3): บรรทัดนี้บังคับ "ทุกย่อหน้าต้องมีภาพ" — ต้นฉบับไม่มีภาพให้ก็ต้องเสก ⇒ เติมหางชุดเดียวกับ The Witness
       `- ภาพ: ทุกย่อหน้าต้องมีรายละเอียดที่มองเห็น/จับต้องได้อย่างน้อย 1 จุด (สิ่งของ ท่าทาง เสียง ความเงียบ)${isWitnessFactLockEnabled() ? ' — ใช้ได้เฉพาะรายละเอียดที่ต้นฉบับบรรยายไว้จริงเท่านั้น ต้นฉบับไม่มีก็ไม่ต้องมี ห้ามเสกขึ้นเอง' : ''}\n` +
@@ -1878,7 +1894,9 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       'หลักการ: เปลี่ยน "ความแรง" → "อารมณ์" เน้น emotional storytelling ไม่ใช่ shock/gore\n' +
       'ห้าม clickbait: "คุณจะไม่เชื่อ", "แชร์ด่วน", "ดูก่อนโดนลบ"\n' +
       'ห้าม engagement bait: "พิมพ์ 1", "เมนต์ 99", "ใครเห็นด้วยกดไลก์"\n' +
-      '=== จบกฎ FACEBOOK SAFETY ===\n\n' +
+      '=== จบกฎ FACEBOOK SAFETY ===\n\n';
+    // (_writerPolicyBlock — บล็อกกฎเฟส 2 · ว่างเมื่อสวิตช์ปิด — แทรกระหว่าง _wpRulesCraft กับ _wpRulesFinal ตอนประกอบด้านล่าง)
+    const _wpRulesFinal =
       // 🔴 17 ส.ค. 69: "ความยาวตามที่กำหนด" กลายเป็นคำสั่งลอยหลังถอดพื้นคำออก (เฟเบิ้ลจับได้)
       //    ตำแหน่งท้ายสุดของใบสั่งงาน = โมเดลให้น้ำหนักสูงสุด · ถอย LEGACY_LENGTH_RULES=1
       `✨✨✨ คำสั่งเด็ดขาด: ต้องสร้างผลลัพธ์ให้ครบจำนวน ${targetCount || 2} เวอร์ชัน ห้ามขาดหาย${finalReminderLengthClause(lenCfg)} ✨✨✨\n\n` +
@@ -1890,10 +1908,28 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       '  ],\n' +
       '  "news_reference": "สรุปข่าวต้นฉบับที่ใช้อ้างอิง 2-3 ประโยค"\n' +
       '}';
+    // ประกอบตามลำดับเดิมทุกก้อน (ก่อน 2 ก.ย. 69 คือนิพจน์เดียว prompt + … ลำดับเดียวกันนี้) — เพิ่มเฉพาะ _writerPolicyBlock ที่ว่างเมื่อสวิตช์ปิด
+    multiPrompt += _wpRulesHead + formalModeRule + _wpRulesQuality + viralFewshotBlock + _wpRulesCraft + _writerPolicyBlock + _wpRulesFinal;
 
     if (_hasImmutableRawSource) {
       multiPrompt = finalizeRawFirstWriterPrompt(rawSourceText, multiPrompt);
       console.log(`[Analyze-Service] 🧭 RAW-FIRST: ข้อความดิบ ${rawSourceText.length}ch อยู่หน้าแรก และ FINAL RAW AUTHORITY อยู่ท้าย prompt`);
+    }
+
+    // ★ เฟส 2 (WRITER_PROMPT_CACHE_V2=1): จัดลำดับใหม่ให้แคชพรอมต์ได้ — ก้อนคงที่ (กฎทั้งหมด + JSON ไม่ผันตามข่าว) ขึ้นก่อนแบบ cache:true
+    //   ก้อนผันตามข่าว (RAW-first + การ์ด/ครู/ประเด็น/ทางการ + FINAL RAW AUTHORITY ท้ายสุด) ตามหลัง · ส่งเป็น promptBlocks ผ่าน aiRouter → callClaude
+    //   multiPrompt สตริง = ก้อนต่อกัน (ตัวสำรอง Sol/preview/log ได้เนื้อเดียวกัน) · สวิตช์ปิด = ไม่แตะ multiPrompt ที่ประกอบไว้ด้านบนเลย
+    let _writerPromptBlocks = null;
+    if (_writerPolicy?.isWriterPromptCacheV2On?.()) {
+      const _split = _writerPolicy.splitWriterPromptForCache({
+        constant: _wpRulesHead + _wpRulesQuality + _wpRulesCraft + _writerPolicyBlock + _wpRulesFinal,
+        variable: prompt + formalModeRule + viralFewshotBlock,
+        rawSourceText: _hasImmutableRawSource ? rawSourceText : '',
+        finalizeRawFirst: finalizeRawFirstWriterPrompt,
+      });
+      multiPrompt = _split.prompt;
+      _writerPromptBlocks = _split.blocks;
+      console.log(`[WriterCacheV2] 🧊 ก้อนคงที่ ${_split.constantChars}ch (cache:true) · ก้อนผันตามข่าว ${_split.variableChars}ch · รวม ${multiPrompt.length}ch${_hasImmutableRawSource ? ' · RAW-first อยู่หัวก้อนผันตามข่าว + FINAL RAW AUTHORITY ท้ายสุด' : ''}`);
     }
 
     console.log(`\n📦 ${'─'.repeat(50)}`);
@@ -1920,6 +1956,8 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
           maxTokens: 10000,
           signal: requestSignal,
           textNewsLengthPolicy: true,
+          // ★ เฟส 2 (WRITER_PROMPT_CACHE_V2): ก้อนพรอมต์แคช — ไม่มีก้อน = ไม่มีคีย์ = การเรียกเดิมทุกไบต์
+          ...(_writerPromptBlocks ? { promptBlocks: _writerPromptBlocks } : {}),
         }),
         270000, 'write_inner', signal
       );
@@ -1949,12 +1987,17 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
         promptPreview: multiPrompt.slice(0, 500) + '...',
         immutableRawFirst: _hasImmutableRawSource,
         immutableRawSourceChars: _hasImmutableRawSource ? rawSourceText.length : 0,
+        // ★ เฟส 2: โหมดแคช (WRITER_PROMPT_CACHE_V2) เนื้อดิบอยู่หัว "ก้อนผันตามข่าว" (blocks[1]) ไม่ใช่หัว multiPrompt — ตรวจที่ก้อนนั้น
         immutableRawStartsTaskPrompt: _hasImmutableRawSource
-          ? multiPrompt.startsWith('=== ขั้นที่ 1: อ่านและประเมินเนื้อดิบเต็มก่อนวัตถุดิบอื่น ===')
+          ? (_writerPromptBlocks ? _writerPromptBlocks[1].text : multiPrompt).startsWith('=== ขั้นที่ 1: อ่านและประเมินเนื้อดิบเต็มก่อนวัตถุดิบอื่น ===')
           : false,
         immutableRawFinalAuthorityLast: _hasImmutableRawSource
           ? multiPrompt.endsWith('=== จบ FINAL RAW AUTHORITY CHECK ===')
           : false,
+        writerPolicyBlockChars: _writerPolicyBlock.length, // ★ เฟส 2: 0 = สวิตช์กฎใหม่ปิดทั้งหมด
+        promptCacheV2: _writerPromptBlocks
+          ? { constantChars: _writerPromptBlocks[0].text.length, variableChars: _writerPromptBlocks[1].text.length }
+          : null,
         aiError,
         aiWarning,
         sourceRemovedFromCompose: false, sourceExcerptChars: _srcExcerpt.length,

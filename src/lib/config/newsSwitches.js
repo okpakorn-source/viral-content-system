@@ -79,6 +79,8 @@ export const NEWS_SWITCH_FILES = Object.freeze([
   'src/lib/services/researchService.js', // อ่านแต่ SERPER_API_KEY — ครอบไว้ให้สวิตช์ที่เพิ่มทีหลังโดนด่าน (autoFlowServiceText import ตรง)
   'src/lib/services/achievementResearch.js', // เช่นเดียวกัน (SERPER_API_KEY เท่านั้น)
   'src/app/api/auto/stream/route.js', // TEXT_ONLY_MODE — ประตูเก่าสาย URL (@deprecated) ที่ยังเรียกได้ จึงมีด่านเดียวกับ /api/auto
+  // ★ เฟส 2 "พรอมต์นักเขียน" 2 ก.ย. 69: จุดอ่านสวิตช์บล็อกกฎ/แคชพรอมต์นักเขียน (summarizeServiceText โหลดแบบ dynamic import)
+  'src/lib/services/writerPolicyText.js', // WRITER_LENGTH_TARGET_V2 · WRITER_FIDELITY_RULES_V2 · WRITER_VIRAL_RULES_V2 · WRITER_PROMPT_CACHE_V2
 ]);
 
 /** ชื่อ env ที่ถือเป็นคีย์ลับ/ที่อยู่ — ไม่ใช่สวิตช์ ไม่ลงทะเบียน */
@@ -138,6 +140,8 @@ const NARRATIVE = 'src/lib/input-engine/narrativePayloadText.js';
 const RAW_GATE = 'src/lib/services/rawFactCompletenessGate.js';
 const STREAM_ROUTE = 'src/app/api/auto/stream/route.js';
 const BOT = 'discord-bot/index.js'; // ไม่อยู่ในชุดสแกน (ไม่ใช่ท่อข่าว) — ใส่ใน readBy ตามจริงได้
+// ★ เฟส 2 "พรอมต์นักเขียน" 2 ก.ย. 69
+const WRITER_POLICY = 'src/lib/services/writerPolicyText.js';
 
 /** เพดานตัดเนื้อข่าวรายด่านใน newsCap.js — ค่าเริ่มต้นทุกด่าน 0 = ไม่จำกัด (เจ้าของสั่งปลด 16 ส.ค. 69) · was = เพดานเดิมก่อนปลด */
 const newsCapRule = (name, stage, was, desc) => ({
@@ -286,6 +290,34 @@ export const NEWS_SWITCHES = Object.freeze([
   {
     name: 'WORD_CAP_MAX', default: '900', values: ['จำนวนคำ > 0'], readBy: [SUMMARIZE], group: 'นักเขียน/ใบสั่งเขียน', kind: 'value',
     meaning: 'เพดานคำสูงสุดของสูตร WORD_FLEX_V2 (เฉพาะโหมดถอย LEGACY)', since: '16 ส.ค. 69', rollback: 'ลบ env = 900',
+  },
+  // ── ★ เฟส 2 "พรอมต์นักเขียน" (2 ก.ย. 69) — ค่าเริ่มต้นปิดทั้ง 5 ตัว (รอ A/B) · ปิด = ใบสั่งเดิมไบต์ต่อไบต์ (สแนปช็อต tests/writer-prompt-cache-v2.test.mjs)
+  //   หลักฐาน: เพจจริง 1,927 โพสต์ 140–170 คำ ค่ากลาง 15,605 ไลก์ · 230+ ≈ 5–6 พัน · ระบบเขียน 228–296 คำ · ผู้ตรวจ 14 คน 12/14 ฉบับมีของแต่งเล็ก
+  //   4 ตัวแรกอ่าน "จุดเดียว" ใน writerPolicyText.js (รับเฉพาะ '1' ตรงตัว) · WRITER_TRIM_PASS อ่านที่ autoFlowServiceText (จุดต่อสายก่อน correction)
+  {
+    name: 'WRITER_LENGTH_TARGET_V2', default: '0', values: ['0', '1'], readBy: [WRITER_POLICY], group: 'นักเขียน/ใบสั่งเขียน', kind: 'switch',
+    meaning: '=1 เติมบล็อกความยาวเป้าหมาย 150–190 คำ (ยืดถึง 220 เฉพาะข่าวหลายเหตุการณ์) + ลำดับการตัด + ของห้ามตัด ในโซนกฎคงที่ก่อน FINAL RAW AUTHORITY · ค่าเริ่มต้น = ไม่มีบล็อก',
+    since: '2 ก.ย. 69', rollback: 'ลบ env หรือ =0 = ใบสั่งเดิมไบต์ต่อไบต์',
+  },
+  {
+    name: 'WRITER_FIDELITY_RULES_V2', default: '0', values: ['0', '1'], readBy: [WRITER_POLICY], group: 'นักเขียน/ใบสั่งเขียน', kind: 'switch',
+    meaning: '=1 เติมบล็อกความซื่อตรง: ห้ามแต่งการกระทำ/ความคิด/ท่าทาง/ความต่างที่ต้นฉบับไม่บอก ("ไม่ได้ดุ" "นั่งลงคุย") · ห้ามเดาเพศ/บทบาท (ใช้ชื่อหรือ "เจ้าตัว") · ตีความอารมณ์ ≤ 1 ประโยค/ย่อหน้า',
+    since: '2 ก.ย. 69', rollback: 'ลบ env หรือ =0 = ใบสั่งเดิมไบต์ต่อไบต์',
+  },
+  {
+    name: 'WRITER_VIRAL_RULES_V2', default: '0', values: ['0', '1'], readBy: [WRITER_POLICY], group: 'นักเขียน/ใบสั่งเขียน', kind: 'switch',
+    meaning: '=1 เติมบล็อก "กฎจากโพสต์ปังจริง" จาก data/writer-viral-rules.json ({version, rules[{id,text,evidence}]} — เติมข้อได้โดยไม่แตะโค้ด) · ไฟล์หาย/พัง/ว่าง = ไม่ใส่บล็อก ⚠️ บน Vercel ต้องเพิ่มไฟล์ใน outputFileTracingIncludes (next.config.mjs) ก่อนเปิด',
+    since: '2 ก.ย. 69', rollback: 'ลบ env หรือ =0 = ใบสั่งเดิมไบต์ต่อไบต์',
+  },
+  {
+    name: 'WRITER_PROMPT_CACHE_V2', default: '0', values: ['0', '1'], readBy: [WRITER_POLICY], group: 'นักเขียน/ใบสั่งเขียน', kind: 'switch',
+    meaning: '=1 แตกใบสั่งเขียนเป็น 2 ก้อนส่งเป็น promptBlocks ของ callClaude: [กฎคงที่+JSON cache:true] แล้ว [RAW-first + การ์ด/ครู/ประเด็น + FINAL RAW AUTHORITY ท้าย] (aiRouter ส่งต่อเฉพาะสาย Claude · Sol ใช้สตริงเดิม) · ค่าเริ่มต้น = RAW-first สตริงเดียวเหมือนเดิม',
+    since: '2 ก.ย. 69', rollback: 'ลบ env หรือ =0 = การเรียกนักเขียนเดิมทุกไบต์ (ไม่มีคีย์ promptBlocks)',
+  },
+  {
+    name: 'WRITER_TRIM_PASS', default: '0', values: ['0', '1'], readBy: [AUTO], group: 'นักเขียน/ใบสั่งเขียน', kind: 'switch',
+    meaning: '=1 ฉบับที่ยาวเกิน 220 คำ ให้ luna ตัดเฉพาะประโยคที่ไม่มีข้อเท็จจริงใหม่เหลือ ~180 คำ ก่อน correctionPipeline (งบ 25s) · fail-safe: ข้อเท็จจริงหายเพิ่ม/สั้นกว่า 146/AI ล้ม/หมดเวลา = ใช้ร่างเดิม (ผลใน version._trimPass) · ค่าเริ่มต้น = ไม่ยิง',
+    since: '2 ก.ย. 69', rollback: 'ลบ env หรือ =0 = ไม่มีขั้นนี้ (เวอร์ชันเข้าด่านแก้ไขเหมือนเดิม)',
   },
 
   // ── สมองเลือกการ์ด (card picker) ──
