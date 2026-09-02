@@ -143,15 +143,20 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
     //   fable-5 ล้มซ้ำ → โยนต่อให้ writer-sol หนึ่งครั้ง แล้วจบ (ไม่มี Terra/ไม่มี Sol รอบสอง)
     case 'claude-write': {
       // ล็อกในโค้ดเพื่อไม่ให้ค่า CLAUDE_WRITE_MODEL เก่าบน Vercel ทับผลศึกตาบอดของเจ้าของ
-      const _primary = 'claude-opus-4-8';
-      const _fb = 'claude-fable-5';
+      // ★ 2 ก.ย. 69 ห้องทดลอง (เจ้าของสั่ง "ลองเปลี่ยนโมเดลสำหรับทดลอง"): WRITER_MODEL_LAB = ชื่อ env ใหม่ ไม่มีบน Vercel
+      //   → production ยังล็อก opus-4-8 เป๊ะ · ตั้งค่าเฉพาะสนามเทสในเครื่อง (เช่น claude-fable-5-1) · ตัวสำรองสลับไม่ให้ซ้ำตัวหลัก
+      const _lab = String(process.env.WRITER_MODEL_LAB || '').trim();
+      const _primary = _lab || 'claude-opus-4-8';
+      const _fb = _primary === 'claude-fable-5' ? 'claude-opus-4-8' : 'claude-fable-5';
+      const _primaryTimeout = /fable/.test(_primary) ? WRITER_ATTEMPT_TIMEOUT_MS.fable : WRITER_ATTEMPT_TIMEOUT_MS.opus;
+      if (_lab) console.log(`[aiRouter] 🧪 WRITER_MODEL_LAB=${_primary} (สนามเทส — production ไม่ใช้ค่านี้)`);
       try {
         return await runWriterAttempt(
           (requestSignal) => callClaude({
             prompt, temperature, maxTokens, systemPrompt, signal: requestSignal, model: _primary,
             maxRetries: 0, retryWithoutEffort: false, textNewsLengthPolicy,
           }),
-          WRITER_ATTEMPT_TIMEOUT_MS.opus, 'writer_opus', signal
+          _primaryTimeout, 'writer_opus', signal
         );
       } catch (wErr) {
         rethrowPipelineDeadline(wErr, `claude-write:${_primary}`);
