@@ -4,7 +4,7 @@
 > ด่านตรวจ: `node --test tests/news-switch-registry.test.mjs` (เพิ่ม `process.env.X` ในไฟล์ท่อข่าวโดยไม่ลงทะเบียน = แดง)
 > คีย์ลับ/ที่อยู่ (ชื่อเข้ารูป `(_KEY|_SECRET|_URL|_TOKEN|_PASSWORD|_DSN)$`) ไม่ใช่สวิตช์ ไม่อยู่ในทะเบียน
 
-สวิตช์ทั้งหมด: 94 ตัว · ไฟล์ที่สแกน: 42 ไฟล์
+สวิตช์ทั้งหมด: 100 ตัว · ไฟล์ที่สแกน: 43 ไฟล์
 
 ## วิธีอ่าน
 
@@ -49,6 +49,11 @@
 | `WORD_CAP_BASE` | `350` | จำนวนคำ > 0 | ฐานเพดานคำของสูตร WORD_FLEX_V2 (เฉพาะโหมดถอย LEGACY) | `src/lib/services/summarizeServiceText.js` | 16 ส.ค. 69 | ลบ env = 350 |
 | `WORD_CAP_RATIO` | `0.75` | สัดส่วน > 0 | สัดส่วนเพดานคำต่อเนื้อดิบของสูตร WORD_FLEX_V2 (เฉพาะโหมดถอย LEGACY) | `src/lib/services/summarizeServiceText.js` | 16 ส.ค. 69 | ลบ env = 0.75 |
 | `WORD_CAP_MAX` | `900` | จำนวนคำ > 0 | เพดานคำสูงสุดของสูตร WORD_FLEX_V2 (เฉพาะโหมดถอย LEGACY) | `src/lib/services/summarizeServiceText.js` | 16 ส.ค. 69 | ลบ env = 900 |
+| `WRITER_LENGTH_TARGET_V2` | `0` | 0 · 1 | =1 เติมบล็อกความยาวเป้าหมาย 150–190 คำ (ยืดถึง 220 เฉพาะข่าวหลายเหตุการณ์) + ลำดับการตัด + ของห้ามตัด ในโซนกฎคงที่ก่อน FINAL RAW AUTHORITY · ค่าเริ่มต้น = ไม่มีบล็อก | `src/lib/services/writerPolicyText.js` | 2 ก.ย. 69 | ลบ env หรือ =0 = ใบสั่งเดิมไบต์ต่อไบต์ |
+| `WRITER_FIDELITY_RULES_V2` | `0` | 0 · 1 | =1 เติมบล็อกความซื่อตรง: ห้ามแต่งการกระทำ/ความคิด/ท่าทาง/ความต่างที่ต้นฉบับไม่บอก ("ไม่ได้ดุ" "นั่งลงคุย") · ห้ามเดาเพศ/บทบาท (ใช้ชื่อหรือ "เจ้าตัว") · ตีความอารมณ์ ≤ 1 ประโยค/ย่อหน้า | `src/lib/services/writerPolicyText.js` | 2 ก.ย. 69 | ลบ env หรือ =0 = ใบสั่งเดิมไบต์ต่อไบต์ |
+| `WRITER_VIRAL_RULES_V2` | `0` | 0 · 1 | =1 เติมบล็อก "กฎจากโพสต์ปังจริง" จาก data/writer-viral-rules.json ({version, rules[{id,text,evidence}]} — เติมข้อได้โดยไม่แตะโค้ด) · ไฟล์หาย/พัง/ว่าง = ไม่ใส่บล็อก ⚠️ บน Vercel ต้องเพิ่มไฟล์ใน outputFileTracingIncludes (next.config.mjs) ก่อนเปิด | `src/lib/services/writerPolicyText.js` | 2 ก.ย. 69 | ลบ env หรือ =0 = ใบสั่งเดิมไบต์ต่อไบต์ |
+| `WRITER_PROMPT_CACHE_V2` | `0` | 0 · 1 | =1 แตกใบสั่งเขียนเป็น 2 ก้อนส่งเป็น promptBlocks ของ callClaude: [กฎคงที่+JSON cache:true] แล้ว [RAW-first + การ์ด/ครู/ประเด็น + FINAL RAW AUTHORITY ท้าย] (aiRouter ส่งต่อเฉพาะสาย Claude · Sol ใช้สตริงเดิม) · ค่าเริ่มต้น = RAW-first สตริงเดียวเหมือนเดิม | `src/lib/services/writerPolicyText.js` | 2 ก.ย. 69 | ลบ env หรือ =0 = การเรียกนักเขียนเดิมทุกไบต์ (ไม่มีคีย์ promptBlocks) |
+| `WRITER_TRIM_PASS` | `0` | 0 · 1 | =1 ฉบับที่ยาวเกิน 220 คำ ให้ luna ตัดเฉพาะประโยคที่ไม่มีข้อเท็จจริงใหม่เหลือ ~180 คำ ก่อน correctionPipeline (งบ 25s) · fail-safe: ข้อเท็จจริงหายเพิ่ม/สั้นกว่า 146/AI ล้ม/หมดเวลา = ใช้ร่างเดิม (ผลใน version._trimPass) · ค่าเริ่มต้น = ไม่ยิง | `src/lib/services/autoFlowServiceText.js` | 2 ก.ย. 69 | ลบ env หรือ =0 = ไม่มีขั้นนี้ (เวอร์ชันเข้าด่านแก้ไขเหมือนเดิม) |
 
 ## สมองเลือกการ์ด
 
@@ -176,3 +181,4 @@
 | สวิตช์ | ค่าเริ่มต้น | ค่าที่รับ | ความหมาย | อ่านโดย | ตั้งแต่ | ถอยกลับ |
 |---|---|---|---|---|---|---|
 | `BOT_RESUME_TRACKING` | `1` | 0 · 1 | บอทจำงานที่กำลังตามอยู่ไว้ที่เซิร์ฟเวอร์ (/api/bot/tracking) — Railway redeploy/รีสตาร์ตแล้วบอทตัวใหม่ตามงานต่อเอง ไม่ค้าง "1%" · envFlag รับเฉพาะ "0"/"1" ตรงตัว ค่าอื่น = ค่าเริ่มต้นเปิด | `discord-bot/index.js` | 2 ก.ย. 69 (เคสหลวงปู่ศิลา 03:49Z) | BOT_RESUME_TRACKING=0 = บอททำงานเหมือนเดิมทุกไบต์ (ต้อง redeploy บอทบน Railway) |
+| `BOT_REVIEW_REACTIONS` | `1` | 0 · 1 | บอทใส่ reaction 👍 ผ่าน / 👎 ไม่ผ่าน / 📌 ใช้แล้ว ใต้ผลข่าว แล้วบันทึกสถานะเข้า PATCH /api/generation-logs/[caseId] + โชว์บรรทัดเตือน (ข้อเท็จจริงหาย/ความคล้าย/โอกาสปัง) — ข้อ 6 แผนยกระดับ | `discord-bot/index.js` | 2 ก.ย. 69 (เฟส 3) | BOT_REVIEW_REACTIONS=0 = ไม่ใส่ reaction ไม่ฟังการกด ไม่แสดงบรรทัดเตือน (ข้อความผลเหมือนเดิม) |

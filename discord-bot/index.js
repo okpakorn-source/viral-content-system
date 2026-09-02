@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, Partials } = require('discord.js');
 const axios = require('axios');
 const { makeQueueTerminalError, isQueueTerminalError, selectQualityWarnings } = require('./queue-errors');
 
@@ -8,7 +8,11 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-  ]
+    // ★ 2 ก.ย. 69 (ข้อ 6 ปุ่มพนักงาน): รับ event กด reaction ในห้อง — intent ธรรมดา (ไม่ใช่ privileged) ไม่ต้องเปิดอะไรใน Developer Portal
+    GatewayIntentBits.GuildMessageReactions,
+  ],
+  // ★ 2 ก.ย. 69: ข้อความผลที่บอทโพสต์ก่อนรีสตาร์ตไม่อยู่ในแคช → ต้องรับ reaction บนข้อความ "partial" ด้วย (ค่อย fetch ตอนกด)
+  partials: [Partials.Message, Partials.Reaction],
 });
 
 // ดึงค่า config จาก .env
@@ -31,6 +35,9 @@ function envFlag(name, fallback) {
   return fallback;
 }
 const BOT_RESUME_TRACKING = envFlag('BOT_RESUME_TRACKING', true);
+// ★ 2 ก.ย. 69 (ข้อ 6): ปุ่มพนักงานในดิสคอร์ด 👍 ผ่าน / 👎 ไม่ผ่าน / 📌 ใช้แล้ว บนข้อความผล + บรรทัดเตือนจากท่อใต้เนื้อข่าว (ดูส่วน 📝 Review ด้านล่าง)
+//   ปิดคืน: ตั้ง env BOT_REVIEW_REACTIONS=0 (รับเฉพาะ '0'/'1' ตรงตัว · ค่าเริ่มต้น=เปิด) → ไม่ติดปุ่ม ไม่ฟัง reaction ไม่เติมบรรทัดเตือน
+const BOT_REVIEW_REACTIONS = envFlag('BOT_REVIEW_REACTIONS', true);
 const RESUME_MAX_AGE_MS = 30 * 60 * 1000; // งานที่เริ่มเก่ากว่านี้ไม่ตามต่อ — แจ้งให้ไปดูหน้าตรวจงานแทน
 const RESUME_STALE_TEXT = '⏱️ งานนี้ค้างตอนระบบรีสตาร์ต ดูผลได้ในหน้าตรวจงาน';
 
@@ -88,10 +95,10 @@ function isDuplicate(content) {
 
 // ★ 27 มิ.ย.: marker เวอร์ชันโค้ด — ใช้ยืนยันใน Railway logs ว่า container ที่รันอยู่เป็น "โค้ดใหม่"
 //   โค้ดใหม่ = single-message (atomic claim ก่อน ack) · ถ้า logs ไม่ขึ้นบรรทัดนี้ = ยังรัน container เก่า
-const BOT_BUILD = '2026-09-02-resume-tracking'; // ★ 2 ก.ย. 69: เดิม '2026-06-27-singlemsg-atomicclaim' — ขยับให้เห็นใน log ว่ารุ่นจำงานข้ามรีสตาร์ตขึ้นแล้ว
+const BOT_BUILD = '2026-09-02-review-reactions'; // ★ 2 ก.ย. 69: เดิม '2026-09-02-resume-tracking' (ก่อนหน้า '2026-06-27-singlemsg-atomicclaim') — ขยับให้เห็นใน log ว่ารุ่นปุ่มพนักงานขึ้นแล้ว
 client.once('ready', () => {
   console.log(`✅ บอทพร้อมทำงานแล้ว! ล็อกอินในชื่อ ${client.user.tag}`);
-  console.log(`🟢 [BOT_BUILD=${BOT_BUILD}] instance=${BOT_INSTANCE} | คิว: เซิร์ฟเวอร์ (atomic claim) | Dedup URL: ${DEDUP_WINDOW_MS / 1000}s | resume=${BOT_RESUME_TRACKING ? 'on' : 'off'}`);
+  console.log(`🟢 [BOT_BUILD=${BOT_BUILD}] instance=${BOT_INSTANCE} | คิว: เซิร์ฟเวอร์ (atomic claim) | Dedup URL: ${DEDUP_WINDOW_MS / 1000}s | resume=${BOT_RESUME_TRACKING ? 'on' : 'off'} | review=${BOT_REVIEW_REACTIONS ? 'on' : 'off'}`);
   // ★ 2 ก.ย. 69: กู้งานที่ค้างจากก่อนรีสตาร์ต (ล้มเงียบ — ห้ามทำให้บอทล้มตอนตื่น) · คืน promise ให้เทสรอได้ (discord.js ไม่สนค่าที่คืน)
   return resumeTrackedJobs().catch((err) => {
     console.warn(`[Bot] 🩹 กู้งานค้างไม่สำเร็จ: ${String(err?.message || err).slice(0, 80)}`);
@@ -462,7 +469,9 @@ async function pollJobUntilDone({ jobId, processingMsg, message, headers, queueU
 
     // ดึง newsTitle และ caseId จาก path ที่ถูกต้อง
     const newsTitle = data.data?.newsData?.newsTitle || data.newsData?.newsTitle || data.data?.analysisResult?.newsTitle || 'ไม่ทราบหัวข้อ';
-    const caseId = data.data?.caseId || data.caseId || null;
+    // ★ 2 ก.ย. 69 (ข้อ 6): ของจริงจากคิวอยู่ที่ data.generationLog.caseId (/api/auto/process ใส่ไว้ตรงนั้น — พิสูจน์จาก data/job_queue.json 11/11 งาน)
+    //   2 path เดิมได้ null ตลอด = ลิงก์ 🔗 ไม่เคยขึ้นในดิสคอร์ด · คงลำดับเดิมไว้ เติม path จริงต่อท้าย
+    const caseId = data.data?.caseId || data.caseId || data.data?.generationLog?.caseId || null;
     const logLink = caseId ? `\n🔗 ดูผลลัพธ์เต็ม: ${(process.env.API_URL || 'http://localhost:3001').replace('/api/auto/process','')}/generation-logs/${caseId}` : '';
 
     if (versionsToShow.length === 0) {
@@ -471,6 +480,9 @@ async function pollJobUntilDone({ jobId, processingMsg, message, headers, queueU
 
     const jobTime = ((Date.now() - jobStartTime) / 1000).toFixed(1);
     await processingMsg.edit({ content: `✅ **สร้างข่าวสำเร็จ!** ${versionsToShow.length} เวอร์ชัน | ใช้เวลา ${jobTime}s\n📰 **${newsTitle.slice(0, 80)}**${warningPreview}${logLink}` });
+
+    // ★ 2 ก.ย. 69 (ข้อ 6): ปุ่มพนักงาน 👍 ผ่าน / 👎 ไม่ผ่าน / 📌 ใช้แล้ว บนข้อความผล — จำ messageId→caseId แล้วติด reaction (ล้มเงียบ · สวิตช์ปิด = ไม่แตะ)
+    await attachReviewReactions(processingMsg, caseId);
 
     // ดึง Research items — ลอง path ทั้งหมดที่เป็นไปได้
     const researchItems = data.data?.researchItems 
@@ -496,10 +508,12 @@ async function pollJobUntilDone({ jobId, processingMsg, message, headers, queueU
         const promptId = v.promptId || (data.data?.usedPromptInfo?.name ? 'Dynamic' : 'Unknown');
         
         const embedTitle = `[${versionLabel}] ${newsTitle}`.slice(0, 250);
+        const embedBody = (v.content || 'ไม่พบเนื้อหา').slice(0, 3800); // ★ 18 ก.ค. 69: ถอดบรรทัดชวน !ปัง (ฟีเจอร์ถูกลบ — ไม่มีคนใช้)
         const embed = new EmbedBuilder()
           .setColor(isEnhanced ? '#10b981' : '#f91880')
           .setTitle(embedTitle)
-          .setDescription((v.content || 'ไม่พบเนื้อหา').slice(0, 3800)) // ★ 18 ก.ค. 69: ถอดบรรทัดชวน !ปัง (ฟีเจอร์ถูกลบ — ไม่มีคนใช้)
+          // ★ 2 ก.ย. 69 (ข้อ 6 B): เติมบรรทัดเตือนจากท่อต่อท้ายเนื้อ (ตกข้อเท็จจริง/ความคล้าย/โอกาสปัง) · ไม่มีคำเตือน = เนื้อเดิมทุกไบต์
+          .setDescription(embedBody + buildWarningTail(embedBody, buildWarningLines(v)))
           .setFooter({ text: `Pipeline: ${data.data?.detection?.pipelineLabel || data.detection?.pipelineLabel || 'Universal'} | PromptID: ${promptId} | เวลา: ${jobTime}s` });
 
         return embed;
@@ -753,6 +767,194 @@ async function resumeTrackedJobs(options = {}) {
   return summary;
 }
 
+// ═══════════════════════════════════════════
+// 📝 Review — ปุ่มพนักงานในดิสคอร์ด + คำเตือนจากท่อใต้ผลข่าว (2 ก.ย. 69 · ข้อ 6)
+//   ที่มา: ปุ่ม ผ่าน/ไม่ผ่าน/ใช้แล้ว บนหน้าเว็บ (PATCH /api/generation-logs/[caseId]) ไม่มีใครกด — 2,215 เคสล่าสุด unreviewed ทั้งหมด
+//   พนักงานทำงานในดิสคอร์ด → ย้ายปุ่มมาเป็น reaction บนข้อความผล: 👍 ผ่าน=good · 👎 ไม่ผ่าน=bad · 📌 ใช้แล้ว=used
+//   คนกด (ไม่ใช่บอท) → PATCH endpoint เดียวกับหน้าเว็บ {status, reviewNote} · กดซ้ำ/กดหลายปุ่ม = ต่อคิวต่อข้อความ ครั้งล่าสุดชนะ
+//   caseId: จำ messageId→caseId ในหน่วยความจำ · หลังรีสตาร์ต (แผนที่ว่าง) อ่านจากลิงก์ 🔗 …/generation-logs/<caseId> ในข้อความผลแทน
+//   (สมุด /api/bot/tracking ไม่มีช่อง caseId — validateTracking ทิ้งช่องที่ไม่รู้จัก และสมุดถูกถอนตอนจบงาน จึงเก็บที่นั่นไม่ได้)
+//   ทุกอย่างล้มเงียบ ห้ามทำงานหลักพัง · ปิดคืน: BOT_REVIEW_REACTIONS=0
+// ═══════════════════════════════════════════
+const REVIEW_STATUS_BY_EMOJI = Object.freeze({ '👍': 'good', '👎': 'bad', '📌': 'used' });
+const REVIEW_EMOJIS = Object.keys(REVIEW_STATUS_BY_EMOJI); // ลำดับที่ติดบนข้อความผล
+const REVIEW_LABEL = Object.freeze({ good: '✅ ผ่าน', bad: '❌ ไม่ผ่าน', used: '📌 ใช้แล้ว' });
+const REVIEW_LINE_PREFIX = '📝 บันทึกแล้ว'; // บรรทัดท้ายข้อความผล — กดใหม่ = แทนที่บรรทัดเดิม (ไม่งอกซ้อน)
+const REVIEW_MAP_MAX = 500;
+const DISCORD_CONTENT_MAX = 2000;
+const EMBED_DESCRIPTION_MAX = 4096;
+const WARNING_LINE_MAX = 220;
+const CASE_LINK_RE = /\/generation-logs\/([A-Za-z0-9_-]+)/u;
+const reviewCaseByMessage = new Map(); // messageId → caseId
+const reviewChains = new Map(); // messageId → promise ของงานล่าสุด (ต่อคิวให้ PATCH เรียงตามลำดับกด)
+
+// อีโมจิ → สถานะรีวิว · รับทั้งชื่ออีโมจิ (string) / MessageReaction / emoji object · ไม่รู้จัก = null
+function mapReactionToStatus(emoji) {
+  const name = typeof emoji === 'string' ? emoji : (emoji?.emoji?.name ?? emoji?.name ?? '');
+  return REVIEW_STATUS_BY_EMOJI[name] || null;
+}
+
+// _viralScore (ยังไม่มีในท่อ — รองรับล่วงหน้า): เลข 0-100 / สตริงเลข / {score|total|value} · นอกช่วง/อ่านไม่ออก = null
+//   ระดับ: ≥70 สูง · ≥40 กลาง · ต่ำกว่านั้น ต่ำ (คิดจากเลขที่ปัดแล้ว ให้ตรงกับที่แสดง)
+function readViralScore(raw) {
+  const num = typeof raw === 'number' ? raw
+    : typeof raw === 'string' ? Number(raw)
+    : raw && typeof raw === 'object' ? Number(raw.score ?? raw.total ?? raw.value) : NaN;
+  if (!Number.isFinite(num) || num < 0 || num > 100) return null;
+  const score = Math.round(num);
+  return { score, level: score >= 70 ? 'สูง' : score >= 40 ? 'กลาง' : 'ต่ำ' };
+}
+
+// บรรทัดเตือนใต้เนื้อข่าวของ 1 เวอร์ชัน (ลำดับ: ข้อเท็จจริงหาย → ความคล้าย → โอกาสปัง) · ไม่มีอะไรเตือน/สวิตช์ปิด = []
+//   _missingFacts จาก L4.7 missingFactsGate: { missing: [{type, text}], checked } · _diversityWarning: สตริงจาก annotateDiversityWarning
+function buildWarningLines(version) {
+  if (!BOT_REVIEW_REACTIONS || !version || typeof version !== 'object') return [];
+  const lines = [];
+  const missing = Array.isArray(version._missingFacts?.missing) ? version._missingFacts.missing : [];
+  if (missing.length > 0) {
+    const texts = missing.map((m) => String((m && typeof m === 'object' ? m.text : m) ?? '').trim()).filter(Boolean);
+    const shown = texts.slice(0, 5).join(' · ') || `${missing.length} จุด`;
+    const extra = texts.length > 5 ? ` (+${texts.length - 5})` : '';
+    lines.push(`⚠️ อาจตกข้อเท็จจริง: ${shown}${extra}`.slice(0, WARNING_LINE_MAX));
+  }
+  const diversity = typeof version._diversityWarning === 'string' ? version._diversityWarning.trim() : '';
+  if (diversity) lines.push(`⚠️ ${diversity}`.slice(0, WARNING_LINE_MAX));
+  const viral = readViralScore(version._viralScore);
+  if (viral) lines.push(`🔥 โอกาสปัง: ${viral.level} (${viral.score}/100)`);
+  return lines;
+}
+
+// ต่อท้าย description ของ embed (เนื้อเดิมไม่ถูกแตะ) · ตัดส่วนเติมให้รวมแล้วไม่เกินเพดาน embed 4096 (เกิน = Discord ปัดทั้งข้อความ)
+function buildWarningTail(body, lines) {
+  if (!Array.isArray(lines) || lines.length === 0) return '';
+  const room = EMBED_DESCRIPTION_MAX - String(body ?? '').length;
+  return room > 0 ? `\n\n${lines.join('\n')}`.slice(0, room) : '';
+}
+
+function rememberReviewCase(messageId, caseId) {
+  if (!messageId || !caseId) return;
+  reviewCaseByMessage.set(String(messageId), String(caseId));
+  if (reviewCaseByMessage.size > REVIEW_MAP_MAX) {
+    for (const key of [...reviewCaseByMessage.keys()].slice(0, reviewCaseByMessage.size - 200)) reviewCaseByMessage.delete(key);
+  }
+}
+
+// caseId ของข้อความผล: แผนที่ในหน่วยความจำก่อน → ไม่มี (บอทรีสตาร์ต) อ่านจากลิงก์ 🔗 ในเนื้อข้อความ → ไม่มีเลย = null
+function resolveReviewCaseId(message) {
+  if (!message) return null;
+  const known = reviewCaseByMessage.get(String(message.id));
+  if (known) return known;
+  const match = typeof message.content === 'string' ? message.content.match(CASE_LINK_RE) : null;
+  return match ? match[1] : null;
+}
+
+// ติดปุ่ม 👍👎📌 บนข้อความผล (หลัง ✅ สร้างข่าวสำเร็จ) · ไม่มี caseId = ไม่ติด (กดแล้วบันทึกไม่ได้ อย่าหลอกพนักงาน) · react ล้ม = เตือนใน log แล้วติดตัวถัดไป
+async function attachReviewReactions(resultMsg, caseId) {
+  if (!BOT_REVIEW_REACTIONS || !resultMsg) return false;
+  if (!caseId) {
+    console.warn('[Review] ⚠️ ผลไม่มี caseId (data.generationLog.caseId) — ไม่ติดปุ่มตรวจ');
+    return false;
+  }
+  rememberReviewCase(resultMsg.id, caseId);
+  for (const emoji of REVIEW_EMOJIS) {
+    try {
+      await resultMsg.react(emoji);
+    } catch (err) {
+      console.warn(`[Review] 🩹 ติดปุ่ม ${emoji} ไม่สำเร็จ (ไม่กระทบงานหลัก): ${String(err?.message || err).slice(0, 80)}`);
+    }
+  }
+  return true;
+}
+
+function buildReviewUrl(caseId) {
+  return buildQueueUrl().replace('/api/queue/add', `/api/generation-logs/${encodeURIComponent(String(caseId))}`);
+}
+
+function reviewerName(user) {
+  return String(user?.displayName || user?.globalName || user?.username || user?.tag || user?.id || 'ไม่ทราบชื่อ');
+}
+
+// เขียน/แทนที่บรรทัด "📝 บันทึกแล้ว …" ท้ายข้อความผล · ยาวเกินเพดาน 2000 หรือแก้ไม่ได้ → ตอบเป็นข้อความสั้นแทน
+async function writeReviewLine(message, line) {
+  const kept = String(message.content || '').split('\n').filter((l) => !l.startsWith(REVIEW_LINE_PREFIX)).join('\n').replace(/\s+$/u, '');
+  const content = kept ? `${kept}\n${line}` : line;
+  try {
+    if (content.length <= DISCORD_CONTENT_MAX && typeof message.edit === 'function') {
+      await message.edit({ content });
+      return 'edited';
+    }
+    await message.reply(line);
+    return 'replied';
+  } catch (err) {
+    console.warn(`[Review] 🩹 แจ้งผลในข้อความไม่สำเร็จ (บันทึกแล้ว): ${String(err?.message || err).slice(0, 80)}`);
+    return 'failed';
+  }
+}
+
+// รับ event กด reaction (messageReactionAdd) → PATCH /api/generation-logs/<caseId> {status, reviewNote} แล้วแจ้งในข้อความ
+//   ข้าม: สวิตช์ปิด · บอทกดเอง (บอทติดปุ่มเอง 3 อันก็ยิง event นี้) · อีโมจิไม่ใช่ 3 ปุ่ม · ข้อความไม่ใช่ของบอท · ไม่รู้ caseId
+//   deps สำหรับเทส: http (แทน axios) · botUserId (แทน client.user.id)
+async function handleReaction(reaction, user, { http = axios, botUserId = client.user?.id } = {}) {
+  if (!BOT_REVIEW_REACTIONS) return { ok: false, skipped: 'off' };
+  if (!reaction || !user) return { ok: false, skipped: 'no_args' };
+  if (user.bot === true || (botUserId && user.id === botUserId)) return { ok: false, skipped: 'bot' };
+  const status = mapReactionToStatus(reaction);
+  if (!status) return { ok: false, skipped: 'emoji' };
+  let message = reaction.message;
+  try {
+    if (reaction.partial && typeof reaction.fetch === 'function') {
+      const full = await reaction.fetch();
+      message = full?.message || reaction.message;
+    }
+    if (message?.partial && typeof message.fetch === 'function') message = await message.fetch();
+  } catch (err) {
+    console.warn(`[Review] 🩹 ดึงข้อความที่ถูกกดไม่ได้: ${String(err?.message || err).slice(0, 80)}`);
+    return { ok: false, skipped: 'fetch_failed' };
+  }
+  if (!message) return { ok: false, skipped: 'no_message' };
+  if (botUserId && message.author?.id !== botUserId) return { ok: false, skipped: 'not_ours' };
+  const caseId = resolveReviewCaseId(message);
+  if (!caseId) {
+    console.log(`[Review] ⏭️ ข้อความ ${message.id} ไม่รู้ caseId — ไม่บันทึก`);
+    return { ok: false, skipped: 'no_case' };
+  }
+  const reviewer = reviewerName(user);
+  const emojiName = typeof reaction === 'string' ? reaction : String(reaction.emoji?.name ?? '');
+  const run = async () => {
+    const body = { status, reviewNote: `Discord ${emojiName} ${REVIEW_LABEL[status]} โดย ${reviewer} (${user.id})` };
+    let res;
+    try {
+      res = await http.patch(buildReviewUrl(caseId), body, { headers: buildApiHeaders(), timeout: 15000 });
+    } catch (err) {
+      console.warn(`[Review] 🩹 บันทึกเคส ${caseId} ไม่สำเร็จ: ${String(err?.message || err).slice(0, 80)}`);
+      return { ok: false, caseId, status, error: String(err?.message || err) };
+    }
+    if (res?.data?.success !== true) {
+      console.warn(`[Review] 🩹 บันทึกเคส ${caseId} ไม่สำเร็จ (เซิร์ฟเวอร์ตอบไม่รับ): ${String(res?.data?.error || 'unknown').slice(0, 80)}`);
+      return { ok: false, caseId, status, error: String(res?.data?.error || 'unknown') };
+    }
+    const notified = await writeReviewLine(message, `${REVIEW_LINE_PREFIX} ${REVIEW_LABEL[status]} โดย @${reviewer}`);
+    console.log(`[Review] ✅ เคส ${caseId} → ${status} โดย ${reviewer} (${user.id})`);
+    return { ok: true, caseId, status, reviewer, notified };
+  };
+  const key = String(message.id);
+  const chained = (reviewChains.get(key) || Promise.resolve()).catch(() => {}).then(run);
+  reviewChains.set(key, chained);
+  try {
+    return await chained;
+  } finally {
+    if (reviewChains.get(key) === chained) reviewChains.delete(key);
+  }
+}
+
+if (BOT_REVIEW_REACTIONS) {
+  client.on('messageReactionAdd', (reaction, user) => {
+    handleReaction(reaction, user).catch((err) => {
+      console.warn(`[Review] 🩹 จัดการ reaction ล้ม (ไม่กระทบงานหลัก): ${String(err?.message || err).slice(0, 80)}`);
+    });
+  });
+}
+
 // ★ 26 มิ.ย.: ปิดตัวนุ่มนวลตอน redeploy (Railway/Docker ส่ง SIGTERM, Ctrl+C ส่ง SIGINT)
 //   หยุดรับข้อความ → รองานที่ทำอยู่จบสั้นๆ → ตัดการเชื่อมต่อ Discord → ออก
 //   ผล: ตัวเก่าเลิกฟัง event ทันที ไม่ทับกับ instance ใหม่ → ไม่เด้ง 2 ตอบช่วง deploy
@@ -772,7 +974,7 @@ if (require.main === module) {
   client.login(TOKEN);
 }
 
-// สำหรับเทส (tests/bot-resume.test.mjs) — ไม่มีผลตอนรันจริง
+// สำหรับเทส (tests/bot-resume.test.mjs · tests/bot-review-reactions.test.mjs) — ไม่มีผลตอนรันจริง
 module.exports = {
   processNewsJob,
   pollJobUntilDone,
@@ -787,5 +989,14 @@ module.exports = {
   trackingTakenByOther,
   RESUME_MAX_AGE_MS,
   RESUME_STALE_TEXT,
+  // ★ 2 ก.ย. 69 (ข้อ 6): ปุ่มพนักงาน + คำเตือน
+  mapReactionToStatus,
+  buildWarningLines,
+  buildWarningTail,
+  attachReviewReactions,
+  handleReaction,
+  buildReviewUrl,
+  reviewCaseFor: (messageId) => reviewCaseByMessage.get(String(messageId)) || null,
+  REVIEW_LINE_PREFIX,
   _client: client,
 };

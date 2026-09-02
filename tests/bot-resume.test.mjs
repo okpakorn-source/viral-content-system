@@ -96,7 +96,8 @@ function makeAxios({ statuses = [], tracking = [], addResponse } = {}) {
 
 function makeProcessingMsg(id, channelId = 'CH1') {
   const edits = [];
-  return { id, channelId, edits, edit: async (c) => { edits.push(typeof c === 'string' ? c : c.content); }, delete: async () => {} };
+  const reactions = []; // ★ 2 ก.ย. 69 ข้อ 6: บอทติดปุ่ม 👍👎📌 บนข้อความผล — ตัวปลอมต้องรับ react ได้ (เทสปุ่มอยู่ที่ bot-review-reactions.test.mjs)
+  return { id, channelId, edits, reactions, edit: async (c) => { edits.push(typeof c === 'string' ? c : c.content); }, react: async (e) => { reactions.push(e); }, delete: async () => {} };
 }
 
 function makeSourceMsg(id, processingMsg, channelId = 'CH1') {
@@ -148,7 +149,8 @@ function loadBot({ env = {}, axios, channels = {} } = {}) {
     async login() { this.loggedIn = true; }
     async destroy() {}
   }
-  const discord = { Client: FakeClient, GatewayIntentBits: { Guilds: 1, GuildMessages: 2, MessageContent: 4 }, EmbedBuilder: FakeEmbed };
+  // ★ 2 ก.ย. 69 ข้อ 6: บอทใช้ GuildMessageReactions + Partials (discord.js v14 มีจริง) — ตัวปลอมต้องมีให้ ไม่งั้นโหลดไม่ขึ้น
+  const discord = { Client: FakeClient, GatewayIntentBits: { Guilds: 1, GuildMessages: 2, MessageContent: 4, GuildMessageReactions: 1024 }, Partials: { Message: 3, Reaction: 5 }, EmbedBuilder: FakeEmbed };
   const fakeRequire = (name) => {
     if (name === 'dotenv') return { config() {} };
     if (name === 'discord.js') return discord;

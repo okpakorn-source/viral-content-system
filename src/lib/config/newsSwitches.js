@@ -589,6 +589,11 @@ export const NEWS_SWITCHES = Object.freeze([
     meaning: 'บอทจำงานที่กำลังตามอยู่ไว้ที่เซิร์ฟเวอร์ (/api/bot/tracking) — Railway redeploy/รีสตาร์ตแล้วบอทตัวใหม่ตามงานต่อเอง ไม่ค้าง "1%" · envFlag รับเฉพาะ "0"/"1" ตรงตัว ค่าอื่น = ค่าเริ่มต้นเปิด',
     since: '2 ก.ย. 69 (เคสหลวงปู่ศิลา 03:49Z)', rollback: 'BOT_RESUME_TRACKING=0 = บอททำงานเหมือนเดิมทุกไบต์ (ต้อง redeploy บอทบน Railway)',
   },
+  {
+    name: 'BOT_REVIEW_REACTIONS', default: '1', values: ['0', '1'], readBy: [BOT], group: 'บอทดิสคอร์ด (discord-bot)', kind: 'switch',
+    meaning: 'บอทใส่ reaction 👍 ผ่าน / 👎 ไม่ผ่าน / 📌 ใช้แล้ว ใต้ผลข่าว แล้วบันทึกสถานะเข้า PATCH /api/generation-logs/[caseId] + โชว์บรรทัดเตือน (ข้อเท็จจริงหาย/ความคล้าย/โอกาสปัง) — ข้อ 6 แผนยกระดับ',
+    since: '2 ก.ย. 69 (เฟส 3)', rollback: 'BOT_REVIEW_REACTIONS=0 = ไม่ใส่ reaction ไม่ฟังการกด ไม่แสดงบรรทัดเตือน (ข้อความผลเหมือนเดิม)',
+  },
 ]);
 
 /** หาสวิตช์ตามชื่อ — คืน undefined ถ้าไม่มีในทะเบียน */
