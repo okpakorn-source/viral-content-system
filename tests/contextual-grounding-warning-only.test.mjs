@@ -3,7 +3,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const PATH = new URL('../src/lib/services/autoFlowServiceText.js', import.meta.url);
-const SOURCE = readFileSync(PATH, 'utf8');
+// ★ 2 ก.ย. 69 — เทสแดงค้าง 1 เคส ("ต้องพบ export function assessRawTextSafety(") · สาเหตุราก = line ending ไม่ใช่โค้ดผิด:
+//   สัญญาโค้ด (assessRawTextSafety / groundingIssuesToWarnings / ตำแหน่งบล็อก) ยังตรงตั้งแต่ 554d0286 (24 ส.ค. 69)
+//   แต่ marker ท้ายฟังก์ชันเขียนเป็น '\n/**\n * กฎคำ…' ขณะที่ working tree บน Windows (core.autocrlf=true) เป็น CRLF
+//   (git ls-files --eol: i/lf w/crlf) → indexOf ไม่เจอ '\n/**\n' ที่จริงคือ '\r\n/**\r\n' · บน Linux/Vercel (LF) เทสเขียวอยู่แล้ว
+//   → normalize CRLF→LF ตอนอ่าน = เทสให้ผลเดียวกันทุกเครื่อง · ไม่แตะ production
+// ผลทุบ (2 ก.ย. 69): ถอด .replace(/\r\n/g, '\n') บนเครื่อง CRLF ⇒ แดงเคสเดิม · ทุบ production เปลี่ยนหาง
+//   '— ให้พนักงานตรวจบริบทก่อนโพสต์' เป็นข้อความอื่น ⇒ แดง 2 เคส (แล้วคืนโค้ด)
+const SOURCE = readFileSync(PATH, 'utf8').replace(/\r\n/g, '\n');
 
 function extractFunction(source, marker, nextMarker) {
   const start = source.indexOf(marker);

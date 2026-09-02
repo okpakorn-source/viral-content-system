@@ -1,26 +1,90 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { parse } from '@babel/parser';
 
-const routeSource = readFileSync(new URL('../src/app/api/auto/process/route.js', import.meta.url), 'utf8');
-const helperStart = routeSource.indexOf('async function saveToArchiveServerSide');
-const helperEnd = routeSource.indexOf('\nexport async function POST', helperStart);
+// ★ 2 ก.ย. 69 — เทสแดงค้าง 6 เคส ("SyntaxError: Unexpected token 'async'") · สาเหตุราก = สัญญาเปลี่ยน ไม่ใช่โค้ดผิด
+//   สัญญาเปลี่ยนที่ a56d011a (21 ส.ค. 69 "stabilize raw-text pipeline") → กลับขึ้น main ที่ 554d0286 (24 ส.ค. 69):
+//   (1) POST ถูกแยกเป็น handlePost / reportHardDeadlineFailure / runProcessWithDeadline → ระหว่าง saveToArchiveServerSide
+//       กับ "export async function POST" มีฟังก์ชันคั่น 3 ตัว การ slice ถึง POST จึงได้หลายฟังก์ชันซ้อนกัน = SyntaxError
+//   (2) saveToArchiveServerSide ไม่ dedup/classify เองแล้ว — มอบให้ saveNewsArchive (src/lib/services/newsArchiveService.js)
+//       ซึ่งเป็นตัวเขียนคลังร่วมกับ /api/news-archive (createStore/callAI/MODEL_FAST ย้ายไปอยู่ที่นั่น)
+//   → ตัดฟังก์ชันด้วย AST (@babel/parser แบบเดียวกับ text-queue-handoff-contract) แล้วประกอบ 2 ชั้นจริง:
+//     route helper (จริง) → saveNewsArchive (จริง) → store/callAI (stub) — โจทย์ 6 เคสเดิมยังพิสูจน์พฤติกรรมเดิมครบ
+//   อ่านซอร์สแบบ normalize CRLF→LF (เครื่อง Windows autocrlf=true ทำ working tree เป็น CRLF ขณะ index เป็น LF)
+// ผลทุบโค้ด (2 ก.ย. 69 — ทุบแล้วคืนโค้ดเดิมทุกไบต์):
+//   M1 route: `return true;` หลัง save → `return false;`            ⇒ แดง 4 เคส (save/timeout/dedup/หัวข้อซ้ำ)
+//   M2 service: ตัด `if (recentMatch) return { item: recentMatch, deduped: true };` ⇒ แดง "พบข่าวซ้ำ…ไม่ add ซ้ำ" (addCalls=1)
+//   M3 service: ตัดการส่ง `signal` เข้า callAI                       ⇒ แดง "AI classify ค้าง…" (classifySignal ไม่มี)
+//   M4 (รอบ 2 ผู้ตรวจไขว้ข้อ 7) ตัด 'MODEL_FAST' ออกจาก INJECTED_BINDINGS ⇒ แดงตั้งแต่โหลดไฟล์ "newsArchiveService.js มี import ต่างจากที่ makeSave ฉีด…"
+//      (เดิมถ้า service เพิ่ม import ใหม่ เทสจะล้มเป็น ReferenceError อ่านไม่รู้เรื่อง — ตอนนี้บอกชัดว่าต้องแก้ makeSave)
 
-assert.ok(helperStart >= 0 && helperEnd > helperStart, 'ต้องหา saveToArchiveServerSide ใน route จริงได้');
+function readSource(relativePath) {
+  return readFileSync(new URL(relativePath, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+}
 
-const helperSource = routeSource.slice(helperStart, helperEnd).trim();
+function extractTopLevel(source, predicate, label) {
+  const ast = parse(source, { sourceType: 'module', plugins: ['jsx'] });
+  const hits = [];
+  for (const node of ast.program.body) {
+    const declaration = node.type === 'ExportNamedDeclaration' ? node.declaration : node;
+    if (declaration && predicate(declaration)) hits.push(declaration);
+  }
+  assert.equal(hits.length, 1, `ต้องพบ ${label} ระดับบนสุดพอดี 1 ตัว (พบ ${hits.length})`);
+  return source.slice(hits[0].start, hits[0].end);
+}
 
-function makeSave({ existing = [], add = async (item) => item, callAI = async () => ({}) } = {}) {
+const functionNamed = name => node => node.type === 'FunctionDeclaration' && node.id?.name === name;
+const constNamed = name => node => node.type === 'VariableDeclaration'
+  && node.declarations.some(declarator => declarator.id?.name === name);
+
+const routeSource = readSource('../src/app/api/auto/process/route.js');
+const serviceSource = readSource('../src/lib/services/newsArchiveService.js');
+const helperSource = extractTopLevel(routeSource, functionNamed('saveToArchiveServerSide'), 'saveToArchiveServerSide');
+const serviceSlice = [
+  extractTopLevel(serviceSource, constNamed('STORE'), 'STORE'),
+  extractTopLevel(serviceSource, constNamed('DUPLICATE_KEY_RE'), 'DUPLICATE_KEY_RE'),
+  extractTopLevel(serviceSource, functionNamed('saveNewsArchive'), 'saveNewsArchive'),
+].join('\n');
+
+assert.match(helperSource, /await saveNewsArchive\(\{/, 'route helper ต้องมอบงานให้ saveNewsArchive (สัญญาตั้งแต่ a56d011a)');
+
+// ★ 2 ก.ย. 69 (ผู้ตรวจไขว้ข้อ 7): makeSave ฉีดตัวแปรอิสระให้ saveNewsArchive ตายตัวตามรายการนี้ — ถ้า newsArchiveService.js
+//   เพิ่ม/ลด import เทสจะล้มด้วย ReferenceError ที่อ่านไม่รู้เรื่อง → เทียบรายชื่อ import กับรายการฉีดตรงนี้ให้บอกชัดว่าต้องแก้อะไร
+const INJECTED_BINDINGS = ['createHash', 'createStore', 'callAI', 'MODEL_FAST'];
+function importedBindings(source) {
+  const ast = parse(source, { sourceType: 'module', plugins: ['jsx'] });
+  return ast.program.body
+    .filter(node => node.type === 'ImportDeclaration')
+    .flatMap(node => node.specifiers.map(specifier => specifier.local.name))
+    .sort();
+}
+assert.deepEqual(
+  importedBindings(serviceSource),
+  [...INJECTED_BINDINGS].sort(),
+  `newsArchiveService.js มี import ต่างจากที่ makeSave ฉีด (${INJECTED_BINDINGS.join('/')}) — เพิ่ม/ลด import แล้วต้องอัปเดต new Function ใน makeSave ให้ตรง`,
+);
+
+function makeSave({
+  existing = [],
+  add = async (item) => item,
+  callAI = async () => ({}),
+  findById = async () => null,
+} = {}) {
   const createStore = () => ({
     getAll: async () => existing,
     add,
+    findById,
   });
-  return new Function(
+  const saveNewsArchive = new Function(
+    'createHash',
     'createStore',
     'callAI',
     'MODEL_FAST',
-    `return (${helperSource});`,
-  )(createStore, callAI, 'test-model');
+    `${serviceSlice}\nreturn saveNewsArchive;`,
+  )(createHash, createStore, callAI, 'test-model');
+  return new Function('saveNewsArchive', `return (${helperSource});`)(saveNewsArchive);
 }
 
 const args = {
@@ -64,10 +128,10 @@ test('AI classify ค้างต้องถูกตัดตาม budget แ
     add: async (item) => { added = item; return item; },
   });
   let watchdog;
-  const result = await Promise.race([
+  const { value: result } = await captureWarnings(() => Promise.race([
     save({ ...args, classifyTimeoutMs: 10 }),
     new Promise((_, reject) => { watchdog = setTimeout(() => reject(new Error('classify timeout guard did not fire')), 500); }),
-  ]).finally(() => clearTimeout(watchdog));
+  ]).finally(() => clearTimeout(watchdog)));
   assert.equal(result, true);
   assert.equal(classifySignal?.aborted, true);
   assert.equal(added?.category, 'ทั่วไป');

@@ -23,8 +23,14 @@ const paths = {
   status: join(ROOT, 'src', 'app', 'api', 'queue', 'status', 'route.js'),
   page: join(ROOT, 'src', 'app', 'content', 'new', 'page.js'),
 };
+// ★ 2 ก.ย. 69 — เทสแดงค้าง 1 เคส ("queue ingress แปลง legacy { text } เป็น input") · สาเหตุราก = line ending ไม่ใช่โค้ดผิด:
+//   โค้ด `if (!isCoverJob && !payload.input) { payload.input = payload.url || payload.text; }` ยังอยู่ครบ (queue/add/route.js:63-65
+//   สัญญาตั้งแต่ a56d011a 21 ส.ค. 69) แต่ mutation ของเทสค้นด้วยสตริง '\n' ขณะ working tree บน Windows (core.autocrlf=true)
+//   เป็น CRLF (git ls-files --eol: i/lf w/crlf) → replace ไม่เจอ → assert.notEqual(mutation, source) แดง · บน Linux/Vercel เขียว
+//   → normalize CRLF→LF ตอนอ่านทุกไฟล์ production = เทสให้ผลเดียวกันทุกเครื่อง (babel/regex เดิมไม่กระทบ) · ไม่แตะ production
+// ผลทุบ (2 ก.ย. 69): ถอด normalize บนเครื่อง CRLF ⇒ แดงเคสเดิม · ทุบ production ลบบล็อก alias { text }→input ⇒ แดง (แล้วคืนโค้ด)
 const production = Object.fromEntries(
-  Object.entries(paths).map(([name, path]) => [name, readFileSync(path, 'utf8')]),
+  Object.entries(paths).map(([name, path]) => [name, readFileSync(path, 'utf8').replace(/\r\n/g, '\n')]),
 );
 
 const RAW = 'สุนารี มีอาชีพเกษตรกรเป็นอาชีพหลัก เป็นอาชีพพ่ออาชีพแม่ที่สุนารีรักมาก และอาชีพนักร้องเป็นอาชีพเสริมมาโดยตลอด เกิดและเติบโตในครอบครัวชาวนาที่มีพี่น้อง 11 คน ต้องช่วยพ่อแม่ทำนาตั้งแต่อายุ 8–9 ขวบ ตื่นตี 4 ตี 5 เพื่อต้อนควายไปทำนา  ตลอดระยะเวลา 42–43 ปีในวงการบันเทิงไม่เคยเลิกทำนา ยังคงปลูกข้าว ปลูกผัก เลี้ยงปลา และนำไปแบ่งปันเพื่อนบ้าน มีการนำผลผลิตมาขายถุงละ 20 บาท โดยมองว่าเงินทุกบาทมีค่า';
