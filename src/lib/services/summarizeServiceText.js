@@ -2890,7 +2890,7 @@ ${newsForStage('CATALOG', actualNewsBody, { squash: true })}
       _catalogPicks = []; // ลองแล้วล้ม — จำไว้ ไม่จ่ายซ้ำมุมถัดไป (Opus P2-C)
       console.warn('[📖 Catalog] ล้ม — ถอยใช้ top-8 สูตรเดิม:', _catErr.message);
       // ★ 1 ก.ย. 69 (บั๊กระดับสูง พิสูจน์แล้ว): ถอยเงียบไม่มีร่องรอย → ลงบันทึกท่อเป็น warning ให้ /pipeline-logs และตัวตรวจสุขภาพเห็น
-      logPipeline({ step: 'card_catalog_picker', status: 'warning', error: String(_catErr.message || _catErr).slice(0, 200), detail: 'AI บรรณารักษ์ล้ม → ถอยใช้สูตรคะแนน' }).catch(() => {});
+      logPipeline({ workflowId, step: 'card_catalog_picker', status: 'warning', error: String(_catErr.message || _catErr).slice(0, 200), detail: 'AI บรรณารักษ์ล้ม → ถอยใช้สูตรคะแนน' }).catch(() => {});
     }
   }
 
@@ -3027,7 +3027,7 @@ ${_aiCands.join('\n')}
       rethrowPipelineDeadline(_pickErr, 'card_final_picker');
       console.warn(`[🤖 CardPicker] ${_pickerModelB} ล่ม — ใช้ลำดับสูตรเดิม:`, _pickErr.message);
       // ★ 1 ก.ย. 69: ร่องรอยการถอย (เดิมเงียบ ค้างได้เป็นวันโดยไม่มีใครรู้ว่าคุณภาพการ์ดตก)
-      logPipeline({ step: 'card_final_picker', status: 'warning', model: _pickerModelB, error: String(_pickErr.message || _pickErr).slice(0, 200), detail: 'AI ผู้เคาะการ์ดล้ม → ใช้ลำดับสูตร' }).catch(() => {});
+      logPipeline({ workflowId, step: 'card_final_picker', status: 'warning', model: _pickerModelB, error: String(_pickErr.message || _pickErr).slice(0, 200), detail: 'AI ผู้เคาะการ์ดล้ม → ใช้ลำดับสูตร' }).catch(() => {});
     }
   }
 

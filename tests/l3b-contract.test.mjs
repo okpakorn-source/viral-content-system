@@ -11,6 +11,9 @@ const stubs = [
   // flagFixer ลาก @/lib ต่อเป็นลูกโซ่ — stub ขั้นต่ำพอให้ guardCoreNews ผ่าน (ไม่ใช่จุดที่เทสนี้วัด)
   ["import { keyNumbersOf, hasKeyNumber } from './flagFixerService';",
     'const keyNumbersOf = () => []; const hasKeyNumber = () => true;'],
+  // ★ 1 ก.ย. 69: L3A ใช้ guardedReplace (ไฟล์ปลอด import) — คงตัวจริงไว้ แค่เติม .js ให้ Node ESM resolve จาก temp file ได้
+  ["import { guardedReplace, sortLongestFirst } from './guardedReplace';",
+    "import { guardedReplace, sortLongestFirst } from './guardedReplace.js';"],
 ];
 for (const [from, to] of stubs) {
   if (!src.includes(from)) { console.log('❌ stub ไม่เจอ:', from.slice(0, 40)); process.exit(1); }

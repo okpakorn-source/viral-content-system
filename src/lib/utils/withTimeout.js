@@ -51,7 +51,8 @@ export function withTimeoutSignal(factory, ms, stepName = 'unknown', parentSigna
     const MIN_STEP_MS = 60_000;
     const remaining = pipelineDeadline.assertCanStart(stepName, Math.min(ms, MIN_STEP_MS));
     if (remaining < ms) {
-      const clamped = Math.max(MIN_STEP_MS, remaining - 5_000);
+      // remaining ≥ MIN_STEP_MS รับประกันจาก assertCanStart แล้ว → หักเผื่อ 5s ตรงๆ (ผู้ตรวจจับ: พื้น MIN เดิมกินเผื่อเมื่อ remaining ∈ [60s,65s])
+      const clamped = Math.max(1_000, remaining - 5_000);
       console.warn(`[withTimeout] ⏱️ ${stepName}: งบ ${Math.round(ms / 1000)}s แต่เหลือ ${Math.round(remaining / 1000)}s → หั่นเหลือ ${Math.round(clamped / 1000)}s`);
       ms = clamped;
     }
