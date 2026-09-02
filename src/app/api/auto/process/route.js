@@ -935,6 +935,8 @@ async function handlePost(request, startTime, deadlineState = {}) {
           errorType: err.errorType || 'UNIVERSAL_PROCESS_ERROR',
           failedStep: err.failedStep || 'unknown_step',
           completedAt: new Date().toISOString(),
+          // ★ 1 ก.ย. 69: ด่านความยาวกักทั้งก้อน → เก็บจำนวนคำ+เนื้อที่ถูกกักไว้กับงาน ไม่ให้หายเงียบ
+          ...(err.lengthGate ? { lengthGate: err.lengthGate } : {}),
         });
       } catch (markErr) {
         queueStatusError = markErr;
@@ -952,6 +954,7 @@ async function handlePost(request, startTime, deadlineState = {}) {
         : (err.errorType || 'UNIVERSAL_PROCESS_ERROR'),
       failedStep: err.failedStep || 'unknown_step',
       ...(err.deadlineStep ? { deadlineStep: err.deadlineStep } : {}),
+      ...(err.lengthGate ? { lengthGate: err.lengthGate } : {}), // ★ 1 ก.ย. 69: หลักฐานด่านความยาว
       queueStatusPersisted: activeQueueJobId ? !queueStatusError : null,
       log,
       debug: { durationSeconds: parseFloat(totalTime) },

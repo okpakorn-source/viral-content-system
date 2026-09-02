@@ -5,6 +5,7 @@ import { isEndingPlain, isWitnessFactLockEnabled } from '@/lib/ai/promptModes'; 
 import { newsForStage } from '@/lib/utils/newsCap'; // 📖 สมุดเพดานเนื้อข่าวกลาง (16 ส.ค. 69)
 import { objTextList, quoteTextFix } from '@/lib/utils/objText'; // 🔧 19 ส.ค. 69 (HOOKS_OBJ_FIX): ตัวแปลงกลาง object → ข้อความ (กัน "[object Object]" หลุดเข้าตัวเขียน) — ถอย HOOKS_OBJ_FIX=0
 import { MODEL_NEWS_ANALYSIS, MODEL_BREAKDOWN, MODEL_FAST_CHEAP, MODEL_HEAVY_FALLBACK , MODEL_BLUEPRINT } from '@/lib/ai/modelConfig';
+import { envOn } from '@/lib/utils/envFlag'; // ★ 1 ก.ย. 69: สวิตช์อ่านค่าทน
 import { withTimeoutSignal } from '@/lib/utils/withTimeout'; // ★ 16 ก.ค. 69: withTimeout เดิมไม่ถูกใช้ในไฟล์นี้แล้ว (ทุกจุดย้ายไป withTimeoutSignal)
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStoreText';
 import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, buildFullContext, validateOutput } from '@/lib/workflow/workflowEngine';
@@ -2105,7 +2106,7 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       //   เหตุ: "ประโยคทุบท้าย" กลางใบเดียวแชร์ทุกมุม → ท่อนจบ 2 เวอร์ชันออกมาแฝดกัน (RUN5 นกจริยา)
       //   เปิด: ANGLE_CLOSING_SPLIT=1 + autoFlow ส่ง angleList ≥2 มุม · ขาดอย่างใดอย่างหนึ่ง = สองตัวแปรล่างเป็น ''
       //   → prompt ประกอบออกมาไบต์ต่อไบต์เท่าของเดิม (พิสูจน์ด้วย harness เทียบ .bak-preD)
-      const _closingSplitAngles = (process.env.ANGLE_CLOSING_SPLIT === '1' && Array.isArray(angleList))
+      const _closingSplitAngles = (envOn('ANGLE_CLOSING_SPLIT') && Array.isArray(angleList))
         ? angleList.filter((a) => a && String(a.angle_name || '').trim()).slice(0, 4)
         : [];
       const _closingSplitOn = _closingSplitAngles.length >= 2;
@@ -2888,6 +2889,8 @@ ${newsForStage('CATALOG', actualNewsBody, { squash: true })}
       rethrowPipelineDeadline(_catErr, 'card_catalog_picker');
       _catalogPicks = []; // ลองแล้วล้ม — จำไว้ ไม่จ่ายซ้ำมุมถัดไป (Opus P2-C)
       console.warn('[📖 Catalog] ล้ม — ถอยใช้ top-8 สูตรเดิม:', _catErr.message);
+      // ★ 1 ก.ย. 69 (บั๊กระดับสูง พิสูจน์แล้ว): ถอยเงียบไม่มีร่องรอย → ลงบันทึกท่อเป็น warning ให้ /pipeline-logs และตัวตรวจสุขภาพเห็น
+      logPipeline({ step: 'card_catalog_picker', status: 'warning', error: String(_catErr.message || _catErr).slice(0, 200), detail: 'AI บรรณารักษ์ล้ม → ถอยใช้สูตรคะแนน' }).catch(() => {});
     }
   }
 
@@ -3023,6 +3026,8 @@ ${_aiCands.join('\n')}
     } catch (_pickErr) {
       rethrowPipelineDeadline(_pickErr, 'card_final_picker');
       console.warn(`[🤖 CardPicker] ${_pickerModelB} ล่ม — ใช้ลำดับสูตรเดิม:`, _pickErr.message);
+      // ★ 1 ก.ย. 69: ร่องรอยการถอย (เดิมเงียบ ค้างได้เป็นวันโดยไม่มีใครรู้ว่าคุณภาพการ์ดตก)
+      logPipeline({ step: 'card_final_picker', status: 'warning', model: _pickerModelB, error: String(_pickErr.message || _pickErr).slice(0, 200), detail: 'AI ผู้เคาะการ์ดล้ม → ใช้ลำดับสูตร' }).catch(() => {});
     }
   }
 

@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
+// ★ 1 ก.ย. 69: correctionPipeline เพิ่ม helper 3 ตัว (ไฟล์ปลอด import — ใช้ของจริงได้เลย)
+import { envOn } from '../src/lib/utils/envFlag.js';
+import { guardedReplace, sortLongestFirst } from '../src/lib/correction/guardedReplace.js';
+import { scrubHallucinatedPlaces } from '../src/lib/correction/placeScrub.js';
 
 const factSource = readFileSync(new URL('../src/lib/correction/factPreservationCheck.js', import.meta.url), 'utf8');
 const checkFactPreservation = new Function(
@@ -97,6 +101,10 @@ function makePipeline(overrides = {}) {
     'semanticSanityCheck',
     'fabricationGate',
     'bbStep',
+    'envOn',
+    'guardedReplace',
+    'sortLongestFirst',
+    'scrubHallucinatedPlaces',
     `${pipelineFunctionSource}\nreturn runCorrectionPipeline;`,
   )(
     deps.auditOutput,
@@ -107,6 +115,10 @@ function makePipeline(overrides = {}) {
     deps.semanticSanityCheck,
     deps.fabricationGate,
     deps.bbStep,
+    envOn,
+    guardedReplace,
+    sortLongestFirst,
+    scrubHallucinatedPlaces,
   );
 }
 

@@ -860,7 +860,9 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
           .order('engagement_likes', { ascending: false });
         const WIDE_LIMIT = 300;
         q = wide ? q.limit(WIDE_LIMIT) : q.eq('category', libCat).limit(rotate ? 100 : 6); // ★ 8 ส.ค. 69: โหมดจับคู่/ชั้นเฉพาะกิจ=ทั้งคลัง · โหมดเดิม=ทั้งหมวด (ใหญ่สุดจริง 64 ใบ)
-        const { data } = await q;
+        const { data, error } = await q;
+        // ★ 1 ก.ย. 69 (บั๊กระดับกลาง พิสูจน์แล้ว): เดิมกลืน error แล้วแคช "ไม่มีครู" ไว้ 10 นาที → ข่าวทุกใบช่วงนั้นเขียนโดยไม่มีครูไวรัล
+        if (error) console.warn(`[ViralFewshot] ⚠️ ดึงคลังครูล้ม (${error.message}) — ไม่แคชผลว่าง จะลองใหม่ข่าวถัดไป`);
         // ⚠️ 16 ส.ค. 69 (ผู้ตรวจอิสระ — ระเบิดเวลา ยังไม่ระเบิดวันนี้เพราะคลังมี 202 ใบ):
         //   engagement_likes ในตารางเป็น 0 ทั้งคลัง ⇒ .order() เรียงจากคีย์เท่ากันหมด = Postgres ไม่รับประกันลำดับ
         //   พอคลังโตเกิน 300 ใบ "โผกว้าง" จะกลายเป็น 300 ใบที่ไม่นิ่ง และคำสัญญา "ครูทุกใบมีสิทธิ์" จะไม่จริง
@@ -869,7 +871,7 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
           console.log(`[ViralFewshot] ⚠️ คลังชนเพดานดึง ${WIDE_LIMIT} แถว — ครูบางใบเข้าไม่ถึงตัวเลือกแล้ว (และลำดับไม่นิ่งเพราะ engagement_likes เป็น 0 ทั้งตาราง) → ต้องเคาะเพดาน/คีย์เรียงใหม่`);
         }
         rows = (data || []).filter(r => (r.content || '').length > 200);
-        _cache.set(cacheKey, { rows, at: Date.now() });
+        if (!error) _cache.set(cacheKey, { rows, at: Date.now() }); // ★ 1 ก.ย. 69: แคชเฉพาะผลที่ดึงสำเร็จ
         if (_cache.size > 30) _cache = new Map([..._cache].slice(-15));
       }
     }

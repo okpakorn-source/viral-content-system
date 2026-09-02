@@ -130,6 +130,10 @@ export async function auditOutput(version) {
             location: paraIndex,
             severity: rule.severity,
             suggestion: rule.suggestion,
+            // ★ 1 ก.ย. 69: แนบ pattern เดิม (ที่มี lookbehind กันศัพท์แพทย์) ให้ด่านแก้ใช้แทนคำอย่างเคารพกันชน
+            //   เดิมด่านแก้ใช้ text ดิบ → "เส้นเลือด" ถูกทำลายทั้งที่ด่านนี้กันไว้แล้ว (ดู guardedReplace.js)
+            patternSource: rule.pattern.source,
+            patternFlags: rule.pattern.flags,
           });
         });
       }
@@ -226,7 +230,15 @@ export async function auditOutput(version) {
     };
 
   } catch (err) {
-    console.error('[OutputAudit] Error:', err.message);
-    return { issues: [], auditScore: 100, summary: '✅ Audit skipped (error)' };
+    // ★ 1 ก.ย. 69 (บั๊กระดับกลาง พิสูจน์แล้ว): เดิมคืน "100 คะแนน สะอาด" ทั้งที่ตรวจไม่ได้เลย
+    //   → ท่อเดินเส้นสั้น ข้ามด่านแก้ทั้งหมด คำเสี่ยงหลุดโดยไม่มีคำเตือน
+    //   ใหม่: fail-closed — คะแนน 0 + ธง auditFailed + issue ให้ท่อเดินเส้นยาว (ด่านอื่นยังทำงาน)
+    console.error('[OutputAudit] ❌ ด่านตรวจล้ม (ไม่ใช่ "สะอาด"):', err.message);
+    return {
+      issues: [{ type: 'audit_error', text: '', location: -1, severity: 'high', suggestion: `ด่านตรวจคำล้ม: ${err.message}` }],
+      auditScore: 0,
+      auditFailed: true,
+      summary: `❌ Audit FAILED — ตรวจไม่ได้ (${err.message}) ห้ามถือว่าสะอาด`,
+    };
   }
 }

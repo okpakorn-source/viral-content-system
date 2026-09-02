@@ -17,6 +17,10 @@ import { editorialPolish } from './editorialPolishService';
 import { semanticSanityCheck } from './semanticSanityCheck';
 import { fabricationGate } from './fabricationGate'; // ★ 4 ส.ค. 69 ด่านจับของเกิน — ผลทดลองศึก 6 นักเขียน (FAB_GATE=0 ปิดได้)
 import { bbStep } from '@/lib/trace/blackbox'; // ★ 1 ส.ค. 69 กล่องดำ: เก็บ before/after ทุกด่าน — ชี้ตัวการได้ไม่ต้องเดา
+// ★ 1 ก.ย. 69 (แก้บั๊กจากรายงานตรวจสภาพ 41 ข้อ): สวิตช์อ่านทน · แทนคำเคารพ whitelist · L4.5 ห้ามลบเนื้อจริง
+import { envOn } from '@/lib/utils/envFlag';
+import { guardedReplace, sortLongestFirst } from './guardedReplace';
+import { scrubHallucinatedPlaces } from './placeScrub';
 // ★ 12 มิ.ย.: FlagFixer + ViralPolish ถูกปลดออกตามคำสั่งทีม ("AI เพี้ยน — ย้อน workflow กลับแบบ 11 มิ.ย. หัวค่ำ")
 //   ไฟล์ flagFixerService.js / viralPolishService.js ยังอยู่ เผื่ออนาคต — ห้ามต่อกลับโดยไม่ผ่านทีม
 
@@ -31,8 +35,8 @@ import { bbStep } from '@/lib/trace/blackbox'; // ★ 1 ส.ค. 69 กล่อ
 //   ส่งให้ด่าน L1.8 ใช้เป็นฐานความจริงเพิ่ม — เดิมด่านเห็นแค่ต้นฉบับ ข้อมูลรีเสิร์ชถูกต้องเลยโดนตัดเป็น "ของเกิน"
 export async function runCorrectionPipeline(versions, newsData, breakdownData, researchFacts = null, rawSourceText = null) {
   // === Bypass check ===
-  if (process.env.SKIP_CORRECTION === 'true') {
-    console.log('[CorrectionPipeline] ⏭️ SKIPPED (SKIP_CORRECTION=true)');
+  if (envOn('SKIP_CORRECTION')) { // ★ 1 ก.ย. 69: รับ 1/true/on (เดิมต้อง 'true' เป๊ะ ผิดนิดเดียวคือเงียบ)
+    console.log('[CorrectionPipeline] ⏭️ SKIPPED (SKIP_CORRECTION=on)');
     return versions.map(v => ({ ...v, _correctionApplied: false, _correctionSkipped: true, _blackbox: [{ layer: 'skip', note: 'SKIP_CORRECTION=true' }] }));
   }
 
@@ -84,6 +88,11 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData, r
       // === Layer 2: Audit ===
       const audit = await auditOutput(version);
       console.log(`  L2 Audit: score=${audit.auditScore} issues=${audit.issues.length}`);
+      if (audit.auditFailed) {
+        // ★ 1 ก.ย. 69: ด่านตรวจล้ม = เดินเส้นยาวต่อ (ด่านอื่นยังคุม) แต่ต้องมีร่องรอยในกล่องดำ ไม่ใช่เงียบ
+        console.warn(`  ⛔ L2 Audit ล้ม — ไม่ถือว่าสะอาด (${audit.summary})`);
+        bbStep(_bb, 'L2-ตรวจคำ(ล้ม)', version.content, version.content, { auditFailed: true, summary: audit.summary });
+      }
 
 
       // ถ้า clean → ยังต้องผ่าน Semantic Check ก่อน Polish
@@ -177,8 +186,9 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData, r
           const _forbidden = (reAudit.issues || []).filter(x => x.type === 'forbidden_word' && x.text
             && typeof x.suggestion === 'string'
             && x.suggestion.length <= 25 && !/เช่น|สำนวน|บริบท|\//.test(x.suggestion));
-          for (const iss of _forbidden) {
-            safeContent = safeContent.split(iss.text).join(iss.suggestion);
+          // ★ 1 ก.ย. 69: เดิม split/join ดิบ → ทำลายศัพท์แพทย์ที่ L2 กันไว้ ("เส้นเลือด" → "เส้นร่องรอยเหตุการณ์")
+          for (const iss of sortLongestFirst(_forbidden)) {
+            safeContent = guardedReplace(safeContent, iss, { all: true });
           }
           _rollbackScrub = { reAuditIssues: (reAudit.issues || []).length, forbiddenScrubbed: _forbidden.length };
           if (_forbidden.length > 0) {
@@ -193,30 +203,10 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData, r
       // === Layer 4.5: Hallucination Scrubbing ===
       // ★ ปรับ 12 มิ.ย. (ลูปคุณภาพจับได้): เดิมแทนทุกอย่างด้วย "ที่เกิดเหตุ" ทื่อๆ → ได้คำพิกล
       //   ("ผที่เกิดเหตุ", ข่าวโรงพยาบาลกลายเป็น "ที่เกิดเหตุ") — เปลี่ยนเป็นแทนแบบรักษาชนิดสถานที่
+      // ★ 1 ก.ย. 69: ย้ายไป placeScrub.js (เทสได้) + แก้บั๊ก regex กินท่อนยาวไม่จำกัดจนลบเนื้อข่าวจริงเป็นท่อน
       let scrubbedContent = safeContent;
       if (newsData && newsData.newsBody) {
-        const placeRegex = /(จ\.|อ\.|ต\.|ซ\.|ถ\.|จังหวัด|อำเภอ|ตำบล|ซอย|ถนน|โรงพยาบาล|สถานี|วัด|โรงเรียน|มหาวิทยาลัย|สนามบิน)\s*([ก-๙a-zA-Z]+)/g;
-        const TYPE_REPLACEMENT = {
-          'จ.': 'ในพื้นที่', 'จังหวัด': 'ในพื้นที่', 'อ.': 'ในพื้นที่', 'อำเภอ': 'ในพื้นที่',
-          'ต.': 'ในพื้นที่', 'ตำบล': 'ในพื้นที่', 'ซ.': 'ในซอย', 'ซอย': 'ในซอย', 'ถ.': 'บนถนน', 'ถนน': 'บนถนน',
-          'โรงพยาบาล': 'โรงพยาบาล', 'สถานี': 'สถานี', 'วัด': 'วัด', 'โรงเรียน': 'โรงเรียน',
-          'มหาวิทยาลัย': 'มหาวิทยาลัย', 'สนามบิน': 'สนามบิน',
-        };
-        const places = new Map(); // full match → { prefix }
-        let match;
-        while ((match = placeRegex.exec(scrubbedContent)) !== null) {
-          places.set(match[0].trim(), { prefix: match[1] });
-        }
-        const sourceBody = newsData.newsBody.replace(/\s+/g, '');
-        for (const [place, info] of places) {
-          const cleanPlace = place.replace(placeRegex, '$2');
-          // ชื่อ ≥4 ตัวอักษรเท่านั้น (สั้นกว่านี้เสี่ยงจับคำทั่วไป) + ไม่อยู่ในต้นฉบับจริง
-          if (cleanPlace.length >= 4 && !sourceBody.includes(cleanPlace)) {
-            const replacement = TYPE_REPLACEMENT[info.prefix] || 'ในพื้นที่';
-            console.log(`  L4.5 Hallucination Scrub: "${place}" -> "${replacement}" (รักษาชนิดสถานที่)`);
-            scrubbedContent = scrubbedContent.split(place).join(replacement);
-          }
-        }
+        scrubbedContent = scrubHallucinatedPlaces(safeContent, newsData.newsBody, (m) => console.log(m)).content;
       }
 
       bbStep(_bb, 'L4.5-ล้างสถานที่หลอน', safeContent, scrubbedContent);

@@ -69,9 +69,14 @@ export function enforceTextNewsPublicationFloor(versions, {
   };
 
   if (passing.length === 0) {
+    // ★ 1 ก.ย. 69 (บั๊กระดับกลาง พิสูจน์แล้ว): เดิมกักทั้งก้อนแล้วเหลือแค่ข้อความ — คนตรวจไม่รู้ว่าขาด 3 คำหรือ 100 คำ
+    //   ใหม่: ข้อความบอกจำนวนคำทุกฉบับ (checks ใน lengthGate มีอยู่แล้ว)
+    //   ⚠️ จงใจ "ไม่แนบเนื้อร่าง" ใน error — สัญญา R231 (news-length-contract) ห้ามเผยร่างที่ถูกกักเหมือนผลสำเร็จ
+    //   การเก็บร่างไว้ให้พนักงานกู้ต้องทำผ่านการบันทึกเข้า workflow แยกต่างหาก (ข้อเสนอ รอเจ้าของเคาะ)
+    const counts = evaluations.map(e => `V${e.versionNumber}=${e.wordCount} คำ`).join(', ');
     throw makeTextLengthGateError(
       'TEXT_NEWS_LENGTH_REVIEW_REQUIRED',
-      `ไม่มีฉบับที่ยาวถึงขั้นต่ำ ${minimumWords} คำ ระบบกักผลไว้โดยไม่เติมคำหรือเรียก AI ซ้ำ`,
+      `ไม่มีฉบับที่ยาวถึงขั้นต่ำ ${minimumWords} คำ (${counts}) ระบบกักผลไว้โดยไม่เติมคำหรือเรียก AI ซ้ำ`,
       { ...diagnostic, status: 'length_review' },
     );
   }
