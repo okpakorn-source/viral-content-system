@@ -13,6 +13,7 @@ import { isCardAuthorityR7Enabled, isCardAuthorityR8Enabled } from '../ai/cardAu
 import { isEndingPlain, isStylePackV2Enabled } from '../ai/promptModes.js'; // 🎛️ 20 ส.ค. 69 (R3): ข้อ 1 วลีลายเซ็น + ข้อ 2 ท่อนจบ — ห้ามอ่าน env 2 ตัวนี้เองจากไฟล์อื่น
 import fs from 'node:fs';
 import path from 'node:path';
+import { rankTeachers } from './teacherRank.js'; // 🎯 2 ก.ย. 69 rank-v2: กติกาหยิบครูใหม่ (ไฟล์ไม่มี import — ยืนเดี่ยว เทสยิงตรงได้)
 
 // ★ 16 ส.ค. 69 — ตัวอ่าน env: ตัดช่องว่าง + ถอดเครื่องหมายคำพูด + ไม่สนตัวพิมพ์
 //   🔴 ใช้ได้เฉพาะ "สวิตช์ที่เกิดในแบตช์นี้" (VIRAL_SHORTLIST, VIRAL_SHORTLIST_K) เท่านั้น
@@ -91,14 +92,19 @@ const _hitsOn = () => process.env.VIRAL_HITS_FORMULA !== '0';
 //   (2) บีบสเกลด้วย sqrt — ใบ 309k เทียบใบค่ากลาง เหลือห่างกัน ~2-3 เท่า ไม่ใช่ 60+ เท่า
 let _realLikes = null, _realLikesAt = 0;
 const REAL_LIKES_CACHE_MS = 10 * 60 * 1000; // ★ ผู้ตรวจ S6: แยกจาก CACHE_MS ของโผ (กัน TDZ + ปรับตัวหนึ่งไม่กระทบอีกตัว)
-function _loadRealLikes() {
-  if (!_hitsOn()) return null;
+// ★ 2 ก.ย. 69 (rank-v2): แยก "ตัวอ่านไฟล์" ออกจาก "สวิตช์สูตรแสนไลก์" — rank-v2 ต้องเห็นไลก์จริงเสมอ (ยอดสูงนำ)
+//   _loadRealLikes ทางเดิม = สวิตช์ + ตัวอ่าน ทำงานเท่าเดิมทุกไบต์ (แคชก้อนเดียวกัน)
+function _readRealLikesFile() {
   if (_realLikesAt && Date.now() - _realLikesAt < REAL_LIKES_CACHE_MS) return _realLikes;
   try {
     _realLikes = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'data', 'viral-likes-real.json'), 'utf8'));
   } catch { _realLikes = null; }
   _realLikesAt = Date.now();
   return _realLikes;
+}
+function _loadRealLikes() {
+  if (!_hitsOn()) return null;
+  return _readRealLikesFile();
 }
 // ★ export เพื่อให้ข้อสอบยิงตรงได้ (ผู้ตรวจ S3) · mapOverride ใช้เฉพาะในเทส
 export function _applyRealLikes(rows, mapOverride = undefined) {
@@ -169,7 +175,8 @@ async function _recordPickHistory(libCat, picks, meta = {}) {
     // ★ 16 ส.ค. 69 (ผู้ตรวจอิสระ — โจทย์เจ้าของสั่ง "ต้องตรวจย้อนได้"): เหตุผลของชั้นเฉพาะกิจยาวเฉลี่ย ~366 ตัวอักษร
     //   เพดาน 240 เดิมตัดเหลือ ~3 ใบจาก 8 = ย้อนดูไม่ได้ว่าใบไหนแข่งบ้าง → ขยายเป็น 700 เฉพาะโหมดใหม่
     //   🔴 โหมดเก่า (rotate/ai/score/top2) คงเพดาน 240 เป๊ะ — "ปิดสวิตช์ = เดิมเป๊ะ" ต้องจริงถึงสมุดประวัติด้วย
-    const isShortlist = String(meta.pickMode || '').startsWith('shortlist');
+    // 🎯 2 ก.ย. 69: โหมด rank-v2 นับเป็นสายชั้นเฉพาะกิจด้วย (โผเดียวกัน ต้องย้อนสอบได้เท่ากัน) — โหมดเก่าไม่เปลี่ยน
+    const isShortlist = /^(shortlist|rank-v2)/.test(String(meta.pickMode || ''));
     const { error: insErr } = await sb.from('store_items').insert({
       id, store_name: 'viral_pick_history',
       data: {
@@ -179,6 +186,8 @@ async function _recordPickHistory(libCat, picks, meta = {}) {
         newsTitle: String(meta.newsTitle || '').slice(0, 140),
         mode: String(meta.pickMode || ''), reason: String(meta.pickReason || '').slice(0, isShortlist ? 700 : 240),
         picks: picks.map((p) => ({ id: p.id ?? null, title: String(p.title || '').slice(0, 120) })),
+        // 🎯 2 ก.ย. 69: ผลกติกา rank-v2 (ด่าน/เหตุผล/ใบที่ข้าม) — ใส่เฉพาะโหมดใหม่ ไม่เปลี่ยนรูปแถวเก่า
+        ...(meta.rank ? { rank: meta.rank } : {}),
       },
       created_at: nowIso, updated_at: nowIso,
     });
@@ -230,6 +239,121 @@ export function pickLibraryCategory({ category = '', emotionalTags = [], archety
     if (score > bestScore) { bestScore = score; best = c.lib; }
   }
   return best || 'ดราม่าครอบครัว'; // หมวดใหญ่สุดของหอสมุดเป็น default
+}
+
+// ═══ 🗂️ 2 ก.ย. 69 — ตัวจำแนกหมวด V2 (LIB_CLASSIFIER_V2) · เลิกกวาดคีย์เวิร์ดในถุงข้อความ + เลิก default ชั้นใหญ่ ═══
+// ปัญหาที่แก้ (เจ้าของจับจากสมุดประวัติจริง 2 ก.ย. 69 — pickLibraryCategory เดิมเทรวม หมวด+โครงเรื่อง+แท็ก เป็นถุงเดียวแล้วนับคีย์):
+//   · "หลวงปู่ศิลามอบทองคำสร้างเหรียญที่ระลึก" → 'ข่าวกีฬา' (คีย์ 'เหรียญ' โผล่ในประโยคโครงเรื่อง)
+//   · "คุณยายเรียนจบ ป.ตรี" → 'ดราม่าครอบครัว' (ไม่ตรงคีย์ไหน → ตก default ชั้นใหญ่)
+//   · สมุดประวัติ 7 วัน (732 ข่าว): 'ดราม่าครอบครัว' 254 ข่าว (35%) ทั้งที่ชั้นมีครู 15 ใบ · 'ข่าวกีฬา' 66 ข่าว ทั้งที่มีครู 1 ใบ
+// วิธีใหม่ — อ่านช่อง breakdown "ตามความหมายของช่อง" (ตารางเล็ก ตรวจย้อนได้ ไม่มี default):
+//   ขั้น 0  ชื่อชั้นตรงตัวใน category/archetype (การ์ด/สายเก่าส่งชื่อชั้นมาเอง)               → ชั้นนั้น
+//   ขั้น 1  ป้ายหมวดหลัก primaryCategory (ป้ายสั้น 1-3 คำ)                                   → LIB_V2_LABELS
+//          🔴 หมวดเชิงหัวข้อ (กีฬา/การเมือง/บันเทิง/สัตว์) ตัดสินจากป้ายนี้เท่านั้น — ห้ามอ่านจากประโยคโครงเรื่อง (บทเรียน 'เหรียญ')
+//   ขั้น 2  โครงเรื่อง narrativeArchetype + humanAngles + conflictTags (ประโยคอิสระ)              → LIB_V2_SHAPES (วลี "รูปเรื่อง" เท่านั้น ไม่มีคำนามหัวข้อ)
+//   ขั้น 3  emotionalTags มีคำเศร้า/สูญเสีย                                                    → 'ข่าวเศร้า' (ชั้นนี้คือชั้นอารมณ์โดยตรง)
+//   ขั้น 4  แมปไม่ได้ → null = ไม่ให้โบนัสหมวด (CAT_BONUS) กับใครเลย · ตัวคัดโผตัดสินด้วยบัตรลักษณะล้วน
+// ทุกคำในตารางอิงโปรไฟล์ธีมของชั้นจริง (viral_examples 202 ใบ × data/viral-essences.json วัด 2 ก.ย. 69) เช่น
+//   ศาสนา/พระสงฆ์/ศรัทธา → 'ช่วยเหลือกัน' (ชั้นนั้นมีธีม พระสงฆ์ 8 · ศรัทธา 4 · การให้ 8 · น้ำใจ 18 จาก 64 ใบ)
+//   การศึกษา/เรียนจบ/ปริญญา → 'สู้ชีวิต' (ธีม การศึกษา อยู่ในชั้นสู้ชีวิต 10 ใบ vs พลิกชีวิต 3 ใบ)
+//   อาชญากรรม/มิจฉาชีพ → 'ข่าวเตือนใจ' (ของเดิมไม่มีทางเข้า → ตกชั้นครอบครัว)
+// การเทียบคำผ่านเกราะสระไทยเดียวกับ _hasWord (กันตัดกลางคำ) · ป้ายที่ตรงหลายคำ: คำที่อยู่หน้าสุดของป้ายชนะ (AI เขียนหมวดหลักไว้ก่อน) แล้วคำยาวกว่า
+// 🔴 ถอยกลับ: LIB_CLASSIFIER_V2=0 → pickLibraryCategory เดิม (CATEGORY_HINTS + default) ทุกไบต์ (รับเฉพาะ '0' ตรงตัว)
+const _libClassifierV2On = () => process.env.LIB_CLASSIFIER_V2 !== '0';
+export const LIB_SHELVES = CATEGORY_HINTS.map((c) => c.lib); // 14 ชั้นของหอสมุด (ชื่อเดียวกับ viral_examples.category)
+export const LIB_V2_LABELS = [
+  // หมวดเชิงหัวข้อ — อ่านจาก "ป้ายหมวดหลัก" เท่านั้น
+  { lib: 'ข่าวกีฬา',       words: ['กีฬา', 'นักกีฬา', 'ฟุตบอล', 'วอลเลย์บอล', 'มวยไทย', 'นักมวย', 'แข่งรถ', 'มอเตอร์สปอร์ต', 'โอลิมปิก', 'ซีเกมส์', 'อีสปอร์ต', 'ทีมชาติ'] },
+  { lib: 'ข่าวการเมือง',   words: ['การเมือง', 'เลือกตั้ง', 'รัฐบาล', 'นักการเมือง', 'รัฐสภา'] },
+  { lib: 'ข่าวบันเทิง',    words: ['บันเทิง', 'ดารา', 'คนดัง', 'ศิลปิน', 'นักแสดง', 'นักร้อง', 'เซเลบ', 'ไอดอล'] },
+  { lib: 'ความรักสัตว์',   words: ['สัตว์', 'สุนัข', 'แมว', 'ช้าง', 'หมาแมว', 'น้องหมา'] },
+  // หมวดเชิงเรื่อง — ป้ายหมวดหลักที่ breakdown ใช้จริง
+  { lib: 'ดราม่าครอบครัว', words: ['ครอบครัว', 'แม่ลูก', 'พ่อลูก', 'พี่น้อง', 'สามีภรรยา', 'กตัญญู'] },
+  { lib: 'ช่วยเหลือกัน',   words: ['ช่วยเหลือ', 'น้ำใจ', 'บริจาค', 'จิตอาสา', 'การให้', 'กุศล', 'มูลนิธิ', 'กู้ภัย', 'ศาสนา', 'พระสงฆ์', 'ศรัทธา', 'ทำบุญ', 'ฮีโร่ชาวบ้าน'] },
+  { lib: 'สู้ชีวิต',       words: ['สู้ชีวิต', 'ความพยายาม', 'ฝ่าฟัน', 'ยากจน', 'ลำบาก', 'การศึกษา', 'แรงบันดาลใจ'] },
+  { lib: 'พลิกชีวิต',      words: ['พลิกชีวิต', 'พลิกผัน', 'จุดเปลี่ยน', 'ความสำเร็จ', 'เริ่มต้นใหม่', 'ปลดหนี้'] },
+  { lib: 'ข่าวเศร้า',      words: ['เศร้า', 'สูญเสีย', 'อาลัย', 'เสียชีวิต', 'โศกนาฏกรรม', 'อุบัติเหตุ'] },
+  { lib: 'ข่าวเตือนใจ',    words: ['เตือนใจ', 'เตือนภัย', 'อุทาหรณ์', 'อาชญากรรม', 'มิจฉาชีพ', 'หลอกลวง', 'ความปลอดภัย', 'เมาแล้วขับ', 'ดื่มแล้วขับ'] },
+  { lib: 'ข่าวชาวบ้าน',    words: ['ชาวบ้าน', 'ชุมชน', 'วิถีชีวิต', 'ท้องถิ่น'] },
+  { lib: 'คนดังตกต่ำ',     words: ['ตกอับ', 'ตกต่ำ', 'ล้มละลาย', 'หมดตัว'] },
+  { lib: 'nostalgia',      words: ['ย้อนวัย', 'วันวาน', 'ความทรงจำ', 'คิดถึงอดีต', 'ตำนาน', 'nostalgia', 'รำลึก'] },
+  { lib: 'moral conflict', words: ['ศีลธรรม', 'จริยธรรม', 'ดราม่าสังคม', 'ถกเถียง', 'ประเด็นสังคม', 'ความยุติธรรม', 'moral'] },
+];
+// วลี "รูปเรื่อง" สำหรับประโยคอิสระ (archetype/humanAngles/conflictTags) — จงใจไม่มีคำนามหัวข้อ (เหรียญ/ทีมชาติ/ดารา/สัตว์)
+export const LIB_V2_SHAPES = [
+  { lib: 'สู้ชีวิต',       words: ['สู้ชีวิต', 'ฝ่าฟัน', 'ไม่ยอมแพ้', 'ความพยายาม', 'ยากจน', 'ลำบาก', 'ไม่มีวันสาย', 'ไม่มีคำว่าสาย', 'เรียนจบ', 'ปริญญา', 'ความฝัน', 'ขยัน'] },
+  { lib: 'พลิกชีวิต',      words: ['พลิกชีวิต', 'พลิกผัน', 'จุดเปลี่ยน', 'เปลี่ยนชีวิต', 'จากศูนย์', 'เริ่มต้นใหม่', 'ปลดหนี้', 'ก้าวข้าม', 'ประสบความสำเร็จ'] },
+  { lib: 'ช่วยเหลือกัน',   words: ['น้ำใจ', 'ช่วยเหลือ', 'ช่วยชีวิต', 'กู้ภัย', 'บริจาค', 'เสียสละ', 'จิตอาสา', 'การให้', 'ฮีโร่', 'ทำบุญ', 'ศรัทธา'] },
+  { lib: 'ดราม่าครอบครัว', words: ['ครอบครัว', 'แม่ลูก', 'พ่อลูก', 'พี่น้อง', 'กตัญญู', 'เลี้ยงดู', 'ดูแลพ่อแม่', 'ดูแลแม่', 'ดูแลพ่อ'] },
+  { lib: 'ข่าวเศร้า',      words: ['สูญเสีย', 'ผู้จากไป', 'การจากไป', 'จากไปอย่างสงบ', 'เสียชีวิต', 'อาลัย', 'โศกนาฏกรรม', 'การจากลา'] },
+  { lib: 'ข่าวเตือนใจ',    words: ['เตือนภัย', 'เตือนใจ', 'อุทาหรณ์', 'บทเรียนราคาแพง', 'มิจฉาชีพ', 'หลอกลวง', 'เมาแล้วขับ', 'ดื่มแล้วขับ'] },
+  { lib: 'moral conflict', words: ['เปิดโปง', 'อยุติธรรม', 'เลือกปฏิบัติ', 'ศักดิ์ศรี', 'ถกเถียง', 'เหลื่อมล้ำ', 'เอาเปรียบ', 'กดขี่', 'ผู้ถูกกระทำ'] },
+  { lib: 'nostalgia',      words: ['ความทรงจำ', 'ย้อนวันวาน', 'รำลึก', 'คิดถึงอดีต', 'ของแทนใจ'] },
+  { lib: 'คนดังตกต่ำ',     words: ['ตกอับ', 'ตกต่ำ', 'ล้มละลาย', 'หมดตัว'] },
+];
+// แท็กอารมณ์ที่บอกว่า "เรื่องนี้เศร้า" (ไม่รวม สะเทือนใจ/ซาบซึ้ง — โผล่ทั้งชั้นช่วยเหลือกัน/สู้ชีวิต ไม่ชี้ชั้น)
+const LIB_V2_SAD = ['เศร้า', 'อาลัย', 'หดหู่', 'ใจหาย', 'สูญเสีย', 'เสียใจ'];
+
+// ตำแหน่งที่คำปรากฏแบบผ่านเกราะสระไทย (-1 = ไม่พบ) — นิยามเกราะเดียวกับ _hasWord ด้านล่าง (ตัวนั้นคืน boolean)
+function _wordIndex(hay, needle) {
+  if (!hay || !needle) return -1;
+  let i = hay.indexOf(needle);
+  while (i !== -1) {
+    const before = i > 0 ? hay[i - 1] : '';
+    const after = hay[i + needle.length] || '';
+    if (!_THAI_FOLLOW.test(after) && !_THAI_LEAD.test(before)) return i;
+    i = hay.indexOf(needle, i + 1);
+  }
+  return -1;
+}
+const _v2Str = (v) => (typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '').trim().toLowerCase();
+const _v2List = (v) => (Array.isArray(v) ? v : v === null || v === undefined || v === '' ? [] : [v]).map(_v2Str).filter(Boolean);
+
+/** @returns {string|null} ชั้นหอสมุด หรือ null = ไม่มีชั้นตรง (ไม่มี default) · ทนอินพุตพิการทุกช่อง (null/สตริง/ตัวเลข) */
+export function pickLibraryCategoryV2(input = {}) {
+  const src = input && typeof input === 'object' ? input : {};
+  const label = _v2Str(src.category);
+  const archetype = _v2Str(src.archetype);
+  const emo = _v2List(src.emotionalTags);
+  const shapes = [archetype, ..._v2List(src.humanAngles), ..._v2List(src.conflictTags)].filter(Boolean);
+
+  // ขั้น 0: ชื่อชั้นตรงตัว
+  for (const lib of LIB_SHELVES) {
+    const l = lib.toLowerCase();
+    if (label === l || archetype === l) return lib;
+  }
+  // ขั้น 1: ป้ายหมวดหลัก — คำหน้าสุดของป้ายชนะ แล้วคำยาวกว่า แล้วลำดับตาราง
+  if (label) {
+    let best = null;
+    for (const t of LIB_V2_LABELS) {
+      for (const w of t.words) {
+        const at = _wordIndex(label, w.toLowerCase());
+        if (at === -1) continue;
+        if (!best || at < best.at || (at === best.at && w.length > best.len)) best = { lib: t.lib, at, len: w.length };
+      }
+    }
+    if (best) return best.lib;
+  }
+  // ขั้น 2: รูปเรื่อง — ชั้นที่วลีตรงรวมยาวสุดชนะ · เสมอ = ลำดับตาราง
+  if (shapes.length) {
+    const text = shapes.join(' | ');
+    let best = null, bestScore = 0;
+    for (const t of LIB_V2_SHAPES) {
+      let score = 0;
+      for (const w of t.words) if (_wordIndex(text, w.toLowerCase()) !== -1) score += w.length;
+      if (score > bestScore) { bestScore = score; best = t.lib; }
+    }
+    if (best) return best;
+  }
+  // ขั้น 3: อารมณ์เศร้า
+  if (emo.some((tag) => LIB_V2_SAD.some((w) => tag.includes(w)))) return 'ข่าวเศร้า';
+  // ขั้น 4: ไม่มีชั้นตรง — ไม่มี default
+  return null;
+}
+
+/** ประตูสวิตช์จุดเดียว: V2 (ค่าเริ่มต้น) หรือ pickLibraryCategory เดิมเมื่อ LIB_CLASSIFIER_V2=0 */
+export function resolveLibraryCategory(input = {}) {
+  return _libClassifierV2On() ? pickLibraryCategoryV2(input) : pickLibraryCategory(input);
 }
 
 // ═══ 🎯 8 ส.ค. 69 เจ้าของสั่ง "ห้ามสุ่ม — ต้องแมชโครงเรื่อง/อารมณ์/แนวทางจริง มีเหตุผลรองรับ" ═══
@@ -401,6 +525,55 @@ function _cardTeacherOn() {
   }
   return false;
 }
+// ═══ 🎯 2 ก.ย. 69 — กติกาหยิบครูใหม่ (TEACHER_RANK_V2) · เจ้าของสั่ง "แมตช์ก่อน แล้วยอดสูงนำ ไม่ล็อก ไม่เอาแต่ดัง" ═══
+//   ตัวกติกาอยู่ ./teacherRank.js (ไม่มี import) · จำลองย้อนหลังกับสมุดประวัติจริง: ไลก์เฉลี่ยครูที่หยิบ +28%
+//   ค่าเริ่มต้น = เปิด · ปิดคืน weightedSample เดิมทุกไบต์: TEACHER_RANK_V2=0 (รับเฉพาะ '0' ตรงตัว)
+//   ขอบเขต: ทำงานเฉพาะชั้นเฉพาะกิจที่คัดโผสำเร็จ (pickMode 'shortlist') — โหมด ai/score/rotate/top2/ถอย ไม่ถูกแตะ
+const _rankV2On = () => process.env.TEACHER_RANK_V2 !== '0';
+const RANK_V2 = { k: 2, cap: 8, floor: 50000, rotate: 3, usageDays: 7 };
+
+// 📒 นับการใช้ครูซ้ำจากสมุดประวัติเดิม (store viral_pick_history — ไฟล์นี้จดเองใน _recordPickHistory) ย้อนหลัง 7 วัน · แคช 5 นาที
+//   อ่านล้ม/หมดเวลา → ถือว่าใช้ 0 ทุกใบ (ห้ามให้ท่อข่าวล้ม) และลองใหม่ใน 60 วิ (บทเรียน "ตำราว่างเงียบๆ" 2 ส.ค.: ห้ามแคชความล้มเหลวยาว)
+let _usageCache = null, _usageAt = 0;
+const USAGE_CACHE_MS = 5 * 60 * 1000, USAGE_RETRY_MS = 60 * 1000, USAGE_TIMEOUT_MS = 6000;
+const _raceTimeout = (p, ms, label) => Promise.race([
+  Promise.resolve(p),
+  new Promise((_, rej) => { const t = setTimeout(() => rej(new Error(`${label} timeout ${ms}ms`)), ms); if (typeof t?.unref === 'function') t.unref(); }),
+]);
+async function _loadRecentUsage() {
+  const now = Date.now();
+  if (_usageCache && now - _usageAt < USAGE_CACHE_MS) return _usageCache;
+  const out = {};
+  let ok = false;
+  try {
+    const sb = getSupabase();
+    if (sb) {
+      const since = new Date(now - RANK_V2.usageDays * 86400e3).toISOString();
+      const PAGE = 1000, MAX_PAGES = 5; // 7 วันจริงมี ~730 แถว (วัด 2 ก.ย. 69) — เผื่อ 5 หน้า
+      for (let i = 0; i < MAX_PAGES; i++) {
+        // 🪶 2 ก.ย. 69 (ผู้ตรวจไขว้): ดึงเฉพาะ data->picks ไม่เอา data ทั้งก้อน (reason 700 ตัว + rank + ชื่อครู) — ต่อรอบเล็กลง ~5 เท่า
+        //   PostgREST ตั้งชื่อคอลัมน์ JSON path ตามคีย์ท้ายสุด → แถวกลับมาเป็น { picks: [...] }
+        //   (อ่านรูป { data: { picks } } ได้ด้วย — กันเซิร์ฟเวอร์ที่ตอบรูปเดิม ไม่ให้ตัวนับกลายเป็น 0 เงียบๆ)
+        const q = sb.from('store_items').select('data->picks').eq('store_name', 'viral_pick_history')
+          .gte('created_at', since).order('created_at', { ascending: false }).range(i * PAGE, i * PAGE + PAGE - 1);
+        const { data, error } = await _raceTimeout(q, USAGE_TIMEOUT_MS, 'viral_pick_history');
+        if (error) throw new Error(error.message || 'read error');
+        for (const r of data || []) {
+          const ps = r?.picks ?? r?.data?.picks;
+          for (const p of (Array.isArray(ps) ? ps : [])) if (p?.id) out[p.id] = (out[p.id] || 0) + 1;
+        }
+        if (!data || data.length < PAGE) break;
+      }
+      ok = true;
+    }
+  } catch (e) {
+    console.log('[ViralFewshot] 🎯 rank-v2 อ่านสมุดประวัติ 7 วันไม่สำเร็จ → นับใช้ซ้ำ=0 ทุกใบ (ไม่กระทบข่าว):', String(e?.message || e).slice(0, 60));
+  }
+  _usageCache = out;
+  _usageAt = ok ? now : now - USAGE_CACHE_MS + USAGE_RETRY_MS; // ล้ม/ไม่มี Supabase = แคชสั้น 60 วิ
+  return out;
+}
+
 // ขนาดโผปรับได้โดยไม่ต้องแก้โค้ด (เจ้าของลอง 6/8/10 เองได้) — ค่าเริ่มต้น 8 ตามที่วัดมาแล้ว
 // 🔴 16 ส.ค. 69 (ผู้ตรวจอิสระจับได้): พื้นเดิม 2 ทำให้ env ตัวเดียวพาระบบกลับไปเป็นท่าที่เจ้าของสั่งห้าม —
 //   K=2 → weightedSample(2 ใบ, 2) คืนทั้งคู่เสมอ = "ครูตายตัว" (K=3 ก็ยังข้ามชั้นแค่ 27%)
@@ -748,6 +921,8 @@ export function shortlistExamples(brief = {}, rows = [], essences = {}, K = 8) {
   const shelfTxt = Object.entries(perShelf).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c}×${n}`).join(', ');
   return {
     list: picked.map((p) => p.r),
+    // 🎯 2 ก.ย. 69 (rank-v2): โผพร้อมคะแนน/hit/ธงเกราะ 1 รายใบ ให้ teacherRank ใช้ด่านแมตช์ — ช่องใหม่ ผู้เรียกเดิมไม่กระทบ
+    cands: picked.map((p) => ({ id: p.r.id, score: p.total, hitsTheme: p.tHits.slice(), hitsEmo: p.eHits.slice(), guard: forcedIds.has(p.r.id), category: p.r.category, row: p.r })),
     fell: false,
     note,
     shelfTxt,
@@ -807,8 +982,11 @@ async function aiMatchExamples(brief, rows, essences) {
  *   3) correction/viralPolishService.js (สายขัดเงา ถอดสายอยู่) — เรียกโดยไม่มี newsBrief/newsTitle เลย
  *      ⇒ โค้ดในไฟล์นี้ต้องทนกรณีไม่มี newsBrief เสมอ (เทสไว้แล้ว: ถอยวิธีเดิม ไม่พัง ไม่จดสมุด)
  */
-export async function getViralFewshotBlock({ category = '', emotionalTags = [], archetype = '', newsTitle = '', newsBrief = null, noHistory = false, teacherGuideEligible = false, cardEssence = '' } = {}) {
-  const libCat = pickLibraryCategory({ category, emotionalTags, archetype });
+export async function getViralFewshotBlock({ category = '', emotionalTags = [], archetype = '', newsTitle = '', newsBrief = null, noHistory = false, teacherGuideEligible = false, cardEssence = '', conflictTags = [], humanAngles = [] } = {}) {
+  // 🗂️ 2 ก.ย. 69: LIB_CLASSIFIER_V2 (ค่าเริ่มต้นเปิด) — แมปหมวดจากช่อง breakdown ตามความหมายของช่อง · =0 คืน pickLibraryCategory เดิม
+  //   V2 คืน null ได้ = "ไม่มีชั้นตรง" → ไม่ให้โบนัสหมวดกับใคร (ทุกจุดที่ใช้ libCat ข้างล่างรับ null ผ่าน noShelf)
+  //   conflictTags/humanAngles เป็นช่องเสริม (จุดเรียกปัจจุบันยังไม่ส่ง = ว่าง) — ส่งมาเมื่อไหร่ V2 ใช้ทันที
+  const libCat = resolveLibraryCategory({ category, emotionalTags, archetype, conflictTags, humanAngles });
 
   let examplesBlock = '';
   try {
@@ -846,7 +1024,10 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
     // 🔴 จุดตายเงียบ: ถ้าไม่นับ shortlist เป็น "เอาทั้งคลัง" ทั้ง cacheKey และ limit ระบบจะดึงมาแค่ชั้น libCat
     //   แล้วให้คะแนนกันเองในชั้นเดิม = เปิดสวิตช์แล้วเหมือนไม่มีอะไรเกิดขึ้น แต่ log บอกว่าทำงานอยู่
     //   (แคชต้องคนละคีย์ด้วย ไม่งั้นเปิด/ปิดสวิตช์สลับกันจะกินแคชผิดก้อน)
-    const wide = mode || shortlistOn;
+    // 🗂️ 2 ก.ย. 69: ไม่มีชั้นตรง (libCat null จาก V2) = ดึงทั้งคลังเหมือนโหมดกว้าง — ห้ามยิง .eq('category', null)
+    //   (สวิตช์ปิด libCat เป็นสตริงเสมอ → noShelf=false → บรรทัดเดิมทุกไบต์)
+    const noShelf = libCat == null;
+    const wide = mode || shortlistOn || noShelf;
     const cacheKey = wide ? '__all__' : libCat;
     let rows = null;
     const cached = _cache.get(cacheKey);
@@ -886,11 +1067,13 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
     let pickMode = rotate ? 'rotate' : 'top2';
     let pickReason = '';
     let samplePool = null; // โผที่ weightedSample เห็นจริง (ใช้จดสมุดประวัติเฉพาะโหมดชั้นเฉพาะกิจ)
+    let slCands = null;    // 🎯 rank-v2: โผพร้อมคะแนน/hit จากชั้นเฉพาะกิจ (มีเฉพาะเมื่อคัดโผสำเร็จ)
+    let rankInfo = null;   // 🎯 rank-v2: ผลกติกา (ด่าน/เหตุผล/ใบที่ข้าม) ไว้จดสมุดประวัติ
     let crossCat = false;  // ตัวอย่างที่ได้มาข้ามหมวดหรือไม่ (ใช้ตัดสินหัวบล็อก ห้ามประกาศหมวดผิดให้นักเขียน)
     if (mode === 'ai' || mode === 'score') {
       // แคชต่อข่าวแบบ "แชร์สัญญา": ทุกเวอร์ชันของข่าวเดียวกัน (รวมที่วิ่งขนานพร้อมกัน) รอผลบรรณารักษ์ก้อนเดียว
       // = จ่าย AI ครั้งเดียว/ข่าว + ได้ครูคู่เดียวกันทุกเวอร์ชัน (จับตอนเทสจริง: 2 เวอร์ชันขนานเคยเบิก 2 รอบ)
-      const mKey = newsTitle ? `${String(newsTitle).slice(0, 80)}|${libCat}|${mode}` : '';
+      const mKey = newsTitle ? `${String(newsTitle).slice(0, 80)}|${libCat ?? ''}|${mode}` : ''; // 🗂️ V2 คืน null → คีย์ว่าง ไม่ใช่ข้อความ "null" (สวิตช์ปิด libCat ไม่มีทางเป็น null)
       let mEntry = mKey ? _matchCache.get(mKey) : null;
       if (!(mEntry && Date.now() - mEntry.at < MATCH_CACHE_MS)) {
         const brief = { title: newsTitle, category, emotionalTags, archetype, libCat,
@@ -935,7 +1118,7 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
       //      ⇒ ของใหม่รั่วไปเปลี่ยนหัวบล็อกของโหมดเก่า ทั้งที่แบตช์นี้สัญญาว่า "ปิดสวิตช์=ไม่แตะอะไรเลย"
       //      (ผู้ตรวจทำให้เกิดบน HEAD ได้จริงด้วยข่าวหมวด 'ข่าวบันเทิง' ที่ชั้นว่าง — ไม่ใช่เคสที่เกิดไม่ได้)
       //      → ผูกกับ shortlistOn อย่างเดียว: โหมดเก่าคงพฤติกรรมเดิมเป๊ะ ของใหม่รับผิดชอบเฉพาะของใหม่
-      crossCat = shortlistOn && !pool.length;
+      crossCat = (shortlistOn && !pool.length) || noShelf; // 🗂️ noShelf: หัวบล็อก/log ห้ามประกาศหมวดที่ไม่มี
       if (mode) pickMode = 'rotate-fallback';
       // ── 🎚️ ชั้นวางเฉพาะกิจ: เปลี่ยนแค่ว่า "usable คือใคร" — ตัวสุ่มบรรทัดล่างคือบรรทัดเดิมทั้งดุ้น ──
       //   ลำดับห้ามสลับ: ดึงแถว → _applyRealLikes(rows) → คัดโผ → weightedSample
@@ -953,6 +1136,7 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
           usable = sl.list;
           pickMode = 'shortlist';
           pickReason = sl.reason;
+          slCands = Array.isArray(sl.cands) ? sl.cands : null;
           console.log(`[ViralFewshot] 🎚️ ชั้นเฉพาะกิจ: คัดเข้ารอบ ${sl.list.length}/${(rows || []).length} ใบ (K=${K}) · ชั้น [${sl.shelfTxt}] · เกราะ1 พื้นชั้นเดิม ${sl.quota} ใบ (ฝืนคะแนนจริง ${sl.forcedReal} ใบ) · หัวโผ ${sl.head.toFixed(2)} ท้ายโผ ${sl.tail.toFixed(2)}${sl.note}`);
           // 📖 เหตุผลรายใบเต็มๆ อยู่บรรทัดของตัวเอง ไม่ถูกตัด — โจทย์เจ้าของบังคับ "ต้องตรวจย้อนได้"
           //   (บรรทัด ✅ ข้างล่างตัดที่ 90 ตัวอักษร ห้ามแตะ ไม่งั้น log ของโหมดเก่าเปลี่ยนตาม)
@@ -968,18 +1152,39 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
           usable = _applyRealLikes(usable);
           // 🔴 16 ส.ค. 69 รอบ 2 (ผู้ตรวจยิงซ้ำ): log เดิมพิมพ์ `ในชั้น "${libCat}"` เสมอ
           //   แต่ถ้าชั้นนั้นว่าง usable = ทั้งคลัง ⇒ log โกหกแทนหัวบล็อก (แก้หัวบล็อกแล้วแต่ลืม log)
+          // 🗂️ 2 ก.ย. 69 (ผู้ตรวจไขว้ — ข้อความ log): V2 คืน null เคยพิมพ์ `ชั้น "null"` · สวิตช์ปิด libCat เป็นสตริงเสมอ = ข้อความเดิมทุกไบต์
           const _poolDesc = crossCat
-            ? `ทั้งคลัง ${usable.length} ใบ (ชั้น "${libCat}" ไม่มีครูสักใบ)`
+            ? `ทั้งคลัง ${usable.length} ใบ (${libCat == null ? 'ไม่มีชั้นตรง' : `ชั้น "${libCat}" ไม่มีครูสักใบ`})`
             : `ในชั้น "${libCat}" ${usable.length} ใบ`;
           console.log(`[ViralFewshot] 🎚️ ชั้นเฉพาะกิจถอย — ${sl.reason} → ใช้วิธีเดิม (สุ่มถ่วงไลก์ ${_poolDesc} · คิดค่ากลางไลก์ใหม่จากก้อนนี้เท่านั้น)${sl.note}`);
         }
         samplePool = usable; // จดขนาดโผ "ที่ตัวสุ่มเห็นจริง" ลงสมุดประวัติ (ของเดิมจด 202 = อ่านผิดความหมาย)
       }
-      picks = rotate ? weightedSample(usable, 2) : usable.slice(0, 2);
+      // ── 🎯 2 ก.ย. 69 rank-v2: แทนตัวสุ่มเฉพาะเมื่อชั้นเฉพาะกิจคัดโผสำเร็จ + สวิตช์เปิด ──
+      //   ปิดสวิตช์ (TEACHER_RANK_V2=0) / โหมดอื่น / กติกาล้ม → บรรทัด weightedSample เดิมทุกไบต์
+      let rk = null;
+      if (pickMode === 'shortlist' && slCands && slCands.length >= 2 && _rankV2On()) {
+        try {
+          const usage = await _loadRecentUsage();
+          rk = rankTeachers(slCands, {
+            likesById: _readRealLikesFile()?.byId || {}, recentUsageById: usage,
+            k: RANK_V2.k, cap: RANK_V2.cap, floor: RANK_V2.floor, rotate: RANK_V2.rotate,
+          });
+          if (!rk || !Array.isArray(rk.picks) || rk.picks.length < 2 || rk.picks.some((c) => !c?.row)) rk = null; // โผผิดรูป → ถอยตัวสุ่มเดิม
+        } catch (e) { rk = null; console.log('[ViralFewshot] 🎯 rank-v2 ล้ม → ถอย weightedSample เดิม:', String(e?.message || e).slice(0, 60)); }
+      }
+      if (rk) {
+        picks = rk.picks.map((c) => c.row);
+        pickMode = 'rank-v2';
+        rankInfo = rk.debug;
+        console.log(`[ViralFewshot] 🎯 rank-v2 หยิบ ${picks.map((r) => String(r.id).slice(0, 8)).join('+')} จากโผ ${slCands.length} ใบ · ${rk.debug.reason}`);
+      } else {
+        picks = rotate ? weightedSample(usable, 2) : usable.slice(0, 2);
+      }
     }
     if (picks.length > 0) {
       // ★ ผู้ตรวจจับได้: โหมดจับคู่เลือกข้ามหมวดได้ — หัวบล็อกห้ามประกาศหมวดผิดๆ ให้นักเขียน
-      const blockTitle = (pickMode === 'ai' || pickMode === 'score' || pickMode === 'score-fallback' || pickMode === 'shortlist')
+      const blockTitle = (pickMode === 'ai' || pickMode === 'score' || pickMode === 'score-fallback' || pickMode === 'shortlist' || pickMode === 'rank-v2')
         ? 'โพสต์ไวรัลจริงที่จับคู่กับข่าวนี้ (โครงเรื่อง/อารมณ์ใกล้เคียง)'
         // 🔴 ถอยแล้วได้ตัวอย่างข้ามหมวด (ชั้น libCat ว่าง) → ห้ามบอกนักเขียนว่าเป็นหมวดเดียวกับข่าว
         : crossCat
@@ -1033,9 +1238,11 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
         poolSize: samplePool ? samplePool.length : (rows || []).length,
         libSize: samplePool ? (rows || []).length : null,
         newsTitle, noHistory, pickMode, pickReason,
+        // 🎯 rank-v2: ด่าน/เหตุผล/ใบที่ข้าม (โหมดอื่น = null = ไม่ใส่ช่อง)
+        rank: rankInfo ? { gate: rankInfo.gate, reason: String(rankInfo.reason || '').slice(0, 400), skipped: (rankInfo.skipped || []).slice(0, 10) } : null,
       });
     } else {
-      console.log(`[ViralFewshot] ⚠️ หมวด "${libCat}" ไม่มีตัวอย่างพอ — ใช้ Style Pack อย่างเดียว`);
+      console.log(`[ViralFewshot] ⚠️ หมวด "${libCat ?? 'ไม่มีชั้นตรง'}" ไม่มีตัวอย่างพอ — ใช้ Style Pack อย่างเดียว`); // 🗂️ V2 null → ไม่พิมพ์ "null"
     }
   } catch (e) {
     console.log('[ViralFewshot] ⚠️ fetch failed (non-fatal):', e.message?.slice(0, 50));

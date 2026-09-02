@@ -113,9 +113,30 @@ t('23 score เลือกได้ · ค่าพิมพ์เพี้ย�
   t('24 สวิตช์ถอย (=0) = สไตล์แพ็คเดิมเป๊ะ (ทางหนีไฟยังใช้ได้)', off.includes('VIRAL STYLE PACK —') && !off.includes('v2'));
   delete process.env.VIRAL_HITS_FORMULA;
   const on = await getViralFewshotBlock({ category: 'ทดสอบ', noHistory: true });
-  t('25 ไม่ตั้งค่า = แพ็ค v2 เป็นค่าเริ่มต้น (เจ้าของเคาะ 14 ส.ค. ค่ำ)', on.includes('VIRAL STYLE PACK v2'));
-  t('26 กฎหลัก v2 ครบ: ห้ามเปิดคำพูด + แบนประโยคบอกความรู้สึก + จบประโยคนิยามภาพ',
-    on.includes('ห้ามใช้เปิดโพสต์') && on.includes('ควรรู้สึกอะไร') && on.includes('ประโยคนิยามภาพ'));
+  // ★ 2 ก.ย. 69 — ข้อ 25/26 แดงค้าง: เทสล้าสมัย ไม่ใช่โค้ดผิด · สัญญาเปลี่ยน 18 ส.ค. 69 (d21e9d2c "คืนระบบเขียนข่าวสู่ยุคปัง"
+  //   เจ้าของสั่ง "ใช้โค้ดช่วง 12 มิ.ย.–1 ก.ค.") → หัว "VIRAL STYLE PACK v2" + กฎแบนประโยคบอกความรู้สึกใน pack
+  //   (เพิ่มที่ 721dbf8e 14 ส.ค.) ถูกถอด กลับเป็น pack ดั้งเดิม e5ba1eb · สิ่งที่ VIRAL_HITS_FORMULA คุมจริงในไฟล์นี้ตอนนี้
+  //   = ถ่วงการหยิบครูด้วยไลก์จริง (_loadRealLikes → data/viral-likes-real.json) · กฎ "ห้ามบอกความรู้สึก" ย้ายไปบรรทัด
+  //   FEELING_ECHO ใน summarizeServiceText.js (นอกไฟล์นี้) · ข้อ 3/ข้อ 5 ของ pack คุมด้วย STYLE_PACK_V2 (default เปิด)
+  //   และ ENDING_MODE (default truth) จาก promptModes.js — 20 ส.ค. 69 (R3)
+  // ผลทุบ (2 ก.ย. 69): สลับ _hitsOn เป็น === '0' ⇒ ข้อ 25 แดง · ปิดการแทน RULE3_OLD→V2 ⇒ ข้อ 26 แดง (แล้วคืนโค้ด)
+  const nodeFs = await import('node:fs');
+  const realMap = JSON.parse(nodeFs.readFileSync(new URL('../data/viral-likes-real.json', import.meta.url), 'utf8'));
+  const [realId, realEntry] = Object.entries(realMap.byId || {})[0];
+  const probe = [{ id: realId, engagement_likes: 0 }, { id: 'no-such-id', engagement_likes: 0 }];
+  const weighted = _applyRealLikes(probe); // ไม่ส่ง override = อ่านไฟล์จริงผ่านสวิตช์ (ไม่ตั้ง env = เปิด)
+  process.env.VIRAL_HITS_FORMULA = '0';
+  const untouched = _applyRealLikes(probe); // ปิด = ไม่อ่านไฟล์ คืนแถวเดิมเป๊ะ
+  delete process.env.VIRAL_HITS_FORMULA;
+  t('25 ไม่ตั้งค่า = สูตรแสนไลก์เปิด: ถ่วงครูด้วยไลก์จริงจากไฟล์ (sqrt) · =0 คืนแถวเดิม · หัว pack v2 ถูกถอดแล้ว 18 ส.ค. (d21e9d2c)',
+    weighted !== probe
+    && weighted[0].engagement_likes === Math.max(1, Math.round(Math.sqrt(Number(realEntry?.likes ?? realEntry))))
+    && untouched === probe
+    && on.includes('VIRAL STYLE PACK —') && !on.includes('VIRAL STYLE PACK v2'));
+  t('26 กฎ pack ปัจจุบันครบ: ข้อ 3 วลีลายเซ็นแบบ R3 (STYLE_PACK_V2 default เปิด ถอด "ขอนับถือใจ") + ข้อ 5 หางสัจธรรมผูกเรื่อง (ENDING_MODE=truth)',
+    on.includes('3. วลีลายเซ็นชวนแชร์: ใช้เมื่อเข้ากับเรื่องเท่านั้น')
+    && !on.includes('"ขอนับถือใจ..."')
+    && on.includes('สัจธรรมต้องสรุปจากข้อเท็จจริงในเรื่องนี้เท่านั้น'));
 }
 
 // ── ⑫ 14 ส.ค. — ตัวถ่วงไลก์จริง _applyRealLikes ยิงตรง (ผู้ตรวจ S3: โค้ดเสี่ยงสุดต้องมีข้อสอบ)
