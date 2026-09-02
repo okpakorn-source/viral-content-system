@@ -17,9 +17,11 @@
  *        จาก missingFactsGate — โครง { numbers, dates, quotes, names, details } ทุกชนิดมี .text รวม detail) ·
  *        ไม่ฉีด = ถอยไป findMissingFacts(raw, '') (เนื้อว่าง = ทุกข้อเท็จจริง "หาย" = รายการเต็ม) · ไม่มีทั้งคู่ = ไม่ใส่รายการ — ห้ามล้ม
  *     2) กฎใหม่ในพรอมต์: ห้ามตัดประโยคที่มี คำพูดในเครื่องหมายคำพูด / สมณศักดิ์-ยศ-ตำแหน่ง / วันที่-เวลา / ตัวเลข
- *     3) ด่านกลไกหลังตัด (ไม่พึ่ง AI · ก่อนขั้น findMissingFacts เดิม): ประโยค/บรรทัดของข้อความก่อนตัดที่เข้ากติกาคุ้มครอง
- *        (regex ชุดเดียวกับข้อ 2) ต้องยังอยู่ในผลตัดแบบ substring ตรงตัว (normalize ช่องว่าง) — หาย = ทิ้งผล reason 'protected_sentence_cut'
- *     ดีบักเพิ่มใน _trimPass: factsListed (จำนวนรายการที่เข้าพรอมต์จริง) · protectedSentences (จำนวนประโยคคุ้มครอง)
+ *     3) ด่านกลไกหลังตัด (ไม่พึ่ง AI · ก่อนขั้น findMissingFacts เดิม): หน่วยประโยค/อนุประโยคของข้อความก่อนตัดที่เข้ากติกา
+ *        คุ้มครอง (regex ชุดเดียวกับข้อ 2) ต้องยังอยู่ในผลตัดแบบ substring (normalize ช่องว่าง+รูปอัญประกาศ+จุดไข่ปลา)
+ *        — หาย = ทิ้งผล reason 'protected_sentence_cut' · หน่วย = ก้อนคำสะสม ≥ TRIM_SENTENCE_MIN_CHARS (แตกที่ช่องว่าง/บรรทัด
+ *        — ผู้ตรวจไขว้ 2 ก.ย. 69: นิยามทั้งย่อหน้าแบบแรกคุ้มครอง 84% ของหน่วยจน 3/10 ฉบับตัดอะไรไม่ได้)
+ *     ดีบักเพิ่มใน _trimPass: factsListed (จำนวนรายการที่เข้าพรอมต์จริง) · protectedSentences (จำนวนหน่วยคุ้มครอง)
  * เทส: tests/writer-trim-pass.test.mjs
  */
 
@@ -85,22 +87,51 @@ export const PROTECTED_SENTENCE_RULES = Object.freeze([
   Object.freeze({ type: 'number', re: PROTECTED_NUMBER_RE }),
 ]);
 
-/** ยุบช่องว่างทุกชนิดเหลือตัวเดียว — ใช้เทียบ substring ของประโยคคุ้มครอง (โจทย์อนุญาต normalize ช่องว่าง) */
+/**
+ * normalize สำหรับเทียบ substring ของประโยคคุ้มครอง — ใช้ทั้งฝั่งต้นฉบับและฝั่งผลตัด:
+ * แปลงเครื่องหมายคำพูด/จุดไข่ปลาให้เป็นรูปเดียว (“ ” „ → " · ‘ ’ → ' · … → ...) แล้วยุบช่องว่างทุกชนิดเหลือตัวเดียว
+ * ★ ผู้ตรวจไขว้ 2 ก.ย. 69 (medium): วัดจริง 10 ฉบับ — luna คืน “”→"" ทั้งที่ประโยคครบ ทำ protected_sentence_cut 4/4 ฉบับที่มี “”
+ *   (trim เป็นหมัน + เผา AI call) — เทียบผ่านรูป normalize จึงไม่ตีกลับเพราะชนิดอัญประกาศ แต่คำในคำพูดเปลี่ยนยังจับได้
+ */
 export function normalizeTrimWhitespace(text) {
-  return String(text || '').replace(/\s+/g, ' ').trim();
+  return String(text || '')
+    .replace(/[“”„]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/…/g, '...')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
+/** ความยาวขั้นต่ำของหน่วยประโยค (ตัวอักษร) — สะสมคำถึงเกณฑ์นี้แล้วปิดหน่วย · เศษท้ายบรรทัดที่สั้นกว่าถูกรวมเข้าหน่วยก่อนหน้า */
+export const TRIM_SENTENCE_MIN_CHARS = 20;
+
 /**
- * แตกข้อความเป็นประโยค/บรรทัด: ขึ้นบรรทัดใหม่ = ตัดเสมอ · ในบรรทัดตัดเพิ่มหลังเครื่องหมายจบประโยค/อัญประกาศปิดที่ตามด้วยช่องว่าง
- * ไทยคั่นประโยคด้วยช่องว่างเดี่ยวซึ่งแตกแม่นไม่ได้ — หน่วยที่ได้อาจเล็ก/ใหญ่กว่าประโยคจริง ซึ่งปลอดภัยทั้งสองทาง:
- * หน่วยเล็กเกิน = เช็ค substring ผ่านง่ายขึ้น (ด่าน findMissingFacts เดิมยังตรวจรายข้อเท็จจริงซ้ำอีกชั้น) · หน่วยใหญ่ = จับการตัดได้กว้างขึ้น
+ * แตกข้อความเป็นหน่วยประโยค/อนุประโยค: ขึ้นบรรทัดใหม่ = ตัดเสมอ · ในบรรทัดใช้ "ช่องว่าง" เป็นขอบเขต (ไทยเขียนติดกันเป็นก้อน
+ * ระหว่างช่องว่าง — ไม่มีจุดจบประโยค) โดยสะสมก้อนคำต่อจนหน่วยยาว ≥ TRIM_SENTENCE_MIN_CHARS แล้วปิดหน่วย ·
+ * เศษท้ายบรรทัดที่สั้นกว่าเกณฑ์ถูกรวมเข้าหน่วยก่อนหน้า — กัน "28" หรือ "กิโล" เป็นหน่วยเดี่ยวที่เช็ค substring ผ่านง่ายเกิน
+ * ★ ผู้ตรวจไขว้ 2 ก.ย. 69 (medium-low): นิยามเดิม (ตัดที่ [.!?…”] เท่านั้น) ให้หน่วย = ทั้งย่อหน้า (median 93–278 ตัวอักษร)
+ *   → 84% ของหน่วยถูกคุ้มครอง · 3/10 ฉบับตัดอะไรไม่ได้เลย — นิยามใหม่คุ้มครองแค่อนุประโยคที่มีของจริง ไม่ใช่ทั้งย่อหน้า
  */
 export function splitTrimSentences(text) {
-  return String(text || '')
-    .split(/\n+/)
-    .flatMap((line) => line.split(/(?<=[.!?…”’"])\s+/u))
-    .map((s) => s.trim())
-    .filter((s) => s.length >= 2);
+  const out = [];
+  for (const line of String(text || '').split(/\n+/)) {
+    const units = [];
+    let buffer = '';
+    for (const token of line.split(/\s+/)) {
+      if (!token) continue;
+      buffer = buffer ? `${buffer} ${token}` : token;
+      if (buffer.length >= TRIM_SENTENCE_MIN_CHARS) {
+        units.push(buffer);
+        buffer = '';
+      }
+    }
+    if (buffer) {
+      if (units.length > 0) units[units.length - 1] += ` ${buffer}`; // เศษสั้นท้ายบรรทัด → รวมหน่วยก่อนหน้า
+      else if (buffer.length >= 2) units.push(buffer);
+    }
+    out.push(...units);
+  }
+  return out;
 }
 
 /** ประโยค/บรรทัดที่เข้ากติกาคุ้มครอง — คืน [{ text, norm, types }] (norm = ยุบช่องว่างแล้ว ใช้เช็ค substring) */
@@ -167,9 +198,22 @@ export function buildTrimPrompt({ content, before, target, minWords, raw, rawCha
   ].join('\n');
 }
 
-/** ดึงเนื้อจากคำตอบ AI — รับ {content} · สตริง · {versions:[{content}]} · อื่น = '' */
+/**
+ * ดึงเนื้อจากคำตอบ AI — รับ {content} · สตริง · {versions:[{content}]} · อื่น = ''
+ * ★ ผู้ตรวจไขว้ 2 ก.ย. 69 (low · pre-existing): บางทาง callAI คืน JSON ดิบทั้งก้อนเป็นสตริง —
+ *   สตริงที่ trim แล้วขึ้นต้น { ให้ลองแกะ .content ก่อน (แกะไม่ได้/ไม่มี content = คืนสตริงเดิมตามพฤติกรรมเก่า)
+ */
 export function pickTrimmedContent(result) {
-  if (typeof result === 'string') return result.trim();
+  if (typeof result === 'string') {
+    const trimmed = result.trim();
+    if (trimmed.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed.content === 'string') return parsed.content.trim();
+      } catch { /* ไม่ใช่ JSON — ใช้สตริงตรงตามเดิม */ }
+    }
+    return trimmed;
+  }
   if (result && typeof result === 'object') {
     if (typeof result.content === 'string') return result.content.trim();
     const first = Array.isArray(result.versions) ? result.versions[0] : null;

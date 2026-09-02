@@ -23,6 +23,12 @@
 //   ผลทุบเพิ่ม (ทุบสำเนาโมดูลใน test + ทุบไฟล์จริงแล้วคืนโค้ดเดิมทุกไบต์):
 //   M8 ตัดด่านกลไก (cutProtected = [])                                          ⇒ แดง "ด่านกลไกประโยคคุ้มครอง…"
 //   M9 ตัด fallback findMissingFacts(raw, '') ใน resolveTrimFactList              ⇒ แดง "ไม่ฉีด extractFacts…"
+// ★ รอบแก้ตามผู้ตรวจไขว้ (2 ก.ย. 69 · conditional): (1) normalize รูปอัญประกาศ/จุดไข่ปลาก่อนเทียบ — “”→"" ไม่ตีกลับ
+//   (2) หน่วย = ก้อนคำสะสม ≥ TRIM_SENTENCE_MIN_CHARS (วัดจริง P2new: คุ้มครอง 84%→30% · ฉบับตัดไม่ได้ 3/10→0/10)
+//   (3) pickTrimmedContent แกะ JSON ดิบที่มาเป็นสตริง · ผลทุบรอบนี้ (ทุบไฟล์จริงแล้วคืน):
+//   M10 ถอด quote-map ใน normalizeTrimWhitespace  ⇒ แดง "luna คืน “”→""…"
+//   M11 ปิดการปิดหน่วยตามเกณฑ์ (if (false))          ⇒ แดง "ตัวช่วยคุ้มครอง…" + "LONG ต้องมีหน่วยคุ้มครอง 4"
+//   M12 ถอด JSON.parse ใน pickTrimmedContent          ⇒ แดง "ตัวช่วย: pickTrimmedContent…"
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
@@ -38,6 +44,7 @@ import {
   PROTECTED_TITLE_RE,
   TRIM_FACT_LIST_LIMITS,
   TRIM_PASS_DEFAULTS,
+  TRIM_SENTENCE_MIN_CHARS,
   buildTrimPrompt,
   countThaiWordsDefault,
   formatTrimFactList,
@@ -90,7 +97,10 @@ function deps(extra = {}) {
 const FACTS_LISTED_FALLBACK = findMissingFacts(RAW, '', { maxMissing: FACT_CHECK_MAX_MISSING }).missing.length;
 const PROTECTED_IN_LONG = listProtectedSentences(LONG).length;
 assert.ok(FACTS_LISTED_FALLBACK >= 5, 'RAW ตัวอย่างต้องมีข้อเท็จจริงหลายรายการ (กันข้อสอบหลอกตัวเอง)');
-assert.equal(PROTECTED_IN_LONG, 2, 'LONG ต้องมีประโยคคุ้มครอง 2 หน่วย (เลข+วันที่ · เลข+คำพูด) — เปลี่ยนตัวแตกประโยคต้องรู้ตัว');
+// ★ ผู้ตรวจไขว้ 2 ก.ย. 69: หน่วยละเอียดขึ้น (fold ที่ช่องว่าง ≥ 20 ตัวอักษร) — FACTS แตกเป็น 6 หน่วย คุ้มครอง 4:
+//   "นายสมชาย ใจดี อายุ 45" · "20 บาท มานาน 30 ปี ที่ตลาดบางกะปิ" · "เมื่อวันที่ 10 ส.ค. 2569" · หน่วยคำพูด
+//   ("ปี ขายก๋วยเตี๋ยวชามละ" กับประโยค detail ไม่คุ้มครอง — luna ตัดส่วนน้ำได้จริง) · เปลี่ยนตัวแตกหน่วยต้องรู้ตัว
+assert.equal(PROTECTED_IN_LONG, 4, 'LONG ต้องมีหน่วยคุ้มครอง 4 หน่วยตามนิยาม fold ใหม่');
 
 test('ไม่เกิน max = ไม่ยิง AI และเวอร์ชันเดิมทุกช่อง (เพิ่มแค่ _trimPass)', async () => {
   const { callAI, calls } = mockAI({ content: 'ไม่ควรถูกใช้' });
@@ -289,6 +299,10 @@ test('parent signal ถูกยกเลิกไว้ก่อน (งบท�
 test('ตัวช่วย: pickTrimmedContent / missingFactKeys / countThaiWordsDefault / buildTrimPrompt ตัดเนื้อดิบยาว', () => {
   assert.equal(pickTrimmedContent({ content: '  ก ข  ' }), 'ก ข');
   assert.equal(pickTrimmedContent('สตริง'), 'สตริง');
+  // ★ ผู้ตรวจไขว้ 2 ก.ย. 69 (low): สตริงที่เป็น JSON ดิบทั้งก้อน → แกะ .content · แกะไม่ได้ = คืนสตริงเดิม
+  assert.equal(pickTrimmedContent('  {"content": " ตัดแล้ว "}  '), 'ตัดแล้ว', 'JSON ดิบเป็นสตริงต้องแกะ .content');
+  assert.equal(pickTrimmedContent('{ not json'), '{ not json', 'ขึ้นต้น { แต่ parse ไม่ได้ = คืนสตริงเดิม');
+  assert.equal(pickTrimmedContent('{"versions": [1]}'), '{"versions": [1]}', 'JSON ที่ไม่มี .content = คืนสตริงเดิม');
   assert.equal(pickTrimmedContent({ versions: [{ content: 'จากเวอร์ชัน' }] }), 'จากเวอร์ชัน');
   assert.equal(pickTrimmedContent({ content: 5 }), '');
   assert.equal(pickTrimmedContent(null), '');
@@ -371,6 +385,23 @@ test('★ ข้อแก้ ①: ด่านกลไกประโยคค�
   assert.equal(okWrap._trimPass.applied, true, `ยุบช่องว่างแล้วเทียบได้ ต้องไม่ตีกลับ: ${JSON.stringify(okWrap._trimPass)}`);
 });
 
+test('★ ผู้ตรวจไขว้ 2 ก.ย. 69: luna คืน “”→"" โดยประโยคครบ = ไม่ตีกลับ (normalize รูปอัญประกาศ) · แก้คำในคำพูด = ยังจับ', async () => {
+  // วัดจริง 10 ฉบับ: อัญประกาศต่างชนิดอย่างเดียวเคยทำ protected_sentence_cut 4/4 ฉบับที่มี “” (trim เป็นหมัน)
+  const quoteInner = 'ผมไม่เคยขึ้นราคาเพราะอยากให้ทุกคนได้กิน';
+  const asciiQuotes = `${FACTS.replace(`“${quoteInner}”`, `"${quoteInner}"`)}\n\n${filler(160, 'น้ำ')}`;
+  assert.ok(asciiQuotes.includes(`"${quoteInner}"`), 'เคสต้องแปลงชนิดอัญประกาศจริง (กันข้อสอบหลอกตัวเอง)');
+  const out = await trimIfTooLong(baseVersion(), deps({ callAI: mockAI({ content: asciiQuotes }).callAI }));
+  assert.equal(out._trimPass.applied, true, `ประโยคครบ ต่างแค่ชนิดอัญประกาศ ต้องไม่ตีกลับ: ${JSON.stringify(out._trimPass)}`);
+  assert.equal(out.content, asciiQuotes);
+  assert.equal(normalizeTrimWhitespace('“ก” ‘ข’ …'), '"ก" \'ข\' ...', 'map “”→" · ‘’→\' · …→... ก่อนยุบช่องว่าง');
+
+  // คำในคำพูดเปลี่ยน (ขึ้น→ลด) — แม้ชนิดอัญประกาศเปลี่ยนด้วย ก็ต้องยังจับ
+  const editedQuote = `${FACTS.replace(`“${quoteInner}”`, '"ผมไม่เคยลดราคาเพราะอยากให้ทุกคนได้กิน"')}\n\n${filler(160, 'น้ำ')}`;
+  const caught = await trimIfTooLong(baseVersion(), deps({ callAI: mockAI({ content: editedQuote }).callAI }));
+  assert.equal(caught._trimPass.reason, 'protected_sentence_cut', `แก้คำในคำพูดต้องถูกจับ: ${JSON.stringify(caught._trimPass)}`);
+  assert.equal(caught.content, LONG);
+});
+
 test('★ ข้อแก้ ①: ไม่ฉีด extractFacts → ถอยไป findMissingFacts(raw, "") · ไม่มีทั้งคู่ → ไม่มีหมวดรายการแต่ยังตัดได้ · resolveTrimFactList ห้ามล้ม', async () => {
   // deps() เดิม (ไม่มี extractFacts): รายการมาจาก findMissingFacts(raw, '') — พรอมต์ต้องมีหมวด
   const shorter = `${FACTS}\n\n${filler(160, 'น้ำ')}`;
@@ -420,10 +451,15 @@ test('★ ข้อแก้ ①: ตัวช่วยคุ้มครอง 
   assert.ok(PROTECTED_QUOTE_RE.test('เขาว่า “สู้”') && PROTECTED_QUOTE_RE.test("เธอว่า 'ไหว'") && !PROTECTED_QUOTE_RE.test('ไม่มีคำพูด'));
   assert.deepEqual(PROTECTED_SENTENCE_RULES.map((r) => r.type), ['quote', 'title', 'date', 'number']);
 
-  // แตกประโยค: ขึ้นบรรทัด + หลังอัญประกาศปิด/เครื่องหมายจบที่ตามด้วยช่องว่าง
+  // ★ ผู้ตรวจไขว้ 2 ก.ย. 69: หน่วย = ก้อนคำสะสม ≥ TRIM_SENTENCE_MIN_CHARS (แตกที่ช่องว่าง/บรรทัด · เศษท้ายรวมหน่วยก่อนหน้า)
+  assert.equal(TRIM_SENTENCE_MIN_CHARS, 20);
   const units = splitTrimSentences('บรรทัดแรกมี 20 บาท\nเขาพูดว่า “สู้ต่อ” แล้วเดินจากไป\n\nประโยคน้ำล้วนไม่มีอะไร');
-  assert.ok(units.includes('เขาพูดว่า “สู้ต่อ”'), `ต้องแตกหลังอัญประกาศปิด: ${JSON.stringify(units)}`);
-  assert.ok(units.includes('บรรทัดแรกมี 20 บาท') && units.includes('ประโยคน้ำล้วนไม่มีอะไร'));
+  assert.deepEqual(units, ['บรรทัดแรกมี 20 บาท', 'เขาพูดว่า “สู้ต่อ” แล้วเดินจากไป', 'ประโยคน้ำล้วนไม่มีอะไร'], 'ขึ้นบรรทัดใหม่ = ตัดเสมอ · ในบรรทัดสะสมถึงเกณฑ์แล้วปิดหน่วย');
+  assert.deepEqual(splitTrimSentences('เดิน 28 กิโล ทุกวัน'), ['เดิน 28 กิโล ทุกวัน'], '"28"/"กิโล" ต้องไม่เป็นหน่วยเดี่ยวที่ substring ผ่านง่าย');
+  const folded = splitTrimSentences('ประโยคแรกยาวพอที่จะปิดหน่วยเองได้เลย แล้วมีเศษ ท้าย');
+  assert.ok(folded.length >= 1 && folded[folded.length - 1].endsWith('ท้าย') && folded.every((u) => u.length >= TRIM_SENTENCE_MIN_CHARS || folded.length === 1), `เศษสั้นท้ายบรรทัดต้องรวมเข้าหน่วยก่อนหน้า: ${JSON.stringify(folded)}`);
+  const medians = splitTrimSentences(LONG).map((u) => u.length).sort((a, b) => a - b);
+  assert.ok(medians[Math.floor(medians.length / 2)] < 60, 'หน่วยส่วนใหญ่ต้องเล็กระดับอนุประโยค ไม่ใช่ทั้งย่อหน้า (ผู้ตรวจวัด median เดิม 93–278)');
   const guarded = listProtectedSentences('มีเลข 20 บาทอยู่หนึ่งประโยค\nเขาพูดว่า “สู้ต่อ” ตรงนี้\nประโยคน้ำล้วนไม่มีอะไร');
   assert.equal(guarded.length, 2, 'เลข 1 + คำพูด 1 (ประโยคน้ำไม่นับ)');
   assert.deepEqual(guarded[0].types, ['number']);
