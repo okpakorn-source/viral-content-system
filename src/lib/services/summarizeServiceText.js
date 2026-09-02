@@ -1775,7 +1775,8 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
     if (formalModeRule) console.log('[Analyze-Service] 🏛️ Formal mode ON (ข่าวทางการ/พระราชพิธี)');
 
     // ★ เฟส 2 "พรอมต์นักเขียน" (2 ก.ย. 69): บล็อกกฎใหม่ 3 สวิตช์ (ความยาวเป้าหมาย/ความซื่อตรง/กฎจากโพสต์ปัง) + สวิตช์แคชพรอมต์
-    //   อ่านสวิตช์ "จุดเดียว" ใน src/lib/services/writerPolicyText.js (ค่าเริ่มต้นปิดทั้งหมด = บล็อกว่าง + ไม่แตกก้อน = ใบสั่งเดิมไบต์ต่อไบต์)
+    //   อ่านสวิตช์ "จุดเดียว" ใน src/lib/services/writerPolicyText.js — ★ 3 ก.ย. 69: บล็อกกฎ 3 ตัว (LENGTH/FIDELITY/VIRAL_RULES) เปิดเป็นค่าเริ่มต้นหลัง A/B รอบ 3 ·
+    //   แคช (WRITER_PROMPT_CACHE_V2) ยังปิด · ตั้ง =0 ทุกตัว = บล็อกว่าง + ไม่แตกก้อน = ใบสั่งเดิมไบต์ต่อไบต์
     //   โหลดแบบ dynamic ในบล็อก try: โหลดไม่ได้ (เช่นเทสสตับเดิม) = เหมือนปิด ห้ามล้มท่อเขียน · ทะเบียน: src/lib/config/newsSwitches.js
     let _writerPolicy = null;
     let _writerPolicyBlock = '';

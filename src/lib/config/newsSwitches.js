@@ -291,23 +291,25 @@ export const NEWS_SWITCHES = Object.freeze([
     name: 'WORD_CAP_MAX', default: '900', values: ['จำนวนคำ > 0'], readBy: [SUMMARIZE], group: 'นักเขียน/ใบสั่งเขียน', kind: 'value',
     meaning: 'เพดานคำสูงสุดของสูตร WORD_FLEX_V2 (เฉพาะโหมดถอย LEGACY)', since: '16 ส.ค. 69', rollback: 'ลบ env = 900',
   },
-  // ── ★ เฟส 2 "พรอมต์นักเขียน" (2 ก.ย. 69) — ค่าเริ่มต้นปิดทั้ง 5 ตัว (รอ A/B) · ปิด = ใบสั่งเดิมไบต์ต่อไบต์ (สแนปช็อต tests/writer-prompt-cache-v2.test.mjs)
-  //   หลักฐาน: เพจจริง 1,927 โพสต์ 140–170 คำ ค่ากลาง 15,605 ไลก์ · 230+ ≈ 5–6 พัน · ระบบเขียน 228–296 คำ · ผู้ตรวจ 14 คน 12/14 ฉบับมีของแต่งเล็ก
-  //   4 ตัวแรกอ่าน "จุดเดียว" ใน writerPolicyText.js (รับเฉพาะ '1' ตรงตัว) · WRITER_TRIM_PASS อ่านที่ autoFlowServiceText (จุดต่อสายก่อน correction)
+  // ── ★ เฟส 2 "พรอมต์นักเขียน" (2 ก.ย. 69) — ★ 3 ก.ย. 69: บล็อกกฎ 3 ตัวแรกเปิดเป็นค่าเริ่มต้นหลัง A/B รอบ 3 ชนะ
+  //   (P2len = LENGTH+FIDELITY+VIRAL_RULES ไม่มี TRIM: 36.9 vs base 36.2 /50 · โหวตแย่สุด 1 vs 6 · tightness 7.5 vs 6.6 · คำเฉลี่ย 228 vs 245)
+  //   TRIM/CACHE ยังปิด (รอ A/B ของตัวเอง) · ตั้ง =0 ทุกตัว = ใบสั่งเดิมไบต์ต่อไบต์ (สแนปช็อต tests/writer-prompt-cache-v2.test.mjs)
+  //   หลักฐานเดิมที่ผลักดัน: เพจจริง 1,927 โพสต์ 140–170 คำ ค่ากลาง 15,605 ไลก์ · 230+ ≈ 5–6 พัน · ระบบเขียน 228–296 คำ · ผู้ตรวจ 14 คน 12/14 ฉบับมีของแต่งเล็ก
+  //   4 ตัวแรกอ่าน "จุดเดียว" ใน writerPolicyText.js (3 ตัวแรกอ่าน !== '0' · แคชรับเฉพาะ '1') · WRITER_TRIM_PASS อ่านที่ autoFlowServiceText (จุดต่อสายก่อน correction)
   {
-    name: 'WRITER_LENGTH_TARGET_V2', default: '0', values: ['0', '1'], readBy: [WRITER_POLICY], group: 'นักเขียน/ใบสั่งเขียน', kind: 'switch',
-    meaning: '=1 เติมบล็อกความยาวเป้าหมาย 150–190 คำ (ยืดถึง 220 เฉพาะข่าวหลายเหตุการณ์) + ลำดับการตัด + ของห้ามตัด ในโซนกฎคงที่ก่อน FINAL RAW AUTHORITY · ค่าเริ่มต้น = ไม่มีบล็อก',
-    since: '2 ก.ย. 69', rollback: 'ลบ env หรือ =0 = ใบสั่งเดิมไบต์ต่อไบต์',
+    name: 'WRITER_LENGTH_TARGET_V2', default: '1', values: ['0', '1'], readBy: [WRITER_POLICY], group: 'นักเขียน/ใบสั่งเขียน', kind: 'switch',
+    meaning: 'บล็อกความยาวเป้าหมาย 150–190 คำ (ยืดถึง 220 เฉพาะข่าวหลายเหตุการณ์) + ลำดับการตัด + ของห้ามตัด ในโซนกฎคงที่ก่อน FINAL RAW AUTHORITY — เปิดเป็นค่าเริ่มต้น 3 ก.ย. 69 หลัง A/B รอบ 3 (P2len 36.9 vs base 36.2 · โหวตแย่สุด 1 vs 6) · อ่าน !== "0"',
+    since: '2 ก.ย. 69 (เปิดเป็นค่าเริ่มต้น 3 ก.ย. 69)', rollback: 'WRITER_LENGTH_TARGET_V2=0 = ใบสั่งเดิมไบต์ต่อไบต์',
   },
   {
-    name: 'WRITER_FIDELITY_RULES_V2', default: '0', values: ['0', '1'], readBy: [WRITER_POLICY], group: 'นักเขียน/ใบสั่งเขียน', kind: 'switch',
-    meaning: '=1 เติมบล็อกความซื่อตรง: ห้ามแต่งการกระทำ/ความคิด/ท่าทาง/ความต่างที่ต้นฉบับไม่บอก ("ไม่ได้ดุ" "นั่งลงคุย") · ห้ามเดาเพศ/บทบาท (ใช้ชื่อหรือ "เจ้าตัว") · ตีความอารมณ์ ≤ 1 ประโยค/ย่อหน้า',
-    since: '2 ก.ย. 69', rollback: 'ลบ env หรือ =0 = ใบสั่งเดิมไบต์ต่อไบต์',
+    name: 'WRITER_FIDELITY_RULES_V2', default: '1', values: ['0', '1'], readBy: [WRITER_POLICY], group: 'นักเขียน/ใบสั่งเขียน', kind: 'switch',
+    meaning: 'บล็อกความซื่อตรง: ห้ามแต่งการกระทำ/ความคิด/ท่าทาง/ความต่างที่ต้นฉบับไม่บอก ("ไม่ได้ดุ" "นั่งลงคุย") · ห้ามเดาเพศ/บทบาท (ใช้ชื่อหรือ "เจ้าตัว") · ตีความอารมณ์ ≤ 1 ประโยค/ย่อหน้า + เตือนซื่อตรงติดเนื้อดิบ — เปิดเป็นค่าเริ่มต้น 3 ก.ย. 69 หลัง A/B รอบ 3 (โหวตแย่สุด 1 vs 6) · อ่าน !== "0"',
+    since: '2 ก.ย. 69 (เปิดเป็นค่าเริ่มต้น 3 ก.ย. 69)', rollback: 'WRITER_FIDELITY_RULES_V2=0 = ใบสั่งเดิมไบต์ต่อไบต์',
   },
   {
-    name: 'WRITER_VIRAL_RULES_V2', default: '0', values: ['0', '1'], readBy: [WRITER_POLICY], group: 'นักเขียน/ใบสั่งเขียน', kind: 'switch',
-    meaning: '=1 เติมบล็อก "กฎจากโพสต์ปังจริง" จาก data/writer-viral-rules.json ({version, rules[{id,text,evidence}]} — เติมข้อได้โดยไม่แตะโค้ด) · ไฟล์หาย/พัง/ว่าง = ไม่ใส่บล็อก ⚠️ บน Vercel ต้องเพิ่มไฟล์ใน outputFileTracingIncludes (next.config.mjs) ก่อนเปิด',
-    since: '2 ก.ย. 69', rollback: 'ลบ env หรือ =0 = ใบสั่งเดิมไบต์ต่อไบต์',
+    name: 'WRITER_VIRAL_RULES_V2', default: '1', values: ['0', '1'], readBy: [WRITER_POLICY], group: 'นักเขียน/ใบสั่งเขียน', kind: 'switch',
+    meaning: 'บล็อก "กฎจากโพสต์ปังจริง" จาก data/writer-viral-rules.json ({version, rules[{id,text,evidence}]} — เติมข้อได้โดยไม่แตะโค้ด) · ไฟล์หาย/พัง/ว่าง = ไม่ใส่บล็อก — เปิดเป็นค่าเริ่มต้น 3 ก.ย. 69 หลัง A/B รอบ 3 (tightness 7.5 vs 6.6) · อ่าน !== "0" ⚠️ ไฟล์อยู่ใน outputFileTracingIncludes ครบ 4 route แล้ว (ยืนยัน 3 ก.ย. 69)',
+    since: '2 ก.ย. 69 (เปิดเป็นค่าเริ่มต้น 3 ก.ย. 69)', rollback: 'WRITER_VIRAL_RULES_V2=0 = ใบสั่งเดิมไบต์ต่อไบต์',
   },
   {
     name: 'WRITER_PROMPT_CACHE_V2', default: '0', values: ['0', '1'], readBy: [WRITER_POLICY], group: 'นักเขียน/ใบสั่งเขียน', kind: 'switch',

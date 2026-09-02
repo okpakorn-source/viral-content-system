@@ -4,7 +4,9 @@
  * ไฟล์นี้ตั้งใจ "ไม่มี import '@/…'" (มีแค่ node:fs/node:path) เพื่อให้เทสดึงใช้ตรงได้ และให้ summarizeServiceText
  * โหลดแบบ dynamic import ในบล็อก try — เทสสตับเดิมที่โหลด summarizeServiceText ด้วย data:/tmp.mjs จึงไม่พัง
  *
- * สวิตช์ (อ่าน "จุดเดียว" ที่ไฟล์นี้ · รับเฉพาะสตริง '1' ตรงตัว · ค่าเริ่มต้นปิดทั้งหมด = ใบสั่งเดิมไบต์ต่อไบต์ · ต้องผ่าน A/B ก่อนเปิด):
+ * สวิตช์ (อ่าน "จุดเดียว" ที่ไฟล์นี้ · ★ 3 ก.ย. 69 บล็อกกฎ 3 ตัวแรกเปิดเป็นค่าเริ่มต้นหลัง A/B รอบ 3 ชนะ — P2len 36.9 vs base 36.2 /50 ·
+ *   โหวตแย่สุด 1 vs 6 · tightness 7.5 vs 6.6 · คำเฉลี่ย 228 vs 245 — อ่าน !== '0' แบบ TEACHER_RANK_V2/ANGLE2_DISTINCT_V2 · ปิดคืน =0 ทั้ง 3 = ใบสั่งเดิมไบต์ต่อไบต์
+ *   ส่วน WRITER_PROMPT_CACHE_V2 ยังปิด (รับเฉพาะ '1' ตรงตัว — รอ A/B ของตัวเอง เช่นเดียวกับ WRITER_TRIM_PASS ที่อ่านฝั่ง autoFlowServiceText):
  *   WRITER_LENGTH_TARGET_V2   บล็อกความยาวเป้าหมาย 150–190 คำ (ยืดถึง 220 เฉพาะข่าวหลายเหตุการณ์) + ลำดับการตัด + ของห้ามตัด
  *   WRITER_FIDELITY_RULES_V2  บล็อกความซื่อตรง: ห้ามแต่งการกระทำ/ความคิด/ท่าทาง/ความต่าง · ห้ามเดาเพศ/บทบาท · ตีความอารมณ์ ≤ 1 ประโยค/ย่อหน้า
  *   WRITER_VIRAL_RULES_V2     บล็อก "กฎจากโพสต์ปังจริง" อ่านจาก data/writer-viral-rules.json (ไฟล์หาย/พัง/ว่าง = ไม่ใส่บล็อก ไม่ล้มท่อ)
@@ -35,16 +37,19 @@ import { join } from 'node:path';
 /** ไฟล์กฎจากโพสต์ปังจริง (โครง { version, rules: [{ id, text, evidence }] }) — เติมข้อใหม่ได้โดยไม่แตะโค้ด */
 export const WRITER_VIRAL_RULES_FILE = 'data/writer-viral-rules.json';
 
-// ── สวิตช์ (รับเฉพาะ '1' ตรงตัว — ค่าอื่นทุกค่า = ปิด) ──
+// ── สวิตช์ ──
+// ★ 3 ก.ย. 69: 3 บล็อกกฎเปิดเป็นค่าเริ่มต้น (A/B รอบ 3 ชนะ) — อ่าน !== '0' ตามแบบแผนสวิตช์ default-on
+//   (TEACHER_RANK_V2 / MISSING_FACTS_GATE / ANGLE2_DISTINCT_V2) · ปิดคืน: ตั้ง =0 (รับเฉพาะ '0' ตรงตัว)
 export function isWriterLengthTargetV2On() {
-  return process.env.WRITER_LENGTH_TARGET_V2 === '1';
+  return process.env.WRITER_LENGTH_TARGET_V2 !== '0';
 }
 export function isWriterFidelityRulesV2On() {
-  return process.env.WRITER_FIDELITY_RULES_V2 === '1';
+  return process.env.WRITER_FIDELITY_RULES_V2 !== '0';
 }
 export function isWriterViralRulesV2On() {
-  return process.env.WRITER_VIRAL_RULES_V2 === '1';
+  return process.env.WRITER_VIRAL_RULES_V2 !== '0';
 }
+// แคชพรอมต์ยังค่าเริ่มต้นปิด (รับเฉพาะ '1' ตรงตัว — รอ A/B ของตัวเอง)
 export function isWriterPromptCacheV2On() {
   return process.env.WRITER_PROMPT_CACHE_V2 === '1';
 }
@@ -147,7 +152,7 @@ export function buildViralRulesBlock(opts = {}) {
 }
 
 /**
- * บล็อกกฎเฟส 2 รวม (ลำดับ: ความยาว → ความซื่อตรง → กฎจากโพสต์ปัง) — สวิตช์ปิดทั้งหมด = '' (ใบสั่งเดิมไบต์ต่อไบต์)
+ * บล็อกกฎเฟส 2 รวม (ลำดับ: ความยาว → ความซื่อตรง → กฎจากโพสต์ปัง) — ปิดทั้งหมด (=0 ทั้ง 3) = '' (ใบสั่งเดิมไบต์ต่อไบต์)
  * ทุกบล็อกลงท้ายด้วยบรรทัดว่างเหมือนหมวดกฎอื่นในใบสั่งเขียน (ผู้เรียกวางไว้ก่อน "✨ คำสั่งเด็ดขาด" + JSON)
  * @param {{ readFile?: (path: string) => string, cwd?: string }} [opts] ส่งต่อให้ loadWriterViralRules
  */

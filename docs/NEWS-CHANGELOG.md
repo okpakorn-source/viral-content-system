@@ -4,7 +4,13 @@
 > (43 ไฟล์ตาม `NEWS_SWITCH_FILES`) — **ห้ามแก้ไฟล์นี้ด้วยมือ** แก้ที่คอมเมนต์ในโค้ดแล้วรันสคริปต์ใหม่
 > เรียงวันที่ใหม่ → เก่า · รูปแบบ: `ไฟล์:บรรทัด` — ข้อความคอมเมนต์ (ย่อ 170 ตัวอักษร) · ปีที่ไม่ระบุถือเป็น พ.ศ. 69
 
-รายการทั้งหมด: 507 จุด
+รายการทั้งหมด: 511 จุด
+
+## 3 ก.ย. 69 (2026-09-03)
+
+- `src/lib/services/summarizeServiceText.js:1778` — อ่านสวิตช์ "จุดเดียว" ใน src/lib/services/writerPolicyText.js — ★ 3 ก.ย. 69: บล็อกกฎ 3 ตัว (LENGTH/FIDELITY/VIRAL_RULES) เปิดเป็นค่าเริ่มต้นหลัง A/B รอบ 3 ·
+- `src/lib/services/writerPolicyText.js:7` — สวิตช์ (อ่าน "จุดเดียว" ที่ไฟล์นี้ · ★ 3 ก.ย. 69 บล็อกกฎ 3 ตัวแรกเปิดเป็นค่าเริ่มต้นหลัง A/B รอบ 3 ชนะ — P2len 36.9 vs base 36.2 /50 ·
+- `src/lib/services/writerPolicyText.js:41` — ★ 3 ก.ย. 69: 3 บล็อกกฎเปิดเป็นค่าเริ่มต้น (A/B รอบ 3 ชนะ) — อ่าน !== '0' ตามแบบแผนสวิตช์ default-on
 
 ## 2 ก.ย. 69 (2026-09-02)
 
@@ -44,11 +50,12 @@
 - `src/lib/services/autoFlowServiceText.js:1319` — ป้ายซ้ำ (key_points ซ้ำกัน / ตัด 80 ตัวแล้วชนกัน) นับเป็นประเด็นเดียว — ไม่งั้นโผล่ "ซ้ำ \| ซ้ำ" ในพรอมต์ (ผู้ตรวจไขว้ 2 ก.ย. 69)
 - `src/lib/services/autoFlowServiceText.js:1393` — มุมที่ไม่มีประเด็นให้เล่าเต็ม (มุม > ประเด็น เช่น GEN_ANGLES=3 กับ 2 ประเด็น) = ไม่เติมข้อความ (เหมือนเดิม) — ห้ามสั่งนักเขียน "ย่อ/ข้ามทุกประเด็น" (ผู้ตรวจไขว้ 2 ก.ย. 69…
 - `src/lib/services/autoFlowServiceText.js:1475` — ★ เฟส 3 ข้อ 7 (2 ก.ย. 69 · VIRAL_SCORE_ANNOTATE=1 · ค่าเริ่มต้นปิด): แนบคะแนน "โอกาสปัง" ต่อฉบับ
+- `src/lib/services/autoFlowServiceText.js:1488` — ★ ผู้ตรวจไขว้ 2 ก.ย. 69: เนื้อไม่ใช่สตริง/ว่าง = ไม่ให้คะแนน (ไม่ใช่ให้คะแนนสตริงว่างต่ำๆ)
 - `src/lib/services/summarizeServiceText.js:171` — ★ ข้อแก้ ① หลัง A/B (2 ก.ย. 69) — param 3 (optional · ไม่ส่ง/null = สตริงเดิมทุกไบต์):
 - `src/lib/services/summarizeServiceText.js:1777` — ★ เฟส 2 "พรอมต์นักเขียน" (2 ก.ย. 69): บล็อกกฎใหม่ 3 สวิตช์ (ความยาวเป้าหมาย/ความซื่อตรง/กฎจากโพสต์ปัง) + สวิตช์แคชพรอมต์
-- `src/lib/services/summarizeServiceText.js:1782` — ★ ข้อแก้ ① (2 ก.ย. 69): เตือนซื่อตรงฉบับสั้น "ติดเนื้อดิบ" — null เมื่อสวิตช์ WRITER_FIDELITY_RULES_V2 ปิด/โหลดล้ม = สตริงเดิมทุกไบต์
-- `src/lib/services/summarizeServiceText.js:1800` — ★ เฟส 2 (2 ก.ย. 69): แยกใบสั่งเขียนเป็นก้อน "กฎคงที่" (_wpRulesHead/Quality/Craft/Final) กับ "วัตถุดิบผันตามข่าว"
-- `src/lib/services/summarizeServiceText.js:1923` — ประกอบตามลำดับเดิมทุกก้อน (ก่อน 2 ก.ย. 69 คือนิพจน์เดียว prompt + … ลำดับเดียวกันนี้) — เพิ่มเฉพาะ _writerPolicyBlock ที่ว่างเมื่อสวิตช์ปิด
+- `src/lib/services/summarizeServiceText.js:1783` — ★ ข้อแก้ ① (2 ก.ย. 69): เตือนซื่อตรงฉบับสั้น "ติดเนื้อดิบ" — null เมื่อสวิตช์ WRITER_FIDELITY_RULES_V2 ปิด/โหลดล้ม = สตริงเดิมทุกไบต์
+- `src/lib/services/summarizeServiceText.js:1801` — ★ เฟส 2 (2 ก.ย. 69): แยกใบสั่งเขียนเป็นก้อน "กฎคงที่" (_wpRulesHead/Quality/Craft/Final) กับ "วัตถุดิบผันตามข่าว"
+- `src/lib/services/summarizeServiceText.js:1924` — ประกอบตามลำดับเดิมทุกก้อน (ก่อน 2 ก.ย. 69 คือนิพจน์เดียว prompt + … ลำดับเดียวกันนี้) — เพิ่มเฉพาะ _writerPolicyBlock ที่ว่างเมื่อสวิตช์ปิด
 - `src/lib/services/viralFewshot.js:16` — 🎯 2 ก.ย. 69 rank-v2: กติกาหยิบครูใหม่ (ไฟล์ไม่มี import — ยืนเดี่ยว เทสยิงตรงได้)
 - `src/lib/services/viralFewshot.js:95` — ★ 2 ก.ย. 69 (rank-v2): แยก "ตัวอ่านไฟล์" ออกจาก "สวิตช์สูตรแสนไลก์" — rank-v2 ต้องเห็นไลก์จริงเสมอ (ยอดสูงนำ)
 - `src/lib/services/viralFewshot.js:178` — 🎯 2 ก.ย. 69: โหมด rank-v2 นับเป็นสายชั้นเฉพาะกิจด้วย (โผเดียวกัน ต้องย้อนสอบได้เท่ากัน) — โหมดเก่าไม่เปลี่ยน
@@ -66,9 +73,9 @@
 - `src/lib/services/viralFewshot.js:1168` — 🗂️ 2 ก.ย. 69 (ผู้ตรวจไขว้ — ข้อความ log): V2 คืน null เคยพิมพ์ `ชั้น "null"` · สวิตช์ปิด libCat เป็นสตริงเสมอ = ข้อความเดิมทุกไบต์
 - `src/lib/services/viralFewshot.js:1176` — ── 🎯 2 ก.ย. 69 rank-v2: แทนตัวสุ่มเฉพาะเมื่อชั้นเฉพาะกิจคัดโผสำเร็จ + สวิตช์เปิด ──
 - `src/lib/services/writerPolicyText.js:2` — ★ เฟส 2 "พรอมต์นักเขียน" (2 ก.ย. 69) — บล็อกกฎใหม่ 3 สวิตช์ + ตัวแตกก้อนใบสั่งเขียนเพื่อแคชพรอมต์ (WRITER_PROMPT_CACHE_V2)
-- `src/lib/services/writerPolicyText.js:13` — ★ ข้อแก้ ① หลังผล A/B (2 ก.ย. 69): บล็อก FIDELITY เต็มอยู่โซนกฎคงที่ไกลจากเนื้อดิบ → กฎห้ามเดาเพศไม่ถึงตอนเขียน
-- `src/lib/services/writerPolicyText.js:81` — ── 2.1) ★ ข้อแก้ ① (2 ก.ย. 69): เตือนซื่อตรงฉบับสั้น "ติดเนื้อดิบ" — สวิตช์เดิม WRITER_FIDELITY_RULES_V2 ไม่เพิ่มสวิตช์ใหม่ ──
-- `src/lib/services/writerPolicyText.js:165` — · ⚠️ ผู้ตรวจไขว้ 2 ก.ย. 69 (low — ไม่ใช่บั๊กโค้ด · สวิตช์ปิดอยู่): ข้อความ RAW-first/FINAL ใน summarizeServiceText ยังบรรยายเลย์เอาต์เดิม
+- `src/lib/services/writerPolicyText.js:15` — ★ ข้อแก้ ① หลังผล A/B (2 ก.ย. 69): บล็อก FIDELITY เต็มอยู่โซนกฎคงที่ไกลจากเนื้อดิบ → กฎห้ามเดาเพศไม่ถึงตอนเขียน
+- `src/lib/services/writerPolicyText.js:86` — ── 2.1) ★ ข้อแก้ ① (2 ก.ย. 69): เตือนซื่อตรงฉบับสั้น "ติดเนื้อดิบ" — สวิตช์เดิม WRITER_FIDELITY_RULES_V2 ไม่เพิ่มสวิตช์ใหม่ ──
+- `src/lib/services/writerPolicyText.js:170` — · ⚠️ ผู้ตรวจไขว้ 2 ก.ย. 69 (low — ไม่ใช่บั๊กโค้ด · สวิตช์ปิดอยู่): ข้อความ RAW-first/FINAL ใน summarizeServiceText ยังบรรยายเลย์เอาต์เดิม
 
 ## 1 ก.ย. 69 (2026-09-01)
 
@@ -89,8 +96,8 @@
 - `src/lib/correction/safeCorrectionService.js:14` — ★ 1 ก.ย. 69: แทนคำต้องห้ามด้วย pattern เดิมของ L2 (เคารพ whitelist ศัพท์แพทย์) — บั๊ก "ยาฆ่าเชื้อ→ยาก่อเหตุเชื้อ"
 - `src/lib/correction/safeCorrectionService.js:147` — ★ 1 ก.ย. 69: คำยาวก่อนคำสั้น ("ฆ่าตัวตาย" ก่อน "ฆ่า") + แทน "ตำแหน่งแรกที่ผ่านกันชน" ไม่ใช่ตำแหน่งแรกในบทความ
 - `src/lib/services/summarizeServiceText.js:8` — ★ 1 ก.ย. 69: สวิตช์อ่านค่าทน
-- `src/lib/services/summarizeServiceText.js:2955` — ★ 1 ก.ย. 69 (บั๊กระดับสูง พิสูจน์แล้ว): ถอยเงียบไม่มีร่องรอย → ลงบันทึกท่อเป็น warning ให้ /pipeline-logs และตัวตรวจสุขภาพเห็น
-- `src/lib/services/summarizeServiceText.js:3092` — ★ 1 ก.ย. 69: ร่องรอยการถอย (เดิมเงียบ ค้างได้เป็นวันโดยไม่มีใครรู้ว่าคุณภาพการ์ดตก)
+- `src/lib/services/summarizeServiceText.js:2956` — ★ 1 ก.ย. 69 (บั๊กระดับสูง พิสูจน์แล้ว): ถอยเงียบไม่มีร่องรอย → ลงบันทึกท่อเป็น warning ให้ /pipeline-logs และตัวตรวจสุขภาพเห็น
+- `src/lib/services/summarizeServiceText.js:3093` — ★ 1 ก.ย. 69: ร่องรอยการถอย (เดิมเงียบ ค้างได้เป็นวันโดยไม่มีใครรู้ว่าคุณภาพการ์ดตก)
 - `src/lib/services/viralFewshot.js:1058` — ★ 1 ก.ย. 69 (บั๊กระดับกลาง พิสูจน์แล้ว): เดิมกลืน error แล้วแคช "ไม่มีครู" ไว้ 10 นาที → ข่าวทุกใบช่วงนั้นเขียนโดยไม่มีครูไวรัล
 - `src/lib/services/viralFewshot.js:1068` — ★ 1 ก.ย. 69: แคชเฉพาะผลที่ดึงสำเร็จ
 - `src/lib/utils/envFlag.js:3` — ★ 1 ก.ย. 69: บั๊กที่พิสูจน์แล้ว 4 จุด — สวิตช์ต้องพิมพ์ '1' หรือ 'true' เป๊ะ ผิดนิดเดียวคือเงียบ (ไม่เตือน)
@@ -116,7 +123,7 @@
 - `src/lib/services/autoFlowServiceText.js:199` — ★ 21 ส.ค. 69: เก็บข้อความที่ผู้ใช้วางไว้แยกจาก newsData.newsBody ซึ่งผ่าน AI สกัด
 - `src/lib/services/summarizeServiceText.js:28` — สัญญา Breakdown ที่เจ้าของยืนยัน 21 ส.ค. 69: ส่งต่อ 4 มุมพอดี
 - `src/lib/services/summarizeServiceText.js:956` — ★ 21 ส.ค. 69: Breakdown ใช้ Sol + สัญญา 4 มุมตามที่เจ้าของเคาะจาก R73
-- `src/lib/services/summarizeServiceText.js:1792` — ★ 21 ส.ค. 69 เจ้าของกำหนด: วิธีเดิมทุกอย่างต้องอยู่ครบ แต่ Fable ต้องได้อ่าน
+- `src/lib/services/summarizeServiceText.js:1793` — ★ 21 ส.ค. 69 เจ้าของกำหนด: วิธีเดิมทุกอย่างต้องอยู่ครบ แต่ Fable ต้องได้อ่าน
 
 ## 20 ส.ค. 69 (2026-08-20)
 
@@ -125,9 +132,9 @@
 - `src/lib/services/summarizeServiceText.js:4` — 🎛️ 20 ส.ค. 69 (R3): ENDING_MODE ท่อนจบ + WITNESS_FACTLOCK — ห้ามอ่าน env 2 ตัวนี้เองจากไฟล์อื่น
 - `src/lib/services/summarizeServiceText.js:1491` _(อ้างถึง "20 ส.ค. 69")_ — 🎛️ 20 ส.ค. 69 (R3 ข้อ 2): เจ้าของเคาะฝั่ง "สัจธรรม" ไปแล้วตั้งแต่ 18 ส.ค. แต่วรรคห้ามข้อคิดยังค้างในบล็อกนี้ 2 จุด
 - `src/lib/services/summarizeServiceText.js:1645` — 🎛️ 20 ส.ค. 69 (R3 ข้อ 3 — เจ้าของเคาะเอง): เก็บบทบาทไว้ แต่ผ่อนด้วยหางกำกับ
-- `src/lib/services/summarizeServiceText.js:1817` — 🎛️ 20 ส.ค. 69 (R3 ข้อ 2): ท่อน [ย่อหน้าสุดท้าย] สั่ง "จบเรียบๆ ไม่ตีความ" ซึ่งขัดกับ Style Pack ข้อ 5 (จบด้วยสัจธรรม) ตรงๆ
-- `src/lib/services/summarizeServiceText.js:1843` — 🎛️ 20 ส.ค. 69 (R3 ข้อ 2): "ไม่สรุปข้อคิดชีวิต" = วรรคที่ 4 ที่ขัดกับฝั่งสัจธรรม · ENDING_MODE=plain คืนกลับมาทุกไบต์
-- `src/lib/services/summarizeServiceText.js:1872` — 🎛️ 20 ส.ค. 69 (R3 ข้อ 3): บรรทัดนี้บังคับ "ทุกย่อหน้าต้องมีภาพ" — ต้นฉบับไม่มีภาพให้ก็ต้องเสก ⇒ เติมหางชุดเดียวกับ The Witness
+- `src/lib/services/summarizeServiceText.js:1818` — 🎛️ 20 ส.ค. 69 (R3 ข้อ 2): ท่อน [ย่อหน้าสุดท้าย] สั่ง "จบเรียบๆ ไม่ตีความ" ซึ่งขัดกับ Style Pack ข้อ 5 (จบด้วยสัจธรรม) ตรงๆ
+- `src/lib/services/summarizeServiceText.js:1844` — 🎛️ 20 ส.ค. 69 (R3 ข้อ 2): "ไม่สรุปข้อคิดชีวิต" = วรรคที่ 4 ที่ขัดกับฝั่งสัจธรรม · ENDING_MODE=plain คืนกลับมาทุกไบต์
+- `src/lib/services/summarizeServiceText.js:1873` — 🎛️ 20 ส.ค. 69 (R3 ข้อ 3): บรรทัดนี้บังคับ "ทุกย่อหน้าต้องมีภาพ" — ต้นฉบับไม่มีภาพให้ก็ต้องเสก ⇒ เติมหางชุดเดียวกับ The Witness
 - `src/lib/services/viralFewshot.js:13` — 🎛️ 20 ส.ค. 69 (R3): ข้อ 1 วลีลายเซ็น + ข้อ 2 ท่อนจบ — ห้ามอ่าน env 2 ตัวนี้เองจากไฟล์อื่น
 - `src/lib/services/viralFewshot.js:44` — ★ 20 ส.ค. 69 (R3 ข้อ 1 — เจ้าของเคาะเอง): วลีลายเซ็นข้อ 3
 - `src/lib/services/viralFewshot.js:53` — ★ 20 ส.ค. 69 (R3 ข้อ 2 — เจ้าของเคาะ "เอา ก ก่อน" = ฝั่งสัจธรรม)
@@ -156,24 +163,24 @@
 - `src/lib/services/autoFlowServiceText.js:533` — 🔧 19 ส.ค. 69 รอบ 3 (โซลตรวจ): 3 อย่างในบล็อกเดียว —
 - `src/lib/services/autoFlowServiceText.js:552` — 🎛️ CARD_AUTHORITY R6 (19 ส.ค. 69): เปิดสวิตช์ = ถอดหาง " ห้ามขึ้นต้นด้วยวันที่" ทั้ง 4 สูตร + หางพร้อมท์ด้านล่าง · ปิด (default) = ข้อความเดิมทุกไบต์
 - `src/lib/services/autoFlowServiceText.js:619` — 🔧 19 ส.ค. 69 รอบ 3: _angleClosingPicks non-null = ฝั่งเขียนจะใช้แผนที่แนบแน่นอน (เงื่อนไข gate ฝั่งเขียน
-- `src/lib/services/autoFlowServiceText.js:2169` — ★ 19 ส.ค. 69 (🟡 FIXLIST-planK): สูตรจำนวนมุม 1-4 (default 2) รวมศูนย์ที่เดียว — เดิมก๊อปสูตรไว้ 2 จุด
-- `src/lib/services/autoFlowServiceText.js:2175` — ★ 19 ส.ค. 69 (ANGLE2_BY_SCORE — สเปคเฟเบิ้ล-สุด): ตัวเลือกมุมแบบอิงคะแนนไวรัล
-- `src/lib/services/autoFlowServiceText.js:2178` _(ปีไม่ระบุ)_ — นิยาม "มีคะแนน" (ผู้ตรวจโซล+คิมิชี้ตรงกัน 19 ส.ค. — Number(null)===0 ทำ null ชนะ key หายผิดสเปค):
-- `src/lib/services/autoFlowServiceText.js:2201` — 🔧 19 ส.ค. 69 รอบ 3 (โซลตรวจ): กติกาจับคู่จริงย้ายไปรวมศูนย์ที่ assignAngleClosings
-- `src/lib/services/autoFlowServiceText.js:2222` — ★ 19 ส.ค. 69 (ANGLE2_BY_SCORE): จุดหั่นมุมจุดที่ 3 — ต้องสลับพร้อมอีก 2 จุดเสมอ (ดูโน้ตที่ selectAnglesForGen)
+- `src/lib/services/autoFlowServiceText.js:2176` — ★ 19 ส.ค. 69 (🟡 FIXLIST-planK): สูตรจำนวนมุม 1-4 (default 2) รวมศูนย์ที่เดียว — เดิมก๊อปสูตรไว้ 2 จุด
+- `src/lib/services/autoFlowServiceText.js:2182` — ★ 19 ส.ค. 69 (ANGLE2_BY_SCORE — สเปคเฟเบิ้ล-สุด): ตัวเลือกมุมแบบอิงคะแนนไวรัล
+- `src/lib/services/autoFlowServiceText.js:2185` _(ปีไม่ระบุ)_ — นิยาม "มีคะแนน" (ผู้ตรวจโซล+คิมิชี้ตรงกัน 19 ส.ค. — Number(null)===0 ทำ null ชนะ key หายผิดสเปค):
+- `src/lib/services/autoFlowServiceText.js:2208` — 🔧 19 ส.ค. 69 รอบ 3 (โซลตรวจ): กติกาจับคู่จริงย้ายไปรวมศูนย์ที่ assignAngleClosings
+- `src/lib/services/autoFlowServiceText.js:2229` — ★ 19 ส.ค. 69 (ANGLE2_BY_SCORE): จุดหั่นมุมจุดที่ 3 — ต้องสลับพร้อมอีก 2 จุดเสมอ (ดูโน้ตที่ selectAnglesForGen)
 - `src/lib/services/summarizeServiceText.js:3` — 🎛️ สวิตช์ปลดกฎกลางทับการ์ด (19 ส.ค. 69) — ห้ามอ่าน env CARD_AUTH* เอง ต้อง import จากไฟล์กลางเท่านั้น
 - `src/lib/services/summarizeServiceText.js:6` — 🔧 19 ส.ค. 69 (HOOKS_OBJ_FIX): ตัวแปลงกลาง object → ข้อความ (กัน "[object Object]" หลุดเข้าตัวเขียน) — ถอย HOOKS_OBJ_FIX=0
 - `src/lib/services/summarizeServiceText.js:18` — ★ 19 ส.ค. 69 รอบ 3: assignAngleClosings = กติกานับ/จับคู่แผนจบรายมุม ชุดเดียวกับ autoFlow
 - `src/lib/services/summarizeServiceText.js:1486` — 🎛️ CARD_AUTHORITY R5A/R5B (19 ส.ค. 69): ผ่าบล็อกเป็น 3 ส่วน — สวิตช์ปิด (default) = ต่อกันแล้วได้ข้อความเดิมทุกไบต์
 - `src/lib/services/summarizeServiceText.js:1718` — 🎛️ CARD_AUTHORITY RXC (19 ส.ค. 69): เปิดสวิตช์ = ตัดเฉพาะประโยค "ทุกอย่างต้องรับใช้มุมนี้..."
-- `src/lib/services/summarizeServiceText.js:1815` — 🎛️ CARD_AUTHORITY R4 (19 ส.ค. 69): เปิดสวิตช์ = ตัดครึ่งหลัง "[ย่อหน้า 1] เปิดแรง hook..." เท่านั้น
-- `src/lib/services/summarizeServiceText.js:1828` — ★ 19 ส.ค. 69 FEELING_ECHO (เจ้าของเคาะ "ทางเลือก A" = แยกปลดจุดนี้จุดเดียว ไม่แตะของอื่นที่ VIRAL_HITS_FORMULA คุม):
-- `src/lib/services/summarizeServiceText.js:1852` — 🎛️ CARD_AUTHORITY R6 (19 ส.ค. 69): เปิดสวิตช์ = ถอดกฎข้อ 8 "ห้ามเปิดด้วยวันที่" ทั้งบรรทัด (เลขข้ออื่นคงเดิมไม่ขยับ)
-- `src/lib/services/summarizeServiceText.js:1884` — 🎛️ CARD_AUTHORITY R6 (19 ส.ค. 69): เปิดสวิตช์ = ถอดเฉพาะหาง " ห้ามเปิดด้วยวันที่"
-- `src/lib/services/summarizeServiceText.js:2160` — 🔧 19 ส.ค. 69 (HOOKS_OBJ_FIX บั๊ก A): quotes บางรอบเป็น { speaker, quote_type, content, emotional_use } — ไม่มีคีย์ quote/text เลย
-- `src/lib/services/summarizeServiceText.js:2299` — 🔧 19 ส.ค. 69 รอบ 3 (โซลจับ): เดิมนับใบที่ "มีชื่อ+มีเนื้อ" — ใบชื่อมั่วไม่เกี่ยวกับมุมไหนเลยก็ถูกนับ (รายงาน 2/2 ปลอม)
-- `src/lib/services/summarizeServiceText.js:2430` — 🔧 19 ส.ค. 69 (HOOKS_OBJ_FIX): ช่องนี้คืน object บ้าง/สตริงบ้าง — ต่อสตริงตรงๆ ได้ "[object Object]" · ถอย HOOKS_OBJ_FIX=0
-- `src/lib/services/summarizeServiceText.js:2435` — 🔧 19 ส.ค. 69 (HOOKS_OBJ_FIX): ตัวใหญ่สุด — พังเป็น "[object Object]" 19 จาก 23 รอบยิง (83%) · ถอย HOOKS_OBJ_FIX=0
+- `src/lib/services/summarizeServiceText.js:1816` — 🎛️ CARD_AUTHORITY R4 (19 ส.ค. 69): เปิดสวิตช์ = ตัดครึ่งหลัง "[ย่อหน้า 1] เปิดแรง hook..." เท่านั้น
+- `src/lib/services/summarizeServiceText.js:1829` — ★ 19 ส.ค. 69 FEELING_ECHO (เจ้าของเคาะ "ทางเลือก A" = แยกปลดจุดนี้จุดเดียว ไม่แตะของอื่นที่ VIRAL_HITS_FORMULA คุม):
+- `src/lib/services/summarizeServiceText.js:1853` — 🎛️ CARD_AUTHORITY R6 (19 ส.ค. 69): เปิดสวิตช์ = ถอดกฎข้อ 8 "ห้ามเปิดด้วยวันที่" ทั้งบรรทัด (เลขข้ออื่นคงเดิมไม่ขยับ)
+- `src/lib/services/summarizeServiceText.js:1885` — 🎛️ CARD_AUTHORITY R6 (19 ส.ค. 69): เปิดสวิตช์ = ถอดเฉพาะหาง " ห้ามเปิดด้วยวันที่"
+- `src/lib/services/summarizeServiceText.js:2161` — 🔧 19 ส.ค. 69 (HOOKS_OBJ_FIX บั๊ก A): quotes บางรอบเป็น { speaker, quote_type, content, emotional_use } — ไม่มีคีย์ quote/text เลย
+- `src/lib/services/summarizeServiceText.js:2300` — 🔧 19 ส.ค. 69 รอบ 3 (โซลจับ): เดิมนับใบที่ "มีชื่อ+มีเนื้อ" — ใบชื่อมั่วไม่เกี่ยวกับมุมไหนเลยก็ถูกนับ (รายงาน 2/2 ปลอม)
+- `src/lib/services/summarizeServiceText.js:2431` — 🔧 19 ส.ค. 69 (HOOKS_OBJ_FIX): ช่องนี้คืน object บ้าง/สตริงบ้าง — ต่อสตริงตรงๆ ได้ "[object Object]" · ถอย HOOKS_OBJ_FIX=0
+- `src/lib/services/summarizeServiceText.js:2436` — 🔧 19 ส.ค. 69 (HOOKS_OBJ_FIX): ตัวใหญ่สุด — พังเป็น "[object Object]" 19 จาก 23 รอบยิง (83%) · ถอย HOOKS_OBJ_FIX=0
 - `src/lib/utils/objText.js:2` — objText — ตัวแปลงกลาง "รายการวัตถุดิบข่าว → ข้อความที่คนอ่านรู้เรื่อง" (19 ส.ค. 69)
 - `src/lib/utils/objText.js:129` — กู้ "ตัวคำพูด" จาก object quote รูปร่างที่โค้ดเดิมอ่านไม่ได้ (บั๊ก A · 19 ส.ค. 69)
 
@@ -190,17 +197,17 @@
 - `src/lib/services/autoFlowServiceText.js:579` — 18 ส.ค. 69 เจ้าของสั่งถอด 3 รอบ (2132c6a · eb6ff50 · 9b9a689) คืนสภาพยุคปัง
 - `src/lib/services/autoFlowServiceText.js:616` — ★ 18 ส.ค. 69 (แบบ ก — ANGLE_CLOSING_SPLIT): มุมนี้รับเฉพาะแผนจบของมุมตัวเอง — กันท่อนจบแฝดข้ามมุม
 - `src/lib/services/autoFlowServiceText.js:1242` _(ปีไม่ระบุ)_ _(อ้างถึง "18 ส.ค.")_ — ★ 2 ก.ย. 69 — สวิตช์ทดลองเปิดเรื่อง (ค่าเริ่มต้น = พฤติกรรมเดิม 100% · เจ้าของสั่ง 18 ส.ค. "ห้ามสั่งทับการ์ด" จึงไม่เปิดเอง)
-- `src/lib/services/autoFlowServiceText.js:2200` — ★ 18 ส.ค. 69 (แบบ ก — ANGLE_CLOSING_SPLIT): หาแผนจบของมุมเดียวจาก blueprint.angle_closings
+- `src/lib/services/autoFlowServiceText.js:2207` — ★ 18 ส.ค. 69 (แบบ ก — ANGLE_CLOSING_SPLIT): หาแผนจบของมุมเดียวจาก blueprint.angle_closings
 - `src/lib/services/summarizeServiceText.js:692` — ★ 18 ส.ค. 69 (แบบ A — ANGLE_BLUEPRINT_MODE=per_angle): ส่วน prompt ที่ทำให้ Blueprint แต่ละ call ยึดมุมเดียว
 - `src/lib/services/summarizeServiceText.js:729` — ★ 18 ส.ค. 69 (แบบ ก — ANGLE_CLOSING_SPLIT): รายชื่อมุมให้ Blueprint วางแผนจบรายมุมในใบเดียว (โหมด blueprint เท่านั้น · ไม่ส่ง = พฤติกรรมเดิม)
 - `src/lib/services/summarizeServiceText.js:1491` _(ปีไม่ระบุ)_ _(อ้างถึง "18 ส.ค.")_ — 🎛️ 20 ส.ค. 69 (R3 ข้อ 2): เจ้าของเคาะฝั่ง "สัจธรรม" ไปแล้วตั้งแต่ 18 ส.ค. แต่วรรคห้ามข้อคิดยังค้างในบล็อกนี้ 2 จุด
 - `src/lib/services/summarizeServiceText.js:1526` — ★ 18 ส.ค. 69: จำกัดไว้โหมดถอยเท่านั้น — ถ้าปล่อยรันในโหมดปกติ จะทับเลขกลับเป็น short {250,300}
-- `src/lib/services/summarizeServiceText.js:1811` _(อ้างถึง "18 ส.ค. 69")_ — 18 ส.ค. 69 เจ้าของสั่งถอดกฎท่อนจบของ 1 ส.ค. คืนของยุคปัง 21 มิ.ย.
-- `src/lib/services/summarizeServiceText.js:1854` _(อ้างถึง "18 ส.ค. 69")_ — ★ 18 ส.ค. 69 (เจ้าของสั่ง "กฎเดิม 11 มิ.ย. เก็บ · กฎใหม่ 16 ส.ค. ลบออก"):
-- `src/lib/services/summarizeServiceText.js:2168` — ★ 18 ส.ค. 69 (แบบ ก — เฟเบิ้ล-สุด · ANGLE_CLOSING_SPLIT): แผนจบแยกรายมุมในใบเดียว — Blueprint ยังเรียกครั้งเดียว/ข่าว
-- `src/lib/services/summarizeServiceText.js:2690` _(อ้างถึง "18 ส.ค. 69")_ — 18 ส.ค. 69 เจ้าของสั่งถอดกฎท่อนจบของ 1 ส.ค. คืนของยุคปัง 21 มิ.ย.
-- `src/lib/services/summarizeServiceText.js:2861` — 18 ส.ค. 69 เจ้าของสั่ง: บรรณารักษ์เห็นข้อมูลการ์ดไม่พอ → เติม ท่าเปิด/โทน/โครงอารมณ์ ลงสารบัญ (อ่านจากการ์ด ไม่แก้การ์ด)
-- `src/lib/services/summarizeServiceText.js:2989` — 18 ส.ค. 69 เจ้าของอนุมัติ: ด่านเคาะ 14→1 เห็นการ์ดเต็มใบ (เดิม 600 ตัวอักษร ≈12%)
+- `src/lib/services/summarizeServiceText.js:1812` _(อ้างถึง "18 ส.ค. 69")_ — 18 ส.ค. 69 เจ้าของสั่งถอดกฎท่อนจบของ 1 ส.ค. คืนของยุคปัง 21 มิ.ย.
+- `src/lib/services/summarizeServiceText.js:1855` _(อ้างถึง "18 ส.ค. 69")_ — ★ 18 ส.ค. 69 (เจ้าของสั่ง "กฎเดิม 11 มิ.ย. เก็บ · กฎใหม่ 16 ส.ค. ลบออก"):
+- `src/lib/services/summarizeServiceText.js:2169` — ★ 18 ส.ค. 69 (แบบ ก — เฟเบิ้ล-สุด · ANGLE_CLOSING_SPLIT): แผนจบแยกรายมุมในใบเดียว — Blueprint ยังเรียกครั้งเดียว/ข่าว
+- `src/lib/services/summarizeServiceText.js:2691` _(อ้างถึง "18 ส.ค. 69")_ — 18 ส.ค. 69 เจ้าของสั่งถอดกฎท่อนจบของ 1 ส.ค. คืนของยุคปัง 21 มิ.ย.
+- `src/lib/services/summarizeServiceText.js:2862` — 18 ส.ค. 69 เจ้าของสั่ง: บรรณารักษ์เห็นข้อมูลการ์ดไม่พอ → เติม ท่าเปิด/โทน/โครงอารมณ์ ลงสารบัญ (อ่านจากการ์ด ไม่แก้การ์ด)
+- `src/lib/services/summarizeServiceText.js:2990` — 18 ส.ค. 69 เจ้าของอนุมัติ: ด่านเคาะ 14→1 เห็นการ์ดเต็มใบ (เดิม 600 ตัวอักษร ≈12%)
 - `src/lib/services/viralFewshot.js:23` — 🗓️ 18 ส.ค. 69: HOOK_STYLE_MODE ถูกถอดออกจากระบบแล้ว (ไม่มีโค้ดอ่านอีก) — เก็บไว้เป็นตัวอย่างบทเรียนเท่านั้น
 - `src/lib/services/viralFewshot.js:28` _(อ้างถึง "18 ส.ค. 69")_ — 18 ส.ค. 69 เจ้าของสั่ง "ใช้โค้ดช่วง 12 มิ.ย. – 1 ก.ค." — คืนสูตรนี้เป็นตัวดั้งเดิม e5ba1eb (11 มิ.ย.)
 - `src/lib/services/viralFewshot.js:1269` _(อ้างถึง "18 ส.ค. 69")_ — 18 ส.ค. 69 เจ้าของสั่งถอดสูตรบังคับ v2 (721dbf8 14 ส.ค.) + สวิตช์ HOOK_STYLE_MODE (eb6ff50 16 ส.ค.) — คืนสภาพ 11 มิ.ย.
@@ -227,13 +234,13 @@
 - `src/lib/services/summarizeServiceText.js:775` _(ปีไม่ระบุ)_ — 3 ย่อหน้ายังล็อกเหนือ VIRAL_HITS_FORMULA เหมือนหลัก 17 ส.ค. (ค่าคงที่ในนโยบายกลาง)
 - `src/lib/services/summarizeServiceText.js:1534` — 🗑️ 17 ส.ค. 69: สวิตช์ข่าวบาง THIN_SOURCE_2PARA ถูก "ลบทั้งบล็อก" ตามคำสั่งเจ้าของ ("ลบทิ้งเลยกันพลาด")
 - `src/lib/services/summarizeServiceText.js:1536` _(ปีไม่ระบุ)_ — เหตุผลลบ: ปัญหา "ข่าวบางพองเกิน" ถูกแก้ที่รากด้วยการถอดกฎบังคับยาว (17 ส.ค.) — ข่าวดิบ 92 คำ
-- `src/lib/services/summarizeServiceText.js:1810` — 🗑️ 17 ส.ค. 69 (เจ้าของสั่ง "ตัดอันนี้ถึงเลย ลบเลย") — เลิกบังคับช่วงคำ เปลี่ยนเป็นประเมินจากเนื้อดิบ · ถอย LEGACY_LENGTH_RULES=1
-- `src/lib/services/summarizeServiceText.js:1821` — 🔴 17 ส.ค. 69: ตัดโควตาประโยคต่อย่อหน้าออก — เจ้าของชี้เองว่า "อันนี้ตัวทำพัง"
-- `src/lib/services/summarizeServiceText.js:1912` — 🔴 17 ส.ค. 69: "ความยาวตามที่กำหนด" กลายเป็นคำสั่งลอยหลังถอดพื้นคำออก (เฟเบิ้ลจับได้)
-- `src/lib/services/summarizeServiceText.js:1918` — 🗑️ 17 ส.ค. 69: ตัวอย่างใน JSON ก็สั่งความยาวด้วย — โมเดลมักยึดตัวอย่างมากกว่าคำอธิบาย · ถอย LEGACY_LENGTH_RULES=1
-- `src/lib/services/summarizeServiceText.js:2450` — 🗑️ 17 ส.ค. 69: ถอด "กฎความยาว: เขียนให้ยาว..." ออก (ถอยคืน LEGACY_LENGTH_RULES=1)
-- `src/lib/services/summarizeServiceText.js:2531` — 🗑️ 17 ส.ค. 69: โหมด mix (ปุ่ม "AI ผสมมุมข่าว" ที่คนกดเอง) · ถอย LEGACY_LENGTH_RULES=1
-- `src/lib/services/summarizeServiceText.js:2544` — 🗑️ 17 ส.ค. 69: ของเดิมเขียน "เนื้อหายาว 250+ คำ 3 ย่อหน้า" ไว้ในตัวอย่าง JSON แบบไม่มีสวิตช์ครอบ
+- `src/lib/services/summarizeServiceText.js:1811` — 🗑️ 17 ส.ค. 69 (เจ้าของสั่ง "ตัดอันนี้ถึงเลย ลบเลย") — เลิกบังคับช่วงคำ เปลี่ยนเป็นประเมินจากเนื้อดิบ · ถอย LEGACY_LENGTH_RULES=1
+- `src/lib/services/summarizeServiceText.js:1822` — 🔴 17 ส.ค. 69: ตัดโควตาประโยคต่อย่อหน้าออก — เจ้าของชี้เองว่า "อันนี้ตัวทำพัง"
+- `src/lib/services/summarizeServiceText.js:1913` — 🔴 17 ส.ค. 69: "ความยาวตามที่กำหนด" กลายเป็นคำสั่งลอยหลังถอดพื้นคำออก (เฟเบิ้ลจับได้)
+- `src/lib/services/summarizeServiceText.js:1919` — 🗑️ 17 ส.ค. 69: ตัวอย่างใน JSON ก็สั่งความยาวด้วย — โมเดลมักยึดตัวอย่างมากกว่าคำอธิบาย · ถอย LEGACY_LENGTH_RULES=1
+- `src/lib/services/summarizeServiceText.js:2451` — 🗑️ 17 ส.ค. 69: ถอด "กฎความยาว: เขียนให้ยาว..." ออก (ถอยคืน LEGACY_LENGTH_RULES=1)
+- `src/lib/services/summarizeServiceText.js:2532` — 🗑️ 17 ส.ค. 69: โหมด mix (ปุ่ม "AI ผสมมุมข่าว" ที่คนกดเอง) · ถอย LEGACY_LENGTH_RULES=1
+- `src/lib/services/summarizeServiceText.js:2545` — 🗑️ 17 ส.ค. 69: ของเดิมเขียน "เนื้อหายาว 250+ คำ 3 ย่อหน้า" ไว้ในตัวอย่าง JSON แบบไม่มีสวิตช์ครอบ
 
 ## 16 ส.ค. 69 (2026-08-16)
 
@@ -255,8 +262,8 @@
 - `src/lib/services/summarizeServiceText.js:74` _(ปีไม่ระบุ)_ — ⚠️ ใช้ตัวอ่านตัวเดียวทั้งไฟล์ (บทเรียน 16 ส.ค.: HOOK_STYLE_MODE ถูกเช็ค 3 แบบ
 - `src/lib/services/summarizeServiceText.js:90` — ★ 16 ส.ค. 69 (เจ้าของสั่ง "ปรับให้ยาวกว่านี้ได้ เพราะแต่ละข่าวมีเนื้อเรื่องต่างกัน
 - `src/lib/services/summarizeServiceText.js:1542` — ★ 16 ส.ค. 69 (เจ้าของสั่ง): "ปรับความยืดหยุ่นคำลงมาที่ 165 คำขั้นต่ำ ส่วนถ้าเนื้อดิบมาเยอะ เจนยาวกว่านี้ได้"
-- `src/lib/services/summarizeServiceText.js:1854` _(ปีไม่ระบุ)_ _(อ้างถึง "16 ส.ค.")_ — ★ 18 ส.ค. 69 (เจ้าของสั่ง "กฎเดิม 11 มิ.ย. เก็บ · กฎใหม่ 16 ส.ค. ลบออก"):
-- `src/lib/services/summarizeServiceText.js:1855` _(ปีไม่ระบุ)_ — ท่อนที่สั่ง "ประโยคแรกต้องขึ้นต้นด้วยคน/การกระทำ · บอกก่อนว่าใคร" (เพิ่มโดย eb6ff50 16 ส.ค.) ถูกลบถาวร
+- `src/lib/services/summarizeServiceText.js:1855` _(ปีไม่ระบุ)_ _(อ้างถึง "16 ส.ค.")_ — ★ 18 ส.ค. 69 (เจ้าของสั่ง "กฎเดิม 11 มิ.ย. เก็บ · กฎใหม่ 16 ส.ค. ลบออก"):
+- `src/lib/services/summarizeServiceText.js:1856` _(ปีไม่ระบุ)_ — ท่อนที่สั่ง "ประโยคแรกต้องขึ้นต้นด้วยคน/การกระทำ · บอกก่อนว่าใคร" (เพิ่มโดย eb6ff50 16 ส.ค.) ถูกลบถาวร
 - `src/lib/services/viralFewshot.js:18` — ★ 16 ส.ค. 69 — ตัวอ่าน env: ตัดช่องว่าง + ถอดเครื่องหมายคำพูด + ไม่สนตัวพิมพ์
 - `src/lib/services/viralFewshot.js:175` — ★ 16 ส.ค. 69 (ผู้ตรวจอิสระ — โจทย์เจ้าของสั่ง "ต้องตรวจย้อนได้"): เหตุผลของชั้นเฉพาะกิจยาวเฉลี่ย ~366 ตัวอักษร
 - `src/lib/services/viralFewshot.js:221` — 🐛 บั๊กค้างที่รู้ตัวแล้วแต่ "จงใจไม่แก้ในแบตช์นี้" (16 ส.ค. 69 — ผู้ตรวจอิสระจับได้):
@@ -309,14 +316,14 @@
 - `src/lib/ai/modelConfig.js:30` — ★ 15 ส.ค. 69 (เจ้าของเคาะ): ขั้น 3 Blueprint (วางโครงอารมณ์) → gpt-5.6-sol
 - `src/lib/ai/modelConfig.js:72` — ★ 15 ส.ค. 69 นักเขียนหลักใหม่ — ไม่มีแถวนี้ /cost จะบันทึก $0 (ผู้ตรวจ Fable จับ)
 - `src/lib/correction/fabricationGate.js:140` — ★ 15 ส.ค. 69 (เจ้าของเคาะหลังศึกหมอผ่าตัด 8 โมเดล × 2 รอบ ด้วยโจทย์เดียวกันเป๊ะ): ระบุตัวผ่า = claude-opus-5
-- `src/lib/services/summarizeServiceText.js:2282` — ★ 15 ส.ค. 69 (เจ้าของเคาะหลังแข่ง 9 โมเดล · กรรมการปิดตา 7 เสียง): ขั้น 3 → gpt-5.6-sol
-- `src/lib/services/summarizeServiceText.js:2895` — ★ 15 ส.ค. 69 (ขั้น 4 sonnet-5 — เจ้าของอนุมัติ หลังแล็บ 44+12 นัด): โมเดลขึ้นต้น claude- → callClaude คิดเบา + แคชสารบัญ
-- `src/lib/services/summarizeServiceText.js:2897` — ★ 15 ส.ค. 69 ดึก (เจ้าของสั่ง "เปิดใช้ sonnet5"): default → claude-sonnet-5 · ถอยกลับ: CARD_PICKER_MODEL=gpt-5.6-luna
-- `src/lib/services/summarizeServiceText.js:2899` _(ปีไม่ระบุ)_ — ★ 15 ส.ค. เย็น เจ้าของสั่งถอย: sonnet-5 ทำข่าวบิดเบือนเยอะ → กลับ luna (เปิด sonnet-5 คืน: CARD_PICKER_MODEL=claude-sonnet-5)
-- `src/lib/services/summarizeServiceText.js:2966` — ★ รอบเทสจริง s5_abort (15 ส.ค. 69): ประกาศนอก try — catch (_pickErr) ใช้ชื่อโมเดลใน log ต้องมองเห็น
-- `src/lib/services/summarizeServiceText.js:2968` — ★ 15 ส.ค. 69 ดึก (เจ้าของสั่ง "เปิดใช้ sonnet5"): default → claude-sonnet-5 (ของเดิม: \|\| MODEL_FAST_CHEAP = luna)
-- `src/lib/services/summarizeServiceText.js:2969` _(ปีไม่ระบุ)_ — ★ 15 ส.ค. เย็น เจ้าของสั่งถอยกลับ luna
-- `src/lib/services/summarizeServiceText.js:3032` — ★ 15 ส.ค. 69 (ขั้น 4 sonnet-5 — เจ้าของอนุมัติ): ซ่อมบั๊ก race ไม่ตัดสาย HTTP จริง (จ่ายเงินฟรีหลัง timeout)
+- `src/lib/services/summarizeServiceText.js:2283` — ★ 15 ส.ค. 69 (เจ้าของเคาะหลังแข่ง 9 โมเดล · กรรมการปิดตา 7 เสียง): ขั้น 3 → gpt-5.6-sol
+- `src/lib/services/summarizeServiceText.js:2896` — ★ 15 ส.ค. 69 (ขั้น 4 sonnet-5 — เจ้าของอนุมัติ หลังแล็บ 44+12 นัด): โมเดลขึ้นต้น claude- → callClaude คิดเบา + แคชสารบัญ
+- `src/lib/services/summarizeServiceText.js:2898` — ★ 15 ส.ค. 69 ดึก (เจ้าของสั่ง "เปิดใช้ sonnet5"): default → claude-sonnet-5 · ถอยกลับ: CARD_PICKER_MODEL=gpt-5.6-luna
+- `src/lib/services/summarizeServiceText.js:2900` _(ปีไม่ระบุ)_ — ★ 15 ส.ค. เย็น เจ้าของสั่งถอย: sonnet-5 ทำข่าวบิดเบือนเยอะ → กลับ luna (เปิด sonnet-5 คืน: CARD_PICKER_MODEL=claude-sonnet-5)
+- `src/lib/services/summarizeServiceText.js:2967` — ★ รอบเทสจริง s5_abort (15 ส.ค. 69): ประกาศนอก try — catch (_pickErr) ใช้ชื่อโมเดลใน log ต้องมองเห็น
+- `src/lib/services/summarizeServiceText.js:2969` — ★ 15 ส.ค. 69 ดึก (เจ้าของสั่ง "เปิดใช้ sonnet5"): default → claude-sonnet-5 (ของเดิม: \|\| MODEL_FAST_CHEAP = luna)
+- `src/lib/services/summarizeServiceText.js:2970` _(ปีไม่ระบุ)_ — ★ 15 ส.ค. เย็น เจ้าของสั่งถอยกลับ luna
+- `src/lib/services/summarizeServiceText.js:3033` — ★ 15 ส.ค. 69 (ขั้น 4 sonnet-5 — เจ้าของอนุมัติ): ซ่อมบั๊ก race ไม่ตัดสาย HTTP จริง (จ่ายเงินฟรีหลัง timeout)
 
 ## 14 ส.ค. 69 (2026-08-14)
 
@@ -333,7 +340,7 @@
 - `src/lib/services/autoFlowServiceText.js:853` — ★ 14 ส.ค. 69: ส่งข้อเท็จจริงรีเสิร์ชให้ด่าน L1.8 — ของจริงจากรีเสิร์ชไม่ใช่ "ของเกิน"
 - `src/lib/services/autoFlowServiceText.js:1144` — ★ 14 ส.ค. 69 (Sol 4a): เวลาจริงรายงาน — เดิมสองตัวนี้ใช้ช่วงขนานรวม = เลขซ้ำทุกเคส
 - `src/lib/services/autoFlowServiceText.js:1218` — ★ 14 ส.ค. 69 (Sol 4a): เวลาจริงรายงาน — logger กับ response ใช้ก้อนเดียวกัน
-- `src/lib/services/summarizeServiceText.js:1827` — ★ 14 ส.ค. 69 สูตรแสนไลก์: วลี "ใครเห็นก็..." ชนกฎ v2 ห้ามบอกความรู้สึกแทนคนอ่าน (Sol จับได้ตอนรีวิวร่วม) — สวิตช์ปิด=ข้อความเดิมเป๊ะ
+- `src/lib/services/summarizeServiceText.js:1828` — ★ 14 ส.ค. 69 สูตรแสนไลก์: วลี "ใครเห็นก็..." ชนกฎ v2 ห้ามบอกความรู้สึกแทนคนอ่าน (Sol จับได้ตอนรีวิวร่วม) — สวิตช์ปิด=ข้อความเดิมเป๊ะ
 - `src/lib/services/viralFewshot.js:29` _(ปีไม่ระบุ)_ _(อ้างถึง "14 ส.ค.")_ — ถอยที่คืนออกไป: c168841 (14 ส.ค. แก้ข้อ 1) · ee64be8 (1 ส.ค. แก้ข้อ 5) · กู้กลับ: git show e5ba1eb
 - `src/lib/services/viralFewshot.js:39` — ★ 14 ส.ค. 69 ค่ำ — "สูตรแสนไลก์" เป็นตัวจริง (เจ้าของสั่ง "จัดการให้เป็นโค้ดใหม่" หลังดูผลเทส 3 ข่าวแล้วชอบ)
 - `src/lib/services/viralFewshot.js:87` — ★ 14 ส.ค. 69 (สูตรแสนไลก์ ข้อ 3): ถ่วงการหยิบครูด้วยไลก์จริงจากเพจ — ไฟล์ data/viral-likes-real.json
@@ -375,7 +382,7 @@
 
 ## 2 ส.ค. 69 (2026-08-02)
 
-- `src/lib/services/summarizeServiceText.js:2287` — ★ 2 ส.ค. 69: 1200→8000 — ค่าเดิมจากยุคโมเดลเล็ก พอโล๊ะเป็น luna (reasoning คิดกินโควตา) เพดานไม่พอ
+- `src/lib/services/summarizeServiceText.js:2288` — ★ 2 ส.ค. 69: 1200→8000 — ค่าเดิมจากยุคโมเดลเล็ก พอโล๊ะเป็น luna (reasoning คิดกินโควตา) เพดานไม่พอ
 - `src/lib/services/viralFewshot.js:173` _(ปีไม่ระบุ)_ — ★ ผู้ตรวจจับได้ (บทเรียนซ้ำรอย "ตำราว่างเงียบๆ" 2 ส.ค.): supabase-js ไม่ throw เมื่อ insert ล้ม —
 - `src/lib/services/viralFewshot.js:381` _(ปีไม่ระบุ)_ _(อ้างถึง "2 ส.ค.")_ — 🛡️ 16 ส.ค. 69 (ผู้ตรวจอิสระ — บทเรียนซ้ำรอย "ตำราว่างเงียบๆ" 2 ส.ค.): ของเดิมแคช {} ถาวรถ้าอ่านไฟล์ล้มครั้งเดียว
 - `src/lib/services/viralFewshot.js:538` _(ปีไม่ระบุ)_ — อ่านล้ม/หมดเวลา → ถือว่าใช้ 0 ทุกใบ (ห้ามให้ท่อข่าวล้ม) และลองใหม่ใน 60 วิ (บทเรียน "ตำราว่างเงียบๆ" 2 ส.ค.: ห้ามแคชความล้มเหลวยาว)
@@ -425,12 +432,12 @@
 - `src/lib/services/summarizeServiceText.js:1282` _(ปีไม่ระบุ)_ — หมายเหตุเส้นทาง (Opus ตรวจ 1 ส.ค.): สายคิว/autoFlow ส่ง presetPrompt มาเสมอ → บล็อกนี้ทำงานเฉพาะสายเรียกตรง
 - `src/lib/services/summarizeServiceText.js:1484` — ★ 1 ส.ค. 69 (เจ้าของสั่ง): กฎเหล็ก "บังคับมีข้อคิด/บทเรียน" default ปิด — ข่าวหลากหลาย ระบบห้ามยัดข้อคิดเอง
 - `src/lib/services/summarizeServiceText.js:1576` — ★ 1 ส.ค. 69 (Opus P2-4): ใบที่ luna เลือก (_matchType='AI_PICKED') ต้องใช้เกรดสูตรจริง (_formulaMatchType)
-- `src/lib/services/summarizeServiceText.js:1811` _(ปีไม่ระบุ)_ _(อ้างถึง "1 ส.ค.")_ — 18 ส.ค. 69 เจ้าของสั่งถอดกฎท่อนจบของ 1 ส.ค. คืนของยุคปัง 21 มิ.ย.
-- `src/lib/services/summarizeServiceText.js:2062` — ★ 1 ส.ค. 69 กล่องดำ: เก็บร่างดิบจากตัวเขียนก่อนโดนจัดระเบียบ/แก้คำ — หลักฐานชี้ตัวการชั้นแรก
-- `src/lib/services/summarizeServiceText.js:2122` _(ปีไม่ระบุ)_ — ★ 1 ส.ค.: แยก "luna ยืนยัน/เลือก" ออกจาก "luna ล่ม" ได้ในบันทึก
-- `src/lib/services/summarizeServiceText.js:2690` _(ปีไม่ระบุ)_ _(อ้างถึง "1 ส.ค.")_ — 18 ส.ค. 69 เจ้าของสั่งถอดกฎท่อนจบของ 1 ส.ค. คืนของยุคปัง 21 มิ.ย.
-- `src/lib/services/summarizeServiceText.js:2848` — ═══ ★ 1 ส.ค. 69 ชั้นสารบัญ 201 ใบ (เจ้าของสั่งหลังประเมิน blind 5 ข่าว: ชนะ 2 · แพ้ฉิว 1 · เลือกตรงกัน 2) ═══
-- `src/lib/services/summarizeServiceText.js:2960` — ★ 1 ส.ค. 69: AI CARD PICKER (luna) ที่จุดเลือกจริงของท่ออัตโนมัติ — เจ้าของสั่งหลังประลอง 6 โมเดล
+- `src/lib/services/summarizeServiceText.js:1812` _(ปีไม่ระบุ)_ _(อ้างถึง "1 ส.ค.")_ — 18 ส.ค. 69 เจ้าของสั่งถอดกฎท่อนจบของ 1 ส.ค. คืนของยุคปัง 21 มิ.ย.
+- `src/lib/services/summarizeServiceText.js:2063` — ★ 1 ส.ค. 69 กล่องดำ: เก็บร่างดิบจากตัวเขียนก่อนโดนจัดระเบียบ/แก้คำ — หลักฐานชี้ตัวการชั้นแรก
+- `src/lib/services/summarizeServiceText.js:2123` _(ปีไม่ระบุ)_ — ★ 1 ส.ค.: แยก "luna ยืนยัน/เลือก" ออกจาก "luna ล่ม" ได้ในบันทึก
+- `src/lib/services/summarizeServiceText.js:2691` _(ปีไม่ระบุ)_ _(อ้างถึง "1 ส.ค.")_ — 18 ส.ค. 69 เจ้าของสั่งถอดกฎท่อนจบของ 1 ส.ค. คืนของยุคปัง 21 มิ.ย.
+- `src/lib/services/summarizeServiceText.js:2849` — ═══ ★ 1 ส.ค. 69 ชั้นสารบัญ 201 ใบ (เจ้าของสั่งหลังประเมิน blind 5 ข่าว: ชนะ 2 · แพ้ฉิว 1 · เลือกตรงกัน 2) ═══
+- `src/lib/services/summarizeServiceText.js:2961` — ★ 1 ส.ค. 69: AI CARD PICKER (luna) ที่จุดเลือกจริงของท่ออัตโนมัติ — เจ้าของสั่งหลังประลอง 6 โมเดล
 - `src/lib/services/viralFewshot.js:29` _(ปีไม่ระบุ)_ _(อ้างถึง "1 ส.ค.")_ — ถอยที่คืนออกไป: c168841 (14 ส.ค. แก้ข้อ 1) · ee64be8 (1 ส.ค. แก้ข้อ 5) · กู้กลับ: git show e5ba1eb
 
 ## 26 ก.ค. 69 (2026-07-26)
@@ -471,10 +478,10 @@
 - `src/lib/services/summarizeServiceText.js:1221` — ★ 16 ก.ค. 69 (B5): แนบโทน+เนื้อย่อจริง — ให้ STAGE 2.5 ตัดสินจากเนื้อ ไม่ใช่แค่ชื่อ
 - `src/lib/services/summarizeServiceText.js:1572` — ★ 16 ก.ค. 69 (B5 — สวิตช์ REF_WEIGHT_BY_MATCH=1 · default OFF = พฤติกรรมเดิมเป๊ะ):
 - `src/lib/services/summarizeServiceText.js:1593` — ★ 16 ก.ค. 69 (B5): CLOSE = ยึดโครง/จังหวะได้ แต่ข้อเท็จจริงข่าวชนะโทนพร้อมท์เสมอ
-- `src/lib/services/summarizeServiceText.js:1969` — ★ 16 ก.ค. 69 (B4): ขั้นเขียน (แพง+ช้าสุด) เดิมไม่มีเพดานเวลาชั้นใน — โมเดลค้าง = ตายทั้งมุม
-- `src/lib/services/summarizeServiceText.js:2106` — ★ 16 ก.ค. 69 (B4): sync สาย URL — เดิมเช็ค === 'library' เป๊ะ ทำงานที่ผ่าน STAGE 2.5
-- `src/lib/services/summarizeServiceText.js:2353` — ★ 16 ก.ค. 69 (B4): เพิ่มเพดานเวลาชั้นใน 120s (เดิมไม่มี — พึ่ง outer อย่างเดียว)
-- `src/lib/services/summarizeServiceText.js:2829` — ★ 16 ก.ค. 69 (recheck fix): แนบ _matchType/_isBorrowed จริงด้วย — เดิมแนบแค่ _matchScore
+- `src/lib/services/summarizeServiceText.js:1970` — ★ 16 ก.ค. 69 (B4): ขั้นเขียน (แพง+ช้าสุด) เดิมไม่มีเพดานเวลาชั้นใน — โมเดลค้าง = ตายทั้งมุม
+- `src/lib/services/summarizeServiceText.js:2107` — ★ 16 ก.ค. 69 (B4): sync สาย URL — เดิมเช็ค === 'library' เป๊ะ ทำงานที่ผ่าน STAGE 2.5
+- `src/lib/services/summarizeServiceText.js:2354` — ★ 16 ก.ค. 69 (B4): เพิ่มเพดานเวลาชั้นใน 120s (เดิมไม่มี — พึ่ง outer อย่างเดียว)
+- `src/lib/services/summarizeServiceText.js:2830` — ★ 16 ก.ค. 69 (recheck fix): แนบ _matchType/_isBorrowed จริงด้วย — เดิมแนบแค่ _matchScore
 - `src/lib/utils/withTimeout.js:37` — ★ 16 ก.ค. 69 (B4): timeout แบบ "หยุดงานจริง" — ของเดิม Promise.race แค่เลิกรอ
 
 ## 10 ก.ค. 69 (2026-07-10)
@@ -549,8 +556,8 @@
 
 ## 21 มิ.ย. 69 (2026-06-21)
 
-- `src/lib/services/summarizeServiceText.js:1811` _(ปีไม่ระบุ)_ _(อ้างถึง "21 มิ.ย.")_ — 18 ส.ค. 69 เจ้าของสั่งถอดกฎท่อนจบของ 1 ส.ค. คืนของยุคปัง 21 มิ.ย.
-- `src/lib/services/summarizeServiceText.js:2690` _(ปีไม่ระบุ)_ _(อ้างถึง "21 มิ.ย.")_ — 18 ส.ค. 69 เจ้าของสั่งถอดกฎท่อนจบของ 1 ส.ค. คืนของยุคปัง 21 มิ.ย.
+- `src/lib/services/summarizeServiceText.js:1812` _(ปีไม่ระบุ)_ _(อ้างถึง "21 มิ.ย.")_ — 18 ส.ค. 69 เจ้าของสั่งถอดกฎท่อนจบของ 1 ส.ค. คืนของยุคปัง 21 มิ.ย.
+- `src/lib/services/summarizeServiceText.js:2691` _(ปีไม่ระบุ)_ _(อ้างถึง "21 มิ.ย.")_ — 18 ส.ค. 69 เจ้าของสั่งถอดกฎท่อนจบของ 1 ส.ค. คืนของยุคปัง 21 มิ.ย.
 
 ## 17 มิ.ย. 69 (2026-06-17)
 
@@ -577,7 +584,7 @@
 - `src/lib/services/queueService.js:548` _(ปีไม่ระบุ)_ — ที่เกิดจริง 3 รอบเมื่อ 12 มิ.ย. และตัด race สองเครื่องคว้างานเดียวกันไปในตัว)
 - `src/lib/services/queueService.js:700` _(ปีไม่ระบุ)_ — ★ 12 มิ.ย.: งานค้าง (เครื่องดับ/deploy คร่อม) ให้ "คืนเข้าคิวลองใหม่ 1 ครั้ง" ก่อน — เดิมตีตายทันที
 - `src/lib/services/queueService.js:701` _(ปีไม่ระบุ)_ — (12 มิ.ย. ต้องกู้มือ 2 รอบ) ถ้าค้างซ้ำรอบสองค่อยตีตายจริง (กันงานพังวนลูปไม่จบ)
-- `src/lib/services/summarizeServiceText.js:1857` _(ปีไม่ระบุ)_ — และการ์ดจับคู่ 105/201 ใบสั่งเรื่องย่อหน้าแรกอยู่แล้วตั้งแต่ 12 มิ.ย. โดยไม่เคยทำให้ซ้ำซาก
+- `src/lib/services/summarizeServiceText.js:1858` _(ปีไม่ระบุ)_ — และการ์ดจับคู่ 105/201 ใบสั่งเรื่องย่อหน้าแรกอยู่แล้วตั้งแต่ 12 มิ.ย. โดยไม่เคยทำให้ซ้ำซาก
 - `src/lib/services/viralFewshot.js:28` _(ปีไม่ระบุ)_ _(อ้างถึง "12 มิ.ย.")_ — 18 ส.ค. 69 เจ้าของสั่ง "ใช้โค้ดช่วง 12 มิ.ย. – 1 ก.ค." — คืนสูตรนี้เป็นตัวดั้งเดิม e5ba1eb (11 มิ.ย.)
 
 ## 11 มิ.ย. 69 (2026-06-11)
@@ -597,8 +604,8 @@
 - `src/lib/services/summarizeServiceText.js:374` _(ปีไม่ระบุ)_ — 5.5 ★ Closing/cross-version duplication (11 มิ.ย. — GEN-176/180/181 จบซ้ำคำต่อคำ แต่ระบบเช็คแค่เปิด)
 - `src/lib/services/summarizeServiceText.js:1741` _(ปีไม่ระบุ)_ — ★ VIRAL FEW-SHOT (11 มิ.ย. — ผู้ใช้เลือก: เรียนจากหอสมุดไวรัล 170 โพสต์ + สำนวนเพจไวรัลเต็มตัว)
 - `src/lib/services/summarizeServiceText.js:1764` _(ปีไม่ระบุ)_ — ★ โหมดทางการ (11 มิ.ย. — บทเรียน GEN-177): ข่าวพระราชวงศ์/พิธีทางการ ห้ามมโนภาพ+คำลำลอง และเก็บประกาศครบ
-- `src/lib/services/summarizeServiceText.js:1854` _(ปีไม่ระบุ)_ _(อ้างถึง "11 มิ.ย.")_ — ★ 18 ส.ค. 69 (เจ้าของสั่ง "กฎเดิม 11 มิ.ย. เก็บ · กฎใหม่ 16 ส.ค. ลบออก"):
-- `src/lib/services/summarizeServiceText.js:1858` _(ปีไม่ระบุ)_ — ⇒ ปล่อยการ์ด+สไตล์ทำหน้าที่เอง · กฎข้อ 9 คงเหลือเฉพาะของเดิม 11 มิ.ย. (4151449) = กฎความสมบูรณ์ของประโยค
+- `src/lib/services/summarizeServiceText.js:1855` _(ปีไม่ระบุ)_ _(อ้างถึง "11 มิ.ย.")_ — ★ 18 ส.ค. 69 (เจ้าของสั่ง "กฎเดิม 11 มิ.ย. เก็บ · กฎใหม่ 16 ส.ค. ลบออก"):
+- `src/lib/services/summarizeServiceText.js:1859` _(ปีไม่ระบุ)_ — ⇒ ปล่อยการ์ด+สไตล์ทำหน้าที่เอง · กฎข้อ 9 คงเหลือเฉพาะของเดิม 11 มิ.ย. (4151449) = กฎความสมบูรณ์ของประโยค
 - `src/lib/services/viralFewshot.js:5` _(ปีไม่ระบุ)_ — (11 มิ.ย. — ผู้ใช้เลือก: Few-shot ตามหมวด + สำนวนเพจไวรัลเต็มตัว)
 - `src/lib/services/viralFewshot.js:28` _(ปีไม่ระบุ)_ _(อ้างถึง "11 มิ.ย.")_ — 18 ส.ค. 69 เจ้าของสั่ง "ใช้โค้ดช่วง 12 มิ.ย. – 1 ก.ค." — คืนสูตรนี้เป็นตัวดั้งเดิม e5ba1eb (11 มิ.ย.)
 - `src/lib/services/viralFewshot.js:1269` _(ปีไม่ระบุ)_ _(อ้างถึง "11 มิ.ย.")_ — 18 ส.ค. 69 เจ้าของสั่งถอดสูตรบังคับ v2 (721dbf8 14 ส.ค.) + สวิตช์ HOOK_STYLE_MODE (eb6ff50 16 ส.ค.) — คืนสภาพ 11 มิ.ย.
@@ -622,4 +629,4 @@
 
 ## 16 ส.ค. 04 (1961-08-16)
 
-- `src/lib/services/summarizeServiceText.js:1856` — เหตุผล: หลักฐานผลจริง 900 เคส — เปิดด้วยชื่อพุ่ง 17% → 77% ทันทีหลัง 16 ส.ค. 04:04
+- `src/lib/services/summarizeServiceText.js:1857` — เหตุผล: หลักฐานผลจริง 900 เคส — เปิดด้วยชื่อพุ่ง 17% → 77% ทันทีหลัง 16 ส.ค. 04:04

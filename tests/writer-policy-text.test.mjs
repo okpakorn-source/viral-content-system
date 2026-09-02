@@ -1,9 +1,10 @@
 // ★ เฟส 2 "พรอมต์นักเขียน" (2 ก.ย. 69) — ข้อสอบบล็อกกฎ 3 สวิตช์ + ตัวอ่านกฎจากไฟล์ (src/lib/services/writerPolicyText.js)
 // รัน: node --test tests/writer-policy-text.test.mjs (ไม่ยิง AI · ไม่แตะเน็ต/DB · อ่านไฟล์ data/writer-viral-rules.json จริง 1 เคส)
-// สัญญา: ปิดทุกสวิตช์ = ไม่มีข้อความเลย ('') · เปิดแต่ละสวิตช์ = กฎครบตามสเปก · กฎจากโพสต์ปังอ่านจากไฟล์ · ไฟล์หาย/พัง = ไม่พัง ไม่ใส่บล็อก
+// สัญญา (★ 3 ก.ย. 69 เปิด 3 บล็อกเป็นค่าเริ่มต้นหลัง A/B รอบ 3): ไม่ตั้ง env = บล็อกทั้ง 3 โผล่ครบ (แคชยังปิด) ·
+//   ตั้ง =0 = ไม่มีข้อความเลย ('' — สวิตช์ถอย) · เปิดแต่ละสวิตช์ = กฎครบตามสเปก · กฎจากโพสต์ปังอ่านจากไฟล์ · ไฟล์หาย/พัง = ไม่พัง ไม่ใส่บล็อก
 // ผลทุบ (2 ก.ย. 69 — ทุบไฟล์จริงแล้วคืนโค้ดเดิมทุกไบต์ · เช็ก md5 ก่อน/หลัง):
 //   M1 ลบบรรทัด "🔒 ห้ามตัด: ชื่อ ตัวเลข วันที่…" ใน WRITER_LENGTH_TARGET_BLOCK        ⇒ แดง "WRITER_LENGTH_TARGET_V2=1 …" (ห้ามตัด)
-//   M2 เปลี่ยน isWriterLengthTargetV2On เป็น !== '0' (ค่าเริ่มต้นกลายเป็นเปิด)            ⇒ แดง "ปิดทุกสวิตช์…" + "สวิตช์รับเฉพาะ '1'…"
+//   M2 (แก้ทิศ 3 ก.ย. 69) เปลี่ยน isWriterLengthTargetV2On กลับเป็น === '1' (ค่าเริ่มต้นกลายเป็นปิด) ⇒ แดง "ค่าเริ่มต้น (ไม่ตั้ง env) ต้องเปิด"
 //   M3 ให้ loadWriterViralRules throw เมื่ออ่านไฟล์ไม่ได้ (ลบ try/catch)                 ⇒ แดง "ไฟล์หาย/พัง…" (บล็อกต้องไม่พัง)
 //   M4 สลับลำดับ parts ใน buildWriterPolicyBlock (viral ก่อน length)                     ⇒ แดง "ลำดับบล็อก…"
 //   M5 ตัด "เจ้าตัว" ออกจากบล็อก FIDELITY                                                ⇒ แดง "WRITER_FIDELITY_RULES_V2=1 …"
@@ -23,11 +24,15 @@ const POLICY_PATH = join(ROOT, 'src', 'lib', 'services', 'writerPolicyText.js');
 const RULES_PATH = join(ROOT, 'data', 'writer-viral-rules.json');
 const SWITCHES = ['WRITER_LENGTH_TARGET_V2', 'WRITER_FIDELITY_RULES_V2', 'WRITER_VIRAL_RULES_V2', 'WRITER_PROMPT_CACHE_V2'];
 
-/** ตั้ง env เฉพาะช่วง fn — คืนค่าเดิมทุกตัวเสมอ (ไม่ตั้ง = ลบออก) */
+/** ตั้ง env เฉพาะช่วง fn — ★ 3 ก.ย. 69: ตัวที่ไม่ระบุถูกตั้ง '0' (โหมดปิดชัดเจน — 3 ตัวแรกค่าเริ่มต้นเปิดแล้ว
+ *  การลบ env จึงไม่ใช่ "ปิด" อีกต่อไป) · ส่ง undefined = ลบ env ตัวนั้นจริงเพื่อทดสอบค่าเริ่มต้น · คืนค่าเดิมทุกตัวเสมอ */
 function withEnv(values, fn) {
   const saved = Object.fromEntries(SWITCHES.map((name) => [name, process.env[name]]));
-  for (const name of SWITCHES) delete process.env[name];
-  for (const [name, value] of Object.entries(values)) process.env[name] = value;
+  for (const name of SWITCHES) process.env[name] = '0';
+  for (const [name, value] of Object.entries(values)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
   try {
     return fn();
   } finally {
@@ -76,8 +81,27 @@ function assertFidelityBlock(text) {
   assert.match(text, /=== จบ FIDELITY ===/u);
 }
 
-test('ปิดทุกสวิตช์ (ไม่ตั้ง env) = ไม่มีข้อความเลย และค่าที่ไม่ใช่ "1" ตรงตัวก็ถือว่าปิด', () => {
-  withEnv({}, () => {
+test('★ 3 ก.ย. 69 (1/2) ค่าเริ่มต้น — ไม่ตั้ง env เลย = บล็อกทั้ง 3 โผล่ครบ (เปิดเป็นค่าเริ่มต้นหลัง A/B รอบ 3) · แคชยังปิด', () => {
+  const unset = Object.fromEntries(SWITCHES.map((name) => [name, undefined]));
+  withEnv(unset, () => {
+    for (const name of SWITCHES) assert.equal(process.env[name], undefined, `${name} ต้องไม่ถูกตั้งจริงในเทสนี้`);
+    assert.equal(policy.isWriterLengthTargetV2On(), true, 'ค่าเริ่มต้น (ไม่ตั้ง env) ต้องเปิด — LENGTH');
+    assert.equal(policy.isWriterFidelityRulesV2On(), true, 'ค่าเริ่มต้น (ไม่ตั้ง env) ต้องเปิด — FIDELITY');
+    assert.equal(policy.isWriterViralRulesV2On(), true, 'ค่าเริ่มต้น (ไม่ตั้ง env) ต้องเปิด — VIRAL_RULES');
+    assert.equal(policy.isWriterPromptCacheV2On(), false, 'WRITER_PROMPT_CACHE_V2 ยังค่าเริ่มต้นปิด (รอ A/B ของตัวเอง)');
+    const block = policy.buildWriterPolicyBlock();
+    assertLengthBlock(block);
+    assertFidelityBlock(block);
+    assert.match(block, /=== 🏆 กฎจากโพสต์ปังจริง/u, 'บล็อกกฎจากโพสต์ปัง (อ่านไฟล์จริง) ต้องโผล่ด้วย');
+    assert.notEqual(policy.buildLengthTargetBlock(), '');
+    assert.notEqual(policy.buildFidelityRulesBlock(), '');
+    assert.notEqual(policy.buildViralRulesBlock(), '');
+    assert.notEqual(policy.buildFidelityRawReminder(), '', 'เตือนซื่อตรงติดเนื้อดิบต้องมากับ FIDELITY ที่เปิด');
+  });
+});
+
+test('★ 3 ก.ย. 69 (2/2) สวิตช์ถอย — ตั้ง =0 ทุกตัว = ไม่มีข้อความเลย (สแนปช็อต "ปิด = ใบสั่งเดิมไบต์ต่อไบต์" พิสูจน์ด้วย "0")', () => {
+  withEnv({}, () => { // withEnv ตั้ง '0' ให้ทุกตัวอยู่แล้ว
     assert.equal(policy.buildWriterPolicyBlock(), '');
     assert.equal(policy.buildLengthTargetBlock(), '');
     assert.equal(policy.buildFidelityRulesBlock(), '');
@@ -87,10 +111,11 @@ test('ปิดทุกสวิตช์ (ไม่ตั้ง env) = ไม�
     assert.equal(policy.isWriterViralRulesV2On(), false);
     assert.equal(policy.isWriterPromptCacheV2On(), false);
   });
-  for (const junk of ['true', 'on', 'yes', ' 1', '1 ', '"1"', '0', '', 'TRUE']) {
+  // 3 ตัวแรกอ่าน !== '0': รับเฉพาะ '0' ตรงตัวเป็นคำสั่งปิด — ค่าขยะทุกค่า = เปิด (แบบแผนเดียวกับ ANGLE2_DISTINCT_V2)
+  for (const junk of ['true', 'on', 'yes', ' 1', '1 ', '"1"', ' 0', '0 ', '', 'TRUE']) {
     withEnv(Object.fromEntries(SWITCHES.map((name) => [name, junk])), () => {
-      assert.equal(policy.buildWriterPolicyBlock(), '', `ค่า ${JSON.stringify(junk)} ต้องถือว่าปิด`);
-      assert.equal(policy.isWriterPromptCacheV2On(), false, `ค่า ${JSON.stringify(junk)} ต้องถือว่าปิด (cache)`);
+      assert.notEqual(policy.buildWriterPolicyBlock(), '', `ค่า ${JSON.stringify(junk)} ไม่ใช่ '0' ตรงตัว = 3 บล็อกยังเปิด`);
+      assert.equal(policy.isWriterPromptCacheV2On(), false, `แคชรับเฉพาะ '1' — ค่า ${JSON.stringify(junk)} ต้องถือว่าปิด (cache)`);
     });
   }
 });
@@ -185,22 +210,31 @@ test('ลำดับบล็อก: ความยาว → ความซ�
   });
 });
 
-test('สวิตช์รับเฉพาะ "1" ตรงตัว และทั้ง 5 ตัวลงทะเบียนค่าเริ่มต้น "0" ใน newsSwitches.js ชี้ไฟล์ที่อ่านจริง', () => {
-  for (const name of SWITCHES) {
-    const reader = {
-      WRITER_LENGTH_TARGET_V2: policy.isWriterLengthTargetV2On,
-      WRITER_FIDELITY_RULES_V2: policy.isWriterFidelityRulesV2On,
-      WRITER_VIRAL_RULES_V2: policy.isWriterViralRulesV2On,
-      WRITER_PROMPT_CACHE_V2: policy.isWriterPromptCacheV2On,
-    }[name];
+test('★ 3 ก.ย. 69 ตัวอ่านสวิตช์: 3 บล็อกกฎอ่าน !== "0" (ทะเบียน default "1") · แคชยังรับเฉพาะ "1" (ทะเบียน "0") · TRIM ยังปิด', () => {
+  const readers = {
+    WRITER_LENGTH_TARGET_V2: policy.isWriterLengthTargetV2On,
+    WRITER_FIDELITY_RULES_V2: policy.isWriterFidelityRulesV2On,
+    WRITER_VIRAL_RULES_V2: policy.isWriterViralRulesV2On,
+  };
+  for (const [name, reader] of Object.entries(readers)) {
     withEnv({ [name]: '1' }, () => assert.equal(reader(), true, `${name}=1 ต้องเปิด`));
-    for (const junk of ['true', 'on', '0', '', ' 1']) withEnv({ [name]: junk }, () => assert.equal(reader(), false, `${name}=${JSON.stringify(junk)} ต้องปิด`));
+    withEnv({ [name]: '0' }, () => assert.equal(reader(), false, `${name}=0 ต้องปิด (สวิตช์ถอย)`));
+    withEnv({ [name]: undefined }, () => assert.equal(reader(), true, `${name} ไม่ตั้ง = ค่าเริ่มต้นเปิด`));
+    for (const junk of ['true', 'on', '', ' 0', ' 1']) withEnv({ [name]: junk }, () => assert.equal(reader(), true, `${name}=${JSON.stringify(junk)} ไม่ใช่ '0' ตรงตัว = เปิด`));
     const entry = findSwitch(name);
     assert.ok(entry, `${name} ต้องอยู่ในทะเบียน`);
-    assert.equal(entry.default, '0', `${name} ค่าเริ่มต้นต้องปิด`);
+    assert.equal(entry.default, '1', `${name} ทะเบียนต้องบอกค่าเริ่มต้นเปิด (3 ก.ย. 69 หลัง A/B รอบ 3)`);
+    assert.match(entry.rollback, /=0/u, `${name} ทะเบียนต้องบอกวิธีปิดคืน =0`);
     assert.deepEqual(entry.readBy, ['src/lib/services/writerPolicyText.js']);
     assert.equal(entry.kind, 'switch');
   }
+  withEnv({ WRITER_PROMPT_CACHE_V2: '1' }, () => assert.equal(policy.isWriterPromptCacheV2On(), true, 'cache=1 ต้องเปิด'));
+  for (const junk of ['true', 'on', '0', '', ' 1', undefined]) {
+    withEnv({ WRITER_PROMPT_CACHE_V2: junk }, () => assert.equal(policy.isWriterPromptCacheV2On(), false, `cache=${JSON.stringify(junk)} ต้องปิด (รับเฉพาะ '1')`));
+  }
+  const cache = findSwitch('WRITER_PROMPT_CACHE_V2');
+  assert.ok(cache && cache.default === '0' && cache.readBy.includes('src/lib/services/writerPolicyText.js'), 'WRITER_PROMPT_CACHE_V2 ยังลงทะเบียนปิดเป็นค่าเริ่มต้น (รอ A/B ของตัวเอง)');
+  assert.equal(cache.kind, 'switch');
   const trim = findSwitch('WRITER_TRIM_PASS');
   assert.ok(trim && trim.default === '0' && trim.readBy.includes('src/lib/services/autoFlowServiceText.js'), 'WRITER_TRIM_PASS ต้องลงทะเบียนปิดเป็นค่าเริ่มต้น อ่านที่ autoFlowServiceText');
 });
@@ -237,14 +271,15 @@ test('★ ข้อแก้ ①: กฎเปิดเรื่องอยู�
 });
 
 test('★ ข้อแก้ ①: เตือนซื่อตรงติดเนื้อดิบ — ว่างเมื่อสวิตช์ปิด · เมื่อเปิด ≤ 5 บรรทัด (ห้ามเดาเพศ/เจ้าตัว/ความต่าง) + ข้อตรวจ FINAL CHECK บรรทัดเดียว', () => {
-  withEnv({}, () => {
-    assert.equal(policy.buildFidelityRawReminder(), '', 'สวิตช์ปิด = reminder ว่าง');
-    assert.equal(policy.buildFidelityFinalCheckLine(), '', 'สวิตช์ปิด = ข้อตรวจว่าง');
+  withEnv({}, () => { // withEnv ตั้ง '0' ทุกตัว = โหมดปิดชัดเจน
+    assert.equal(policy.buildFidelityRawReminder(), '', 'สวิตช์ปิด (=0) = reminder ว่าง');
+    assert.equal(policy.buildFidelityFinalCheckLine(), '', 'สวิตช์ปิด (=0) = ข้อตรวจว่าง');
   });
-  for (const junk of ['0', 'true', 'on', ' 1', '']) {
+  // ★ 3 ก.ย. 69 default เปิด: เฉพาะ '0' ตรงตัวเท่านั้นที่ปิด — ค่าขยะ/ไม่ตั้ง = เปิด
+  for (const junk of ['true', 'on', ' 1', '', undefined]) {
     withEnv({ WRITER_FIDELITY_RULES_V2: junk }, () => {
-      assert.equal(policy.buildFidelityRawReminder(), '', `ค่า ${JSON.stringify(junk)} ต้องถือว่าปิด`);
-      assert.equal(policy.buildFidelityFinalCheckLine(), '');
+      assert.notEqual(policy.buildFidelityRawReminder(), '', `ค่า ${JSON.stringify(junk)} ไม่ใช่ '0' ตรงตัว = เปิด`);
+      assert.notEqual(policy.buildFidelityFinalCheckLine(), '');
     });
   }
   withEnv({ WRITER_FIDELITY_RULES_V2: '1' }, () => {
@@ -277,10 +312,14 @@ test('mutation oracle: ทุบสำเนาโมดูลจริงแล
   });
   withEnv({ WRITER_LENGTH_TARGET_V2: '1' }, () => assert.throws(() => assertLengthBlock(noForbidden.buildWriterPolicyBlock())));
 
-  const defaultOn = await loadModule((source) => {
-    const mutated = source.replace("process.env.WRITER_LENGTH_TARGET_V2 === '1'", "process.env.WRITER_LENGTH_TARGET_V2 !== '0'");
+  // M2 (แก้ทิศ 3 ก.ย. 69): ทุบตัวอ่านกลับเป็น === '1' (ค่าเริ่มต้นกลายเป็นปิด) — เทสค่าเริ่มต้นต้องจับได้
+  const defaultOff = await loadModule((source) => {
+    const mutated = source.replace("process.env.WRITER_LENGTH_TARGET_V2 !== '0'", "process.env.WRITER_LENGTH_TARGET_V2 === '1'");
     assert.notEqual(mutated, source, 'mutation M2 ต้องเกิดจริง');
     return mutated;
   });
-  withEnv({}, () => assert.throws(() => assert.equal(defaultOn.buildWriterPolicyBlock(), ''), 'ค่าเริ่มต้นกลายเป็นเปิดต้องถูกจับ'));
+  withEnv({ WRITER_LENGTH_TARGET_V2: undefined }, () => assert.throws(
+    () => assert.notEqual(defaultOff.buildLengthTargetBlock(), '', 'ค่าเริ่มต้น (ไม่ตั้ง env) ต้องเปิด'),
+    'ทุบให้ค่าเริ่มต้นกลับเป็นปิดต้องถูกจับ',
+  ));
 });

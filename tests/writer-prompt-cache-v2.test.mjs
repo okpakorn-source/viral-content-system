@@ -261,7 +261,14 @@ test('★ ข้อแก้ ①: เปิด WRITER_FIDELITY_RULES_V2 — remi
     else process.env.WRITER_FIDELITY_RULES_V2 = savedFid;
   }
   assert.ok(fidelity.reminder.includes('เตือนซื่อตรง') && fidelity.finalCheckLine.startsWith('- '), 'สวิตช์เปิดต้องได้ข้อความจริง');
-  assert.equal(policy.buildFidelityRawReminder(), '', 'สวิตช์ปิด (env ปกติของเทส) ต้องว่าง');
+  // ★ 3 ก.ย. 69: default เปิดแล้ว — โหมดปิดต้องตั้ง '0' ชัดเจน (ไม่ตั้ง env = เปิด)
+  process.env.WRITER_FIDELITY_RULES_V2 = '0';
+  try {
+    assert.equal(policy.buildFidelityRawReminder(), '', 'สวิตช์ปิด (=0) ต้องว่าง');
+  } finally {
+    if (savedFid === undefined) delete process.env.WRITER_FIDELITY_RULES_V2;
+    else process.env.WRITER_FIDELITY_RULES_V2 = savedFid;
+  }
 
   // มีเนื้อดิบ: reminder หลังกรอบ RAW ก่อนวัตถุดิบ + finalCheckLine ใน FINAL CHECK — ทั้งหมดอยู่ blocks[1] เท่านั้น
   const wrapped = (rawText, supporting) => finalizer(rawText, supporting, fidelity);
