@@ -101,13 +101,15 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData, r
         let cleanContent = version.content;
         let cleanSemanticDebug = { checked: false };
         try {
-          const semResult = await semanticSanityCheck(version.content);
+          const semResult = await semanticSanityCheck(version.content, { sourceBody: newsData?.newsBody || rawSourceText || null }); // ★ 2 ก.ย. 69 Fact-bearing Guard
           cleanContent = semResult.sanitizedContent;
           cleanSemanticDebug = {
             checked: true,
             issuesFound: semResult.issuesFound?.length || 0,
             fixed: semResult.fixed || false,
             issues: (semResult.issuesFound || []).slice(0, 3),
+            guardedFactBearing: semResult.guardedFactBearing || [], // ★ 2 ก.ย. 69
+            usedFallback: !!semResult.usedFallback,
             error: semResult.error || null, // ★ 14 ส.ค. 69 (ผู้ตรวจ #3): พาธง Seam Guard (OPENING/UNSAFE_SEAM_GUARD) ถึงกล่องดำ
           };
           console.log(`  L4.6 Semantic (clean): ${cleanSemanticDebug.issuesFound} issues ${cleanSemanticDebug.fixed ? '(fixed)' : '(clean)'}`);
@@ -215,13 +217,15 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData, r
       let semanticContent = scrubbedContent;
       let semanticDebug = { checked: false };
       try {
-        const semanticResult = await semanticSanityCheck(scrubbedContent);
+        const semanticResult = await semanticSanityCheck(scrubbedContent, { sourceBody: newsData?.newsBody || rawSourceText || null }); // ★ 2 ก.ย. 69 Fact-bearing Guard
         semanticContent = semanticResult.sanitizedContent;
         semanticDebug = {
           checked: true,
           issuesFound: semanticResult.issuesFound?.length || 0,
           fixed: semanticResult.fixed || false,
           issues: (semanticResult.issuesFound || []).slice(0, 3),
+          guardedFactBearing: semanticResult.guardedFactBearing || [], // ★ 2 ก.ย. 69
+          usedFallback: !!semanticResult.usedFallback,
           error: semanticResult.error || null, // ★ 14 ส.ค. 69 (ผู้ตรวจ #3): พาธง Seam Guard ถึงกล่องดำ
         };
         console.log(`  L4.6 Semantic: ${semanticDebug.issuesFound} issues ${semanticDebug.fixed ? '(fixed)' : '(clean)'}`);

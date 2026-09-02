@@ -100,7 +100,34 @@ function quoteDebt(text) {
  * @param {string} content - เนื้อหาที่จะตรวจ
  * @returns {{ sanitizedContent: string, issuesFound: Array, fixed: boolean }}
  */
-export async function semanticSanityCheck(content) {
+// ═══ ★ 2 ก.ย. 69 — Fact-bearing Guard (เทสสนามจริงเคส #05234 ศรราม/ป๋าเดียร์) ═══
+// ด่านนี้ "ลบทั้งประโยค" เมื่อ AI ชี้ว่าสำนวนพัง → เคสจริง: ตัวสำรอง (luna) ชี้ประโยค "พ่อยังเป็นห่วงเรื่องการขับรถ…"
+// ว่าไม่สมบูรณ์ แล้วลบทิ้ง = ข้อเท็จจริงจากต้นฉบับหายเงียบ (FactCheck ท้ายท่อจับไม่ได้ เพราะเช็คแค่ของที่ยังอยู่)
+// กติกา: ประโยคที่มีอักษรต่อเนื่องตรงกับเนื้อดิบ ≥ FACT_OVERLAP_MIN_CHARS = แบกข้อเท็จจริง → คงไว้ให้คนตรวจ (ห้ามลบ)
+// ประโยคไร้ความหมายจริง (เช่น "อบอุ่นขึ้นไปอีกระเสียชีวิต") ไม่มีในต้นฉบับ → ยังลบได้เหมือนเดิม · ไม่ส่ง sourceBody = พฤติกรรมเดิม 100%
+const FACT_OVERLAP_MIN_CHARS = 12;
+const _normForOverlap = (s) => String(s || '').replace(/[\s"“”'‘’]+/g, '');
+export function longestCommonRun(a, b) {
+  let best = 0;
+  let prev = new Uint16Array(b.length + 1);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = new Uint16Array(b.length + 1);
+    const ca = a.charCodeAt(i - 1);
+    for (let j = 1; j <= b.length; j++) {
+      if (ca === b.charCodeAt(j - 1)) { const v = prev[j - 1] + 1; cur[j] = v; if (v > best) best = v; }
+    }
+    prev = cur;
+  }
+  return best;
+}
+export function sharesSourceFact(text, sourceBody) {
+  const t = _normForOverlap(text);
+  const s = _normForOverlap(sourceBody);
+  if (t.length < FACT_OVERLAP_MIN_CHARS || s.length < FACT_OVERLAP_MIN_CHARS) return false;
+  return longestCommonRun(t, s) >= FACT_OVERLAP_MIN_CHARS;
+}
+
+export async function semanticSanityCheck(content, { sourceBody = null } = {}) {
   if (!content || content.length < 50) {
     return { sanitizedContent: content, issuesFound: [], fixed: false };
   }
@@ -110,15 +137,19 @@ export async function semanticSanityCheck(content) {
 
     // ★ 1 ส.ค. 69 (เจ้าของสั่ง "GPT ที่แตะภาษาตรง → opus5"): ชั้นนี้ชี้ประโยคที่จะถูกตัดจริง → claude-opus-5 ก่อน · ล้ม/ไม่มีคีย์ → luna เดิม
     let result;
+    let usedFallback = false;
     try {
       if (!isClaudeAvailable()) throw new Error('no-claude-key');
       result = await callClaude({ model: 'claude-opus-5', maxTokens: 800, prompt });
     } catch (_clErr) {
+      // ★ 2 ก.ย. 69: เดิมถอยเงียบ (เทสสนามจริง: Claude ล้มโดยไม่มีร่องรอยในล็อก) → บอกสาเหตุ + ติดธงให้กล่องดำ
+      usedFallback = true;
+      console.warn(`  L4.6 Semantic: Claude ล้ม → ถอยใช้ ${MODEL_FAST} (${_clErr?.message || _clErr})`);
       result = await callAI({ model: MODEL_FAST, temperature: 0.1, maxTokens: 500, prompt });
     }
 
     if (!result || !result.hasIssues || !Array.isArray(result.issues) || result.issues.length === 0) {
-      return { sanitizedContent: content, issuesFound: [], fixed: false };
+      return { sanitizedContent: content, issuesFound: [], fixed: false, usedFallback };
     }
 
     // ★ Seam Guard ขั้น 1 (atomic): ตรวจทุก issue ก่อน commit ใดๆ — เคส #03995 issue เปิดเรื่องมาเป็นลำดับสอง
@@ -134,13 +165,14 @@ export async function semanticSanityCheck(content) {
 
     if (touchesOpening) {
       console.warn('  L4.6 Semantic Guard: opening deletion blocked — kept input');
-      return { sanitizedContent: content, issuesFound: [], fixed: false, error: 'OPENING_SEAM_GUARD' };
+      return { sanitizedContent: content, issuesFound: [], fixed: false, error: 'OPENING_SEAM_GUARD', usedFallback };
     }
 
     // Apply fixes: ลบประโยคที่มีปัญหาออก — ★ Seam Guard ขั้น 2: จำลองผลก่อนตัดทุกครั้ง เย็บไม่ได้=ไม่ตัด
     let fixedContent = content;
     const appliedFixes = [];
     let guardedSeam = false;
+    const factGuarded = []; // ★ 2 ก.ย. 69 ประโยคที่กันไว้เพราะแบกข้อเท็จจริง
 
     for (const issue of result.issues) {
       if (typeof issue?.brokenText !== 'string' || issue.brokenText.length < 5) continue;
@@ -148,6 +180,13 @@ export async function semanticSanityCheck(content) {
       // เหมือน replace เดิม: ใช้ occurrence แรกที่ยังอยู่ในเนื้อปัจจุบัน
       const seam = fixedContent.indexOf(issue.brokenText);
       if (seam < 0) continue;
+
+      // ★ 2 ก.ย. 69 Fact-bearing Guard: ตรงกับต้นฉบับ ≥12 ตัวอักษร → คงไว้ ห้ามลบ (คนตรวจอ่านจากธง)
+      if (sourceBody && sharesSourceFact(issue.brokenText, sourceBody)) {
+        factGuarded.push(issue.brokenText);
+        console.warn(`  L4.6 Semantic Guard: fact-bearing sentence kept — deletion skipped ("${issue.brokenText.slice(0, 40)}…")`);
+        continue;
+      }
 
       const wasParagraphStart = startsParagraph(fixedContent, seam);
       const candidate = fixedContent.slice(0, seam) + fixedContent.slice(seam + issue.brokenText.length);
@@ -182,7 +221,9 @@ export async function semanticSanityCheck(content) {
         sanitizedContent: content,
         issuesFound: [],
         fixed: false,
-        ...(guardedSeam ? { error: 'UNSAFE_SEAM_GUARD' } : {}),
+        ...(guardedSeam ? { error: 'UNSAFE_SEAM_GUARD' } : factGuarded.length ? { error: 'FACT_BEARING_GUARD' } : {}),
+        ...(factGuarded.length ? { guardedFactBearing: factGuarded } : {}),
+        usedFallback,
       };
     }
 
@@ -196,6 +237,8 @@ export async function semanticSanityCheck(content) {
       sanitizedContent: fixedContent,
       issuesFound: appliedFixes,
       fixed: true,
+      ...(factGuarded.length ? { guardedFactBearing: factGuarded } : {}),
+      usedFallback,
     };
 
   } catch (err) {
