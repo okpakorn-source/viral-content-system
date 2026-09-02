@@ -11,6 +11,15 @@
  *     แก้: ขอ maxMissing = FACT_CHECK_MAX_MISSING ทั้ง 2 รอบ + ถ้ารายงานยังถูกตัด (truncated) = ตรวจไม่ครบ → ทิ้งผล (reason fact_check_truncated)
  * ทุกฉบับได้ version._trimPass = { before, after, applied, reason } (before/after = จำนวนคำ) · ห้ามแตะ title/provenance (usedModel/promptId/_source)
  * ผู้เรียก (autoFlowServiceText) เช็กสวิตช์ WRITER_TRIM_PASS === '1' ก่อนเรียก — ไฟล์นี้ไม่อ่าน env เอง (สวิตช์ปิด = ไม่ยิงเลย)
+ *   ★ ข้อแก้ ① หลังผล A/B (2 ก.ย. 69 · 5 ข่าว × 2 แขน): trim pass ตีกลับ 3/6 เพราะ facts_lost — luna ตัดของสำคัญจริง
+ *     (ตัวอย่างที่หาย: "เสียบ้าน" · "วันที่ 1 พ.ย." · สมณศักดิ์ · "เส้นที่ชอบ") → แก้ 3 ชั้นโดยด่านเดิมคงอยู่ทั้งหมด:
+ *     1) พรอมต์ได้ "รายการข้อเท็จจริงที่ห้ามหาย" จากต้นฉบับดิบ — ผู้เรียกฉีด extractFacts (= extractSourceFactsDetailed
+ *        จาก missingFactsGate — โครง { numbers, dates, quotes, names, details } ทุกชนิดมี .text รวม detail) ·
+ *        ไม่ฉีด = ถอยไป findMissingFacts(raw, '') (เนื้อว่าง = ทุกข้อเท็จจริง "หาย" = รายการเต็ม) · ไม่มีทั้งคู่ = ไม่ใส่รายการ — ห้ามล้ม
+ *     2) กฎใหม่ในพรอมต์: ห้ามตัดประโยคที่มี คำพูดในเครื่องหมายคำพูด / สมณศักดิ์-ยศ-ตำแหน่ง / วันที่-เวลา / ตัวเลข
+ *     3) ด่านกลไกหลังตัด (ไม่พึ่ง AI · ก่อนขั้น findMissingFacts เดิม): ประโยค/บรรทัดของข้อความก่อนตัดที่เข้ากติกาคุ้มครอง
+ *        (regex ชุดเดียวกับข้อ 2) ต้องยังอยู่ในผลตัดแบบ substring ตรงตัว (normalize ช่องว่าง) — หาย = ทิ้งผล reason 'protected_sentence_cut'
+ *     ดีบักเพิ่มใน _trimPass: factsListed (จำนวนรายการที่เข้าพรอมต์จริง) · protectedSentences (จำนวนประโยคคุ้มครอง)
  * เทส: tests/writer-trim-pass.test.mjs
  */
 
@@ -43,10 +52,92 @@ export function countThaiWordsDefault(text) {
   return Math.max(1, Math.ceil(clean.replace(/\s+/g, '').length / 4));
 }
 
+// ── ★ ข้อแก้ ① (2 ก.ย. 69): กติกาประโยคคุ้มครอง — regex ชุดเดียวใช้ทั้งบรรยายในพรอมต์และด่านกลไกหลังตัด ──
+/** สมณศักดิ์/ยศ/ตำแหน่ง — ประโยคที่มีคำเหล่านี้ห้ามถูกตัด (สตริง regex เรียงยาวก่อนสั้น กันจับครึ่งคำ) · export ให้เทสตรวจรายการได้ */
+export const PROTECTED_TITLE_PATTERNS = Object.freeze([
+  // สมณศักดิ์/ตำแหน่งสงฆ์ (จากผล A/B: สมณศักดิ์เป็นของที่ luna ตัดหายจริง)
+  'พระครู', 'พระอาจารย์', 'พระมหา', 'พระเทพ', 'หลวงพ่อ', 'หลวงปู่', 'หลวงตา', 'หลวงพี่', 'สมเด็จ', 'เจ้าอาวาส', 'เจ้าคุณ', 'สามเณร',
+  // ยศตำรวจ/ทหารแบบย่อ (จุดต้อง escape)
+  'พล\\.ต\\.อ\\.', 'พล\\.ต\\.ท\\.', 'พล\\.ต\\.ต\\.', 'พ\\.ต\\.อ\\.', 'พ\\.ต\\.ท\\.', 'พ\\.ต\\.ต\\.', 'ร\\.ต\\.อ\\.', 'ร\\.ต\\.ท\\.', 'ร\\.ต\\.ต\\.',
+  'ด\\.ต\\.', 'จ\\.ส\\.ต\\.', 'จ\\.ส\\.อ\\.', 'ส\\.ต\\.อ\\.', 'ส\\.ต\\.ท\\.', 'ส\\.ต\\.ต\\.', 'พล\\.อ\\.', 'พล\\.ท\\.', 'พล\\.ต\\.', 'พ\\.อ\\.', 'พ\\.ท\\.',
+  // ตำแหน่งราชการ/ปกครอง/วิชาชีพ
+  'นายกรัฐมนตรี', 'นายกเทศมนตรี', 'นายกฯ', 'นายก อบต', 'นายก อบจ', 'รัฐมนตรี', 'ผู้ว่าราชการ', 'ผู้ว่าฯ', 'อธิบดี', 'ปลัด', 'กำนัน', 'ผู้ใหญ่บ้าน',
+  'ผอ\\.', 'ผกก\\.', 'ผบช\\.', 'ผบ\\.', 'สารวัตร', 'นพ\\.', 'พญ\\.', 'ทพ\\.', 'ดร\\.', 'รศ\\.', 'ผศ\\.',
+]);
+/** คำพูดในเครื่องหมายคำพูด (“ ” " ' ‘ ’) */
+export const PROTECTED_QUOTE_RE = /[“”"‘’']/u;
+export const PROTECTED_TITLE_RE = new RegExp(`(?:${PROTECTED_TITLE_PATTERNS.join('|')})`, 'u');
+/** วันที่/เวลา (1 พ.ย. · 12 ม.ค. 68 · 10/8/2569 · เวลา 03.00 น. · ปี 2567) — เลขไทยถูกครอบโดยกติกาตัวเลขอยู่แล้ว */
+export const PROTECTED_DATE_RE = new RegExp([
+  '\\d{1,2}\\s*(?:ม\\.ค\\.|ก\\.พ\\.|มี\\.ค\\.|เม\\.ย\\.|พ\\.ค\\.|มิ\\.ย\\.|ก\\.ค\\.|ส\\.ค\\.|ก\\.ย\\.|ต\\.ค\\.|พ\\.ย\\.|ธ\\.ค\\.|มกราคม|กุมภาพันธ์|มีนาคม|เมษายน|พฤษภาคม|มิถุนายน|กรกฎาคม|สิงหาคม|กันยายน|ตุลาคม|พฤศจิกายน|ธันวาคม)',
+  '\\d{1,2}[.:]\\d{2}\\s*น\\.',
+  'เวลา\\s*\\d',
+  '(?:ปี|พ\\.ศ\\.|ค\\.ศ\\.)\\s*\\d{2,4}',
+  '\\d{1,2}/\\d{1,2}/\\d{2,4}',
+].join('|'), 'u');
+export const PROTECTED_NUMBER_RE = /[0-9๐-๙]/u;
+
+/** กติกาคุ้มครองประโยคทั้งชุด — ลำดับ: quote → title → date → number (types ใน listProtectedSentences เรียงตามนี้) */
+export const PROTECTED_SENTENCE_RULES = Object.freeze([
+  Object.freeze({ type: 'quote', re: PROTECTED_QUOTE_RE }),
+  Object.freeze({ type: 'title', re: PROTECTED_TITLE_RE }),
+  Object.freeze({ type: 'date', re: PROTECTED_DATE_RE }),
+  Object.freeze({ type: 'number', re: PROTECTED_NUMBER_RE }),
+]);
+
+/** ยุบช่องว่างทุกชนิดเหลือตัวเดียว — ใช้เทียบ substring ของประโยคคุ้มครอง (โจทย์อนุญาต normalize ช่องว่าง) */
+export function normalizeTrimWhitespace(text) {
+  return String(text || '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * แตกข้อความเป็นประโยค/บรรทัด: ขึ้นบรรทัดใหม่ = ตัดเสมอ · ในบรรทัดตัดเพิ่มหลังเครื่องหมายจบประโยค/อัญประกาศปิดที่ตามด้วยช่องว่าง
+ * ไทยคั่นประโยคด้วยช่องว่างเดี่ยวซึ่งแตกแม่นไม่ได้ — หน่วยที่ได้อาจเล็ก/ใหญ่กว่าประโยคจริง ซึ่งปลอดภัยทั้งสองทาง:
+ * หน่วยเล็กเกิน = เช็ค substring ผ่านง่ายขึ้น (ด่าน findMissingFacts เดิมยังตรวจรายข้อเท็จจริงซ้ำอีกชั้น) · หน่วยใหญ่ = จับการตัดได้กว้างขึ้น
+ */
+export function splitTrimSentences(text) {
+  return String(text || '')
+    .split(/\n+/)
+    .flatMap((line) => line.split(/(?<=[.!?…”’"])\s+/u))
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 2);
+}
+
+/** ประโยค/บรรทัดที่เข้ากติกาคุ้มครอง — คืน [{ text, norm, types }] (norm = ยุบช่องว่างแล้ว ใช้เช็ค substring) */
+export function listProtectedSentences(text) {
+  const out = [];
+  for (const sentence of splitTrimSentences(text)) {
+    const types = PROTECTED_SENTENCE_RULES.filter((rule) => rule.re.test(sentence)).map((rule) => rule.type);
+    if (types.length > 0) out.push({ text: sentence, norm: normalizeTrimWhitespace(sentence), types });
+  }
+  return out;
+}
+
+/** เพดานรายการข้อเท็จจริงในพรอมต์ — กันพรอมต์บาน (เกินให้บอก "…และอีก N รายการ") */
+export const TRIM_FACT_LIST_LIMITS = Object.freeze({ maxItems: 80, maxChars: 3000, maxItemChars: 160 });
+
+/** จัดรายการ [{type, text}] เป็นบรรทัด "- ชนิด|ข้อความ" ภายใต้เพดาน — คืน { lines, listed, omitted } */
+export function formatTrimFactList(facts, limits = TRIM_FACT_LIST_LIMITS) {
+  const list = Array.isArray(facts) ? facts : [];
+  const lines = [];
+  let used = 0;
+  for (const fact of list) {
+    if (lines.length >= limits.maxItems) break;
+    const text = normalizeTrimWhitespace(fact?.text).slice(0, limits.maxItemChars);
+    if (!text) continue;
+    const line = `- ${fact?.type || 'fact'}|${text}`;
+    if (used + line.length > limits.maxChars) break;
+    lines.push(line);
+    used += line.length;
+  }
+  return { lines, listed: lines.length, omitted: Math.max(0, list.length - lines.length) };
+}
+
 /** คำสั่งตัด — ตัดทั้งประโยคหรือคงทั้งประโยคเท่านั้น ห้ามเรียบเรียงใหม่ (ให้ด่านตรวจข้อเท็จจริงจับได้ง่าย) */
-export function buildTrimPrompt({ content, before, target, minWords, raw, rawChars = TRIM_PASS_DEFAULTS.rawChars }) {
+export function buildTrimPrompt({ content, before, target, minWords, raw, rawChars = TRIM_PASS_DEFAULTS.rawChars, facts }) {
   const rawText = String(raw || '');
   const rawShown = rawText.length > rawChars ? `${rawText.slice(0, rawChars)}\n…(ตัดแสดง)` : rawText;
+  const factList = formatTrimFactList(facts); // ★ ข้อแก้ ①: ไม่มีรายการ = ไม่ใส่หมวด (กติกาคุ้มครองใส่เสมอ)
   return [
     '=== งาน: ตัดฉบับให้กระชับ (TRIM PASS) ===',
     `ข้อความด้านล่างยาว ${before} คำ ต้องเหลือประมาณ ${target} คำ (ห้ามต่ำกว่า ${minWords} คำ)`,
@@ -54,8 +145,16 @@ export function buildTrimPrompt({ content, before, target, minWords, raw, rawCha
     '- ตัดได้เฉพาะประโยคที่ "ไม่มีข้อเท็จจริงใหม่": ประโยคบรรยายอารมณ์/ความเห็นของผู้เขียน ประโยคสรุปซ้ำใจความเดิม รายละเอียดตัวละครรอง ตัวอย่างที่ซ้ำกัน',
     '- ตัดทั้งประโยค หรือคงไว้ทั้งประโยคเท่านั้น — ห้ามเรียบเรียงใหม่ ห้ามเปลี่ยนคำ ห้ามเติมคำ ในประโยคที่เหลือ',
     '- ห้ามตัดหรือแก้ ชื่อ ตัวเลข วันที่ คำพูดในเครื่องหมายคำพูด จุดหักของเรื่อง และผลลัพธ์',
+    '- 🔒 ห้ามตัดประโยคที่มีอย่างใดอย่างหนึ่งต่อไปนี้ และต้องคงประโยคนั้นไว้ตรงตัวทุกคำ: คำพูดในเครื่องหมายคำพูด (“ ” " \' ‘ ’) · สมณศักดิ์/ยศ/ตำแหน่ง (พระครู พระอาจารย์ หลวงพ่อ หลวงปู่ พระมหา สมเด็จ พ.ต.อ. ร.ต.ท. นายก ผอ. ฯลฯ) · วันที่/เวลา (1 พ.ย. · 12 ม.ค. 68 · เวลา 03.00 น. · ปี 2567) · ตัวเลขทุกตัว — ระบบตรวจด้วยเครื่องหลังตัด ถ้าประโยคเหล่านี้หาย ผลจะถูกทิ้งทั้งฉบับ',
     '- คงจำนวนย่อหน้าและลำดับย่อหน้าเดิม (คั่นด้วยบรรทัดว่าง) ห้ามรวมย่อหน้า ห้ามเปลี่ยนประโยคเปิดของย่อหน้าแรก',
     '- ถ้าตัดแล้วข้อเท็จจริงจะหาย ให้คงประโยคนั้นไว้แม้จะยาวเกินเป้า',
+    ...(factList.listed > 0 ? [
+      '',
+      '=== 📌 รายการข้อเท็จจริงที่ห้ามหาย (นับจากต้นฉบับดิบ) ===',
+      ...factList.lines,
+      ...(factList.omitted > 0 ? [`…และอีก ${factList.omitted} รายการ (ของที่ไม่ได้แสดงก็ห้ามหาย — เทียบกับต้นฉบับดิบด้านล่าง)`] : []),
+      '=== จบรายการข้อเท็จจริง ===',
+    ] : []),
     'ตอบเป็น JSON เท่านั้น: {"content": "ข้อความหลังตัด"}',
     '',
     '=== ต้นฉบับข่าวดิบ (ใช้เทียบว่าประโยคไหนมีข้อเท็จจริง — ห้ามคัดลอกสำนวนจากนี้) ===',
@@ -112,12 +211,53 @@ function runWithTrimTimeout(factory, timeoutMs, parentSignal) {
 export const FACT_CHECK_MAX_MISSING = 10_000;
 
 /**
+ * ★ ข้อแก้ ①: แปลงผล extractFacts เป็นรายการ [{ type, text }] — รับได้ 2 ทรง:
+ * (ก) array ของ { type, text } ตรงๆ (เช่น missing จาก findMissingFacts) · (ข) object จาก extractSourceFactsDetailed:
+ * { numbers, dates, quotes, names, details } — ทุกชนิดมี .text (สตริงล้วนก็รับ) และต้องรวมชนิด detail ด้วย
+ */
+export function normalizeExtractedFacts(result) {
+  if (Array.isArray(result)) {
+    return result
+      .filter((item) => item && typeof item === 'object' && typeof item.text === 'string' && item.text)
+      .map((item) => ({ type: String(item.type || 'fact'), text: item.text }));
+  }
+  if (!result || typeof result !== 'object') return [];
+  const out = [];
+  for (const [key, type] of [['numbers', 'number'], ['dates', 'date'], ['quotes', 'quote'], ['names', 'name'], ['details', 'detail']]) {
+    for (const item of Array.isArray(result[key]) ? result[key] : []) {
+      const text = typeof item === 'string' ? item : item?.text;
+      if (typeof text === 'string' && text) out.push({ type, text });
+    }
+  }
+  return out;
+}
+
+/**
+ * ★ ข้อแก้ ①: รายการข้อเท็จจริงสำหรับพรอมต์ — ลำดับถอย: extractFacts (ฉีดมา) → findMissingFacts(raw, '')
+ * (เนื้อว่าง = ทุกข้อเท็จจริง "หาย" = ได้รายการเต็ม) → ไม่มีทั้งคู่/พัง = [] — ห้ามล้มไม่ว่ากรณีใด
+ */
+export function resolveTrimFactList({ extractFacts, findMissingFacts, raw } = {}) {
+  if (!raw) return [];
+  try {
+    if (typeof extractFacts === 'function') return normalizeExtractedFacts(extractFacts(raw));
+    if (typeof findMissingFacts === 'function') {
+      const report = findMissingFacts(raw, '', { maxMissing: FACT_CHECK_MAX_MISSING });
+      return normalizeExtractedFacts(Array.isArray(report?.missing) ? report.missing : []);
+    }
+  } catch {
+    return [];
+  }
+  return [];
+}
+
+/**
  * ตัดฉบับที่ยาวเกิน — คืน version ใหม่ (ไม่แก้ object เดิม) พร้อม _trimPass เสมอ
  * @param {object} version ร่างจากนักเขียน (ใช้ .content)
  * @param {{
  *   raw?: string, maxWords?: number, target?: number, minWords?: number, timeoutMs?: number, rawChars?: number,
  *   callAI?: Function, model?: string, countWords?: (text: string) => number,
  *   findMissingFacts?: (raw: string, out: string, opts?: { maxMissing?: number }) => { missing: Array<{type: string, text: string}>, truncated?: number },
+ *   extractFacts?: (raw: string) => object | Array<{type: string, text: string}>,
  *   signal?: AbortSignal,
  * }} [opts]
  */
@@ -133,6 +273,7 @@ export async function trimIfTooLong(version, opts = {}) {
     model,
     countWords = countThaiWordsDefault,
     findMissingFacts,
+    extractFacts, // ★ ข้อแก้ ①: ผู้เรียกฉีด extractSourceFactsDetailed (ไม่ฉีด = ถอยไป findMissingFacts(raw, ''))
     signal,
   } = opts;
   const base = version && typeof version === 'object' ? version : {};
@@ -148,7 +289,22 @@ export async function trimIfTooLong(version, opts = {}) {
   if (!Number.isFinite(before) || before <= maxWords) return keep({ before, after: before, reason: 'within_max' });
   if (typeof callAI !== 'function') return keep({ before, after: before, reason: 'no_ai' });
 
-  const prompt = buildTrimPrompt({ content, before, target, minWords, raw, rawChars });
+  // ★ ข้อแก้ ① (2 ก.ย. 69): เตรียมรายการข้อเท็จจริง (เข้าพรอมต์) + ประโยคคุ้มครอง (ด่านกลไกหลังตัด) — พังส่วนไหนถือว่าไม่มีส่วนนั้น ห้ามล้ม
+  let promptFacts = [];
+  try {
+    promptFacts = resolveTrimFactList({ extractFacts, findMissingFacts, raw });
+  } catch {
+    promptFacts = [];
+  }
+  let protectedSentences = [];
+  try {
+    protectedSentences = listProtectedSentences(content);
+  } catch {
+    protectedSentences = [];
+  }
+  const debugInfo = { factsListed: formatTrimFactList(promptFacts).listed, protectedSentences: protectedSentences.length };
+
+  const prompt = buildTrimPrompt({ content, before, target, minWords, raw, rawChars, facts: promptFacts });
   let result;
   try {
     result = await runWithTrimTimeout(
@@ -167,20 +323,34 @@ export async function trimIfTooLong(version, opts = {}) {
   } catch (err) {
     const message = String(err?.message || err);
     const reason = /^TIMEOUT/.test(message) ? 'timeout' : (signal?.aborted ? 'aborted' : 'ai_error');
-    return keep({ before, after: before, reason, error: message.slice(0, 120) });
+    return keep({ ...debugInfo, before, after: before, reason, error: message.slice(0, 120) });
   }
 
   const next = pickTrimmedContent(result);
-  if (!next) return keep({ before, after: before, reason: 'empty_result' });
+  if (!next) return keep({ ...debugInfo, before, after: before, reason: 'empty_result' });
 
   let after;
   try {
     after = countWords(next);
   } catch (err) {
-    return keep({ before, after: before, reason: 'count_error', error: String(err?.message || err).slice(0, 120) });
+    return keep({ ...debugInfo, before, after: before, reason: 'count_error', error: String(err?.message || err).slice(0, 120) });
   }
-  if (!Number.isFinite(after) || after >= before) return keep({ before, after, reason: 'not_shorter' });
-  if (after < minWords) return keep({ before, after, reason: 'too_short' });
+  if (!Number.isFinite(after) || after >= before) return keep({ ...debugInfo, before, after, reason: 'not_shorter' });
+  if (after < minWords) return keep({ ...debugInfo, before, after, reason: 'too_short' });
+
+  // ★ ข้อแก้ ①: ด่านกลไก (ไม่พึ่ง AI) — ประโยคคุ้มครองของข้อความก่อนตัดต้องยังอยู่ครบแบบ substring ตรงตัว (normalize ช่องว่าง)
+  //   ทำก่อนขั้น findMissingFacts เดิมเสมอ (ด่านเดิมคงไว้ทั้งหมด) — จับ luna ตัดประโยคคำพูด/สมณศักดิ์-ยศ/วันที่/ตัวเลขทิ้ง
+  const normNext = normalizeTrimWhitespace(next);
+  const cutProtected = protectedSentences.filter((s) => !normNext.includes(s.norm));
+  if (cutProtected.length > 0) {
+    return keep({
+      ...debugInfo,
+      before,
+      after,
+      reason: 'protected_sentence_cut',
+      cut: cutProtected.slice(0, 3).map((s) => s.text.slice(0, 140)),
+    });
+  }
 
   if (typeof findMissingFacts === 'function' && raw) {
     let lost = [];
@@ -194,16 +364,16 @@ export async function trimIfTooLong(version, opts = {}) {
       const nowMissing = Array.isArray(nowReport?.missing) ? nowReport.missing : [];
       lost = nowMissing.filter((m) => !wasMissing.has(`${m?.type || ''}|${m?.text || ''}`));
     } catch (err) {
-      return keep({ before, after, reason: 'fact_check_error', error: String(err?.message || err).slice(0, 120) });
+      return keep({ ...debugInfo, before, after, reason: 'fact_check_error', error: String(err?.message || err).slice(0, 120) });
     }
     if (lost.length > 0) {
-      return keep({ before, after, reason: 'facts_lost', lost: lost.slice(0, 5).map((m) => `${m.type}:${m.text}`) });
+      return keep({ ...debugInfo, before, after, reason: 'facts_lost', lost: lost.slice(0, 5).map((m) => `${m.type}:${m.text}`) });
     }
     if (truncated > 0) {
       // รายงานถูกตัด = เทียบไม่ครบ ไม่รู้ว่าของที่ตกนอกรายการหายเพิ่มหรือไม่ → fail-safe ทิ้งผล ใช้ต้นฉบับ
-      return keep({ before, after, reason: 'fact_check_truncated', truncated });
+      return keep({ ...debugInfo, before, after, reason: 'fact_check_truncated', truncated });
     }
   }
 
-  return { ...base, content: next, _trimPass: { before, after, applied: true, reason: 'trimmed', originalChars: content.length } };
+  return { ...base, content: next, _trimPass: { before, after, applied: true, reason: 'trimmed', originalChars: content.length, ...debugInfo } };
 }

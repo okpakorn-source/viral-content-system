@@ -10,6 +10,14 @@
  *   WRITER_VIRAL_RULES_V2     บล็อก "กฎจากโพสต์ปังจริง" อ่านจาก data/writer-viral-rules.json (ไฟล์หาย/พัง/ว่าง = ไม่ใส่บล็อก ไม่ล้มท่อ)
  *   WRITER_PROMPT_CACHE_V2    แตกใบสั่งเขียนเป็น 2 ก้อน [กฎคงที่ cache:true, วัตถุดิบผันตามข่าว] ส่งเป็น promptBlocks ของ callClaude
  *
+ * ★ ข้อแก้ ① หลังผล A/B (2 ก.ย. 69): บล็อก FIDELITY เต็มอยู่โซนกฎคงที่ไกลจากเนื้อดิบ → กฎห้ามเดาเพศไม่ถึงตอนเขียน
+ *   (A/B: ทั้ง 2 แขนยังเดาเพศ "แม่/เธอ" ทั้งที่ดิบไม่บอก) จึงเพิ่ม "เตือนซื่อตรงฉบับสั้น" (≤ 5 บรรทัด) ใต้สวิตช์
+ *   WRITER_FIDELITY_RULES_V2 ตัวเดิม — buildFidelityRawReminder()/buildFidelityFinalCheckLine() คืน '' เมื่อสวิตช์ปิด
+ *   จุดวาง (summarizeServiceText ต่อสายผ่าน _writerPolicy → finalizeRawFirstWriterPrompt param 3):
+ *     · มีเนื้อดิบ (RAW-first): วาง 2 จุด — ทันทีหลังกรอบ RAW-first (ก่อนวัตถุดิบประกอบ) + เป็นข้อหนึ่งใน FINAL RAW AUTHORITY CHECK
+ *     · ไม่มีเนื้อดิบ (สาย URL/transcript — ไม่มีกรอบ RAW): วางท้ายก้อนผันตามข่าว/ท้ายพรอมต์ ใกล้จุดที่โมเดลเริ่มเขียนที่สุด
+ *     · โหมดแคช (WRITER_PROMPT_CACHE_V2): ต้องอยู่ในก้อนผันตามข่าว (blocks[1]) เสมอ ห้ามปนก้อน cache:true
+ *
  * หลักฐานที่ผลักดัน (เพจจริง 1,927 โพสต์): 140–170 คำ ค่ากลาง 15,605 ไลก์ · 170–200 = 11,039 · 200–230 = 7,074 · 230+ ≈ 5–6 พัน
  *   ระบบเขียน 228–296 คำ (ยาวกว่าดิบ 40–60% จากประโยคบรรยายอารมณ์/รายละเอียดแต่ง/สรุปซ้ำ) · ผู้ตรวจ 14 คน: 12/14 ฉบับมีของแต่งเล็ก
  *   ("ไม่ได้ดุ" "นั่งลงคุย" "ไม่ใช่เพื่อซื้อของเล่น") · เดาเพศ/บทบาท ("แม่/เธอ" ทั้งที่ดิบไม่บอก)
@@ -68,6 +76,27 @@ export const WRITER_FIDELITY_RULES_BLOCK = [
 
 export function buildFidelityRulesBlock() {
   return isWriterFidelityRulesV2On() ? WRITER_FIDELITY_RULES_BLOCK : '';
+}
+
+// ── 2.1) ★ ข้อแก้ ① (2 ก.ย. 69): เตือนซื่อตรงฉบับสั้น "ติดเนื้อดิบ" — สวิตช์เดิม WRITER_FIDELITY_RULES_V2 ไม่เพิ่มสวิตช์ใหม่ ──
+/** ≤ 5 บรรทัด — วางทันทีหลังกรอบ RAW-first (หรือท้ายพรอมต์เมื่อไม่มีเนื้อดิบ — ดูหัวไฟล์) · ข้อความเป็นกลางใช้ได้ทั้ง 2 ตำแหน่ง */
+export const WRITER_FIDELITY_RAW_REMINDER = [
+  '=== 🧷 เตือนซื่อตรงก่อนเขียน (อ่านคู่กับเนื้อข่าวต้นฉบับ) ===',
+  '- ห้ามเดาเพศ/บทบาท/ความสัมพันธ์ที่ต้นฉบับไม่ระบุ (แม่/พ่อ/ภรรยา/เธอ/เขา) — ใช้ชื่อตามต้นฉบับ หรือคำกลาง "เจ้าตัว" "คนในคลิป" "ผู้โพสต์"',
+  '- ห้ามแต่งการกระทำ ท่าทาง หรือ "ความต่าง/การปฏิเสธ" (ไม่ได้…/ไม่ใช่…) ที่ต้นฉบับไม่ได้บอก',
+  '- ทุกข้อเท็จจริงที่เขียนต้องชี้กลับได้ว่าอยู่ตรงไหนของต้นฉบับ',
+  '=== จบเตือนซื่อตรง ===',
+].join('\n');
+
+export function buildFidelityRawReminder() {
+  return isWriterFidelityRulesV2On() ? WRITER_FIDELITY_RAW_REMINDER : '';
+}
+
+/** ข้อเพิ่มใน FINAL RAW AUTHORITY CHECK (1 บรรทัด — summarizeServiceText แทรกต่อท้ายรายการตรวจเดิม) */
+export const WRITER_FIDELITY_FINAL_CHECK_LINE = '- ตรวจซื่อตรงซ้ำ: เพศ/บทบาท/ความสัมพันธ์/การกระทำ/ความต่าง ที่ RAW ไม่ระบุ ต้องไม่ปรากฏ — ใช้ชื่อตามต้นฉบับหรือ "เจ้าตัว" แทนการเดา';
+
+export function buildFidelityFinalCheckLine() {
+  return isWriterFidelityRulesV2On() ? WRITER_FIDELITY_FINAL_CHECK_LINE : '';
 }
 
 // ── 3) บล็อก "กฎจากโพสต์ปังจริง" (WRITER_VIRAL_RULES_V2) — อ่านไฟล์ด้วย fs แบบเดียวกับ data/viral-likes-real.json ──

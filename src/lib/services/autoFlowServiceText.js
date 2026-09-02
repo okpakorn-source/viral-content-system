@@ -811,13 +811,15 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   //   จุดต่อสาย: หลังได้ร่างครบทุกมุม ก่อน correctionPipeline · งบ 25s ใต้ pipeline deadline เดิม (เหลือ < 60s = ข้าม ไม่เบียดด่านแก้ไข)
   //   ผลอยู่ใน version._trimPass · provenance (usedModel/promptId/_source) คงเดิม · ทะเบียนสวิตช์: src/lib/config/newsSwitches.js
   //   dependency โหลดแบบ dynamic ในบล็อก try — เทสสตับเดิมที่โหลดไฟล์นี้ไม่ต้องรู้จักโมดูลใหม่
+  //   ★ ข้อแก้ ① หลัง A/B (2 ก.ย. 69): ฉีด extractFacts = extractSourceFactsDetailed ให้ตัวตัดเห็น "รายการข้อเท็จจริงห้ามหาย"
+  //     ในพรอมต์ก่อนตัด + ด่านกลไกประโยคคุ้มครอง (คำพูด/สมณศักดิ์-ยศ/วันที่/ตัวเลข) อยู่ใน writerTrimPass เอง
   if (process.env.WRITER_TRIM_PASS === '1') {
     const _trimDeadline = getActivePipelineDeadline();
     if (_trimDeadline && _trimDeadline.remainingMs() < 60_000) {
       addLog('TrimPass', `⏭️ ข้าม trim pass — งบท่อเหลือ ${Math.round(_trimDeadline.remainingMs() / 1000)}s ไม่พอ (ต้องเหลือ ≥ 60s)`);
     } else {
       try {
-        const [{ trimIfTooLong }, { callAI }, { MODEL_FAST_CHEAP }, { findMissingFacts }, { countPublishableThaiWords }] = await Promise.all([
+        const [{ trimIfTooLong }, { callAI }, { MODEL_FAST_CHEAP }, { findMissingFacts, extractSourceFactsDetailed }, { countPublishableThaiWords }] = await Promise.all([
           import('@/lib/services/writerTrimPass'),
           import('@/lib/ai/openai'),
           import('@/lib/ai/modelConfig'),
@@ -830,6 +832,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
             callAI,
             model: MODEL_FAST_CHEAP,
             findMissingFacts,
+            extractFacts: extractSourceFactsDetailed, // ★ ข้อแก้ ①: รายการข้อเท็จจริง (รวมชนิด detail) เข้าพรอมต์ตัด
             countWords: (text) => countPublishableThaiWords({ content: text }),
             signal: requestSignal,
             timeoutMs: 24_000,

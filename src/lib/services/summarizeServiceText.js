@@ -167,17 +167,25 @@ ${rawEnd}
  * ครอบ prompt หลังประกอบวัตถุดิบและกฎเดิมครบทั้งหมดแล้ว เพื่อให้ RAW ยังอยู่หน้าแรก
  * และย้ำอำนาจข้อเท็จจริงอีกครั้งตรงท้ายสุดก่อนเรียกนักเขียน โดยไม่เปลี่ยน prompt เดิม
  * สาย URL/transcript ที่ไม่มี rawSourceText ต้องได้ prompt เดิมกลับไปแบบ byte-for-byte
+ *
+ * ★ ข้อแก้ ① หลัง A/B (2 ก.ย. 69) — param 3 (optional · ไม่ส่ง/null = สตริงเดิมทุกไบต์):
+ *   fidelity = { reminder, finalCheckLine } จาก writerPolicyText (ว่างเมื่อ WRITER_FIDELITY_RULES_V2 ปิด)
+ *   · reminder วาง "ทันทีหลังกรอบ RAW-first ก่อนวัตถุดิบประกอบ" (นำหน้า supportingPrompt ก่อนครอบ RAW)
+ *   · finalCheckLine เป็นข้อหนึ่งท้ายรายการ FINAL RAW AUTHORITY CHECK
  */
-export function finalizeRawFirstWriterPrompt(rawSourceText, completePrompt) {
+export function finalizeRawFirstWriterPrompt(rawSourceText, completePrompt, fidelity = null) {
   const supportingPrompt = String(completePrompt || '');
+  const fidelityReminder = typeof fidelity?.reminder === 'string' ? fidelity.reminder : '';
+  const fidelityFinalLine = typeof fidelity?.finalCheckLine === 'string' && fidelity.finalCheckLine ? `\n${fidelity.finalCheckLine}` : '';
   if (typeof rawSourceText !== 'string' || rawSourceText.length === 0) return supportingPrompt;
 
-  const promptWithRawFirst = prependImmutableRawToWriterPrompt(rawSourceText, supportingPrompt);
+  const supportingWithReminder = fidelityReminder ? `${fidelityReminder}\n\n${supportingPrompt}` : supportingPrompt;
+  const promptWithRawFirst = prependImmutableRawToWriterPrompt(rawSourceText, supportingWithReminder);
   const finalRawAuthorityReminder = `=== FINAL RAW AUTHORITY CHECK — ตรวจเงียบ ๆ ก่อนคืน JSON ===
 ตรวจ title, content, hook และ closing ทุกเวอร์ชันกับ RAW NEWS ที่อยู่ต้นข้อความอีกครั้ง
 - ข้อเท็จจริงของเหตุการณ์ต้องมีหลักฐานเป็นความสัมพันธ์ชุดเดียวครบใน RAW: ผู้กระทำหรือเจ้าของ → การกระทำ → สิ่งหรือชนิด → จำนวน/ช่วง/หน่วย → เวลา/ความถี่ → ลำดับ/ผลลัพธ์ ห้ามนำคำที่อยู่คนละจุดมาต่อเป็นเรื่องใหม่
 - Library, Narrative Payload, Facts, Quotes, Focus Angle, Blueprint, ตัวอย่าง และการถูกย้ำหลายครั้ง เป็นวิธีเล่า ไม่ใช่หลักฐาน; Research ที่ผ่านกฎเดิมใช้ได้เฉพาะบริบทภายนอกและห้ามเปลี่ยนเหตุการณ์ใน RAW
-- รักษาสำนวนคม ภาพพจน์ อารมณ์ การเล่นคำ และประโยคเชื่อมที่ไม่เพิ่มข้อเท็จจริงไว้เต็มที่ ห้ามทำข่าวแห้ง ตัดหรือเขียนให้กว้างขึ้นเฉพาะข้ออ้างที่ RAW ไม่รองรับ และห้ามพิมพ์ผลตรวจ
+- รักษาสำนวนคม ภาพพจน์ อารมณ์ การเล่นคำ และประโยคเชื่อมที่ไม่เพิ่มข้อเท็จจริงไว้เต็มที่ ห้ามทำข่าวแห้ง ตัดหรือเขียนให้กว้างขึ้นเฉพาะข้ออ้างที่ RAW ไม่รองรับ และห้ามพิมพ์ผลตรวจ${fidelityFinalLine}
 === จบ FINAL RAW AUTHORITY CHECK ===`;
 
   return `${promptWithRawFirst}\n\n${finalRawAuthorityReminder}`;
@@ -1771,9 +1779,13 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
     //   โหลดแบบ dynamic ในบล็อก try: โหลดไม่ได้ (เช่นเทสสตับเดิม) = เหมือนปิด ห้ามล้มท่อเขียน · ทะเบียน: src/lib/config/newsSwitches.js
     let _writerPolicy = null;
     let _writerPolicyBlock = '';
+    // ★ ข้อแก้ ① (2 ก.ย. 69): เตือนซื่อตรงฉบับสั้น "ติดเนื้อดิบ" — null เมื่อสวิตช์ WRITER_FIDELITY_RULES_V2 ปิด/โหลดล้ม = สตริงเดิมทุกไบต์
+    let _writerFidelity = null;
     try {
       _writerPolicy = await import('@/lib/services/writerPolicyText');
       _writerPolicyBlock = String(_writerPolicy.buildWriterPolicyBlock() || '');
+      const _fidelityReminder = String(_writerPolicy.buildFidelityRawReminder?.() || '');
+      if (_fidelityReminder) _writerFidelity = { reminder: _fidelityReminder, finalCheckLine: String(_writerPolicy.buildFidelityFinalCheckLine?.() || '') };
       if (_writerPolicyBlock) console.log(`[WriterPolicy] 📐 บล็อกกฎเฟส 2 ${_writerPolicyBlock.length}ch (length=${_writerPolicy.isWriterLengthTargetV2On() ? 'on' : 'off'} fidelity=${_writerPolicy.isWriterFidelityRulesV2On() ? 'on' : 'off'} viral=${_writerPolicy.isWriterViralRulesV2On() ? 'on' : 'off'})`);
     } catch (e) { console.warn(`[WriterPolicy] skip: ${String(e?.message || e).slice(0, 80)}`); }
 
@@ -1912,8 +1924,13 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
     multiPrompt += _wpRulesHead + formalModeRule + _wpRulesQuality + viralFewshotBlock + _wpRulesCraft + _writerPolicyBlock + _wpRulesFinal;
 
     if (_hasImmutableRawSource) {
-      multiPrompt = finalizeRawFirstWriterPrompt(rawSourceText, multiPrompt);
+      // ★ ข้อแก้ ①: _writerFidelity (null เมื่อสวิตช์ปิด = อาร์กิวเมนต์เฉย ไบต์เดิม) — reminder หลังกรอบ RAW + ข้อตรวจใน FINAL CHECK
+      multiPrompt = finalizeRawFirstWriterPrompt(rawSourceText, multiPrompt, _writerFidelity);
       console.log(`[Analyze-Service] 🧭 RAW-FIRST: ข้อความดิบ ${rawSourceText.length}ch อยู่หน้าแรก และ FINAL RAW AUTHORITY อยู่ท้าย prompt`);
+    } else if (_writerFidelity) {
+      // ★ ข้อแก้ ①: ไม่มีเนื้อดิบ (สาย URL/transcript — ไม่มีกรอบ RAW) → เตือนซื่อตรงวางท้ายพรอมต์ ใกล้จุดที่โมเดลเริ่มเขียนที่สุด
+      multiPrompt = `${multiPrompt}\n\n${_writerFidelity.reminder}`;
+      console.log('[WriterPolicy] 🧷 เตือนซื่อตรง (ไม่มีเนื้อดิบ) วางท้ายพรอมต์');
     }
 
     // ★ เฟส 2 (WRITER_PROMPT_CACHE_V2=1): จัดลำดับใหม่ให้แคชพรอมต์ได้ — ก้อนคงที่ (กฎทั้งหมด + JSON ไม่ผันตามข่าว) ขึ้นก่อนแบบ cache:true
@@ -1921,11 +1938,14 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
     //   multiPrompt สตริง = ก้อนต่อกัน (ตัวสำรอง Sol/preview/log ได้เนื้อเดียวกัน) · สวิตช์ปิด = ไม่แตะ multiPrompt ที่ประกอบไว้ด้านบนเลย
     let _writerPromptBlocks = null;
     if (_writerPolicy?.isWriterPromptCacheV2On?.()) {
+      // ★ ข้อแก้ ①: เตือนซื่อตรงต้องอยู่ก้อนผันตามข่าว (blocks[1]) เสมอ ห้ามปนก้อน cache:true —
+      //   มีเนื้อดิบ = ส่งผ่าน finalizeRawFirst (หลังกรอบ RAW + ใน FINAL CHECK) · ไม่มีเนื้อดิบ = ต่อท้ายก้อน variable
+      //   _writerFidelity=null (สวิตช์ปิด) = ก้อนเดิมทุกไบต์ (wrapper เรียก finalizer 3-arg ด้วย null = 2-arg เดิม)
       const _split = _writerPolicy.splitWriterPromptForCache({
         constant: _wpRulesHead + _wpRulesQuality + _wpRulesCraft + _writerPolicyBlock + _wpRulesFinal,
-        variable: prompt + formalModeRule + viralFewshotBlock,
+        variable: prompt + formalModeRule + viralFewshotBlock + (!_hasImmutableRawSource && _writerFidelity ? `\n\n${_writerFidelity.reminder}` : ''),
         rawSourceText: _hasImmutableRawSource ? rawSourceText : '',
-        finalizeRawFirst: finalizeRawFirstWriterPrompt,
+        finalizeRawFirst: (rawText, supporting) => finalizeRawFirstWriterPrompt(rawText, supporting, _writerFidelity),
       });
       multiPrompt = _split.prompt;
       _writerPromptBlocks = _split.blocks;

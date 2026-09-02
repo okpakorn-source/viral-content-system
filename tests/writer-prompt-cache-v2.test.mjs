@@ -163,7 +163,8 @@ function assertProductionWiring(summarize = summarizeSource, router = routerSour
   // OFF path เดิมต้องอยู่ครบ (สัญญาเดียวกับ raw-first-prompt-authority)
   const buildStart = summarize.indexOf('    let multiPrompt = prompt;');
   const assembly = summarize.indexOf('    multiPrompt += _wpRulesHead + formalModeRule + _wpRulesQuality + viralFewshotBlock + _wpRulesCraft + _writerPolicyBlock + _wpRulesFinal;');
-  const finalizer = summarize.indexOf('multiPrompt = finalizeRawFirstWriterPrompt(rawSourceText, multiPrompt);');
+  // ★ ข้อแก้ ① (2 ก.ย. 69): finalizer รับ _writerFidelity เป็น param 3 (null เมื่อสวิตช์ปิด = ไบต์เดิม)
+  const finalizer = summarize.indexOf('multiPrompt = finalizeRawFirstWriterPrompt(rawSourceText, multiPrompt, _writerFidelity);');
   const cacheGate = summarize.indexOf('if (_writerPolicy?.isWriterPromptCacheV2On?.()) {');
   const writerCall = summarize.indexOf("callSmartAI('write', { prompt: multiPrompt,");
   assert.ok(buildStart >= 0, 'ต้องเริ่มด้วย let multiPrompt = prompt;');
@@ -173,15 +174,22 @@ function assertProductionWiring(summarize = summarizeSource, router = routerSour
   assert.ok(writerCall > cacheGate, 'แตกก้อนเสร็จก่อนส่งให้นักเขียน');
   const cacheBlock = summarize.slice(cacheGate, writerCall);
   assert.match(cacheBlock, /constant: _wpRulesHead \+ _wpRulesQuality \+ _wpRulesCraft \+ _writerPolicyBlock \+ _wpRulesFinal,/u, 'ก้อนคงที่ = กฎทุกส่วน + บล็อกเฟส 2');
-  assert.match(cacheBlock, /variable: prompt \+ formalModeRule \+ viralFewshotBlock,/u, 'ก้อนผันตามข่าว = การ์ด/ทางการ/ครู');
+  // ★ ข้อแก้ ①: reminder ซื่อตรงต้องอยู่ก้อนผันตามข่าวเสมอ — ไม่มีเนื้อดิบ = ต่อท้าย variable · มีเนื้อดิบ = ผ่าน finalizer 3-arg
+  assert.ok(
+    cacheBlock.includes("variable: prompt + formalModeRule + viralFewshotBlock + (!_hasImmutableRawSource && _writerFidelity ? `\\n\\n${_writerFidelity.reminder}` : ''),"),
+    'ก้อนผันตามข่าว = การ์ด/ทางการ/ครู (+ เตือนซื่อตรงท้ายก้อนเมื่อไม่มีเนื้อดิบและสวิตช์เปิด — สวิตช์ปิด = นิพจน์เดิม)',
+  );
   assert.match(cacheBlock, /rawSourceText: _hasImmutableRawSource \? rawSourceText : '',/u);
-  assert.match(cacheBlock, /finalizeRawFirst: finalizeRawFirstWriterPrompt,/u, 'ต้องใช้ finalizer ของจริง (RAW-first + FINAL RAW AUTHORITY)');
+  assert.match(cacheBlock, /finalizeRawFirst: \(rawText, supporting\) => finalizeRawFirstWriterPrompt\(rawText, supporting, _writerFidelity\),/u, 'ต้องใช้ finalizer ของจริง (RAW-first + FINAL RAW AUTHORITY) ส่ง _writerFidelity ต่อ');
   assert.match(cacheBlock, /\[WriterCacheV2\][^\n]*constantChars[^\n]*variableChars/u, 'ต้อง log ขนาดก้อนคงที่/ผันแปร');
   const callBlock = summarize.slice(writerCall, summarize.indexOf("270000, 'write_inner'", writerCall));
   assert.match(callBlock, /\.\.\.\(_writerPromptBlocks \? \{ promptBlocks: _writerPromptBlocks \} : \{\}\),/u, 'ส่ง promptBlocks เฉพาะเมื่อมี — ไม่มี = ไม่มีคีย์');
   assert.match(summarize, /await import\('@\/lib\/services\/writerPolicyText'\)/u, 'โหลดนโยบายแบบ dynamic ในบล็อก try');
   assert.doesNotMatch(summarize, /^import .*writerPolicyText/mu, 'ห้าม static import (เทสสตับเดิมโหลดไฟล์นี้)');
   assert.match(summarize, /let _writerPolicyBlock = '';[\s\S]*?_writerPolicyBlock = String\(_writerPolicy\.buildWriterPolicyBlock\(\) \|\| ''\);/u);
+  // ★ ข้อแก้ ①: _writerFidelity มาจาก buildFidelityRawReminder (optional chaining — โมดูลเก่า/สตับไม่มีฟังก์ชัน = ปิด)
+  assert.match(summarize, /let _writerFidelity = null;[\s\S]*?buildFidelityRawReminder\?\.\(\)[\s\S]*?_writerFidelity = \{ reminder: _fidelityReminder, finalCheckLine: String\(_writerPolicy\.buildFidelityFinalCheckLine\?\.\(\) \|\| ''\) \};/u);
+  assert.match(summarize, /\} else if \(_writerFidelity\) \{[\s\S]*?multiPrompt = `\$\{multiPrompt\}\\n\\n\$\{_writerFidelity\.reminder\}`;/u, 'ไม่มีเนื้อดิบ = เตือนซื่อตรงท้ายพรอมต์ (เฉพาะสวิตช์เปิด)');
 
   // aiRouter: ส่งต่อ promptBlocks แบบ optional
   assert.match(router, /const \{ prompt, temperature, maxTokens, systemPrompt, signal, textNewsLengthPolicy = false, promptBlocks \} = options;/u);
@@ -231,6 +239,56 @@ test('เปิด WRITER_PROMPT_CACHE_V2: blocks[0] คงที่ไม่ม
   const on = policy.splitWriterPromptForCache({ constant, variable, rawSourceText: '', finalizeRawFirst: finalizer }).prompt;
   assert.equal(on.length, off.length + 2 - 2, 'ความยาวรวมเท่าเดิม (ย้ายบรรทัดว่างนำ 2 ตัวไปท้ายก้อนคงที่)');
   assert.deepEqual([...on].sort().join(''), [...off].sort().join(''), 'ตัวอักษรชุดเดียวกันทุกตัว — แค่สลับลำดับก้อน');
+});
+
+test('★ ข้อแก้ ①: เปิด WRITER_FIDELITY_RULES_V2 — reminder อยู่ก้อนผันตามข่าว (blocks[1]) หลังเนื้อดิบ + ข้อตรวจใน FINAL CHECK · ปิด/null = ไบต์เดิม', () => {
+  const finalizer = makeFinalizer();
+  const slice = extractAssembly(summarizeSource);
+  const parts = evaluateAssembly(slice, { ...VARIABLE_INPUT, returnParts: true });
+  const constant = parts._wpRulesHead + parts._wpRulesQuality + parts._wpRulesCraft + VARIABLE_INPUT.policyBlock + parts._wpRulesFinal;
+  const variable = VARIABLE_INPUT.prompt + VARIABLE_INPUT.formalModeRule + VARIABLE_INPUT.viralFewshotBlock;
+
+  // ปิด: param 3 = null/ไม่ส่ง ต้องได้ไบต์เดิมเป๊ะ (สัญญาสวิตช์ถอย)
+  assert.equal(finalizer(RAW, variable, null), finalizer(RAW, variable), 'fidelity=null ต้องเท่ากับเรียกแบบ 2-arg เดิม');
+
+  const savedFid = process.env.WRITER_FIDELITY_RULES_V2;
+  process.env.WRITER_FIDELITY_RULES_V2 = '1';
+  let fidelity;
+  try {
+    fidelity = { reminder: policy.buildFidelityRawReminder(), finalCheckLine: policy.buildFidelityFinalCheckLine() };
+  } finally {
+    if (savedFid === undefined) delete process.env.WRITER_FIDELITY_RULES_V2;
+    else process.env.WRITER_FIDELITY_RULES_V2 = savedFid;
+  }
+  assert.ok(fidelity.reminder.includes('เตือนซื่อตรง') && fidelity.finalCheckLine.startsWith('- '), 'สวิตช์เปิดต้องได้ข้อความจริง');
+  assert.equal(policy.buildFidelityRawReminder(), '', 'สวิตช์ปิด (env ปกติของเทส) ต้องว่าง');
+
+  // มีเนื้อดิบ: reminder หลังกรอบ RAW ก่อนวัตถุดิบ + finalCheckLine ใน FINAL CHECK — ทั้งหมดอยู่ blocks[1] เท่านั้น
+  const wrapped = (rawText, supporting) => finalizer(rawText, supporting, fidelity);
+  const split = policy.splitWriterPromptForCache({ constant, variable, rawSourceText: RAW, finalizeRawFirst: wrapped });
+  const [constantBlock, variableBlock] = split.blocks;
+  assert.ok(!constantBlock.text.includes('เตือนซื่อตรง') && !constantBlock.text.includes(fidelity.finalCheckLine), 'ก้อน cache:true ห้ามมี reminder/ข้อตรวจซื่อตรง');
+  const rawAt = variableBlock.text.indexOf(RAW_SENTINEL);
+  const reminderAt = variableBlock.text.indexOf(fidelity.reminder);
+  const promptAt = variableBlock.text.indexOf('[PROMPT]');
+  assert.ok(rawAt >= 0 && reminderAt > rawAt, 'reminder ต้องอยู่หลังเนื้อดิบ (ทันทีหลังกรอบ RAW-first)');
+  assert.ok(promptAt > reminderAt, 'reminder ต้องอยู่ก่อนวัตถุดิบประกอบ');
+  assert.equal(variableBlock.text.split(fidelity.reminder).length - 1, 1, 'reminder ต้องมีครั้งเดียว');
+  const finalAt = variableBlock.text.indexOf(FINAL_BEGIN);
+  const lineAt = variableBlock.text.indexOf(fidelity.finalCheckLine);
+  assert.ok(finalAt > promptAt && lineAt > finalAt && lineAt < variableBlock.text.indexOf(FINAL_END), 'ข้อตรวจซื่อตรงต้องเป็นข้อหนึ่งใน FINAL RAW AUTHORITY CHECK');
+  assert.ok(variableBlock.text.endsWith(FINAL_END));
+
+  // ไม่มีเนื้อดิบ (สาย URL — จำลอง wiring จริง: ต่อ reminder ท้ายก้อน variable): ยังอยู่ blocks[1] และก้อนคงที่สะอาด
+  const noRawSplit = policy.splitWriterPromptForCache({ constant, variable: `${variable}\n\n${fidelity.reminder}`, rawSourceText: '', finalizeRawFirst: wrapped });
+  assert.ok(noRawSplit.blocks[1].text.endsWith(fidelity.reminder), 'ไม่มีเนื้อดิบ = reminder ท้ายก้อนผันตามข่าว');
+  assert.ok(!noRawSplit.blocks[0].text.includes('เตือนซื่อตรง'));
+  assert.ok(!noRawSplit.prompt.includes(FINAL_BEGIN), 'ไม่มีเนื้อดิบ = ไม่มี FINAL CHECK เหมือนเดิม');
+
+  // โหมดปกติ (ไม่แคช): finalizer 3-arg ตรงๆ — reminder หลังกรอบ RAW + ข้อตรวจใน FINAL CHECK และจบด้วย FINAL_END เดิม
+  const plain = finalizer(RAW, variable, fidelity);
+  assert.ok(plain.indexOf(fidelity.reminder) > plain.indexOf(RAW_SENTINEL) && plain.indexOf(fidelity.reminder) < plain.indexOf('[PROMPT]'));
+  assert.ok(plain.indexOf(fidelity.finalCheckLine) > plain.indexOf(FINAL_BEGIN) && plain.endsWith(FINAL_END));
 });
 
 test('production wiring: ปิด = RAW-first สตริงเดิม · เปิด = แตกก้อนหลัง RAW-first ก่อนส่งนักเขียน · aiRouter ส่งต่อเฉพาะเมื่อมี', () => {

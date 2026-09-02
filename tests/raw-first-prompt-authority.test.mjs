@@ -111,9 +111,10 @@ function assertProductionWiring(autoFlow = autoFlowSource, summarize = summarize
   assert.match(summarize, /if \(shouldPersistAnalysis\(workflowId, deferAnalysisPersistence\)\) \{/u);
   assert.doesNotMatch(autoFlow, /regenerateFactualVersion|factual_regeneration_/u);
   assert.doesNotMatch(autoFlow, /repairVersionDiversityOnce|rewriteDiverseVersion|diversity_repair_/u);
+  // ★ ข้อแก้ ① (2 ก.ย. 69): finalizer รับ param 3 (_writerFidelity — null เมื่อสวิตช์ WRITER_FIDELITY_RULES_V2 ปิด = ไบต์เดิม)
   assert.match(
     summarize,
-    /multiPrompt = finalizeRawFirstWriterPrompt\(rawSourceText, multiPrompt\);/,
+    /multiPrompt = finalizeRawFirstWriterPrompt\(rawSourceText, multiPrompt, _writerFidelity\);/,
   );
   assert.match(
     summarize,
@@ -124,7 +125,7 @@ function assertProductionWiring(autoFlow = autoFlowSource, summarize = summarize
   const buildStart = summarize.indexOf('let multiPrompt =');
   const schemaEnd = summarize.indexOf("      '}';", buildStart);
   const finalizerCall = summarize.indexOf(
-    'multiPrompt = finalizeRawFirstWriterPrompt(rawSourceText, multiPrompt);',
+    'multiPrompt = finalizeRawFirstWriterPrompt(rawSourceText, multiPrompt, _writerFidelity);',
     buildStart,
   );
   const writerCall = summarize.indexOf("callSmartAI('write', { prompt: multiPrompt", finalizerCall);

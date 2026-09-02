@@ -217,6 +217,55 @@ test('splitWriterPromptForCache: ก้อนคงที่ไม่มีบ�
   assert.equal(policy.splitWriterPromptForCache({ constant: 'กฎ', variable: 'การ์ด', rawSourceText: 'ดิบ' }).blocks[1].text, 'การ์ด', 'ไม่ส่ง finalizer = ไม่ครอบ');
 });
 
+test('★ ข้อแก้ ①: กฎเปิดเรื่องอยู่ในไฟล์จริง (VR-010) — loadWriterViralRules() อ่านจาก cwd ของ repo ได้ · version ≥ 3', () => {
+  const doc = policy.loadWriterViralRules(); // อ่าน data/writer-viral-rules.json จริง
+  assert.ok(doc && Array.isArray(doc.rules) && doc.rules.length >= 10, 'ไฟล์จริงต้องอ่านได้และมี ≥ 10 ข้อ');
+  assert.ok(Number(doc.version) >= 3, `version ต้อง ≥ 3 (ได้ ${doc.version})`);
+  const opening = doc.rules.find((rule) => /กติกาเปิดเรื่อง/u.test(rule.text) && /สองประโยคแรก/u.test(rule.text));
+  assert.ok(opening, 'ต้องมีข้อที่พูดถึงกติกาเปิดเรื่อง (สองประโยคแรก)');
+  assert.match(opening.text, /ห้ามเปิดด้วยเบื้องหลัง/u, 'ต้องห้ามเปิดด้วยเบื้องหลัง/ฉาก/ย้อนอดีต');
+  assert.match(opening.text, /มีเวลาไม่มาก/u);
+  assert.match(opening.text, /จากไป|เสียชีวิต/u, 'ต้องสั่งบอกการจากไปก่อนฉาก');
+  assert.match(opening.text, /ผลลัพธ์ปัจจุบัน/u, '"ผลก่อนแล้วย้อน" ต้องนิยามเป็นผลลัพธ์ปัจจุบัน ไม่ใช่เปิดด้วยที่มา');
+  assert.match(opening.evidence, /6\.7 vs 7\.5/u, 'ต้องอ้างผล A/B (opening แขนใหม่แพ้)');
+  assert.match(opening.evidence, /30\.5\/40/u, 'ต้องอ้างศึกโมเดล E2');
+  const vr4 = doc.rules.find((rule) => rule.id === 'VR-004');
+  assert.ok(vr4 && vr4.text.includes(opening.id), `VR-004 ("ผลก่อนแล้วย้อน") ต้องชี้กลับไปกติกาเปิดเรื่อง ${opening.id}`);
+  withEnv({ WRITER_VIRAL_RULES_V2: '1' }, () => {
+    assert.ok(policy.buildWriterPolicyBlock().includes(opening.text), 'เปิดสวิตช์แล้วกฎเปิดเรื่องต้องเข้าบล็อกจริง');
+  });
+});
+
+test('★ ข้อแก้ ①: เตือนซื่อตรงติดเนื้อดิบ — ว่างเมื่อสวิตช์ปิด · เมื่อเปิด ≤ 5 บรรทัด (ห้ามเดาเพศ/เจ้าตัว/ความต่าง) + ข้อตรวจ FINAL CHECK บรรทัดเดียว', () => {
+  withEnv({}, () => {
+    assert.equal(policy.buildFidelityRawReminder(), '', 'สวิตช์ปิด = reminder ว่าง');
+    assert.equal(policy.buildFidelityFinalCheckLine(), '', 'สวิตช์ปิด = ข้อตรวจว่าง');
+  });
+  for (const junk of ['0', 'true', 'on', ' 1', '']) {
+    withEnv({ WRITER_FIDELITY_RULES_V2: junk }, () => {
+      assert.equal(policy.buildFidelityRawReminder(), '', `ค่า ${JSON.stringify(junk)} ต้องถือว่าปิด`);
+      assert.equal(policy.buildFidelityFinalCheckLine(), '');
+    });
+  }
+  withEnv({ WRITER_FIDELITY_RULES_V2: '1' }, () => {
+    const reminder = policy.buildFidelityRawReminder();
+    assert.equal(reminder, policy.WRITER_FIDELITY_RAW_REMINDER);
+    assert.ok(reminder.split('\n').length <= 5, `เตือนซื่อตรงต้อง ≤ 5 บรรทัด (ได้ ${reminder.split('\n').length})`);
+    assert.match(reminder, /ห้ามเดาเพศ\/บทบาท\/ความสัมพันธ์/u);
+    assert.match(reminder, /"เจ้าตัว"/u, 'ต้องเสนอคำกลาง "เจ้าตัว"');
+    assert.match(reminder, /ความต่าง\/การปฏิเสธ/u, 'ต้องห้ามแต่งการกระทำ/ความต่าง');
+    assert.match(reminder, /ชี้กลับได้ว่าอยู่ตรงไหนของต้นฉบับ/u);
+    const line = policy.buildFidelityFinalCheckLine();
+    assert.equal(line, policy.WRITER_FIDELITY_FINAL_CHECK_LINE);
+    assert.ok(line.startsWith('- ') && !line.includes('\n'), 'ข้อตรวจต้องเป็นรายการข้อเดียวบรรทัดเดียว (แทรกใน FINAL RAW AUTHORITY CHECK ได้)');
+    assert.match(line, /เจ้าตัว/u);
+    assert.match(line, /เพศ\/บทบาท/u);
+    // reminder ฉบับสั้นเป็นคนละก้อนกับบล็อก FIDELITY เต็ม (บล็อกเต็มยังอยู่โซนกฎคงที่ตามเดิม)
+    assert.notEqual(reminder, policy.WRITER_FIDELITY_RULES_BLOCK);
+    assert.ok(!policy.buildWriterPolicyBlock().includes(reminder), 'reminder ไม่ปนเข้า buildWriterPolicyBlock (โซนกฎคงที่)');
+  });
+});
+
 test('mutation oracle: ทุบสำเนาโมดูลจริงแล้วข้อสอบต้องแดง (ห้ามตัดหาย · ค่าเริ่มต้นกลายเป็นเปิด)', async () => {
   const intact = await loadModule();
   withEnv({ WRITER_LENGTH_TARGET_V2: '1' }, () => assertLengthBlock(intact.buildWriterPolicyBlock()));
