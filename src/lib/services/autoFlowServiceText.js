@@ -566,7 +566,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         .map(item => `${item?.angle_name || ''}: ${item?.description || ''}`.trim())
         .filter(Boolean);
       const _openingStyle = buildAngleOpeningContract(index, _promptHook, _reservedOpeningAngles, _caR6Tail);
-      const writeAngle = `${focusAngle}\nสไตล์เปิดเรื่องบังคับของเวอร์ชันนี้: ${_openingStyle}`;
+      const writeAngle = _openingStyle ? `${focusAngle}\nสไตล์เปิดเรื่องบังคับของเวอร์ชันนี้: ${_openingStyle}` : focusAngle; // ★ 2 ก.ย. 69 สัญญาว่าง (สวิตช์ทดลอง) → ไม่ใส่บรรทัดเปล่า
       
       // 1. Research for this angle
       const resResult = await performResearch({
@@ -1146,7 +1146,15 @@ export function stampWriterModel(version, model) {
  * กำหนดตระกูลบทเปิดไม่ซ้ำต่อมุม โดยให้ hook จากการ์ดเป็นเทคนิครองเท่านั้น
  * การ์ดคนละใบในคลังอาจมี hookStyle เดียวกัน จึงห้ามให้การ์ดทับ family ที่จองไว้
  */
+// ★ 2 ก.ย. 69 — สวิตช์ทดลองเปิดเรื่อง (ค่าเริ่มต้น = พฤติกรรมเดิม 100% · เจ้าของสั่ง 18 ส.ค. "ห้ามสั่งทับการ์ด" จึงไม่เปิดเอง)
+//   ที่มา: เทสสนามจริงเคส #05234 V2 — มุมที่ 2 ถูกสัญญานี้บังคับตระกูล "ความต่าง" → นักเขียนเปิดเป็นฉากปัจจุบัน
+//   ("สายโทรศัพท์กลางดึกยังดังขึ้นเสมอ") ทั้งที่พ่อเสียชีวิตแล้ว และไม่บอกว่าป๋าเดียร์คือใครจนประโยคที่ 3 → คนอ่านงง "สลับบริบท"
+//   OPENING_FAMILY_CONTRACT=0 → เลิกบังคับตระกูลเปิดต่อมุม (การ์ด/ครูนำ · ยังกันแกนซ้ำกับมุมก่อน)
+//   OPENING_IDENTITY_RULE=1  → เติมกติกา: 2 ประโยคแรกต้องบอก ใคร/อะไร/เมื่อไหร่ · ผู้ล่วงลับห้ามเล่าเป็นปัจจุบัน
+export const OPENING_IDENTITY_RULE_TEXT = 'ไม่ว่าจะเปิดแบบไหน ภายในสองประโยคแรกคนอ่านต้องรู้ว่า ใคร (ชื่อจริง + ความสัมพันธ์หรือบทบาทตามต้นฉบับ) เกิดอะไร และเป็นเรื่องช่วงเวลาไหน — ถ้าต้นฉบับบอกว่าบุคคลเสียชีวิตแล้ว ห้ามเล่าเหมือนเหตุการณ์ยังเกิดอยู่ตอนนี้ (เช่น "ยัง…อยู่เสมอ") ให้เล่าเป็นความทรงจำหรืออดีตตั้งแต่ประโยคแรก';
 export function buildAngleOpeningContract(index, cardHook = '', reservedAngles = [], tail = '') {
+  const familyContractOff = process.env.OPENING_FAMILY_CONTRACT === '0';
+  const identityRuleOn = process.env.OPENING_IDENTITY_RULE === '1';
   const families = [
     'เปิดด้วยภาพหรือการกระทำจริงที่อยู่ในต้นฉบับ แล้วพาคนอ่านเข้าเหตุการณ์ทันที',
     'เปิดด้วยตัวเลขหรือความต่างที่มีอยู่จริงในต้นฉบับ และเขียนเป็นประโยคสมบูรณ์',
@@ -1160,11 +1168,14 @@ export function buildAngleOpeningContract(index, cardHook = '', reservedAngles =
     .map(value => String(value || '').replace(/\s+/gu, ' ').trim())
     .filter(Boolean);
   return [
-    `${primaryFamily}${String(tail || '')} — นี่คือตระกูลเปิดหลัก ห้ามเปลี่ยนไปใช้ตระกูลของมุมอื่น`,
-    cleanHook ? `เทคนิคจากการ์ดใช้ปรับจังหวะภายในตระกูลนี้เท่านั้น: ${cleanHook}` : '',
+    familyContractOff ? '' : `${primaryFamily}${String(tail || '')} — นี่คือตระกูลเปิดหลัก ห้ามเปลี่ยนไปใช้ตระกูลของมุมอื่น`,
+    cleanHook
+      ? (familyContractOff ? `เทคนิคเปิดเรื่องจากการ์ด (แนวทาง ไม่ใช่คำสั่งทับ): ${cleanHook}` : `เทคนิคจากการ์ดใช้ปรับจังหวะภายในตระกูลนี้เท่านั้น: ${cleanHook}`)
+      : '',
     cleanReserved.length > 0
       ? `แกนที่มุมก่อนหน้าจองใช้เปิดแล้ว ห้ามใช้เป็นแกนประโยคแรกซ้ำ: ${cleanReserved.join(' | ')}`
       : '',
+    identityRuleOn ? OPENING_IDENTITY_RULE_TEXT : '',
   ].filter(Boolean).join('\n');
 }
 
