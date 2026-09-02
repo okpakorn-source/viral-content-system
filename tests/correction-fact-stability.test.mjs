@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { envOn } from '../src/lib/utils/envFlag.js';
 import { guardedReplace, sortLongestFirst } from '../src/lib/correction/guardedReplace.js';
 import { scrubHallucinatedPlaces } from '../src/lib/correction/placeScrub.js';
+import { findMissingFacts } from '../src/lib/correction/missingFactsGate.js'; // ★ 2 ก.ย. 69 L4.7 (ไฟล์ปลอด import — ใช้ของจริง)
 
 const factSource = readFileSync(new URL('../src/lib/correction/factPreservationCheck.js', import.meta.url), 'utf8');
 const checkFactPreservation = new Function(
@@ -105,6 +106,7 @@ function makePipeline(overrides = {}) {
     'guardedReplace',
     'sortLongestFirst',
     'scrubHallucinatedPlaces',
+    'findMissingFacts',
     `${pipelineFunctionSource}\nreturn runCorrectionPipeline;`,
   )(
     deps.auditOutput,
@@ -119,6 +121,7 @@ function makePipeline(overrides = {}) {
     guardedReplace,
     sortLongestFirst,
     scrubHallucinatedPlaces,
+    findMissingFacts,
   );
 }
 

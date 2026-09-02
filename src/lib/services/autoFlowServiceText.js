@@ -552,6 +552,24 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   // 🎛️ CARD_AUTHORITY R6 (19 ส.ค. 69): เปิดสวิตช์ = ถอดหาง " ห้ามขึ้นต้นด้วยวันที่" ทั้ง 4 สูตร + หางพร้อมท์ด้านล่าง · ปิด (default) = ข้อความเดิมทุกไบต์
   const _caR6Tail = isCardAuthorityR6Enabled() ? '' : ' ห้ามขึ้นต้นด้วยวันที่';
   const blueprintPlansForRepair = new Array(anglesToUse.length).fill(null);
+  // ★ 2 ก.ย. 69 ANGLE2_DISTINCT_V2 (ค่าเริ่มต้นเปิด · ปิดคืน ANGLE2_DISTINCT_V2=0 = ข้อความส่งนักเขียนเหมือนเดิมทุกไบต์)
+  //   ที่มา: เทสสนามจริงเคสศรราม 2 ก.ย. — 2 มุมเขียนขนานกัน ย่อหน้ากลางซ้ำเกือบคำต่อคำ (คล้าย 38–42%) เพราะแกนจองกันแค่ประโยคแรก
+  //   → จัดสรร key_points ให้แต่ละมุม "เล่าเต็ม" ไม่ซ้ำกันก่อนยิงขนาน (ฟังก์ชันบริสุทธิ์ท้ายไฟล์ · มุมเดียว/ประเด็น<2 = ไม่เติม)
+  //   ล้ม (throw) = fail-open เหมือนด่าน L4.7: แผน null → นักเขียนได้ข้อความเหมือนสวิตช์ปิด ไม่ล้มทั้งงานข่าว (ผู้ตรวจไขว้ 2 ก.ย. 69)
+  // ── ANGLE2_DISTINCT_V2 plan start ── (เทสดึงบล็อกนี้ไปรันกับ stub ที่ throw — ห้ามย้าย/เปลี่ยนชื่อตัวแปรโดยไม่แก้ tests/angle2-distinct-v2)
+  let _anglePointPlan = null;
+  if (isAngle2DistinctV2Enabled()) {
+    try {
+      _anglePointPlan = assignKeyPointsToAngles(breakdownData?.key_points, anglesToUse);
+      if (anglesToUse.some((_, i) => buildAnglePointsText(_anglePointPlan, i))) {
+        addLog('AngleDistinct', `🧭 จัดสรรประเด็นต่อมุมไม่ซ้ำ: ${_anglePointPlan.map((p, i) => `A${i + 1}=${p.primary.length} ประเด็น`).join(' · ')} (ANGLE2_DISTINCT_V2)`);
+      }
+    } catch (planErr) {
+      _anglePointPlan = null;
+      addLog('AngleDistinct', `⚠️ จัดสรรประเด็นล้ม — ใช้มุมเดิม (${planErr?.message || planErr})`);
+    }
+  }
+  // ── ANGLE2_DISTINCT_V2 plan end ──
 
   // === PARALLEL GENERATE: สร้างเนื้อหาขนานด้วย prompt ที่เลือกไว้แล้ว ===
   const generationTasks = anglesToUse.map((angleObj, index) => {
@@ -567,6 +585,9 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         .filter(Boolean);
       const _openingStyle = buildAngleOpeningContract(index, _promptHook, _reservedOpeningAngles, _caR6Tail);
       const writeAngle = _openingStyle ? `${focusAngle}\nสไตล์เปิดเรื่องบังคับของเวอร์ชันนี้: ${_openingStyle}` : focusAngle; // ★ 2 ก.ย. 69 สัญญาว่าง (สวิตช์ทดลอง) → ไม่ใส่บรรทัดเปล่า
+      // ★ 2 ก.ย. 69 ANGLE2_DISTINCT_V2: ต่อท้ายมุมด้วย "ประเด็นที่มุมนี้ต้องเล่าเต็ม / ประเด็นที่มุมอื่นเล่าเต็มแล้วให้ย่อ" — สวิตช์ปิด/มุมเดียว/ประเด็น<2 คืน '' = writeAngle เดิม
+      const _pointsText = buildAnglePointsText(_anglePointPlan, index);
+      const writeAngleWithPoints = _pointsText ? `${writeAngle}\n${_pointsText}` : writeAngle;
       
       // 1. Research for this angle
       const resResult = await performResearch({
@@ -631,7 +652,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         emotionalBlueprint: angleBlueprint, // ★ สวิตช์ปิด = ตัวแปรนี้คือ blueprint ก้อนเดิมเป๊ะ (reference เดียวกัน)
         researchData: researchItems.length > 0 ? { items: researchItems } : null,
         factPool: factPool,
-        focusAngle: writeAngle, // ★ มุมเล่า + สไตล์เปิดเรื่องบังคับของ angle นี้
+        focusAngle: writeAngleWithPoints, // ★ มุมเล่า + สไตล์เปิดเรื่องบังคับของ angle นี้ (+ ประเด็นต่อมุม ANGLE2_DISTINCT_V2 — ว่าง = writeAngle เดิม)
         workflowId: _autoWorkflowId,
         deferAnalysisPersistence: true,
         user: _user,
@@ -823,6 +844,8 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   const diversity = assessVersionDiversity(finalVersions);
   let diversityWarning = '';
   ({ versions: finalVersions, warning: diversityWarning } = annotateDiversityWarning(finalVersions, diversity));
+  // ★ 2 ก.ย. 69 ANGLE2_DISTINCT_V2: บันทึกตัวเลขความคล้ายลงทุกเวอร์ชันเสมอ (_diversitySimilarity) — เกณฑ์บล็อก 37%/50% ไม่เปลี่ยน
+  if (isAngle2DistinctV2Enabled()) finalVersions = stampDiversitySimilarity(finalVersions, diversity);
   if (diversityWarning) {
     pipelineQualityWarnings.push(diversityWarning);
     addLog('Quality', `⚠️ ${diversityWarning}`);
@@ -926,6 +949,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
           return withoutOldWarning;
         });
         diversityWarning = '';
+        if (isAngle2DistinctV2Enabled()) finalVersions = stampDiversitySimilarity(finalVersions, postFactDiversity); // ★ 2 ก.ย. 69 ตัวเลขความคล้ายหลัง factual editor
         if (!postFactDiversity.ok) {
           ({ versions: finalVersions, warning: diversityWarning } = annotateDiversityWarning(
             finalVersions,
@@ -1180,6 +1204,145 @@ export function buildAngleOpeningContract(index, cardHook = '', reservedAngles =
     identityRuleOn ? OPENING_IDENTITY_RULE_TEXT : '',
   ].filter(Boolean).join('\n');
 }
+
+// ── ANGLE2_DISTINCT_V2 block start ── (★ 2 ก.ย. 69 — ฟังก์ชันบริสุทธิ์ ใช้แค่ process.env + Intl เพื่อให้เทสดึงไปรันแยกได้ · ห้ามเพิ่ม import)
+//   ที่มา: เทสสนามจริงเคสศรราม 2 ก.ย. 69 — 2 มุมเขียนขนาน ย่อหน้ากลางซ้ำเกือบคำต่อคำ (คล้าย 38–42%) เพราะแกนจอง (_reservedOpeningAngles) กันแค่ประโยคแรก
+//   ค่าเริ่มต้นเปิด · ปิดคืน: ANGLE2_DISTINCT_V2=0 (รับเฉพาะ '0' ตรงตัว) → ข้อความส่งนักเขียน/ผลลัพธ์เหมือนเดิมทุกไบต์ · ถอยทั้งก้อน = git revert
+export function isAngle2DistinctV2Enabled() {
+  return process.env.ANGLE2_DISTINCT_V2 !== '0';
+}
+
+// คำเชื่อม/คำทั่วไปที่ไม่บอกว่าประเด็นเป็นของมุมไหน (ตัดออกก่อนวัดความทับซ้อน)
+const ANGLE_POINT_STOPWORDS = new Set(['ที่', 'ซึ่ง', 'และ', 'กับ', 'ของ', 'ใน', 'ให้', 'ได้', 'ไม่', 'แต่', 'ก็', 'จะ', 'ว่า', 'เป็น', 'มี', 'ยัง', 'แล้ว', 'จาก', 'ถึง', 'ผ่าน', 'เพื่อ', 'โดย', 'หรือ', 'นี้', 'นั้น', 'กัน', 'อยู่', 'มา', 'ไป', 'ทั้ง', 'ต่าง', 'เรื่อง', 'การ', 'ความ', 'คน', 'เขา', 'เธอ', 'ตัว', 'ตน', 'ครั้ง', 'เมื่อ', 'จน', 'ต่อ', 'ด้วย', 'ตาม', 'อย่าง', 'แบบ', 'หลัง', 'ก่อน', 'คือ', 'ใช้', 'ทำ', 'ถูก', 'ต้อง', 'กว่า', 'มาก', 'น้อย', 'เคย', 'แค่', 'เลย', 'ๆ']);
+
+/** ตัดคำไทยด้วย Intl.Segmenter (สำรอง: ตัดตามช่องว่าง/เครื่องหมาย) — คืนคำยาว ≥ 2 ตัว ไม่รวมคำเชื่อม */
+export function tokenizeThaiWords(text) {
+  const clean = String(text || '').normalize('NFC').toLowerCase();
+  let words = [];
+  try {
+    if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
+      for (const s of new Intl.Segmenter('th', { granularity: 'word' }).segment(clean)) if (s.isWordLike) words.push(s.segment);
+    }
+  } catch {
+    words = [];
+  }
+  if (words.length === 0) words = clean.split(/[^\p{L}\p{M}\p{N}]+/u);
+  return words.map(w => w.trim()).filter(w => w.length >= 2 && !ANGLE_POINT_STOPWORDS.has(w));
+}
+
+/**
+ * จัดสรร key_points ให้แต่ละมุม "เล่าเต็ม" คนละชุด — ประเด็นหนึ่งเป็น primary ได้มุมเดียว · ที่เหลือเป็น secondary (มุมอื่นเล่าเต็มแล้ว)
+ * คะแนน = สัดส่วนคำของประเด็นที่โผล่ในชื่อ+คำอธิบายมุม (คำในชื่อประเด็นน้ำหนัก 2 · รายละเอียด 1)
+ * เสมอ → มุมที่มี primary น้อยกว่า → ดัชนีต่ำกว่า · มุมที่ว่างดึงประเด็นที่เข้ากับตัวเองที่สุดจากมุมที่มี ≥2 · ต่างกัน ≥2 ประเด็นและคะแนนก้ำกึ่ง (≤0.25) ย้ายมาถ่วง
+ * @param {Array<string|{point?:string,detail?:string}>} keyPoints breakdownData.key_points
+ * @param {Array<string|{angle_name?:string,description?:string}>} angles มุมที่จะเขียน (ลำดับเดียวกับ anglesToUse)
+ * @returns {Array<{ primary: string[], secondary: string[] }>} ยาวเท่าจำนวนมุม (ป้ายประเด็นตัด 80 ตัว)
+ */
+export function assignKeyPointsToAngles(keyPoints, angles) {
+  const angleList = (Array.isArray(angles) ? angles : [])
+    .map(a => (typeof a === 'string' ? { angle_name: a, description: '' } : (a && typeof a === 'object' ? a : {})));
+  const clip = value => String(value || '').replace(/\s+/gu, ' ').trim().slice(0, 80);
+  const pointList = (Array.isArray(keyPoints) ? keyPoints : [])
+    .map(kp => (typeof kp === 'string'
+      ? { label: clip(kp), detail: '' }
+      : { label: clip(kp?.point || kp?.title || kp?.text || ''), detail: String(kp?.detail || kp?.description || '') }))
+    .filter(p => p.label)
+    // ป้ายซ้ำ (key_points ซ้ำกัน / ตัด 80 ตัวแล้วชนกัน) นับเป็นประเด็นเดียว — ไม่งั้นโผล่ "ซ้ำ | ซ้ำ" ในพรอมต์ (ผู้ตรวจไขว้ 2 ก.ย. 69)
+    .filter((p, i, all) => all.findIndex(q => q.label === p.label) === i);
+  const plan = angleList.map(() => ({ primary: [], secondary: [] }));
+  if (angleList.length === 0 || pointList.length === 0) return plan;
+  const angleTokens = angleList.map(a => new Set(tokenizeThaiWords(`${a.angle_name || ''} ${a.description || ''}`)));
+  const scores = pointList.map(p => {
+    const labelTokens = tokenizeThaiWords(p.label);
+    const detailTokens = tokenizeThaiWords(p.detail);
+    return angleTokens.map(set => {
+      let hit = 0;
+      let total = 0;
+      for (const t of labelTokens) { total += 2; if (set.has(t)) hit += 2; }
+      for (const t of detailTokens) { total += 1; if (set.has(t)) hit += 1; }
+      return total > 0 ? hit / total : 0;
+    });
+  });
+  const owner = new Array(pointList.length).fill(0);
+  const counts = new Array(angleList.length).fill(0);
+  const EPS = 1e-9;
+  pointList.forEach((_, pi) => {
+    let best = 0;
+    for (let ai = 1; ai < angleList.length; ai++) {
+      const diff = scores[pi][ai] - scores[pi][best];
+      if (diff > EPS || (Math.abs(diff) <= EPS && counts[ai] < counts[best])) best = ai;
+    }
+    owner[pi] = best;
+    counts[best]++;
+  });
+  const moveBest = (toAngle, minOwnerCount, maxMargin) => {
+    let pick = -1;
+    let pickMargin = Infinity;
+    for (let pi = 0; pi < pointList.length; pi++) {
+      if (owner[pi] === toAngle || counts[owner[pi]] < minOwnerCount) continue;
+      const margin = scores[pi][owner[pi]] - scores[pi][toAngle];
+      if (margin > maxMargin + EPS) continue;
+      if (margin < pickMargin - EPS) { pick = pi; pickMargin = margin; }
+    }
+    if (pick < 0) return false;
+    counts[owner[pick]]--;
+    owner[pick] = toAngle;
+    counts[toAngle]++;
+    return true;
+  };
+  // ทุกมุมต้องมีประเด็นให้เล่าเต็มอย่างน้อย 1
+  for (let ai = 0; ai < angleList.length; ai++) if (counts[ai] === 0) moveBest(ai, 2, Infinity);
+  // ถ่วงให้ใกล้เคียง: มุมที่ได้น้อยกว่า ≥2 ประเด็น ดึงประเด็นคะแนนก้ำกึ่งจากมุมที่ได้มากสุด
+  for (let guard = 0; guard < pointList.length; guard++) {
+    const most = counts.indexOf(Math.max(...counts));
+    const least = counts.indexOf(Math.min(...counts));
+    if (counts[most] - counts[least] < 2) break;
+    const before = counts[least];
+    let moved = false;
+    for (let pi = 0; pi < pointList.length && !moved; pi++) {
+      if (owner[pi] !== most) continue;
+      moved = moveBest(least, counts[most], 0.25);
+    }
+    if (!moved || counts[least] === before) break;
+  }
+  pointList.forEach((p, pi) => {
+    plan.forEach((slot, ai) => { (owner[pi] === ai ? slot.primary : slot.secondary).push(p.label); });
+  });
+  return plan;
+}
+
+/** ข้อความต่อท้าย focusAngle ของมุมที่ index — '' เมื่อสวิตช์ปิด / มุม < 2 / ประเด็นรวม < 2 / มุมนี้ไม่มีประเด็นให้เล่าเต็ม (= ไม่เติมอะไรตามเดิม) */
+export function buildAnglePointsText(plan, index) {
+  if (!isAngle2DistinctV2Enabled()) return '';
+  if (!Array.isArray(plan) || plan.length < 2) return '';
+  const total = plan.reduce((n, slot) => n + (Array.isArray(slot?.primary) ? slot.primary.length : 0), 0);
+  if (total < 2) return '';
+  const me = Number.isInteger(index) ? plan[index] : null;
+  if (!me) return '';
+  const uniqueLabels = list => [...new Set((Array.isArray(list) ? list : []).map(v => String(v || '').trim()).filter(Boolean))];
+  const own = uniqueLabels(me.primary);
+  // มุมที่ไม่มีประเด็นให้เล่าเต็ม (มุม > ประเด็น เช่น GEN_ANGLES=3 กับ 2 ประเด็น) = ไม่เติมข้อความ (เหมือนเดิม) — ห้ามสั่งนักเขียน "ย่อ/ข้ามทุกประเด็น" (ผู้ตรวจไขว้ 2 ก.ย. 69)
+  if (own.length === 0) return '';
+  const others = uniqueLabels(me.secondary).filter(label => !own.includes(label));
+  const parts = [`ประเด็นที่มุมนี้ต้องเล่าเต็ม: ${own.join(' | ')}`];
+  if (others.length > 0) parts.push(`ประเด็นที่มุมอื่นเล่าเต็มแล้ว ให้ย่อเป็นประโยคเดียวหรือข้าม: ${others.join(' | ')}`);
+  return parts.join(' · ');
+}
+
+/** ติดตัวเลขความคล้ายสูงสุดของแต่ละเวอร์ชัน (_diversitySimilarity 0–1 · ทศนิยม 3 ตำแหน่ง) — ไม่แตะเนื้อ/คำเตือน · ไม่มีคู่เทียบ = คืน array เดิม */
+export function stampDiversitySimilarity(versions, report) {
+  const list = Array.isArray(versions) ? versions : [];
+  const pairs = Array.isArray(report?.pairs) ? report.pairs : [];
+  if (list.length === 0 || pairs.length === 0) return list;
+  return list.map((version, i) => {
+    let max = 0;
+    for (const pair of pairs) {
+      if (pair && (pair.left === i || pair.right === i)) max = Math.max(max, Number(pair.similarity) || 0);
+    }
+    return { ...version, _diversitySimilarity: Math.round(max * 1000) / 1000 };
+  });
+}
+// ── ANGLE2_DISTINCT_V2 block end ──
 
 /** ตรวจความซ้ำข้ามเวอร์ชันด้วย Thai character 5-gram + หัว/ท้ายซ้ำตรง */
 export function assessVersionDiversity(versions) {

@@ -21,6 +21,7 @@ import { bbStep } from '@/lib/trace/blackbox'; // ★ 1 ส.ค. 69 กล่อ
 import { envOn } from '@/lib/utils/envFlag';
 import { guardedReplace, sortLongestFirst } from './guardedReplace';
 import { scrubHallucinatedPlaces } from './placeScrub';
+import { findMissingFacts } from './missingFactsGate'; // ★ 2 ก.ย. 69 L4.7 ด่านข้อเท็จจริงหาย — เตือนเท่านั้น (MISSING_FACTS_GATE=0 ปิด)
 // ★ 12 มิ.ย.: FlagFixer + ViralPolish ถูกปลดออกตามคำสั่งทีม ("AI เพี้ยน — ย้อน workflow กลับแบบ 11 มิ.ย. หัวค่ำ")
 //   ไฟล์ flagFixerService.js / viralPolishService.js ยังอยู่ เผื่ออนาคต — ห้ามต่อกลับโดยไม่ผ่านทีม
 
@@ -141,11 +142,14 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData, r
         }
         bbStep(_bb, 'L4-เช็คข้อเท็จจริง(final clean)', _cleanCandidate, _cleanFinalContent,
           { candidateAction: _cleanCandidateFactCheck.action, candidateDrifts: _cleanCandidateFactCheck.drifts.length, outputPreserved: _cleanFinalFactCheck.preserved });
+        // ★ 2 ก.ย. 69 L4.7: เทียบต้นฉบับดิบกับฉบับที่จะคืนจริง — เตือนอย่างเดียว (null = สวิตช์ปิด → ไม่แตะผลลัพธ์)
+        const _cleanMissing = runMissingFactsGate(_bb, vLabel, rawSourceText || newsData?.newsBody, _cleanFinalContent);
         return {
           ...version,
           content: _cleanFinalContent,
           _blackbox: _bb,
           _correctionApplied: changes.length > 0 || cleanSemanticDebug.fixed,
+          ...(_cleanMissing ? { _missingFacts: _cleanMissing } : {}), // ★ 2 ก.ย. 69 L4.7 (สวิตช์ปิด = ไม่มีคีย์นี้)
           _correctionDebug: {
             fabGate: _fabDebug,
             coreGuard: _cleanGuard.ok ? 'passed' : `reverted:${_cleanGuard.reason}`,
@@ -159,6 +163,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData, r
             semanticCheck: cleanSemanticDebug,
             polishChanges: changes.length,
             path: _cleanFactRolledBack ? 'rollback' : 'clean',
+            ...missingFactsDebug(_cleanMissing), // ★ 2 ก.ย. 69 L4.7 คำเตือนแทน logPipeline (เฉพาะเมื่อมีของหาย)
           },
         };
       }
@@ -272,12 +277,15 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData, r
 
       bbStep(_bb, 'L4-เช็คข้อเท็จจริง(final)', _candidateContent, finalContent,
         { initialAction: factCheck.action, candidateAction: _candidateFactCheck.action, candidateDrifts: _candidateFactCheck.drifts.length, outputPreserved: finalFactCheck.preserved });
+      // ★ 2 ก.ย. 69 L4.7: เทียบต้นฉบับดิบกับฉบับสุดท้าย — เตือนอย่างเดียว (null = สวิตช์ปิด → ไม่แตะผลลัพธ์)
+      const _missingFacts = runMissingFactsGate(_bb, vLabel, rawSourceText || newsData?.newsBody, finalContent);
 
       return {
         ...version,
         content: finalContent,
         _blackbox: _bb,
         _correctionApplied: true,
+        ...(_missingFacts ? { _missingFacts } : {}), // ★ 2 ก.ย. 69 L4.7 (สวิตช์ปิด = ไม่มีคีย์นี้)
         _correctionDebug: {
           fabGate: _fabDebug,
           coreGuard: _coreGuard.ok ? 'passed' : `reverted:${_coreGuard.reason}`,
@@ -294,6 +302,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData, r
           semanticCheck: semanticDebug,
           polishChanges: changes.length,
           path: _factRolledBack ? 'rollback' : 'corrected',
+          ...missingFactsDebug(_missingFacts), // ★ 2 ก.ย. 69 L4.7 คำเตือนแทน logPipeline (เฉพาะเมื่อมีของหาย)
         },
       };
 
@@ -326,4 +335,43 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData, r
   console.log(`${'═'.repeat(50)}\n`);
 
   return corrected;
+}
+
+// ★ 2 ก.ย. 69 — L4.7 ด่านข้อเท็จจริงหาย (เตือนเท่านั้น ห้ามแก้เนื้อ) · ค่าเริ่มต้นเปิด · MISSING_FACTS_GATE=0 = ไม่ทำอะไร (ผลลัพธ์เหมือนเดิมทุกไบต์)
+//   ที่มา: เทสสนามจริงเคสศรราม V2 รอบ 1 — "ห่วงเรื่องการขับรถ" หายจากผล ไม่มีด่านไหนเห็น (L4 เทียบร่างนักเขียนกับผลแก้ ไม่ได้เทียบต้นฉบับ)
+//   เรียกหลัง FactCheck สุดท้ายทั้ง clean path และ main path · ล้ม = fail-open (บันทึก error ไว้ใน _missingFacts)
+//   ⚠️ diagnostics เท่านั้น (ผู้ตรวจไขว้ 2 ก.ย. 69): ผลอยู่ใน version._missingFacts / _correctionDebug.missingFacts / กล่องดำ / console.warn
+//   — ไม่เข้า pipelineQualityWarnings จึง "ยังไม่ถึงพนักงาน" ใน UI · จะให้พนักงานเห็นจริง = งานแยก (เปลี่ยนสิ่งที่ UI แสดง รอเจ้าของเคาะ)
+//   (ประกาศไว้ท้ายไฟล์โดยเจตนา — tests/correction-fact-stability โหลดซอร์สตั้งแต่ runCorrectionPipeline ถึงท้ายไฟล์ · ห้าม export)
+function runMissingFactsGate(_bb, vLabel, rawSource, finalContent) {
+  if (process.env.MISSING_FACTS_GATE === '0') return null;
+  try {
+    const source = String(rawSource || '');
+    if (!source.trim()) return { checked: 0, missing: [], coverage: 1, skipped: 'no_source' };
+    const result = findMissingFacts(source, finalContent);
+    if (result.missing.length > 0) {
+      const preview = result.missing.slice(0, 5).map(m => `${m.type}:${m.text}`).join(' | ');
+      console.warn(`  ⚠️ L4.7 MissingFacts ${vLabel}: ข้อเท็จจริงจากต้นฉบับหาย ${result.missing.length}/${result.checked} — ${preview}`);
+      bbStep(_bb, 'L4.7-ด่านข้อเท็จจริงหาย', finalContent, finalContent,
+        { checked: result.checked, coverage: result.coverage, missing: result.missing.slice(0, 10) });
+    }
+    return result;
+  } catch (err) {
+    console.warn(`  L4.7 MissingFacts: SKIPPED (${err.message})`);
+    return { checked: 0, missing: [], coverage: 1, error: err.message };
+  }
+}
+
+/** สรุปสำหรับ _correctionDebug (แทน logPipeline ที่ไฟล์นี้ไม่มี · diagnostics — ไม่ใช่ข้อความที่พนักงานเห็น) — ใส่เฉพาะเมื่อมีของหาย ไม่งั้นไม่เพิ่มคีย์ */
+function missingFactsDebug(result) {
+  if (!result || !Array.isArray(result.missing) || result.missing.length === 0) return {};
+  return {
+    missingFacts: {
+      warning: `ข้อเท็จจริงจากต้นฉบับหาย ${result.missing.length}/${result.checked} จุด — diagnostics เท่านั้น (ยังไม่แสดงให้พนักงาน · อ่านจาก _missingFacts/กล่องดำ)`,
+      missing: result.missing.length,
+      checked: result.checked,
+      coverage: result.coverage,
+      items: result.missing.slice(0, 10),
+    },
+  };
 }
