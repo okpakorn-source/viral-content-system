@@ -286,12 +286,16 @@ test('buildWarningLines: ตกข้อเท็จจริง → ควา�
   // ความคล้ายอย่างเดียว
   assert.deepEqual(bot.buildWarningLines(v1()), [`⚠️ ${DIVERSITY_TEXT}`]);
   assert.deepEqual(bot.buildWarningLines({ _diversityWarning: '   ' }), [], 'สตริงว่าง = ไม่เตือน');
-  // โอกาสปัง (รองรับล่วงหน้า): เลข / สตริงเลข / object · ระดับ ≥70 สูง · ≥40 กลาง · ต่ำกว่า ต่ำ
+  // โอกาสปัง: เลข / สตริงเลข / object · ระดับจากเลข = เกณฑ์เดียวกับโมเดล (≥70 สูง · ≥35 กลาง · ต่ำกว่า ต่ำ) · object ที่มี bandLabel ใช้ป้ายของโมเดลก่อน
   assert.deepEqual(bot.buildWarningLines({ _viralScore: 85 }), ['🔥 โอกาสปัง: สูง (85/100)']);
   assert.deepEqual(bot.buildWarningLines({ _viralScore: 70 }), ['🔥 โอกาสปัง: สูง (70/100)']);
   assert.deepEqual(bot.buildWarningLines({ _viralScore: 69.4 }), ['🔥 โอกาสปัง: กลาง (69/100)']);
   assert.deepEqual(bot.buildWarningLines({ _viralScore: 40 }), ['🔥 โอกาสปัง: กลาง (40/100)']);
-  assert.deepEqual(bot.buildWarningLines({ _viralScore: '39' }), ['🔥 โอกาสปัง: ต่ำ (39/100)']);
+  assert.deepEqual(bot.buildWarningLines({ _viralScore: '39' }), ['🔥 โอกาสปัง: กลาง (39/100)'], 'ช่วง 35–39 ต้องเป็น กลาง ตามโมเดล (เดิมบอทใช้ 40)');
+  assert.deepEqual(bot.buildWarningLines({ _viralScore: '34' }), ['🔥 โอกาสปัง: ต่ำ (34/100)']);
+  assert.deepEqual(bot.buildWarningLines({ _viralScore: { score: 37, bandLabel: 'กลาง' } }), ['🔥 โอกาสปัง: กลาง (37/100)'], 'ป้ายจากท่อ (VIRAL_SCORE_ANNOTATE) ต้องชนะ');
+  assert.deepEqual(bot.buildWarningLines({ _viralScore: { score: 72, bandLabel: 'กลาง' } }), ['🔥 โอกาสปัง: กลาง (72/100)'], 'ป้ายของโมเดลชนะเลขเสมอ');
+  assert.deepEqual(bot.buildWarningLines({ _viralScore: { score: 72, bandLabel: 'มั่ว' } }), ['🔥 โอกาสปัง: สูง (72/100)'], 'ป้ายไม่รู้จัก = คิดจากเลข');
   assert.deepEqual(bot.buildWarningLines({ _viralScore: { score: 12 } }), ['🔥 โอกาสปัง: ต่ำ (12/100)']);
   assert.deepEqual(bot.buildWarningLines({ _viralScore: { total: 91 } }), ['🔥 โอกาสปัง: สูง (91/100)']);
   for (const bad of [150, -1, 'abc', null, undefined, {}, { score: 'x' }, NaN]) {

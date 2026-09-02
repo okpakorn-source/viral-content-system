@@ -160,6 +160,30 @@ test('pure function: scorer โยน = ฉบับนั้นไม่มี�
   assert.equal(nullOut.versions.length, input.length, 'จำนวน/ลำดับต้องไม่เปลี่ยนแม้ไม่มีโมเดล');
 });
 
+test('pure function (ผู้ตรวจไขว้ 2 ก.ย. 69): content ว่าง/ไม่ใช่สตริง = ไม่ให้คะแนน ไม่เรียก scorer · [] = log "ไม่มีฉบับให้คะแนน" · ว่างหมด = log "ไม่มีเนื้อฉบับ" (ไม่ใช่ "โมเดลไม่พร้อม")', () => {
+  const annotate = makeAnnotate();
+  let calls = 0;
+  const countingScorer = (text) => { calls += 1; return fakeScorer()(text); };
+  const input = sampleVersions();
+  const mixed = [{ ...input[0], content: null }, { ...input[1] }, { ...input[0], title: 'ว่าง', content: '   ' }];
+  const out = annotate(mixed, { scoreVersion: countingScorer, metrics: fakeMetrics });
+  assert.equal(calls, 1, 'scorer ต้องถูกเรียกเฉพาะฉบับที่มีเนื้อเป็นสตริงไม่ว่าง');
+  assert.ok(!('_viralScore' in out.versions[0]), 'content null ต้องไม่มีคีย์');
+  assert.ok(!('_viralScore' in out.versions[2]), 'content ว่างต้องไม่มีคีย์');
+  assert.equal(out.versions[1]._viralScore.score, 41);
+  assert.equal(out.scoredCount, 1);
+  assert.equal(out.versions.length, 3, 'จำนวน/ลำดับไม่เปลี่ยน');
+
+  const empty = annotate([], { scoreVersion: countingScorer, metrics: fakeMetrics });
+  assert.deepEqual(empty.versions, []);
+  assert.match(empty.logLine, /ไม่มีฉบับให้คะแนน/);
+  assert.doesNotMatch(empty.logLine, /โมเดลไม่พร้อม/, 'ชุดว่างห้ามโทษโมเดล');
+
+  const blank = annotate([{ ...input[0], content: '' }], { scoreVersion: countingScorer, metrics: fakeMetrics });
+  assert.match(blank.logLine, /ไม่มีเนื้อฉบับ/);
+  assert.doesNotMatch(blank.logLine, /โมเดลไม่พร้อม/);
+});
+
 // ── 3. fail-safe ระดับ wiring: โมดูลหาย/โยน = ท่อไม่ล้ม ──
 test('loader โยน (โมดูลหาย/บันเดิลพัง): ท่อไม่ล้ม · versions เดิม · addLog เตือน 1 บรรทัด', async () => {
   const input = sampleVersions();

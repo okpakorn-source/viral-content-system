@@ -795,14 +795,17 @@ function mapReactionToStatus(emoji) {
 }
 
 // _viralScore (ยังไม่มีในท่อ — รองรับล่วงหน้า): เลข 0-100 / สตริงเลข / {score|total|value} · นอกช่วง/อ่านไม่ออก = null
-//   ระดับ: ≥70 สูง · ≥40 กลาง · ต่ำกว่านั้น ต่ำ (คิดจากเลขที่ปัดแล้ว ให้ตรงกับที่แสดง)
+//   ระดับ: object ที่มี bandLabel สูง/กลาง/ต่ำ ใช้ป้ายนั้น · ไม่มี = ≥70 สูง · ≥35 กลาง · ต่ำกว่านั้น ต่ำ (คิดจากเลขที่ปัดแล้ว ให้ตรงกับที่แสดง)
 function readViralScore(raw) {
   const num = typeof raw === 'number' ? raw
     : typeof raw === 'string' ? Number(raw)
     : raw && typeof raw === 'object' ? Number(raw.score ?? raw.total ?? raw.value) : NaN;
   if (!Number.isFinite(num) || num < 0 || num > 100) return null;
   const score = Math.round(num);
-  return { score, level: score >= 70 ? 'สูง' : score >= 40 ? 'กลาง' : 'ต่ำ' };
+  // ★ 2 ก.ย. 69 (เฟส 3 · ผู้ตรวจไขว้): ท่อส่ง bandLabel มาด้วย (VIRAL_SCORE_ANNOTATE) → ใช้ป้ายของโมเดลก่อน · ไม่มีป้ายค่อยคิดจากเลข
+  //   ด้วยเกณฑ์เดียวกับโมเดล (DEFAULT_BANDS ใน src/lib/feedback/viralScore.js: ≥70 สูง · ≥35 กลาง) — เดิมบอทใช้ 40 ทำช่วง 35–39 ป้ายไม่ตรงท่อ
+  const label = raw && typeof raw === 'object' && ['สูง', 'กลาง', 'ต่ำ'].includes(raw.bandLabel) ? raw.bandLabel : null;
+  return { score, level: label || (score >= 70 ? 'สูง' : score >= 35 ? 'กลาง' : 'ต่ำ') };
 }
 
 // บรรทัดเตือนใต้เนื้อข่าวของ 1 เวอร์ชัน (ลำดับ: ข้อเท็จจริงหาย → ความคล้าย → โอกาสปัง) · ไม่มีอะไรเตือน/สวิตช์ปิด = []

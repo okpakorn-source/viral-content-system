@@ -1482,11 +1482,14 @@ export function annotateViralScores(versions, { scoreVersion, metrics } = {}) {
   const canScore = typeof scoreVersion === 'function';
   const bandOfLabel = { 'สูง': 'high', 'กลาง': 'mid', 'ต่ำ': 'low' }; // BAND_LABELS ของ viralScore.js กลับด้าน (scoreVersion คืนเฉพาะ bandLabel ไทย)
   const parts = [];
+  let attempted = 0; // ฉบับที่มีเนื้อให้คะแนนจริง (แยกจาก "โมเดลไม่พร้อม")
   const annotated = list.map((version, index) => {
     if (!canScore) return version;
+    if (typeof version?.content !== 'string' || !version.content.trim()) return version; // ★ ผู้ตรวจไขว้ 2 ก.ย. 69: เนื้อไม่ใช่สตริง/ว่าง = ไม่ให้คะแนน (ไม่ใช่ให้คะแนนสตริงว่างต่ำๆ)
+    attempted += 1;
     let result = null;
     try {
-      result = scoreVersion(String(version?.content ?? ''));
+      result = scoreVersion(version.content);
     } catch {
       result = null; // scorer โยน = ฉบับนี้ไม่มีคะแนน — ห้ามล้มท่อ
     }
@@ -1513,7 +1516,11 @@ export function annotateViralScores(versions, { scoreVersion, metrics } = {}) {
     : 'ตัวทำนายสถิติ — คำเตือน ไม่ใช่คำตัดสิน';
   const logLine = parts.length > 0
     ? `🔥 โอกาสปัง: ${parts.join(' · ')} (${note})`
-    : '⚠️ โอกาสปัง: โมเดลไม่พร้อม (data/viral-score-model.json หายหรือเพี้ยน) — ส่งข่าวต่อโดยไม่มีคะแนน';
+    : list.length === 0
+      ? '⚠️ โอกาสปัง: ไม่มีฉบับให้คะแนน'
+      : attempted === 0
+        ? '⚠️ โอกาสปัง: ไม่มีเนื้อฉบับให้คะแนน (content ว่าง/ไม่ใช่สตริง) — ส่งข่าวต่อโดยไม่มีคะแนน'
+        : '⚠️ โอกาสปัง: โมเดลไม่พร้อม (data/viral-score-model.json หายหรือเพี้ยน) — ส่งข่าวต่อโดยไม่มีคะแนน';
   return { versions: annotated, scoredCount: parts.length, logLine };
 }
 // ── VIRAL_SCORE_ANNOTATE block end ──

@@ -212,7 +212,7 @@ export function scoreVersion(text, modelOrOpts) {
   return {
     score,
     predictedReactions,
-    bandLabel: bandOf(percentile, model.bands),
+    bandLabel: bandOf(score, model.bands), // ★ ผู้ตรวจไขว้ 2 ก.ย. 69: ตัดจากเลขที่ปัดแล้ว (เท่าที่แสดง) — ไม่งั้น 69.6 → {score:70, 'กลาง'} ขัดกันเอง
     topDrivers,
     pushers,
     draggers,
