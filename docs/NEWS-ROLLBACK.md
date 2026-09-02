@@ -7,7 +7,7 @@
 | แท็ก | commit | คืออะไร |
 |---|---|---|
 | `news-prod-736adca3-2sep69` | 736adca3 | production **ก่อน**งานยกระดับ 13 ข้อ (2 ก.ย. 69) · สำเนาเต็ม + ดัมพ์ DB อยู่ `Desktop\ระบบข่าว-จุดกู้ก่อนยกระดับ13ข้อ-2-9-69` และ OneDrive |
-| `news-prod-5b4b6064-3sep69` | 5b4b6064 | ปล่อยเฟส 1–3 + เปิดกฎนักเขียนชุดใหม่ (3 ก.ย. 69) |
+| `news-prod-566cbc3d-3sep69` | 566cbc3d | ปล่อยเฟส 1–3 + เปิดกฎนักเขียนชุดใหม่ (5b4b6064) + ชุดย้อนกลับ (3 ก.ย. 69 · push 17:00Z) |
 
 ## ระดับ 1 — ปิดสวิตช์ (ไม่แตะโค้ด · ไม่ต้อง push · ใช้เวลา 2 นาที)
 ทุกฟีเจอร์ใหม่มีสวิตช์ (ทะเบียนเต็ม `docs/NEWS-SWITCHES.md`) — ตั้งใน Vercel → Settings → Environment Variables แล้วกด **Redeploy**
@@ -37,7 +37,7 @@ bash scripts/news-rollback.sh verify  news-prod-736adca3-2sep69   # origin/main 
 ```
 - Vercel deploy ตัวเดิมเองจากกิ่ง main · บอท Railway ก็ deploy จากกิ่งเดียวกัน (โค้ดบอทกลับด้วย)
 - `--force-with-lease=main:<sha ปัจจุบัน>` = ถ้ามีคน push ทับระหว่างนั้น คำสั่งจะไม่ทำงาน (กันทับงานคนอื่น)
-- commit ที่ถอยยังอยู่ในเครื่อง (แท็ก `news-prod-5b4b6064-3sep69`) — จะกลับมาปล่อยใหม่เมื่อไหร่ก็ได้: `git push origin news-prod-5b4b6064-3sep69^{commit}:main`
+- commit ที่ถอยยังอยู่ในเครื่อง (แท็ก `news-prod-566cbc3d-3sep69`) — จะกลับมาปล่อยใหม่เมื่อไหร่ก็ได้: `git push origin news-prod-566cbc3d-3sep69^{commit}:main`
 
 ## ข้อมูล (DB/ไฟล์) ต้องกู้ไหม?
 - **ไม่มี migration** · โค้ดใหม่ **ไม่แก้** ตารางเดิม (การ์ด/ครู/คิว/generation logs ใช้โครงเดิม)
