@@ -21,6 +21,19 @@ const BOT_INSTANCE = require('os').hostname() + '_' + Math.random().toString(36)
 //   + ตัดการเชื่อมต่อ Discord เพื่อไม่ให้ตัวเก่า+ตัวใหม่ฟัง event ทับกัน (ต้นเหตุเห็น 2 ตอบช่วง deploy)
 let shuttingDown = false;
 
+// ★ 2 ก.ย. 69 (เคสหลวงปู่ศิลา 03:49Z): บอทจำงานที่กำลังตามอยู่ไว้ที่เซิร์ฟเวอร์ (/api/bot/tracking)
+//   → Railway redeploy/รีสตาร์ต แล้วบอทตัวใหม่ตามงานต่อเอง ไม่ค้าง "1%" ตลอดไป (ดู trackingUpsert / resumeTrackedJobs)
+//   ปิดคืน: ตั้ง env BOT_RESUME_TRACKING=0 (รับเฉพาะ '0'/'1' ตรงตัว · ค่าเริ่มต้น=เปิด) → บอททำงานเหมือนเดิมทุกไบต์
+function envFlag(name, fallback) {
+  const raw = process.env[name];
+  if (raw === '1') return true;
+  if (raw === '0') return false;
+  return fallback;
+}
+const BOT_RESUME_TRACKING = envFlag('BOT_RESUME_TRACKING', true);
+const RESUME_MAX_AGE_MS = 30 * 60 * 1000; // งานที่เริ่มเก่ากว่านี้ไม่ตามต่อ — แจ้งให้ไปดูหน้าตรวจงานแทน
+const RESUME_STALE_TEXT = '⏱️ งานนี้ค้างตอนระบบรีสตาร์ต ดูผลได้ในหน้าตรวจงาน';
+
 // ═══════════════════════════════════════════
 // 🔧 QUEUE SYSTEM — ป้องกัน concurrent overload
 // ═══════════════════════════════════════════
@@ -75,10 +88,14 @@ function isDuplicate(content) {
 
 // ★ 27 มิ.ย.: marker เวอร์ชันโค้ด — ใช้ยืนยันใน Railway logs ว่า container ที่รันอยู่เป็น "โค้ดใหม่"
 //   โค้ดใหม่ = single-message (atomic claim ก่อน ack) · ถ้า logs ไม่ขึ้นบรรทัดนี้ = ยังรัน container เก่า
-const BOT_BUILD = '2026-06-27-singlemsg-atomicclaim';
+const BOT_BUILD = '2026-09-02-resume-tracking'; // ★ 2 ก.ย. 69: เดิม '2026-06-27-singlemsg-atomicclaim' — ขยับให้เห็นใน log ว่ารุ่นจำงานข้ามรีสตาร์ตขึ้นแล้ว
 client.once('ready', () => {
   console.log(`✅ บอทพร้อมทำงานแล้ว! ล็อกอินในชื่อ ${client.user.tag}`);
-  console.log(`🟢 [BOT_BUILD=${BOT_BUILD}] instance=${BOT_INSTANCE} | คิว: เซิร์ฟเวอร์ (atomic claim) | Dedup URL: ${DEDUP_WINDOW_MS / 1000}s`);
+  console.log(`🟢 [BOT_BUILD=${BOT_BUILD}] instance=${BOT_INSTANCE} | คิว: เซิร์ฟเวอร์ (atomic claim) | Dedup URL: ${DEDUP_WINDOW_MS / 1000}s | resume=${BOT_RESUME_TRACKING ? 'on' : 'off'}`);
+  // ★ 2 ก.ย. 69: กู้งานที่ค้างจากก่อนรีสตาร์ต (ล้มเงียบ — ห้ามทำให้บอทล้มตอนตื่น) · คืน promise ให้เทสรอได้ (discord.js ไม่สนค่าที่คืน)
+  return resumeTrackedJobs().catch((err) => {
+    console.warn(`[Bot] 🩹 กู้งานค้างไม่สำเร็จ: ${String(err?.message || err).slice(0, 80)}`);
+  });
 });
 
 client.on('messageCreate', async (message) => {
@@ -172,6 +189,25 @@ client.on('messageCreate', async (message) => {
   }
 });
 
+// ★ 2 ก.ย. 69: แยก header + URL คิวออกเป็นฟังก์ชัน (เส้นทางกู้หลังรีสตาร์ตต้องใช้ชุดเดียวกัน) — ตรรกะเดิมทุกบรรทัด
+function buildApiHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  if (API_KEY) headers['x-api-key'] = API_KEY;
+  return headers;
+}
+
+function buildQueueUrl() {
+  let queueUrl = API_URL;
+  if (queueUrl.endsWith('/api/auto/process')) {
+    queueUrl = queueUrl.replace('/api/auto/process', '/api/queue/add');
+  } else if (queueUrl.endsWith('/api/auto/stream')) {
+    queueUrl = queueUrl.replace('/api/auto/stream', '/api/queue/add');
+  } else {
+    queueUrl = queueUrl.replace(/\/api\/.*$/, '/api/queue/add');
+  }
+  return queueUrl;
+}
+
 // ═══════════════════════════════════════════
 // 📰 Process News Job — ฟังก์ชันประมวลผลข่าวจริง
 // ═══════════════════════════════════════════
@@ -180,6 +216,9 @@ async function processNewsJob(job) {
   // ★ 27 มิ.ย.: เริ่มเป็น null — โพสต์ ack "หลังชนะเคลม atomic" เท่านั้น (instance ที่แพ้ไม่เคยโพสต์อะไร)
   let processingMsg = job.processingMsg || null;
   const jobStartTime = Date.now();
+  // ★ 2 ก.ย. 69: jobId ที่จดลงสมุด tracking แล้ว (จบ/ล้มต้องถอนออก) · handedOff = งานถูก instance อื่นรับช่วง (ห้ามถอนสมุดของเขา)
+  let trackedJobId = null;
+  let handedOff = false;
 
   try {
     // เตรียมข้อมูลยิง API
@@ -192,18 +231,10 @@ async function processNewsJob(job) {
       _msgId: message.id,           // ★ ข้อความ Discord ไหน (สืบ double-event)
     };
 
-    const headers = { 'Content-Type': 'application/json' };
-    if (API_KEY) headers['x-api-key'] = API_KEY;
+    const headers = buildApiHeaders();
 
     // === Submit via Server Queue ===
-    let queueUrl = API_URL;
-    if (queueUrl.endsWith('/api/auto/process')) {
-      queueUrl = queueUrl.replace('/api/auto/process', '/api/queue/add');
-    } else if (queueUrl.endsWith('/api/auto/stream')) {
-      queueUrl = queueUrl.replace('/api/auto/stream', '/api/queue/add');
-    } else {
-      queueUrl = queueUrl.replace(/\/api\/.*$/, '/api/queue/add');
-    }
+    const queueUrl = buildQueueUrl(); // ★ 2 ก.ย. 69: ย้ายตรรกะเดิมไป buildQueueUrl() ด้านบน — ผลเท่าเดิมทุกกรณี
 
     // 1. Add to server queue
     // ★ 15 ส.ค. 69 (เจ้าของสั่งแก้ timeout ดิสคอร์ด): เดิม timeout 15000 — ช่วงคิวแน่น /api/queue/add ตอบช้ากว่า 15 วิ
@@ -247,6 +278,64 @@ async function processNewsJob(job) {
     if (processingMsg) await processingMsg.edit(ackText).catch(() => {});
     else processingMsg = await message.reply(ackText);
 
+    // ★ 2 ก.ย. 69: ได้ jobId + ข้อความ ack แล้ว → จดลงสมุดที่เซิร์ฟเวอร์ (ล้มเงียบ ห้ามทำงานหลักพัง)
+    //   บอทตัวใหม่หลัง redeploy จะอ่านสมุดนี้แล้วตามงานต่อ (ดู resumeTrackedJobs) · ปิดสวิตช์ = ไม่ยิงอะไรเลย
+    trackedJobId = jobId;
+    await trackingUpsert({
+      jobId,
+      channelId: processingMsg.channelId || message.channelId || null,
+      messageId: processingMsg.id,
+      sourceMessageId: message.id,
+      guildId: message.guildId || null,
+      userId: message.author?.id || null,
+      instance: BOT_INSTANCE,
+      startedAt: new Date(jobStartTime).toISOString(),
+      queueUrl,
+    });
+
+    // 2. Poll for result + โพสต์ผล — ★ 2 ก.ย. 69 ย้ายไป pollJobUntilDone (ก้อนเดิมทุกบรรทัด) ให้เส้นทางกู้ใช้ร่วม
+    await pollJobUntilDone({ jobId, processingMsg, message, headers, queueUrl, jobStartTime });
+
+  } catch (error) {
+    // ★ 2 ก.ย. 69: งานถูกบอทตัวใหม่รับช่วงไปแล้ว (redeploy ทับตอนงานเสร็จพอดี) → ตัวนี้เงียบ ไม่โพสต์ซ้ำ ไม่ถอนสมุดของเขา
+    if (error?.code === 'BOT_HANDOFF') {
+      handedOff = true;
+      console.log(`[Bot] 🩹 ${error.message}`);
+      return;
+    }
+    console.error('[Discord Bot Error Detail]:', error);
+    console.error('[Discord Bot Error]:', error.message);
+    // ★ 4 ก.ค.: ข่าวเนื้อเดิม/เกือบเดิมส่งซ้ำใน 45 นาที (NEAR_DUPLICATE จาก server) → ตอบเตือนสั้นๆ 1 ครั้ง
+    //   ไม่เงียบแบบ claim-ซ้ำ — คนส่งต้องรู้ว่า "งานแรกมีอยู่แล้ว" จะได้ไม่ส่งวนอีก (ต้นเหตุที่เห็นประมวลผลเบิ้ล)
+    if (error.response?.data?.errorType === 'NEAR_DUPLICATE') {
+      const warnText = `⚠️ ${error.response.data.error}`;
+      if (processingMsg) await processingMsg.edit(warnText).catch(() => {});
+      else await message.reply(warnText).catch(() => {});
+      return;
+    }
+    // ★ 26 มิ.ย.: ถ้า error คือ "งานซ้ำ" (server คืน 409/DUPLICATE_JOB ตอน overlap) → เงียบ ลบ reply ทิ้ง
+    //   เหมือนเส้น duplicate:true ด้านบน — ไม่โชว์ "❌ เกิดข้อผิดพลาด" ที่ทำให้เห็น 2 อัน
+    const _eMsg = String(error.response?.data?.error || error.message || '');
+    const _isDup = error.response?.status === 409 || error.response?.data?.errorType === 'DUPLICATE_JOB'
+      || /กำลังประมวลผลอยู่|อยู่ในคิวแล้ว|DUPLICATE/i.test(_eMsg);
+    if (_isDup) {
+      console.log('[Bot] ⏭️ งานซ้ำ (409) — instance นี้เงียบสนิท (ไม่โพสต์ ack)');
+      if (processingMsg) await processingMsg.delete().catch(() => {});
+      return;
+    }
+    // error จริง — โพสต์เฉพาะถ้าเคยโพสต์ ack แล้ว (ชนะเคลม) · ตัวที่แพ้เคลมไม่ควรโผล่ error
+    if (processingMsg) await processingMsg.edit(`❌ เกิดข้อผิดพลาดในการประมวลผล: ${error.response?.data?.error || error.message}`).catch(() => {});
+    else await message.reply(`❌ เกิดข้อผิดพลาดในการประมวลผล: ${error.response?.data?.error || error.message}`).catch(() => {});
+  } finally {
+    // ★ 2 ก.ย. 69: จบงาน/ล้ม → ถอนออกจากสมุด · ยกเว้น (ก) กำลังปิดตัวตาม SIGTERM (client ถูก destroy โพสต์อะไรไม่ได้แล้ว)
+    //   — เก็บสมุดไว้ให้ตัวใหม่ตามต่อ (ข) งานถูก instance อื่นรับช่วงไปแล้ว — สมุดเป็นของเขา ห้ามลบ
+    if (trackedJobId && !shuttingDown && !handedOff) await trackingDelete(trackedJobId);
+  }
+}
+
+// ★ 2 ก.ย. 69: ลูปติดตามผล + โพสต์ผลลัพธ์ — แยกจาก processNewsJob ให้เส้นทางปกติและเส้นทางกู้หลังรีสตาร์ต (resumeTrackedJob)
+//   ใช้ร่วมกัน · เนื้อในย้ายมาทั้งก้อนไม่แก้สักบรรทัด (คงย่อหน้าเดิมให้ diff เห็นว่าเป็นการย้ายล้วน) · โยน error ให้ผู้เรียกจัดการเหมือนเดิม
+async function pollJobUntilDone({ jobId, processingMsg, message, headers, queueUrl, jobStartTime }) {
     // 2. Poll for result
     const statusUrl = queueUrl.replace('/api/queue/add', '/api/queue/status');
     const workerUrl = queueUrl.replace('/api/queue/add', '/api/queue/worker');
@@ -355,6 +444,11 @@ async function processNewsJob(job) {
       throw new Error(data.error || 'API Processing Failed');
     }
 
+    // ★ 2 ก.ย. 69: ก่อนโพสต์ผล — ถ้าสมุด tracking บอกว่างานนี้ถูก instance อื่นรับช่วงไปแล้ว (บอทตัวใหม่กู้งานหลัง redeploy
+    //   ทับช่วงงานเสร็จพอดี) → ตัวนี้เงียบ ให้ตัวใหม่โพสต์คนเดียว (กันเห็นผล 2 ชุด) · ปิดสวิตช์ = ไม่เช็ค ไม่มีคำขอเพิ่ม
+    //   อ่านสมุดไม่ได้/ไม่มีในสมุด = ถือว่าเป็นของเรา (fail-open — ห้ามทำให้ผลลัพธ์หาย)
+    if (await trackingTakenByOther(jobId)) throw makeHandoffAbort(jobId);
+
     // ดึงเวอร์ชันทั้งหมด (รองรับสูงสุด 10 เวอร์ชัน)
     const allVersions = data.analysisResult?.versions || data.data?.analysisResult?.versions || [];
     const versionsToShow = allVersions.slice(0, 10);
@@ -450,32 +544,213 @@ async function processNewsJob(job) {
 
     await message.react('✅');
     console.log(`[Queue] ✅ Job done for ${message.author.tag} | ${jobTime}s | Queue remaining: ${queue.length}`);
+}
 
-  } catch (error) {
-    console.error('[Discord Bot Error Detail]:', error);
-    console.error('[Discord Bot Error]:', error.message);
-    // ★ 4 ก.ค.: ข่าวเนื้อเดิม/เกือบเดิมส่งซ้ำใน 45 นาที (NEAR_DUPLICATE จาก server) → ตอบเตือนสั้นๆ 1 ครั้ง
-    //   ไม่เงียบแบบ claim-ซ้ำ — คนส่งต้องรู้ว่า "งานแรกมีอยู่แล้ว" จะได้ไม่ส่งวนอีก (ต้นเหตุที่เห็นประมวลผลเบิ้ล)
-    if (error.response?.data?.errorType === 'NEAR_DUPLICATE') {
-      const warnText = `⚠️ ${error.response.data.error}`;
-      if (processingMsg) await processingMsg.edit(warnText).catch(() => {});
-      else await message.reply(warnText).catch(() => {});
-      return;
+// ═══════════════════════════════════════════
+// 🩹 Tracking — จำงานที่กำลังตามอยู่ไว้ที่เซิร์ฟเวอร์ (2 ก.ย. 69) · ทุกคำสั่งล้มเงียบ ห้ามทำงานหลักพัง
+//   สมุด = /api/bot/tracking (store 'bot-tracking') · กุญแจเดียวกับ /api/queue/add (API_KEY = DISCORD_API_SECRET ฝั่งเซิร์ฟเวอร์)
+// ═══════════════════════════════════════════
+function buildTrackingUrl() {
+  return buildQueueUrl().replace('/api/queue/add', '/api/bot/tracking');
+}
+
+function buildTrackingHeaders() {
+  const headers = buildApiHeaders();
+  if (API_KEY) headers['x-bot-secret'] = API_KEY;
+  return headers;
+}
+
+function makeHandoffAbort(jobId) {
+  const err = new Error(`งาน ${String(jobId).slice(0, 8)} ถูกบอทตัวใหม่รับช่วงไปแล้ว — instance นี้เงียบ ไม่โพสต์ซ้ำ`);
+  err.code = 'BOT_HANDOFF';
+  return err;
+}
+
+// ★ 2 ก.ย. 69 (ผู้ตรวจไขว้ ข้อ medium): งานที่ instance นี้ "จดลงสมุดสำเร็จและยังไม่ได้ถอนเอง"
+//   ใช้แยก "สมุดอ่านได้แต่ไม่มีงานนี้ เพราะตัวใหม่โพสต์ผล+ถอนสมุดไปแล้ว" (ต้องเงียบ) ออกจาก "ไม่เคยจดสำเร็จ" (โพสต์ตามปกติ)
+//   ช่วง Railway overlap ตัวเก่า poll ห่างได้ถึง 3 วิ → เห็น completed ตามหลังตัวใหม่ → เดิมถือว่าเป็นของตัวเองแล้วโพสต์ซ้ำทั้งชุด
+const registeredJobs = new Set();
+
+// จด/ทับ 1 งาน (upsert) · คืน true เฉพาะเซิร์ฟเวอร์ตอบรับจริง (success:true) — และจำไว้ใน registeredJobs
+async function trackingUpsert(entry) {
+  if (!BOT_RESUME_TRACKING) return false;
+  try {
+    const res = await axios.post(buildTrackingUrl(), entry, { headers: buildTrackingHeaders(), timeout: 10000 });
+    if (res?.data?.success !== true) {
+      console.warn(`[Bot] 🩹 จดงานลงสมุดไม่สำเร็จ (เซิร์ฟเวอร์ตอบไม่รับ ไม่กระทบงานหลัก): ${String(res?.data?.error || 'unknown').slice(0, 80)}`);
+      return false;
     }
-    // ★ 26 มิ.ย.: ถ้า error คือ "งานซ้ำ" (server คืน 409/DUPLICATE_JOB ตอน overlap) → เงียบ ลบ reply ทิ้ง
-    //   เหมือนเส้น duplicate:true ด้านบน — ไม่โชว์ "❌ เกิดข้อผิดพลาด" ที่ทำให้เห็น 2 อัน
-    const _eMsg = String(error.response?.data?.error || error.message || '');
-    const _isDup = error.response?.status === 409 || error.response?.data?.errorType === 'DUPLICATE_JOB'
-      || /กำลังประมวลผลอยู่|อยู่ในคิวแล้ว|DUPLICATE/i.test(_eMsg);
-    if (_isDup) {
-      console.log('[Bot] ⏭️ งานซ้ำ (409) — instance นี้เงียบสนิท (ไม่โพสต์ ack)');
-      if (processingMsg) await processingMsg.delete().catch(() => {});
-      return;
-    }
-    // error จริง — โพสต์เฉพาะถ้าเคยโพสต์ ack แล้ว (ชนะเคลม) · ตัวที่แพ้เคลมไม่ควรโผล่ error
-    if (processingMsg) await processingMsg.edit(`❌ เกิดข้อผิดพลาดในการประมวลผล: ${error.response?.data?.error || error.message}`).catch(() => {});
-    else await message.reply(`❌ เกิดข้อผิดพลาดในการประมวลผล: ${error.response?.data?.error || error.message}`).catch(() => {});
+    registeredJobs.add(entry.jobId);
+    return true;
+  } catch (err) {
+    console.warn(`[Bot] 🩹 จดงานลงสมุดไม่สำเร็จ (ไม่กระทบงานหลัก): ${String(err?.message || err).slice(0, 80)}`);
+    return false;
   }
+}
+
+// ถอน 1 งานออกจากสมุด (จบ/ล้ม/กู้เสร็จ) · ลืมจาก registeredJobs ก่อนยิง — ถอนเองแล้ว สมุดว่างหลังจากนี้ไม่ใช่สัญญาณว่าคนอื่นปิดงานแทน
+async function trackingDelete(jobId) {
+  if (!BOT_RESUME_TRACKING || !jobId) return false;
+  registeredJobs.delete(jobId);
+  try {
+    await axios.delete(`${buildTrackingUrl()}?jobId=${encodeURIComponent(jobId)}`, { headers: buildTrackingHeaders(), timeout: 10000 });
+    return true;
+  } catch (err) {
+    console.warn(`[Bot] 🩹 ถอนงานออกจากสมุดไม่สำเร็จ (ไม่กระทบงานหลัก): ${String(err?.message || err).slice(0, 80)}`);
+    return false;
+  }
+}
+
+// รายการงานที่ยังเปิดอยู่ทั้งหมด · อ่านไม่ได้ = [] (บอทตื่นต่อได้ตามปกติ)
+async function trackingList() {
+  if (!BOT_RESUME_TRACKING) return [];
+  try {
+    const res = await axios.get(buildTrackingUrl(), { headers: buildTrackingHeaders(), timeout: 15000 });
+    const items = res.data?.items;
+    return Array.isArray(items) ? items : [];
+  } catch (err) {
+    console.warn(`[Bot] 🩹 อ่านรายการงานค้างไม่สำเร็จ: ${String(err?.message || err).slice(0, 80)}`);
+    return [];
+  }
+}
+
+// งานนี้ถูก instance อื่นรับช่วง/ปิดแทนไปแล้วหรือยัง (เช็คก่อนโพสต์ผล)
+//   · สมุดมีงานนี้แต่ instance ไม่ใช่เรา = true (ตัวใหม่รับช่วงแล้ว ให้เขาโพสต์คนเดียว)
+//   · สมุดอ่านได้จริง (success:true) แต่ไม่มีงานนี้ ทั้งที่เราจดสำเร็จและยังไม่ได้ถอนเอง = true (ตัวใหม่โพสต์ผล+ถอนสมุดไปแล้ว)
+//     — ★ 2 ก.ย. 69 ผู้ตรวจไขว้: เดิมช่องนี้ fail-open → ช่วง overlap ตัวเก่าโพสต์ผลซ้ำทั้งชุด (✅ + embed ทุกเวอร์ชัน + react)
+//   · อ่านไม่ได้ (สายพัง/401/403/5xx) หรือไม่เคยจดสำเร็จ = false (fail-open — ห้ามทำให้ผลลัพธ์หาย)
+async function trackingTakenByOther(jobId) {
+  if (!BOT_RESUME_TRACKING || !jobId) return false;
+  try {
+    const res = await axios.get(`${buildTrackingUrl()}?jobId=${encodeURIComponent(jobId)}`, { headers: buildTrackingHeaders(), timeout: 5000 });
+    if (res?.data?.success !== true) return false;
+    const items = Array.isArray(res.data.items) ? res.data.items : [];
+    const entry = items.find((e) => e && e.jobId === jobId);
+    const taken = entry
+      ? !!(entry.instance && entry.instance !== BOT_INSTANCE)
+      : registeredJobs.has(jobId);
+    if (taken) registeredJobs.delete(jobId); // งานไม่ใช่ของเราแล้ว — ไม่ต้องจำต่อ
+    return taken;
+  } catch {
+    return false;
+  }
+}
+
+// ★ 2 ก.ย. 69 (ผู้ตรวจไขว้ ข้อ low): รหัส error ของ Discord ที่แปลว่าห้อง/ข้อความ "ไม่มีให้ตามแล้วจริงๆ" — ค่อยถอนสมุด
+//   10003 Unknown Channel · 10008 Unknown Message · 50001 Missing Access (DiscordAPIError.code ของ discord.js v14)
+//   error อื่น (429 rate-limit / 5xx / สายหลุดชั่วคราวหลัง ready) = ชั่วคราว → ข้ามรอบนี้โดยไม่ลบ (รีสตาร์ตครั้งหน้าลองใหม่
+//   หรือหมดอายุตามกฎ 30 นาที) — เดิมตีความทุก error ว่า "หายแล้ว" แล้วลบสมุด = งานกลายเป็นกำพร้าเงียบๆ เหมือนบั๊กเดิม
+const DISCORD_GONE_CODES = new Set([10003, 10008, 50001]);
+function isDiscordGoneError(err) {
+  const code = Number(err?.code);
+  return Number.isFinite(code) && DISCORD_GONE_CODES.has(code);
+}
+
+function skipResume(jobId, what, err) {
+  console.warn(`[Bot] 🩹 ดึง${what}ของงาน ${String(jobId).slice(0, 8)} ไม่ได้ชั่วคราว (${String(err?.message || err).slice(0, 60)}) — คงสมุดไว้ ลองใหม่รอบหน้า`);
+  return 'skipped';
+}
+
+// ข้อความต้นทางของคนส่งหาไม่เจอแล้ว (ถูกลบ) → ยังโพสต์ผลลงห้องเดิมได้ แต่ไม่ reply/react ใส่ข้อความที่หายไป
+function makeFallbackSourceMessage(channel, entry) {
+  return {
+    id: entry.sourceMessageId || null,
+    author: { id: entry.userId || 'unknown', tag: entry.userId ? `discord-${entry.userId}` : 'unknown' },
+    reply: (options) => channel.send(options),
+    react: async () => null,
+  };
+}
+
+// กู้ 1 งาน → 'dropped' (ห้อง/ข้อความหายจริง) · 'skipped' (Discord ล้มชั่วคราว — คงสมุดไว้) · 'stale' (เริ่มมาเกิน 30 นาที)
+//   · 'resumed' (ตามต่อจนโพสต์ผล) · 'handedoff' (instance อื่นรับช่วงไปอีกที) · 'failed' (ตามต่อแล้วล้ม — แจ้ง ❌ ในข้อความเดิม)
+async function resumeTrackedJob(entry, { client: bot = client, now = Date.now() } = {}) {
+  const jobId = entry.jobId;
+  const startedAtMs = Date.parse(entry.startedAt || '');
+  const jobStartTime = Number.isFinite(startedAtMs) ? startedAtMs : now;
+  const isStale = now - jobStartTime > RESUME_MAX_AGE_MS;
+  // ดึงห้อง/ข้อความ: หายจริง (รหัส 10003/10008/50001) หรือค้างเกิน 30 นาทีแล้ว = ถอนสมุด · ล้มชั่วคราว = ข้ามรอบนี้ ไม่ลบ
+  let channel = null;
+  try {
+    channel = await bot.channels.fetch(entry.channelId);
+  } catch (err) {
+    if (!isDiscordGoneError(err) && !isStale) return skipResume(jobId, 'ห้อง', err);
+    channel = null;
+  }
+  if (!channel || typeof channel.messages?.fetch !== 'function') {
+    await trackingDelete(jobId);
+    return 'dropped';
+  }
+  let processingMsg = null;
+  try {
+    processingMsg = await channel.messages.fetch(entry.messageId);
+  } catch (err) {
+    if (!isDiscordGoneError(err) && !isStale) return skipResume(jobId, 'ข้อความ', err);
+    processingMsg = null;
+  }
+  if (!processingMsg) {
+    await trackingDelete(jobId);
+    return 'dropped';
+  }
+  if (isStale) {
+    await processingMsg.edit(RESUME_STALE_TEXT).catch(() => {});
+    await trackingDelete(jobId);
+    return 'stale';
+  }
+  let message = null;
+  if (entry.sourceMessageId) {
+    try { message = await channel.messages.fetch(entry.sourceMessageId); } catch { message = null; }
+  }
+  if (!message) message = makeFallbackSourceMessage(channel, entry);
+  const queueUrl = entry.queueUrl || buildQueueUrl();
+  // รับช่วง: เขียนทับ instance เป็นของเรา — ตัวเก่า (ถ้ายังไม่ตาย) จะเห็นตอนก่อนโพสต์ผลแล้วเงียบเอง
+  await trackingUpsert({
+    jobId,
+    channelId: entry.channelId,
+    messageId: entry.messageId,
+    sourceMessageId: entry.sourceMessageId || null,
+    guildId: entry.guildId || null,
+    userId: entry.userId || null,
+    instance: BOT_INSTANCE,
+    startedAt: new Date(jobStartTime).toISOString(),
+    queueUrl,
+  });
+  let handedOff = false;
+  activeCount++;
+  try {
+    await pollJobUntilDone({ jobId, processingMsg, message, headers: buildApiHeaders(), queueUrl, jobStartTime });
+    return 'resumed';
+  } catch (error) {
+    if (error?.code === 'BOT_HANDOFF') {
+      handedOff = true;
+      console.log(`[Bot] 🩹 ${error.message}`);
+      return 'handedoff';
+    }
+    console.error('[Bot] 🩹 งานที่กู้มาล้ม:', error.message);
+    await processingMsg.edit(`❌ เกิดข้อผิดพลาดในการประมวลผล: ${error.response?.data?.error || error.message}`).catch(() => {});
+    return 'failed';
+  } finally {
+    activeCount--;
+    if (!handedOff && !shuttingDown) await trackingDelete(jobId);
+  }
+}
+
+// ตอนบอทพร้อม: ดึงรายการงานที่ค้างจากก่อนรีสตาร์ต แล้วกู้พร้อมกันทุกงาน (งานปกติก็วิ่งขนานกันได้อยู่แล้ว)
+async function resumeTrackedJobs(options = {}) {
+  const summary = { total: 0, resumed: 0, stale: 0, dropped: 0, skipped: 0, handedoff: 0, failed: 0 };
+  if (!BOT_RESUME_TRACKING) return summary;
+  const entries = (await trackingList()).filter((e) => e && typeof e.jobId === 'string' && e.jobId);
+  summary.total = entries.length;
+  if (entries.length === 0) return summary;
+  console.log(`🩹 กู้งานค้าง ${entries.length} งาน`);
+  const results = await Promise.allSettled(entries.map((entry) => resumeTrackedJob(entry, options)));
+  for (const r of results) {
+    if (r.status === 'fulfilled' && Object.prototype.hasOwnProperty.call(summary, r.value)) summary[r.value]++;
+    else if (r.status === 'rejected') {
+      summary.failed++;
+      console.warn(`[Bot] 🩹 กู้งานล้มกลางทาง: ${String(r.reason?.message || r.reason).slice(0, 80)}`);
+    }
+  }
+  return summary;
 }
 
 // ★ 26 มิ.ย.: ปิดตัวนุ่มนวลตอน redeploy (Railway/Docker ส่ง SIGTERM, Ctrl+C ส่ง SIGINT)
@@ -492,4 +767,25 @@ async function gracefulShutdown(signal) {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-client.login(TOKEN);
+// ★ 2 ก.ย. 69: ล็อกอินเฉพาะตอนรันเป็นโปรแกรมหลัก (`node index.js` — Railway ใช้แบบนี้) · ถูก require ในเทส = ไม่ล็อกอิน
+if (require.main === module) {
+  client.login(TOKEN);
+}
+
+// สำหรับเทส (tests/bot-resume.test.mjs) — ไม่มีผลตอนรันจริง
+module.exports = {
+  processNewsJob,
+  pollJobUntilDone,
+  resumeTrackedJobs,
+  resumeTrackedJob,
+  buildQueueUrl,
+  buildApiHeaders,
+  buildTrackingUrl,
+  trackingUpsert,
+  trackingDelete,
+  trackingList,
+  trackingTakenByOther,
+  RESUME_MAX_AGE_MS,
+  RESUME_STALE_TEXT,
+  _client: client,
+};
