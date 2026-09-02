@@ -1,5 +1,6 @@
-// 🎬 ข้อสอบสวิตช์ทดลองสัญญาเปิดเรื่องต่อมุม (2 ก.ย. 69 — จากเทสสนามจริงเคส #05234 V2 "สลับบริบท")
-//   ค่าเริ่มต้น (ไม่ตั้ง env) ต้อง = พฤติกรรมเดิม 100% · OPENING_FAMILY_CONTRACT=0 เลิกบังคับตระกูล · OPENING_IDENTITY_RULE=1 เติมกติกาใคร/อะไร/เมื่อไหร่
+// 🎬 ข้อสอบสัญญาเปิดเรื่องต่อมุม (2 ก.ย. 69 — จากเทสสนามจริงเคส #05234 V2 "สลับบริบท" + ศึกโมเดล 7 แขน)
+//   ★ 2 ก.ย. เย็น เจ้าของเคาะ "เคาะเปลี่ยน": ค่าเริ่มต้น = เลิกบังคับตระกูล + เติมกติกาใคร/อะไร/เมื่อไหร่
+//   สวิตช์ปิดคืน: OPENING_FAMILY_CONTRACT=1 (บังคับตระกูลแบบเดิม) · OPENING_IDENTITY_RULE=0 (ถอดกติกา)
 // autoFlowServiceText ลาก import '@/…' เป็นลูกโซ่ → ดึงเฉพาะฟังก์ชัน (pure: ใช้แค่ process.env) มาประเมินแยก
 // รัน: node tests/opening-contract-switches.test.mjs
 import { readFileSync } from 'node:fs';
@@ -16,52 +17,50 @@ let pass = 0, fail = 0;
 const t = (name, cond) => { if (cond) { pass++; console.log('✅ ' + name); } else { fail++; console.log('❌ ' + name); } };
 const HOOK = 'เปิดด้วยคำพูดสั้นที่คนพูดจริง';
 const RESERVED = ['พ่อที่เลี้ยงลูกเหมือนเพื่อน: เวลาธรรมดาที่ลูกยังจำ'];
+const LEGACY = { OPENING_FAMILY_CONTRACT: '1', OPENING_IDENTITY_RULE: '0' };
 
-// ── ① ค่าเริ่มต้น = ของเดิม: บังคับตระกูล + เทคนิคการ์ดในตระกูล + แกนจอง · ไม่มีกติกาใคร/อะไร ──
+// ── ① ค่าเริ่มต้น (ไม่ตั้ง env) = แบบใหม่ที่เจ้าของเคาะ: ไม่บังคับตระกูล · การ์ดเป็นแนวทาง · แกนจอง · กติกาใคร/อะไร ──
 {
   const { buildAngleOpeningContract: f, OPENING_IDENTITY_RULE_TEXT: RULE } = make({});
   const out = f(1, HOOK, RESERVED, ' (เคส)');
-  t('1 default: บังคับตระกูล "ความต่าง" สำหรับมุมที่ 2 เหมือนเดิม', out.startsWith('เปิดด้วยตัวเลขหรือความต่าง') && out.includes(' (เคส) — นี่คือตระกูลเปิดหลัก ห้ามเปลี่ยนไปใช้ตระกูลของมุมอื่น'));
-  t('2 default: เทคนิคการ์ดถูกจำกัดในตระกูล (ข้อความเดิม)', out.includes('เทคนิคจากการ์ดใช้ปรับจังหวะภายในตระกูลนี้เท่านั้น: ' + HOOK));
+  t('1 default: ไม่มีบรรทัดบังคับตระกูล', !out.includes('ตระกูลเปิดหลัก') && !out.includes('เปิดด้วยตัวเลขหรือความต่าง'));
+  t('2 default: เทคนิคการ์ดเป็นแนวทาง ไม่ใช่คำสั่งทับ', out.includes('เทคนิคเปิดเรื่องจากการ์ด (แนวทาง ไม่ใช่คำสั่งทับ): ' + HOOK));
   t('3 default: ยังกันแกนซ้ำกับมุมก่อน', out.includes('แกนที่มุมก่อนหน้าจองใช้เปิดแล้ว') && out.includes(RESERVED[0]));
-  t('4 default: ไม่มีกติกาใคร/อะไร/เมื่อไหร่ (ไม่สั่งทับการ์ดเอง)', !out.includes(RULE) && out.split('\n').length === 3);
+  t('4 default: กติกาใคร/อะไร/เมื่อไหร่ + ผู้ล่วงลับ อยู่ท้ายสัญญา', out.endsWith(RULE) && RULE.includes('เสียชีวิตแล้ว') && RULE.includes('สองประโยคแรก') && out.split('\n').length === 3);
+  t('5 default: มุมแรก ไม่มีการ์ด/แกนจอง → เหลือแค่กติกา', f(0, '', []) === RULE);
 }
 
-// ── ② OPENING_FAMILY_CONTRACT=0: เลิกบังคับตระกูล · การ์ดเป็นแนวทาง · แกนจองยังอยู่ ──
+// ── ② สวิตช์ปิดคืนทั้งคู่ (=1 / =0) = พฤติกรรมเดิมก่อน 2 ก.ย. ไบต์ต่อไบต์ ──
 {
-  const { buildAngleOpeningContract: f } = make({ OPENING_FAMILY_CONTRACT: '0' });
+  const { buildAngleOpeningContract: f, OPENING_IDENTITY_RULE_TEXT: RULE } = make(LEGACY);
+  const out = f(1, HOOK, RESERVED, ' (เคส)');
+  t('6 legacy: บังคับตระกูล "ความต่าง" สำหรับมุมที่ 2 เหมือนเดิม', out.startsWith('เปิดด้วยตัวเลขหรือความต่าง') && out.includes(' (เคส) — นี่คือตระกูลเปิดหลัก ห้ามเปลี่ยนไปใช้ตระกูลของมุมอื่น'));
+  t('7 legacy: เทคนิคการ์ดถูกจำกัดในตระกูล (ข้อความเดิม)', out.includes('เทคนิคจากการ์ดใช้ปรับจังหวะภายในตระกูลนี้เท่านั้น: ' + HOOK));
+  t('8 legacy: ไม่มีกติกาใคร/อะไร · 3 บรรทัดเท่าเดิม', !out.includes(RULE) && out.split('\n').length === 3);
+  t('9 legacy: ไม่มีการ์ด/แกนจอง → เหลือบรรทัดตระกูลบรรทัดเดียว', f(0, '', []).split('\n').length === 1 && f(0, '', []).startsWith('เปิดด้วยภาพหรือการกระทำจริง'));
+}
+
+// ── ③ สลับทีละตัว ──
+{
+  const { buildAngleOpeningContract: f, OPENING_IDENTITY_RULE_TEXT: RULE } = make({ OPENING_FAMILY_CONTRACT: '1' });
   const out = f(1, HOOK, RESERVED);
-  t('5 family=0: ไม่มีบรรทัดบังคับตระกูล', !out.includes('ตระกูลเปิดหลัก') && !out.includes('เปิดด้วยตัวเลขหรือความต่าง'));
-  t('6 family=0: เทคนิคการ์ดกลายเป็นแนวทาง', out.includes('เทคนิคเปิดเรื่องจากการ์ด (แนวทาง ไม่ใช่คำสั่งทับ): ' + HOOK));
-  t('7 family=0: แกนจองยังกันซ้ำ', out.includes(RESERVED[0]));
-  t('8 family=0 + ไม่มีการ์ด/ไม่มีแกนจอง → สัญญาว่าง (ให้ผู้เรียกไม่ใส่บรรทัดเปล่า)', f(0, '', []) === '');
+  t('10 family=1 อย่างเดียว: บังคับตระกูล + ยังมีกติกา', out.includes('ตระกูลเปิดหลัก') && out.endsWith(RULE));
+  const { buildAngleOpeningContract: g } = make({ OPENING_IDENTITY_RULE: '0' });
+  const out2 = g(1, HOOK, RESERVED);
+  t('11 identity=0 อย่างเดียว: ไม่บังคับตระกูล + ไม่มีกติกา', !out2.includes('ตระกูลเปิดหลัก') && !out2.includes(RULE) && out2.includes(RESERVED[0]));
+  t('12 identity=0 + ไม่มีการ์ด/แกนจอง → สัญญาว่าง (ผู้เรียกไม่ใส่บรรทัดเปล่า)', g(0, '', []) === '');
 }
 
-// ── ③ OPENING_IDENTITY_RULE=1: เติมกติกา 2 ประโยคแรก + ผู้ล่วงลับ · ตระกูลยังบังคับอยู่ ──
+// ── ④ ค่า env แปลกๆ = ค่าเริ่มต้นแบบใหม่ (รับเฉพาะ 1 / 0 ตรงตัวเป็นคำสั่งปิดคืน) ──
 {
-  const { buildAngleOpeningContract: f, OPENING_IDENTITY_RULE_TEXT: RULE } = make({ OPENING_IDENTITY_RULE: '1' });
-  const out = f(1, HOOK, RESERVED);
-  t('9 identity=1: มีกติกาใคร/อะไร/เมื่อไหร่ ต่อท้ายสัญญา', out.endsWith(RULE) && RULE.includes('เสียชีวิตแล้ว') && RULE.includes('สองประโยคแรก'));
-  t('10 identity=1: ตระกูลยังบังคับเหมือนเดิม', out.includes('ตระกูลเปิดหลัก'));
-}
-
-// ── ④ เปิดทั้งคู่: การ์ดนำ + กติกาใคร/อะไร · ไม่มีตระกูล ──
-{
-  const { buildAngleOpeningContract: f, OPENING_IDENTITY_RULE_TEXT: RULE } = make({ OPENING_FAMILY_CONTRACT: '0', OPENING_IDENTITY_RULE: '1' });
-  const out = f(0, HOOK, []);
-  t('11 ทั้งคู่: [แนวทางการ์ด, กติกา] เท่านั้น', out === `เทคนิคเปิดเรื่องจากการ์ด (แนวทาง ไม่ใช่คำสั่งทับ): ${HOOK}\n${RULE}`);
-}
-
-// ── ⑤ ค่า env แปลกๆ ต้องไม่เปิดสวิตช์โดยไม่ตั้งใจ ──
-{
-  const { buildAngleOpeningContract: f, OPENING_IDENTITY_RULE_TEXT: RULE } = make({ OPENING_FAMILY_CONTRACT: 'off', OPENING_IDENTITY_RULE: 'true' });
+  const { buildAngleOpeningContract: f, OPENING_IDENTITY_RULE_TEXT: RULE } = make({ OPENING_FAMILY_CONTRACT: 'on', OPENING_IDENTITY_RULE: 'false' });
   const out = f(2, '', []);
-  t('12 "off"/"true" ไม่นับ (รับเฉพาะ 0 / 1 ตามสมุดสวิตช์)', out.includes('ตระกูลเปิดหลัก') && !out.includes(RULE));
+  t('13 "on"/"false" ไม่นับเป็นคำสั่งปิดคืน → ยังเป็นแบบใหม่', !out.includes('ตระกูลเปิดหลัก') && out === RULE);
 }
 
-// ── ⑥ จุดเรียก: สัญญาว่างต้องไม่ใส่บรรทัด "สไตล์เปิดเรื่องบังคับ: " เปล่า ──
+// ── ⑤ จุดเรียก: สัญญาว่างต้องไม่ใส่บรรทัด "สไตล์เปิดเรื่องบังคับ: " เปล่า ──
 {
-  t('13 ผู้เรียกกันบรรทัดเปล่าเมื่อสัญญาว่าง', src.includes("const writeAngle = _openingStyle ? `${focusAngle}\\nสไตล์เปิดเรื่องบังคับของเวอร์ชันนี้: ${_openingStyle}` : focusAngle;"));
+  t('14 ผู้เรียกกันบรรทัดเปล่าเมื่อสัญญาว่าง', src.includes("const writeAngle = _openingStyle ? `${focusAngle}\\nสไตล์เปิดเรื่องบังคับของเวอร์ชันนี้: ${_openingStyle}` : focusAngle;"));
 }
 
 console.log(`\n${pass}/${pass + fail} ผ่าน${fail ? ' — ❌ ตก ' + fail + ' เคส ห้ามไปต่อ' : ' — ✅ ด่านข้อสอบผ่าน'}`);
