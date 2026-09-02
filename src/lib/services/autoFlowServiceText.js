@@ -1044,6 +1044,30 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     }
   }
 
+  // ── VIRAL_SCORE_ANNOTATE wiring start ──
+  // ★ เฟส 3 ข้อ 7 (2 ก.ย. 69 · VIRAL_SCORE_ANNOTATE=1 · ค่าเริ่มต้นปิด = ไม่ import โมดูล ไม่มีคีย์ _viralScore สักฉบับ):
+  //   แนบคะแนน "โอกาสปัง" (src/lib/feedback/viralScore.js — ridge ในเครื่อง ไม่ยิง API) ลง version._viralScore ต่อฉบับ
+  //   จุดนี้คือจุดเดียวที่เนื้อสุดท้ายนิ่งแล้วทุกสาขา: หลัง correction fallback + diversity + factual editor (map finalVersions ใหม่)
+  //   + length gate (กรองฉบับสั้นออกแล้ว — ให้คะแนนเฉพาะชุดที่ส่งจริง) · ก่อน buildPublishableAnalysisResult ประกอบ response
+  //   → _viralScore ติดไป analysisResult.versions ถึงบอท (discord-bot/index.js readViralScore รองรับล่วงหน้าแล้ว ห้ามแก้บอท)
+  //   fail-safe: โมเดลไม่มี/scorer คืน null = ไม่แนบคีย์ · import หรือคำนวณล้ม = addLog เตือน 1 บรรทัด ห้ามล้มท่อ
+  //   ⚠️ Generation Log (generationLogger compactVersions) เป็น whitelist — คะแนนไม่เข้าสมุดสถิติ (เหมือน _missingFacts/_diversityWarning)
+  //   ทะเบียนสวิตช์: src/lib/config/newsSwitches.js · เทส: tests/viral-score-annotate.test.mjs
+  if (process.env.VIRAL_SCORE_ANNOTATE === '1') {
+    try {
+      const { scoreVersion, getModelMetrics } = await loadViralScoreModule();
+      const scored = annotateViralScores(finalVersions, {
+        scoreVersion,
+        metrics: typeof getModelMetrics === 'function' ? getModelMetrics() : null,
+      });
+      finalVersions = scored.versions;
+      addLog('ViralScore', scored.logLine);
+    } catch (viralScoreError) {
+      addLog('ViralScore', `⚠️ โอกาสปัง: คำนวณไม่ได้ (${viralScoreError?.message || viralScoreError}) — ส่งข่าวต่อโดยไม่มีคะแนน`);
+    }
+  }
+  // ── VIRAL_SCORE_ANNOTATE wiring end ──
+
   ({ classic: classicVersionCount, enhanced: enhancedVersionCount } = countFinalVersionSources(finalVersions));
   usedPreset = resolveFinalUsedPreset(finalVersions, usedPresetByPromptId, usedPreset);
 
@@ -1446,6 +1470,57 @@ export function annotateDiversityWarning(versions, report, label = '2 เวอ�
     warning,
   };
 }
+
+// ── VIRAL_SCORE_ANNOTATE block start ──
+/** ★ เฟส 3 ข้อ 7 (2 ก.ย. 69 · VIRAL_SCORE_ANNOTATE=1 · ค่าเริ่มต้นปิด): แนบคะแนน "โอกาสปัง" ต่อฉบับ
+ * pure function — คืน object ใหม่ทุกฉบับที่ได้คะแนน ไม่ mutate ของเดิม ไม่แตะ content/title/provenance/ลำดับ/จำนวน
+ * scorer คืน null หรือโยน = ฉบับนั้นไม่มีคีย์ _viralScore (fail-safe ต่อฉบับ ไม่ล้มทั้งชุด)
+ * metrics (จาก getModelMetrics ของ viralScore.js) ใช้ประกอบ modelVersion + เลข Spearman ใน log — ไม่มีก็แนบคะแนนได้
+ * คืน { versions, scoredCount, logLine } — logLine พร้อมพ่น addLog 1 บรรทัด (Spearman 0.30 = คำเตือน ไม่ใช่คำตัดสิน) */
+export function annotateViralScores(versions, { scoreVersion, metrics } = {}) {
+  const list = Array.isArray(versions) ? versions : [];
+  const canScore = typeof scoreVersion === 'function';
+  const bandOfLabel = { 'สูง': 'high', 'กลาง': 'mid', 'ต่ำ': 'low' }; // BAND_LABELS ของ viralScore.js กลับด้าน (scoreVersion คืนเฉพาะ bandLabel ไทย)
+  const parts = [];
+  const annotated = list.map((version, index) => {
+    if (!canScore) return version;
+    let result = null;
+    try {
+      result = scoreVersion(String(version?.content ?? ''));
+    } catch {
+      result = null; // scorer โยน = ฉบับนี้ไม่มีคะแนน — ห้ามล้มท่อ
+    }
+    if (!result || typeof result !== 'object' || !Number.isFinite(Number(result.score))) return version;
+    const score = Math.round(Number(result.score));
+    const bandLabel = typeof result.bandLabel === 'string' ? result.bandLabel : '';
+    parts.push(`V${index + 1} ${score}/100${bandLabel ? ` ${bandLabel}` : ''}`);
+    return {
+      ...version,
+      _viralScore: {
+        score,
+        band: result.band ?? bandOfLabel[bandLabel] ?? null,
+        bandLabel,
+        predictedReactions: Number.isFinite(Number(result.predictedReactions)) ? Number(result.predictedReactions) : null,
+        topDrivers: Array.isArray(result.topDrivers) ? result.topDrivers : [],
+        warnings: Array.isArray(result.warnings) ? result.warnings : [],
+        modelVersion: metrics?.version ?? null,
+      },
+    };
+  });
+  const spearman = Number(metrics?.metrics?.valid?.spearman);
+  const note = Number.isFinite(spearman)
+    ? `ตัวทำนาย Spearman ${spearman.toFixed(2)} — คำเตือน ไม่ใช่คำตัดสิน`
+    : 'ตัวทำนายสถิติ — คำเตือน ไม่ใช่คำตัดสิน';
+  const logLine = parts.length > 0
+    ? `🔥 โอกาสปัง: ${parts.join(' · ')} (${note})`
+    : '⚠️ โอกาสปัง: โมเดลไม่พร้อม (data/viral-score-model.json หายหรือเพี้ยน) — ส่งข่าวต่อโดยไม่มีคะแนน';
+  return { versions: annotated, scoredCount: parts.length, logLine };
+}
+// ── VIRAL_SCORE_ANNOTATE block end ──
+
+/** โหลดโมดูลคะแนนโอกาสปังแบบ dynamic — แยกเป็นชื่อ module-scope เพื่อให้เทส wiring ฉีดของปลอมแทนได้
+ * (แค่ประกาศ ไม่โหลดอะไร — สวิตช์ปิดจึงไม่ import '@/lib/feedback/viralScore' เลยตามกติกาเทสสตับเดิม) */
+const loadViralScoreModule = () => import('@/lib/feedback/viralScore');
 
 /** ด่านเสี่ยงที่ตรวจได้แบบแน่นอนจากข้อความดิบ โดยไม่เปิดตัวผ่าข่าวเก่า */
 export function assessRawTextSafety(versions, sourceText) {

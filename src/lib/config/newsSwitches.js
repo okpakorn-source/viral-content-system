@@ -472,6 +472,11 @@ export const NEWS_SWITCHES = Object.freeze([
     meaning: 'ด่าน Sol ตรวจความครบของข้อเท็จจริงจากเนื้อดิบ (สาย TEXT เท่านั้น — autoFlowServiceText เรียก isRawFactCompletenessGateEnabled) · โค้ดอ่าน ?? "1" !== "0" = ค่าเริ่มต้นเปิด ⚠️ production ตั้ง =0 โดยเจตนา (สมุดสวิตช์ 24 ส.ค. 69: RAW_FACT=0)',
     since: '21 ส.ค. 69 (a56d011a)', rollback: 'RAW_FACT_COMPLETENESS_GATE=0 = ข้ามด่าน (log "ปิดด่าน Sol ตรวจ RAW ชั่วคราว")',
   },
+  {
+    name: 'VIRAL_SCORE_ANNOTATE', default: '0', values: ['0', '1'], readBy: [AUTO], group: 'ด่านแก้ไข/ตรวจ', kind: 'switch',
+    meaning: '=1 แนบคะแนน "โอกาสปัง" ต่อฉบับใน version._viralScore ({score 0-100 เปอร์เซ็นไทล์, band, bandLabel สูง/กลาง/ต่ำ, predictedReactions, topDrivers, warnings, modelVersion}) หลังเนื้อสุดท้ายนิ่งทุกสาขา (หลัง correction/factual editor/length gate ก่อนประกอบ response) — ridge ในเครื่องจาก data/viral-score-model.json (Spearman 0.30) ไม่ยิง API · คำเตือนให้พนักงาน ไม่ใช่คำตัดสิน (บอทแสดง "🔥 โอกาสปัง: สูง (72/100)") · โมเดลไม่มี/คำนวณล้ม = ไม่แนบคีย์ ไม่ล้มท่อ ⚠️ บน Vercel ไฟล์โมเดลต้องอยู่ใน outputFileTracingIncludes (next.config.mjs — เพิ่มครบ 4 route แล้ว)',
+    since: '2 ก.ย. 69 (เฟส 3)', rollback: 'ลบ env หรือ =0 = ไม่ import โมดูล ไม่มีคีย์ _viralScore (response เดิมทุกไบต์)',
+  },
 
   // ── ความยาว / กฎถอย (legacyLengthRules) ──
   {

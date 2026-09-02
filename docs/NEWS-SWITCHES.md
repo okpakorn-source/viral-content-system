@@ -4,7 +4,7 @@
 > ด่านตรวจ: `node --test tests/news-switch-registry.test.mjs` (เพิ่ม `process.env.X` ในไฟล์ท่อข่าวโดยไม่ลงทะเบียน = แดง)
 > คีย์ลับ/ที่อยู่ (ชื่อเข้ารูป `(_KEY|_SECRET|_URL|_TOKEN|_PASSWORD|_DSN)$`) ไม่ใช่สวิตช์ ไม่อยู่ในทะเบียน
 
-สวิตช์ทั้งหมด: 100 ตัว · ไฟล์ที่สแกน: 43 ไฟล์
+สวิตช์ทั้งหมด: 101 ตัว · ไฟล์ที่สแกน: 43 ไฟล์
 
 ## วิธีอ่าน
 
@@ -120,6 +120,7 @@
 | `CORRECTION_MIN_KEEP` | `0.75` | (0, 1] | สัดส่วนแก่นเรื่องขั้นต่ำที่ต้องคงไว้หลังแก้ไข (core guard) — นอกช่วง = ใช้ 0.75 | `src/lib/correction/safeCorrectionService.js` | 1 ส.ค. 69 | ลบ env = 0.75 |
 | `MISSING_FACTS_GATE` | `1` | 0 · 1 | L4.7 ด่านข้อเท็จจริงหาย — เทียบต้นฉบับดิบกับผลสุดท้ายแล้วเตือนใน _missingFacts (เตือนเท่านั้น ไม่แก้เนื้อ · fail-open) · runMissingFactsGate อ่าน === "0" = ค่าเริ่มต้นเปิด | `src/lib/correction/correctionPipeline.js` | 2 ก.ย. 69 (เคสศรราม "ห่วงเรื่องการขับรถ" หาย) | MISSING_FACTS_GATE=0 = ไม่ทำอะไร (ผลลัพธ์เหมือนเดิมทุกไบต์) |
 | `RAW_FACT_COMPLETENESS_GATE` | `1` | 0 · 1 | ด่าน Sol ตรวจความครบของข้อเท็จจริงจากเนื้อดิบ (สาย TEXT เท่านั้น — autoFlowServiceText เรียก isRawFactCompletenessGateEnabled) · โค้ดอ่าน ?? "1" !== "0" = ค่าเริ่มต้นเปิด ⚠️ production ตั้ง =0 โดยเจตนา (สมุดสวิตช์ 24 ส.ค. 69: RAW_FACT=0) | `src/lib/services/rawFactCompletenessGate.js` | 21 ส.ค. 69 (a56d011a) | RAW_FACT_COMPLETENESS_GATE=0 = ข้ามด่าน (log "ปิดด่าน Sol ตรวจ RAW ชั่วคราว") |
+| `VIRAL_SCORE_ANNOTATE` | `0` | 0 · 1 | =1 แนบคะแนน "โอกาสปัง" ต่อฉบับใน version._viralScore ({score 0-100 เปอร์เซ็นไทล์, band, bandLabel สูง/กลาง/ต่ำ, predictedReactions, topDrivers, warnings, modelVersion}) หลังเนื้อสุดท้ายนิ่งทุกสาขา (หลัง correction/factual editor/length gate ก่อนประกอบ response) — ridge ในเครื่องจาก data/viral-score-model.json (Spearman 0.30) ไม่ยิง API · คำเตือนให้พนักงาน ไม่ใช่คำตัดสิน (บอทแสดง "🔥 โอกาสปัง: สูง (72/100)") · โมเดลไม่มี/คำนวณล้ม = ไม่แนบคีย์ ไม่ล้มท่อ ⚠️ บน Vercel ไฟล์โมเดลต้องอยู่ใน outputFileTracingIncludes (next.config.mjs — เพิ่มครบ 4 route แล้ว) | `src/lib/services/autoFlowServiceText.js` | 2 ก.ย. 69 (เฟส 3) | ลบ env หรือ =0 = ไม่ import โมดูล ไม่มีคีย์ _viralScore (response เดิมทุกไบต์) |
 
 ## ความยาว/กฎถอย
 
