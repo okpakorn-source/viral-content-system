@@ -3,16 +3,34 @@ const { Client, GatewayIntentBits, EmbedBuilder, Partials } = require('discord.j
 const axios = require('axios');
 const { makeQueueTerminalError, isQueueTerminalError, selectQualityWarnings } = require('./queue-errors');
 
+// ★ 3 ก.ย. 69: ย้าย envFlag + สวิตช์ปุ่ม/บรรทัดเตือนขึ้นมาก่อนสร้าง Client — intents/partials ต้องรู้ค่าสวิตช์ตอนสร้าง
+//   รับเฉพาะ '0'/'1' ตรงตัว: '1'=เปิด · '0'=ปิด · ค่าอื่น/ไม่ตั้ง=ค่าเริ่มต้น (ตัวฟังก์ชันเดิมทุกบรรทัด แค่ย้ายที่)
+function envFlag(name, fallback) {
+  const raw = process.env[name];
+  if (raw === '1') return true;
+  if (raw === '0') return false;
+  return fallback;
+}
+// ★ 2 ก.ย. 69 (ข้อ 6) → 3 ก.ย. 69 เจ้าของสั่ง "ไม่เอาปุ่ม": ปุ่มพนักงาน 👍👎📌 บนข้อความผล ปิดเป็นค่าเริ่มต้น
+//   สวิตช์นี้คุมเฉพาะ "ปุ่ม": ติด reaction + ฟังการกด (messageReactionAdd) + intent/partials ที่ต้องใช้
+//   เปิดคืน: ตั้ง env BOT_REVIEW_REACTIONS=1 → พฤติกรรมปุ่มแบบ 2 ก.ย. กลับมาทุกไบต์ · บรรทัดเตือนใต้ผลข่าวไม่ได้อยู่ใต้สวิตช์นี้แล้ว (ดู BOT_RESULT_WARNINGS)
+const BOT_REVIEW_REACTIONS = envFlag('BOT_REVIEW_REACTIONS', false);
+// ★ 3 ก.ย. 69: บรรทัดเตือนใต้ผลข่าว (⚠️ อาจตกข้อเท็จจริง / ⚠️ ความคล้าย / 🔥 โอกาสปัง — ดู buildWarningLines) เปิดเป็นค่าเริ่มต้น
+//   เดิมผูกกับ BOT_REVIEW_REACTIONS — เจ้าของสั่ง "ปิดปุ่มแต่คงบรรทัดเตือน" จึงแยกสวิตช์ · ปิดคืน: BOT_RESULT_WARNINGS=0 → เนื้อ embed เดิมล้วนทุกไบต์
+const BOT_RESULT_WARNINGS = envFlag('BOT_RESULT_WARNINGS', true);
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    // ★ 2 ก.ย. 69 (ข้อ 6 ปุ่มพนักงาน): รับ event กด reaction ในห้อง — intent ธรรมดา (ไม่ใช่ privileged) ไม่ต้องเปิดอะไรใน Developer Portal
-    GatewayIntentBits.GuildMessageReactions,
+    // ★ 2 ก.ย. 69 (ข้อ 6 ปุ่มพนักงาน) → 3 ก.ย. 69: intent รับ event กด reaction มีไว้เพื่อฟีเจอร์ปุ่มอย่างเดียว → ขอเฉพาะตอนสวิตช์เปิด
+    //   (intents เป็น array ธรรมดา discord.js v14 อ่านครั้งเดียวตอน new Client — ผันตาม env ได้ ไม่กระทบ event Guilds/Messages เดิม)
+    ...(BOT_REVIEW_REACTIONS ? [GatewayIntentBits.GuildMessageReactions] : []),
   ],
-  // ★ 2 ก.ย. 69: ข้อความผลที่บอทโพสต์ก่อนรีสตาร์ตไม่อยู่ในแคช → ต้องรับ reaction บนข้อความ "partial" ด้วย (ค่อย fetch ตอนกด)
-  partials: [Partials.Message, Partials.Reaction],
+  // ★ 2 ก.ย. 69 → 3 ก.ย. 69: partials Message/Reaction มีไว้รับ reaction บนข้อความที่โพสต์ก่อนรีสตาร์ต (ค่อย fetch ตอนกด) — ของฟีเจอร์ปุ่มอย่างเดียว
+  //   → ประกาศเฉพาะตอนสวิตช์เปิด (บอทฟังแค่ ready/messageCreate ซึ่ง messageCreate ไม่มีทางเป็น partial — ปิดแล้วเหมือนก่อนมีฟีเจอร์ปุ่มทุกช่อง)
+  ...(BOT_REVIEW_REACTIONS ? { partials: [Partials.Message, Partials.Reaction] } : {}),
 });
 
 // ดึงค่า config จาก .env
@@ -28,16 +46,8 @@ let shuttingDown = false;
 // ★ 2 ก.ย. 69 (เคสหลวงปู่ศิลา 03:49Z): บอทจำงานที่กำลังตามอยู่ไว้ที่เซิร์ฟเวอร์ (/api/bot/tracking)
 //   → Railway redeploy/รีสตาร์ต แล้วบอทตัวใหม่ตามงานต่อเอง ไม่ค้าง "1%" ตลอดไป (ดู trackingUpsert / resumeTrackedJobs)
 //   ปิดคืน: ตั้ง env BOT_RESUME_TRACKING=0 (รับเฉพาะ '0'/'1' ตรงตัว · ค่าเริ่มต้น=เปิด) → บอททำงานเหมือนเดิมทุกไบต์
-function envFlag(name, fallback) {
-  const raw = process.env[name];
-  if (raw === '1') return true;
-  if (raw === '0') return false;
-  return fallback;
-}
+//   (envFlag ย้ายขึ้นไปบนสุดของไฟล์ 3 ก.ย. 69 — Client ต้องใช้ค่าสวิตช์ก่อน · ความหมายเดิมทุกประการ)
 const BOT_RESUME_TRACKING = envFlag('BOT_RESUME_TRACKING', true);
-// ★ 2 ก.ย. 69 (ข้อ 6): ปุ่มพนักงานในดิสคอร์ด 👍 ผ่าน / 👎 ไม่ผ่าน / 📌 ใช้แล้ว บนข้อความผล + บรรทัดเตือนจากท่อใต้เนื้อข่าว (ดูส่วน 📝 Review ด้านล่าง)
-//   ปิดคืน: ตั้ง env BOT_REVIEW_REACTIONS=0 (รับเฉพาะ '0'/'1' ตรงตัว · ค่าเริ่มต้น=เปิด) → ไม่ติดปุ่ม ไม่ฟัง reaction ไม่เติมบรรทัดเตือน
-const BOT_REVIEW_REACTIONS = envFlag('BOT_REVIEW_REACTIONS', true);
 const RESUME_MAX_AGE_MS = 30 * 60 * 1000; // งานที่เริ่มเก่ากว่านี้ไม่ตามต่อ — แจ้งให้ไปดูหน้าตรวจงานแทน
 const RESUME_STALE_TEXT = '⏱️ งานนี้ค้างตอนระบบรีสตาร์ต ดูผลได้ในหน้าตรวจงาน';
 
@@ -95,10 +105,10 @@ function isDuplicate(content) {
 
 // ★ 27 มิ.ย.: marker เวอร์ชันโค้ด — ใช้ยืนยันใน Railway logs ว่า container ที่รันอยู่เป็น "โค้ดใหม่"
 //   โค้ดใหม่ = single-message (atomic claim ก่อน ack) · ถ้า logs ไม่ขึ้นบรรทัดนี้ = ยังรัน container เก่า
-const BOT_BUILD = '2026-09-02-review-reactions'; // ★ 2 ก.ย. 69: เดิม '2026-09-02-resume-tracking' (ก่อนหน้า '2026-06-27-singlemsg-atomicclaim') — ขยับให้เห็นใน log ว่ารุ่นปุ่มพนักงานขึ้นแล้ว
+const BOT_BUILD = '2026-09-03-buttons-off-warnings-on'; // ★ 3 ก.ย. 69: เดิม '2026-09-02-review-reactions' — ขยับให้เห็นใน log ว่ารุ่น "ปิดปุ่ม 👍👎📌 แต่คงบรรทัดเตือน" ขึ้นแล้ว
 client.once('ready', () => {
   console.log(`✅ บอทพร้อมทำงานแล้ว! ล็อกอินในชื่อ ${client.user.tag}`);
-  console.log(`🟢 [BOT_BUILD=${BOT_BUILD}] instance=${BOT_INSTANCE} | คิว: เซิร์ฟเวอร์ (atomic claim) | Dedup URL: ${DEDUP_WINDOW_MS / 1000}s | resume=${BOT_RESUME_TRACKING ? 'on' : 'off'} | review=${BOT_REVIEW_REACTIONS ? 'on' : 'off'}`);
+  console.log(`🟢 [BOT_BUILD=${BOT_BUILD}] instance=${BOT_INSTANCE} | คิว: เซิร์ฟเวอร์ (atomic claim) | Dedup URL: ${DEDUP_WINDOW_MS / 1000}s | resume=${BOT_RESUME_TRACKING ? 'on' : 'off'} | review=${BOT_REVIEW_REACTIONS ? 'on' : 'off'} | warnings=${BOT_RESULT_WARNINGS ? 'on' : 'off'}`);
   // ★ 2 ก.ย. 69: กู้งานที่ค้างจากก่อนรีสตาร์ต (ล้มเงียบ — ห้ามทำให้บอทล้มตอนตื่น) · คืน promise ให้เทสรอได้ (discord.js ไม่สนค่าที่คืน)
   return resumeTrackedJobs().catch((err) => {
     console.warn(`[Bot] 🩹 กู้งานค้างไม่สำเร็จ: ${String(err?.message || err).slice(0, 80)}`);
@@ -481,7 +491,8 @@ async function pollJobUntilDone({ jobId, processingMsg, message, headers, queueU
     const jobTime = ((Date.now() - jobStartTime) / 1000).toFixed(1);
     await processingMsg.edit({ content: `✅ **สร้างข่าวสำเร็จ!** ${versionsToShow.length} เวอร์ชัน | ใช้เวลา ${jobTime}s\n📰 **${newsTitle.slice(0, 80)}**${warningPreview}${logLink}` });
 
-    // ★ 2 ก.ย. 69 (ข้อ 6): ปุ่มพนักงาน 👍 ผ่าน / 👎 ไม่ผ่าน / 📌 ใช้แล้ว บนข้อความผล — จำ messageId→caseId แล้วติด reaction (ล้มเงียบ · สวิตช์ปิด = ไม่แตะ)
+    // ★ 2 ก.ย. 69 (ข้อ 6): ปุ่มพนักงาน 👍 ผ่าน / 👎 ไม่ผ่าน / 📌 ใช้แล้ว บนข้อความผล — จำ messageId→caseId แล้วติด reaction
+    //   (ล้มเงียบ · สวิตช์ BOT_REVIEW_REACTIONS ปิด = ไม่แตะ — และปิดเป็นค่าเริ่มต้นตั้งแต่ 3 ก.ย. 69 ตามคำสั่งเจ้าของ)
     await attachReviewReactions(processingMsg, caseId);
 
     // ดึง Research items — ลอง path ทั้งหมดที่เป็นไปได้
@@ -512,7 +523,7 @@ async function pollJobUntilDone({ jobId, processingMsg, message, headers, queueU
         const embed = new EmbedBuilder()
           .setColor(isEnhanced ? '#10b981' : '#f91880')
           .setTitle(embedTitle)
-          // ★ 2 ก.ย. 69 (ข้อ 6 B): เติมบรรทัดเตือนจากท่อต่อท้ายเนื้อ (ตกข้อเท็จจริง/ความคล้าย/โอกาสปัง) · ไม่มีคำเตือน = เนื้อเดิมทุกไบต์
+          // ★ 2 ก.ย. 69 (ข้อ 6 B): เติมบรรทัดเตือนจากท่อต่อท้ายเนื้อ (ตกข้อเท็จจริง/ความคล้าย/โอกาสปัง) · ไม่มีคำเตือน/BOT_RESULT_WARNINGS=0 = เนื้อเดิมทุกไบต์
           .setDescription(embedBody + buildWarningTail(embedBody, buildWarningLines(v)))
           .setFooter({ text: `Pipeline: ${data.data?.detection?.pipelineLabel || data.detection?.pipelineLabel || 'Universal'} | PromptID: ${promptId} | เวลา: ${jobTime}s` });
 
@@ -774,7 +785,9 @@ async function resumeTrackedJobs(options = {}) {
 //   คนกด (ไม่ใช่บอท) → PATCH endpoint เดียวกับหน้าเว็บ {status, reviewNote} · กดซ้ำ/กดหลายปุ่ม = ต่อคิวต่อข้อความ ครั้งล่าสุดชนะ
 //   caseId: จำ messageId→caseId ในหน่วยความจำ · หลังรีสตาร์ต (แผนที่ว่าง) อ่านจากลิงก์ 🔗 …/generation-logs/<caseId> ในข้อความผลแทน
 //   (สมุด /api/bot/tracking ไม่มีช่อง caseId — validateTracking ทิ้งช่องที่ไม่รู้จัก และสมุดถูกถอนตอนจบงาน จึงเก็บที่นั่นไม่ได้)
-//   ทุกอย่างล้มเงียบ ห้ามทำงานหลักพัง · ปิดคืน: BOT_REVIEW_REACTIONS=0
+//   ทุกอย่างล้มเงียบ ห้ามทำงานหลักพัง
+//   ★ 3 ก.ย. 69 เจ้าของสั่ง "ไม่เอาปุ่ม": BOT_REVIEW_REACTIONS ค่าเริ่มต้น=ปิด (เปิดคืน =1) — คุมเฉพาะปุ่ม/การฟังกด/intent+partials
+//     ส่วน "บรรทัดเตือน" ใต้เนื้อข่าว (buildWarningLines/buildWarningTail) แยกไปสวิตช์ BOT_RESULT_WARNINGS (ค่าเริ่มต้น=เปิด · ปิด =0)
 // ═══════════════════════════════════════════
 const REVIEW_STATUS_BY_EMOJI = Object.freeze({ '👍': 'good', '👎': 'bad', '📌': 'used' });
 const REVIEW_EMOJIS = Object.keys(REVIEW_STATUS_BY_EMOJI); // ลำดับที่ติดบนข้อความผล
@@ -810,8 +823,9 @@ function readViralScore(raw) {
 
 // บรรทัดเตือนใต้เนื้อข่าวของ 1 เวอร์ชัน (ลำดับ: ข้อเท็จจริงหาย → ความคล้าย → โอกาสปัง) · ไม่มีอะไรเตือน/สวิตช์ปิด = []
 //   _missingFacts จาก L4.7 missingFactsGate: { missing: [{type, text}], checked } · _diversityWarning: สตริงจาก annotateDiversityWarning
+//   ★ 3 ก.ย. 69: สวิตช์ของบรรทัดเตือนคือ BOT_RESULT_WARNINGS (แยกจากสวิตช์ปุ่มแล้ว — ปุ่มปิดอยู่ก็ยังเตือน ตามคำสั่งเจ้าของ)
 function buildWarningLines(version) {
-  if (!BOT_REVIEW_REACTIONS || !version || typeof version !== 'object') return [];
+  if (!BOT_RESULT_WARNINGS || !version || typeof version !== 'object') return [];
   const lines = [];
   const missing = Array.isArray(version._missingFacts?.missing) ? version._missingFacts.missing : [];
   if (missing.length > 0) {
@@ -851,7 +865,8 @@ function resolveReviewCaseId(message) {
   return match ? match[1] : null;
 }
 
-// ติดปุ่ม 👍👎📌 บนข้อความผล (หลัง ✅ สร้างข่าวสำเร็จ) · ไม่มี caseId = ไม่ติด (กดแล้วบันทึกไม่ได้ อย่าหลอกพนักงาน) · react ล้ม = เตือนใน log แล้วติดตัวถัดไป
+// ติดปุ่ม 👍👎📌 บนข้อความผล (หลัง ✅ สร้างข่าวสำเร็จ) · สวิตช์ปุ่มปิด (ค่าเริ่มต้น 3 ก.ย. 69) = ไม่ติด ไม่จำ caseId
+//   · ไม่มี caseId = ไม่ติด (กดแล้วบันทึกไม่ได้ อย่าหลอกพนักงาน) · react ล้ม = เตือนใน log แล้วติดตัวถัดไป
 async function attachReviewReactions(resultMsg, caseId) {
   if (!BOT_REVIEW_REACTIONS || !resultMsg) return false;
   if (!caseId) {
@@ -950,6 +965,7 @@ async function handleReaction(reaction, user, { http = axios, botUserId = client
   }
 }
 
+// ★ 3 ก.ย. 69: ผูกตัวฟังเฉพาะตอนสวิตช์ปุ่มเปิด (ค่าเริ่มต้น=ปิด) — ปิดอยู่ intent ก็ไม่ได้ขอ ไม่มี event มาถึงอยู่แล้ว
 if (BOT_REVIEW_REACTIONS) {
   client.on('messageReactionAdd', (reaction, user) => {
     handleReaction(reaction, user).catch((err) => {

@@ -5,7 +5,22 @@
 //   ผลจากคิวใช้ "รูปทรงจริง" ที่ /api/auto/process คืน: caseId อยู่ที่ data.generationLog.caseId (พิสูจน์จาก data/job_queue.json 11/11 งาน)
 //   รัน: node --test tests/bot-review-reactions.test.mjs
 //
-// ผลการทุบโค้ด (mutation) — ทุบแล้วต้องแดง แล้วคืนโค้ด (ยิงจริง 2 ก.ย. 69 ด้วยสคริปต์ทุบ-เทส-คืนไฟล์ byte-exact ตรวจ sha256 · กัด 24/24):
+// ★ 3 ก.ย. 69 — เจ้าของสั่ง "ไม่เอาปุ่ม แต่คงบรรทัดเตือน":
+//   · BOT_REVIEW_REACTIONS ค่าเริ่มต้นกลายเป็น "ปิด" (เปิดคืน =1) — คุมเฉพาะปุ่ม: ติด reaction / ฟังกด / intent GuildMessageReactions + partials
+//   · บรรทัดเตือนแยกไปสวิตช์ใหม่ BOT_RESULT_WARNINGS (ค่าเริ่มต้น "เปิด" · ปิด =0) — ปุ่มปิดอยู่ก็ยังเตือน
+//   → เทสพฤติกรรมปุ่มเดิมทุกตัวจึงตั้ง env BOT_REVIEW_REACTIONS='1' ชัดๆ (ค่า ON ด้านล่าง) · เทสค่าเริ่มต้น = ไม่มีปุ่ม+ยังเตือน
+//
+// ผลการทุบโค้ดรอบแยกสวิตช์ (ยิงจริง 3 ก.ย. 69 · ทุบ-เทส-คืนไฟล์ byte-exact ตรวจ sha256 · กัด 7/7):
+//   M1 default ปุ่มกลับเป็นเปิด (false→true) → แดง 6: ตั้งค่า client + log ตอนตื่น + ค่าเริ่มต้น 3 ก.ย. + BOT_RESULT_WARNINGS=0 + ไม่ยิง PATCH + เส้นทางกู้
+//   M2 intent ใส่ตลอดไม่ผันตามสวิตช์ → แดง 1: ตั้งค่า client        M3 partials ใส่ตลอด → แดง 1: ตั้งค่า client
+//   M4 บรรทัดเตือนกลับไปเกตด้วยสวิตช์ปุ่ม → แดง 5: buildWarningLines + ค่าเริ่มต้น + BOT_RESULT_WARNINGS=0 + ไม่ยิง PATCH + เส้นทางกู้
+//   M5 default เตือนกลายเป็นปิด (true→false) → แดง 7: buildWarningLines + log + ค่าเริ่มต้น + เส้นทางปกติรุ่นปุ่ม + เนื้อยาว + ไม่ยิง PATCH + เส้นทางกู้
+//   M6 เกตตัวฟังกลับขั้ว (ฟังเมื่อปิด) → แดง 3: ตั้งค่า client + ไม่ยิง PATCH + PATCH ล้ม
+//   M7 ตัดการติดปุ่มหลัง ✅ → แดง 5: ค่าเริ่มต้น + เส้นทางปกติรุ่นปุ่ม + เนื้อยาว + BOT_RESULT_WARNINGS=0 + เส้นทางกู้
+//   ทุกตัว: tests/bot-resume.test.mjs ยังเขียว 19/19 · tests/discord-queue-terminal-error.test.mjs เขียว 4/4
+//
+// ผลการทุบโค้ดรอบแรก (mutation) — ทุบแล้วต้องแดง แล้วคืนโค้ด (ยิงจริง 2 ก.ย. 69 สมัย default ปุ่ม=เปิด ด้วยสคริปต์ทุบ-เทส-คืนไฟล์ byte-exact ตรวจ sha256 · กัด 24/24
+//   — บันทึกประวัติ: เทสชุดนั้นถูกปรับ 3 ก.ย. ให้เทสปุ่มตั้ง env ='1' ชัดๆ · โครงการทุบยังเทียบเคียงได้ในโหมด =1):
 //   MR1 ตัด intent GuildMessageReactions → แดง 1: 'ตั้งค่า client …'          MR2 partials ว่าง → แดง 1: 'ตั้งค่า client …'
 //   MR3 👎→'good' → แดง 4: mapReactionToStatus + รีสตาร์ต + partial + ครั้งล่าสุดชนะ
 //   MR4 ไม่เติมบรรทัดความคล้าย → แดง 3: buildWarningLines + เส้นทางปกติ + เส้นทางกู้
@@ -44,6 +59,8 @@ const reviewUrl = (caseId) => `http://api.test/api/generation-logs/${caseId}`;
 // ข้อความจริงจาก data/job_queue.json (annotateDiversityWarning ใน autoFlowServiceText)
 const DIVERSITY_TEXT = '2 เวอร์ชันยังคล้ายกัน 48% · เปิดซ้ำ — ส่งฉบับเดิมให้พนักงานอ่านเลือกโดยไม่เขียนซ้ำ เพื่อลดเวลาและค่า API';
 const NEWS_TEXT = 'ข่าวยาวพอสมควรสำหรับทดสอบปุ่มพนักงานในดิสคอร์ดของบอทดิสคอร์ดสร้างข่าว';
+// ★ 3 ก.ย. 69: ปุ่มปิดเป็นค่าเริ่มต้นแล้ว — เทสพฤติกรรมปุ่ม (รุ่น 2 ก.ย.) ต้องเปิดชัดๆ ด้วย env นี้
+const ON = Object.freeze({ BOT_REVIEW_REACTIONS: '1' });
 
 class FakeEmbed {
   constructor() { this.data = {}; }
@@ -232,28 +249,40 @@ test('node --check discord-bot/index.js ผ่าน', () => {
   execFileSync(process.execPath, ['--check', botPath], { stdio: 'pipe' });
 });
 
-test('ตั้งค่า client: intent GuildMessageReactions + partials Message/Reaction · ฟัง messageReactionAdd เมื่อสวิตช์เปิด · ปิด = ไม่ผูก (ของเดิมยังครบ)', () => {
+test('ตั้งค่า client: ค่าเริ่มต้น (ปุ่มปิด) = intent เดิม 3 ตัว ไม่มี partials ไม่ฟัง reaction · =1 คืน intent+partials+ตัวฟังครบแบบรุ่นปุ่ม', () => {
   const { axios } = makeAxios();
-  const on = loadBot({ axios });
-  assert.ok(on.client.opts.intents.includes(1024), 'ต้องขอ intent GuildMessageReactions (1024 ในตัวปลอม)');
-  assert.deepEqual(on.client.opts.intents.slice(0, 3), [1, 2, 4], 'intent เดิม 3 ตัวต้องอยู่ครบและลำดับเดิม');
+  // ★ 3 ก.ย. 69 เจ้าของสั่ง "ไม่เอาปุ่ม": ค่าเริ่มต้น client ต้องเหมือนก่อนมีฟีเจอร์ปุ่มทุกช่อง — ไม่ขอ intent 1024 ไม่ประกาศ partials
+  const def = loadBot({ axios });
+  assert.deepEqual(def.client.opts.intents, [1, 2, 4], 'ค่าเริ่มต้นห้ามขอ intent GuildMessageReactions (1024 ในตัวปลอม)');
+  assert.equal(def.client.opts.partials, undefined, 'ค่าเริ่มต้นห้ามประกาศ partials (มีไว้เพื่อฟีเจอร์ปุ่มอย่างเดียว)');
+  assert.equal(def.handlers.messageReactionAdd, undefined, 'ค่าเริ่มต้น = ไม่ฟัง reaction');
+  assert.equal(def.handlers.ready?.length, 1);
+  assert.equal(def.handlers.messageCreate?.length, 1);
+  assert.equal(def.client.loggedIn, false);
+  const off = loadBot({ axios, env: { BOT_REVIEW_REACTIONS: '0' } });
+  assert.deepEqual(off.client.opts.intents, [1, 2, 4]);
+  assert.equal(off.client.opts.partials, undefined);
+  assert.equal(off.handlers.messageReactionAdd, undefined, "'0' = ปิดเหมือนค่าเริ่มต้น");
+  // เปิดคืนด้วย =1 → โครง client รุ่นปุ่ม (2 ก.ย. 69) กลับมาครบ
+  const on = loadBot({ axios, env: ON });
+  assert.deepEqual(on.client.opts.intents, [1, 2, 4, 1024], 'intent เดิม 3 ตัวลำดับเดิม + GuildMessageReactions ต่อท้าย');
   assert.deepEqual(on.client.opts.partials, [3, 5], 'partials ต้องมี Message + Reaction (รับ reaction บนข้อความก่อนรีสตาร์ต)');
   assert.equal(on.handlers.messageReactionAdd?.length, 1);
   assert.equal(on.handlers.ready?.length, 1);
   assert.equal(on.handlers.messageCreate?.length, 1);
-  assert.equal(on.client.loggedIn, false);
-  const off = loadBot({ axios, env: { BOT_REVIEW_REACTIONS: '0' } });
-  assert.equal(off.handlers.messageReactionAdd, undefined, 'สวิตช์ปิด = ไม่ฟัง reaction');
-  assert.equal(off.handlers.messageCreate?.length, 1);
 });
 
-test('log ตอนตื่น (BOT_BUILD) บอกสถานะสวิตช์ review=on/off — ไว้ยืนยันบน Railway ว่ารุ่นนี้ขึ้นแล้ว', async () => {
-  const on = loadBot({ axios: makeAxios().axios });
+test('log ตอนตื่น (BOT_BUILD) บอกสถานะ review=off/on + warnings=on/off — ไว้ยืนยันบน Railway ว่ารุ่นปิดปุ่มขึ้นแล้ว', async () => {
+  const def = loadBot({ axios: makeAxios().axios });
+  await def.handlers.ready[0]();
+  assert.ok(def.logs.some((l) => l.includes('BOT_BUILD=') && l.includes('review=off') && l.includes('warnings=on') && l.includes('resume=on')),
+    'ค่าเริ่มต้น 3 ก.ย. 69: review=off + warnings=on');
+  const on = loadBot({ axios: makeAxios().axios, env: ON });
   await on.handlers.ready[0]();
-  assert.ok(on.logs.some((l) => l.includes('BOT_BUILD=') && l.includes('review=on') && l.includes('resume=on')));
-  const off = loadBot({ axios: makeAxios().axios, env: { BOT_REVIEW_REACTIONS: '0' } });
-  await off.handlers.ready[0]();
-  assert.ok(off.logs.some((l) => l.includes('BOT_BUILD=') && l.includes('review=off')));
+  assert.ok(on.logs.some((l) => l.includes('BOT_BUILD=') && l.includes('review=on') && l.includes('warnings=on')));
+  const noWarn = loadBot({ axios: makeAxios().axios, env: { BOT_RESULT_WARNINGS: '0' } });
+  await noWarn.handlers.ready[0]();
+  assert.ok(noWarn.logs.some((l) => l.includes('review=off') && l.includes('warnings=off')));
 });
 
 test('mapReactionToStatus: 👍→good · 👎→bad · 📌→used · อื่น/ว่าง→null · รับทั้ง string / MessageReaction / emoji object', () => {
@@ -307,9 +336,18 @@ test('buildWarningLines: ตกข้อเท็จจริง → ควา�
   assert.ok(all[0].startsWith('⚠️ อาจตกข้อเท็จจริง'));
   assert.equal(all[1], `⚠️ ${DIVERSITY_TEXT}`);
   assert.equal(all[2], '🔥 โอกาสปัง: สูง (77/100)');
-  // สวิตช์ปิด = ไม่เติมอะไรเลย
-  const off = loadBot({ axios: makeAxios().axios, env: { BOT_REVIEW_REACTIONS: '0' } }).bot;
-  assert.deepEqual(off.buildWarningLines({ ...v2(), _viralScore: 77 }), []);
+  // ★ 3 ก.ย. 69: บรรทัดเตือนแยกสวิตช์แล้ว — สวิตช์ปุ่ม (ค่าเริ่มต้น/='0') ไม่ดับบรรทัดเตือน · ดับได้ด้วย BOT_RESULT_WARNINGS=0 เท่านั้น
+  const buttonsOff = loadBot({ axios: makeAxios().axios, env: { BOT_REVIEW_REACTIONS: '0' } }).bot;
+  assert.equal(buttonsOff.buildWarningLines({ ...v2(), _viralScore: 77 }).length, 3, 'ปิดปุ่มต้องไม่ดับบรรทัดเตือน (คำสั่งเจ้าของ 3 ก.ย. 69)');
+  const noWarn = loadBot({ axios: makeAxios().axios, env: { BOT_RESULT_WARNINGS: '0' } }).bot;
+  assert.deepEqual(noWarn.buildWarningLines({ ...v2(), _viralScore: 77 }), []);
+  const noWarnButtonsOn = loadBot({ axios: makeAxios().axios, env: { BOT_RESULT_WARNINGS: '0', ...ON } }).bot;
+  assert.deepEqual(noWarnButtonsOn.buildWarningLines(v2()), [], 'เปิดปุ่มก็ไม่ทำให้เตือนกลับมา — สองสวิตช์ขาดจากกันจริง');
+  // แบบแผน envFlag: BOT_RESULT_WARNINGS รับเฉพาะ '0' ตรงตัวเป็นปิด — ค่าอื่นยังเปิด (default-on)
+  for (const v of ['off', 'false', '', 'no']) {
+    const b = loadBot({ axios: makeAxios().axios, env: { BOT_RESULT_WARNINGS: v } }).bot;
+    assert.equal(b.buildWarningLines(v1()).length, 1, `ค่า '${v}' ต้องยังเปิดบรรทัดเตือน`);
+  }
 });
 
 test('buildWarningTail: เว้นบรรทัดแล้วต่อท้าย · รวมกับเนื้อแล้วไม่เกินเพดาน embed 4096 · เนื้อเต็มเพดาน = ไม่เติม', () => {
@@ -322,8 +360,46 @@ test('buildWarningTail: เว้นบรรทัดแล้วต่อท�
   assert.equal(bot.buildWarningTail('ก'.repeat(5000), ['⚠️ x']), '');
 });
 
-test('เส้นทางปกติ (ผลรูปทรงจริงจากคิว): ลิงก์ 🔗 ได้ caseId จาก data.generationLog · ติดปุ่ม 👍👎📌 หลัง ✅ · embed เติมบรรทัดเตือนท้ายเนื้อ · จำ messageId→caseId', async () => {
-  const { bot, p1, m1, logs } = await runToSuccess();
+test('ค่าเริ่มต้น 3 ก.ย. 69 (ปุ่มปิด·เตือนเปิด): ไม่ติด 👍👎📌 ไม่จำ caseId · บรรทัดเตือนยังอยู่ · ส่วนอื่นของข้อความผลตรงกับรุ่นปุ่ม (=1) ทุกไบต์', async () => {
+  const def = await runToSuccess();
+  const on = await runToSuccess({ env: ON });
+  // ปุ่ม: ค่าเริ่มต้นไม่ติดอะไรเลย (ไม่มี react: ใน timeline) · =1 ติด 3 อันเหมือนรุ่น 2 ก.ย.
+  assert.deepEqual(def.p1.reactions, []);
+  assert.ok(!def.p1.timeline.some((e) => e.startsWith('react:')));
+  assert.deepEqual(on.p1.reactions, ['👍', '👎', '📌']);
+  // ทุกอย่างที่เหลือต้องตรงกันทุกไบต์ (เวลา jobTime แกว่งตามเครื่อง — ปิดตาด้วย mask เฉพาะตัวเลขวินาที)
+  const maskTime = (s) => String(s).replace(/\d+\.\ds/gu, 'X.Xs');
+  assert.deepEqual(def.p1.edits.map(maskTime), on.p1.edits.map(maskTime), 'ประวัติแก้ข้อความผล (ack→progress→✅) ต้องตรงกันทุกไบต์');
+  const norm = (r) => (typeof r === 'string' ? maskTime(r)
+    : (r.embeds || []).map((e) => ({ ...e.data, footer: e.data.footer && { text: maskTime(e.data.footer.text) } })));
+  assert.deepEqual(def.m1.replies.map(norm), on.m1.replies.map(norm), 'embed ทุกใบ (เนื้อ+เตือน+สี+footer) ต้องตรงกันทุกไบต์');
+  assert.deepEqual(def.m1.reactions, on.m1.reactions);
+  // เตือนยังโชว์จริงที่ค่าเริ่มต้น (ไม่ใช่สองฝั่งว่างเหมือนกัน)
+  assert.equal(def.m1.replies[1].embeds[0].data.description, `เนื้อข่าว V1\n\n⚠️ ${DIVERSITY_TEXT}`);
+  assert.equal(def.m1.replies[2].embeds[0].data.description, `เนื้อข่าว V2\n\n⚠️ อาจตกข้อเท็จจริง: 209,678 บาท · ห่วงเรื่องการขับรถ\n⚠️ ${DIVERSITY_TEXT}`);
+  assert.match(def.p1.edits[def.p1.edits.length - 1], /🔗 ดูผลลัพธ์เต็ม: http:\/\/api\.test\/generation-logs\/05268$/u, 'ลิงก์ผลเต็มยังขึ้น (ไม่ใช่ของฟีเจอร์ปุ่ม)');
+  // ปุ่มปิด = ไม่จำ caseId · event หลุดมา (สมมุติ) ก็ไม่ยิง PATCH · ไม่มี log "ไม่ติดปุ่มตรวจ" (ปิดโดยตั้งใจ ไม่ใช่ผลผิดรูป)
+  assert.equal(def.bot.reviewCaseFor('P1'), null);
+  assert.deepEqual(await def.bot.handleReaction(makeReaction('👍', def.p1), human()), { ok: false, skipped: 'off' });
+  assert.equal(def.calls.patch.length, 0);
+  assert.ok(!def.logs.some((l) => l.includes('ไม่ติดปุ่มตรวจ')));
+});
+
+test('BOT_RESULT_WARNINGS=0: embed เหลือเนื้อล้วนทุกไบต์ · เปิดปุ่มร่วม (=1) ปุ่มยังทำงานแต่ก็ไม่เตือน — สวิตช์เตือนคุมเฉพาะบรรทัดเตือน', async () => {
+  const noWarn = await runToSuccess({ env: { BOT_RESULT_WARNINGS: '0' } });
+  assert.equal(noWarn.m1.replies[1].embeds[0].data.description, 'เนื้อข่าว V1');
+  assert.equal(noWarn.m1.replies[2].embeds[0].data.description, 'เนื้อข่าว V2');
+  assert.deepEqual(noWarn.p1.reactions, []);
+  assert.match(noWarn.p1.edits[noWarn.p1.edits.length - 1], /^✅ \*\*สร้างข่าวสำเร็จ!\*\*/u, 'ข้อความ ✅ ไม่เกี่ยวกับสวิตช์เตือน');
+  assert.equal(noWarn.m1.replies[3].embeds[0].data.title, '📄 เขียนจากเนื้อต้นฉบับอย่างเดียว');
+  const both = await runToSuccess({ env: { BOT_RESULT_WARNINGS: '0', ...ON } });
+  assert.equal(both.m1.replies[1].embeds[0].data.description, 'เนื้อข่าว V1');
+  assert.equal(both.m1.replies[2].embeds[0].data.description, 'เนื้อข่าว V2');
+  assert.deepEqual(both.p1.reactions, ['👍', '👎', '📌'], 'ปุ่มยังทำงานตามสวิตช์ปุ่มของมัน');
+});
+
+test('เส้นทางปกติรุ่นปุ่ม (BOT_REVIEW_REACTIONS=1 · ผลรูปทรงจริงจากคิว): ลิงก์ 🔗 ได้ caseId จาก data.generationLog · ติดปุ่ม 👍👎📌 หลัง ✅ · embed เติมบรรทัดเตือนท้ายเนื้อ · จำ messageId→caseId', async () => {
+  const { bot, p1, m1, logs } = await runToSuccess({ env: ON });
   const finalEdit = p1.edits[p1.edits.length - 1];
   assert.match(finalEdit, /^✅ \*\*สร้างข่าวสำเร็จ!\*\* 2 เวอร์ชัน \| ใช้เวลา \d+\.\ds\n📰 \*\*ลุงสามล้อ\*\*\n🔗 ดูผลลัพธ์เต็ม: http:\/\/api\.test\/generation-logs\/05268$/u,
     'ข้อความ ✅ รูปแบบเดิม + ลิงก์ที่ได้ caseId จาก data.generationLog.caseId (path จริง)');
@@ -343,14 +419,14 @@ test('เส้นทางปกติ (ผลรูปทรงจริงจ
   assert.ok(!logs.some((l) => l.includes('ไม่ติดปุ่มตรวจ')));
 
   // เวอร์ชันไม่มีคำเตือนเลย → description = เนื้อเดิมทุกไบต์ (ไม่มีบรรทัดว่างงอก)
-  const plain = await runToSuccess({ statuses: [DONE(realResult({ versions: [{ content: 'เนื้อล้วน', style: 'Classic', _source: 'classic' }] }))] });
+  const plain = await runToSuccess({ env: ON, statuses: [DONE(realResult({ versions: [{ content: 'เนื้อล้วน', style: 'Classic', _source: 'classic' }] }))] });
   assert.equal(plain.m1.replies[1].embeds[0].data.description, 'เนื้อล้วน');
   assert.deepEqual(plain.p1.reactions, ['👍', '👎', '📌']);
 
   // ผลไม่มี caseId เลย (ไม่มี generationLog) → ไม่มีลิงก์ ไม่ติดปุ่ม (กดแล้วบันทึกไม่ได้) + เตือนใน log · งานหลักยังจบปกติ
   const noCase = realResult();
   delete noCase.data.generationLog;
-  const nc = await runToSuccess({ statuses: [DONE(noCase)] });
+  const nc = await runToSuccess({ env: ON, statuses: [DONE(noCase)] });
   assert.match(nc.p1.edits[nc.p1.edits.length - 1], /^✅ \*\*สร้างข่าวสำเร็จ!\*\* 2 เวอร์ชัน/u);
   assert.ok(!nc.p1.edits[nc.p1.edits.length - 1].includes('🔗'));
   assert.deepEqual(nc.p1.reactions, []);
@@ -360,7 +436,7 @@ test('เส้นทางปกติ (ผลรูปทรงจริงจ
 
   // รูปทรงเก่า (data.caseId) ยังอ่านได้เหมือนเดิม
   const legacy = { success: true, data: { caseId: 'CASE9', newsData: { newsTitle: 'เก่า' }, analysisResult: { versions: [v1()], qualityWarnings: [] } } };
-  const lg = await runToSuccess({ statuses: [DONE(legacy)] });
+  const lg = await runToSuccess({ env: ON, statuses: [DONE(legacy)] });
   assert.ok(lg.p1.edits[lg.p1.edits.length - 1].endsWith('/generation-logs/CASE9'));
   assert.equal(lg.bot.reviewCaseFor('P1'), 'CASE9');
 });
@@ -368,7 +444,7 @@ test('เส้นทางปกติ (ผลรูปทรงจริงจ
 test('เนื้อยาวเกิน 3800 + คำเตือนครบ → description ไม่เกิน 4096 และเนื้อ 3800 ตัวแรกไม่ถูกแตะ · react ล้มไม่ทำงานหลักพัง', async () => {
   const long = { content: 'ก'.repeat(5000), style: 'X', _source: 'classic', _diversityWarning: DIVERSITY_TEXT, _viralScore: 88,
     _missingFacts: { missing: ['ก', 'ข', 'ค', 'ง', 'จ', 'ฉ', 'ช'].map((t) => ({ type: 'name', text: t })) } };
-  const { m1, p1 } = await runToSuccess({ statuses: [DONE(realResult({ versions: [long] }))] });
+  const { m1, p1 } = await runToSuccess({ env: ON, statuses: [DONE(realResult({ versions: [long] }))] });
   const d = m1.replies[1].embeds[0].data.description;
   assert.ok(d.length <= 4096, `description ยาว ${d.length}`);
   assert.ok(d.startsWith('ก'.repeat(3800)));
@@ -382,7 +458,7 @@ test('เนื้อยาวเกิน 3800 + คำเตือนครบ
   p2.react = async (e) => { throw discordError(50013, `Missing Permissions ${e}`, 403); };
   const m2 = makeSourceMsg('M2', p2);
   const t = makeAxios({ statuses: [DONE()] });
-  const { bot, logs } = loadBot({ axios: t.axios });
+  const { bot, logs } = loadBot({ axios: t.axios, env: ON });
   await bot.processNewsJob({ message: m2, content: NEWS_TEXT, processingMsg: null, addedAt: Date.now() });
   assert.equal(m2.replies.length, 4);
   assert.deepEqual(m2.reactions, ['✅']);
@@ -390,8 +466,8 @@ test('เนื้อยาวเกิน 3800 + คำเตือนครบ
   assert.equal(bot.reviewCaseFor('P2'), '05268', 'ติดปุ่มไม่ได้ก็ยังจำ caseId ไว้ (คนอาจกดอีโมจิเองได้)');
 });
 
-test('กด 👍 บนข้อความผล → PATCH /api/generation-logs/<caseId> {status:good, reviewNote} ด้วย header เดิม → เติมบรรทัด "📝 บันทึกแล้ว ✅ ผ่าน โดย @ชื่อ" ท้ายข้อความ', async () => {
-  const { bot, calls, p1 } = await runToSuccess();
+test('กด 👍 บนข้อความผล (=1) → PATCH /api/generation-logs/<caseId> {status:good, reviewNote} ด้วย header เดิม → เติมบรรทัด "📝 บันทึกแล้ว ✅ ผ่าน โดย @ชื่อ" ท้ายข้อความ', async () => {
+  const { bot, calls, p1 } = await runToSuccess({ env: ON });
   const before = p1.content;
   const r = await bot.handleReaction(makeReaction('👍', p1), human());
   assert.equal(r.ok, true);
@@ -417,7 +493,7 @@ test('กด 👍 บนข้อความผล → PATCH /api/generation-lo
 });
 
 test('ไม่ยิง PATCH: บอทกดเอง (user.bot / id ตรงบอท) · อีโมจิไม่ใช่ 3 ปุ่ม · ข้อความไม่ใช่ของบอท · ไม่รู้ caseId · สวิตช์ปิด', async () => {
-  const { bot, calls, p1 } = await runToSuccess();
+  const { bot, calls, p1 } = await runToSuccess({ env: ON });
   const before = p1.content;
   assert.deepEqual(await bot.handleReaction(makeReaction('👍', p1), human({ id: BOT_USER_ID, bot: true, username: 'bot' })), { ok: false, skipped: 'bot' });
   assert.deepEqual(await bot.handleReaction(makeReaction('👍', p1), human({ id: BOT_USER_ID, bot: undefined })), { ok: false, skipped: 'bot' }, 'id ตรงบอทก็พอ (กัน user.bot หาย)');
@@ -437,25 +513,25 @@ test('ไม่ยิง PATCH: บอทกดเอง (user.bot / id ตร�
   assert.equal(p1.content, before);
   assert.equal(unknown.content, '⚡ **Auto Pipeline V2** กำลังประมวลผล...');
 
-  // สวิตช์ปิด: ไม่ติดปุ่ม ไม่เติมคำเตือน ไม่รับ reaction — ข้อความผลเหมือนเดิมทุกไบต์
+  // สวิตช์ปุ่มปิด (='0' — พฤติกรรมเดียวกับค่าเริ่มต้น): ไม่ติดปุ่ม ไม่รับ reaction · ★ 3 ก.ย. 69 บรรทัดเตือน "ยังอยู่" (แยกสวิตช์แล้ว)
   const off = await runToSuccess({ env: { BOT_REVIEW_REACTIONS: '0' } });
   assert.deepEqual(off.p1.reactions, []);
-  assert.equal(off.m1.replies[1].embeds[0].data.description, 'เนื้อข่าว V1');
+  assert.equal(off.m1.replies[1].embeds[0].data.description, `เนื้อข่าว V1\n\n⚠️ ${DIVERSITY_TEXT}`, 'ปุ่มปิดแต่บรรทัดเตือนต้องยังโชว์ (คำสั่งเจ้าของ 3 ก.ย. 69)');
   assert.match(off.p1.edits[off.p1.edits.length - 1], /🔗 ดูผลลัพธ์เต็ม: http:\/\/api\.test\/generation-logs\/05268$/u, 'ลิงก์ path จริงยังขึ้นแม้ปิดสวิตช์ (เป็นการแก้ path ไม่ใช่ฟีเจอร์ปุ่ม)');
   assert.deepEqual(await off.bot.handleReaction(makeReaction('👍', off.p1), human()), { ok: false, skipped: 'off' });
   assert.equal(off.calls.patch.length, 0);
-  // ค่าอื่นนอกจาก '0' = เปิด (แบบเดียวกับ BOT_RESUME_TRACKING)
-  for (const v of ['off', 'false', '', 'no']) {
+  // ★ 3 ก.ย. 69 default-off ตามแบบแผน envFlag: เฉพาะ '1' ตรงตัวถึงเปิด — ค่าอื่น/ไม่ตั้ง = ปิด
+  for (const v of ['off', 'false', '', 'no', '2']) {
     const l = loadBot({ axios: makeAxios().axios, env: { BOT_REVIEW_REACTIONS: v } });
-    assert.equal(l.handlers.messageReactionAdd?.length, 1, `ค่า '${v}' ต้องยังเปิด`);
+    assert.equal(l.handlers.messageReactionAdd, undefined, `ค่า '${v}' ต้องปิด (ไม่ใช่ '1' ตรงตัว)`);
   }
   const one = loadBot({ axios: makeAxios().axios, env: { BOT_REVIEW_REACTIONS: '1' } });
-  assert.equal(one.handlers.messageReactionAdd?.length, 1);
+  assert.equal(one.handlers.messageReactionAdd?.length, 1, "'1' ตรงตัวเท่านั้นที่เปิดปุ่มคืน");
 });
 
 test('บอทรีสตาร์ต (แผนที่ในหน่วยความจำว่าง) → อ่าน caseId จากลิงก์ 🔗 ในข้อความผล · 👎 → bad · ลิงก์ผิดรูป/ไม่มี = ไม่บันทึก', async () => {
   const t = makeAxios();
-  const { bot } = loadBot({ axios: t.axios });
+  const { bot } = loadBot({ axios: t.axios, env: ON });
   assert.equal(bot.reviewCaseFor('P1'), null);
   const p1 = makeProcessingMsg('P1', { content: '✅ **สร้างข่าวสำเร็จ!** 2 เวอร์ชัน | ใช้เวลา 250.3s\n📰 **ลุงสามล้อ**\n🔗 ดูผลลัพธ์เต็ม: http://api.test/generation-logs/05266' });
   const r = await bot.handleReaction(makeReaction('👎', p1), human());
@@ -477,7 +553,7 @@ test('บอทรีสตาร์ต (แผนที่ในหน่วย
 
 test('ข้อความ/reaction เป็น partial (ไม่อยู่ในแคชหลังรีสตาร์ต) → fetch ก่อนแล้วค่อยบันทึก · fetch ล้ม (Unknown Message) = ข้ามเงียบ ไม่ยิง', async () => {
   const t = makeAxios();
-  const { bot, logs } = loadBot({ axios: t.axios });
+  const { bot, logs } = loadBot({ axios: t.axios, env: ON });
   // reaction partial → fetch() คืนตัวเต็มที่มี message
   const full = makeProcessingMsg('P1', { content: '🔗 ดูผลลัพธ์เต็ม: http://api.test/generation-logs/05268' });
   const partialReaction = makeReaction('👍', { id: 'P1', partial: true, author: null, content: null }, { partial: true });
@@ -509,7 +585,7 @@ test('ข้อความ/reaction เป็น partial (ไม่อยู่
 
 test('กดซ้ำ/กดหลายปุ่ม = ครั้งล่าสุดชนะ: PATCH เรียงตามลำดับกด · บรรทัด 📝 มีบรรทัดเดียว (แทนที่ ไม่งอกซ้อน) · กดรัวพร้อมกันก็เรียงถูก', async () => {
   // เซิร์ฟเวอร์ตอบ 'used' ช้ากว่า 'good' 15ms — ถ้าไม่ต่อคิวต่อข้อความ ปุ่มที่กดก่อน (📌) จะไปเขียนทับผลของปุ่มที่กดทีหลัง (👍)
-  const { bot, calls, p1 } = await runToSuccess({ patch: { delayMs: { used: 15 } } });
+  const { bot, calls, p1 } = await runToSuccess({ env: ON, patch: { delayMs: { used: 15 } } });
   const base = p1.content;
   await bot.handleReaction(makeReaction('👍', p1), human());
   await bot.handleReaction(makeReaction('👎', p1), human({ id: 'U2', globalName: 'สมหญิง' }));
@@ -529,7 +605,7 @@ test('กดซ้ำ/กดหลายปุ่ม = ครั้งล่า�
 });
 
 test('PATCH ล้ม (สายพัง) หรือเซิร์ฟเวอร์ตอบ success:false → ไม่แตะข้อความ ไม่โยน error · แก้ข้อความไม่ได้ = ยังถือว่าบันทึกแล้ว', async () => {
-  const down = await runToSuccess({ patch: { throws: Object.assign(new Error('Request failed with status code 500'), { response: { status: 500 } }) } });
+  const down = await runToSuccess({ env: ON, patch: { throws: Object.assign(new Error('Request failed with status code 500'), { response: { status: 500 } }) } });
   const before = down.p1.content;
   const r = await down.bot.handleReaction(makeReaction('👍', down.p1), human());
   assert.equal(r.ok, false);
@@ -539,7 +615,7 @@ test('PATCH ล้ม (สายพัง) หรือเซิร์ฟเว�
   assert.equal(down.p1.content, before, 'ล้ม = ห้ามขึ้น "บันทึกแล้ว"');
   assert.ok(down.logs.some((l) => l.includes('บันทึกเคส 05268 ไม่สำเร็จ')));
 
-  const rejected = await runToSuccess({ patch: { response: { success: false, error: 'status ต้องเป็น good, bad, unreviewed หรือ used', errorType: 'INVALID_STATUS' } } });
+  const rejected = await runToSuccess({ env: ON, patch: { response: { success: false, error: 'status ต้องเป็น good, bad, unreviewed หรือ used', errorType: 'INVALID_STATUS' } } });
   const before2 = rejected.p1.content;
   const r2 = await rejected.bot.handleReaction(makeReaction('👎', rejected.p1), human());
   assert.equal(r2.ok, false);
@@ -547,7 +623,7 @@ test('PATCH ล้ม (สายพัง) หรือเซิร์ฟเว�
   assert.equal(rejected.p1.content, before2);
 
   // PATCH สำเร็จแต่ Discord แก้ข้อความไม่ได้ (เช่น 50001) → คืน ok:true notified:'failed' ไม่โยน
-  const ok = await runToSuccess();
+  const ok = await runToSuccess({ env: ON });
   ok.p1.edit = async () => { throw discordError(50001, 'Missing Access', 403); };
   ok.p1.reply = async () => { throw discordError(50001, 'Missing Access', 403); };
   const r3 = await ok.bot.handleReaction(makeReaction('👍', ok.p1), human());
@@ -557,7 +633,7 @@ test('PATCH ล้ม (สายพัง) หรือเซิร์ฟเว�
 
   // handler ที่ผูกกับ client ต้องไม่โยนออกไปแม้ข้างในพัง (กัน unhandled rejection ทำบอทล้ม)
   const t = makeAxios();
-  const { handlers, logs } = loadBot({ axios: t.axios });
+  const { handlers, logs } = loadBot({ axios: t.axios, env: ON });
   const evil = { emoji: { get name() { throw new Error('boom'); } }, message: null };
   assert.doesNotThrow(() => handlers.messageReactionAdd[0](evil, human()));
   await new Promise((r) => setTimeout(r, 5));
@@ -567,7 +643,7 @@ test('PATCH ล้ม (สายพัง) หรือเซิร์ฟเว�
 
 test('ข้อความผลยาวจนเติมบรรทัดแล้วเกิน 2000 → ตอบเป็นข้อความสั้นแทนการแก้ (ไม่ให้ Discord ปัด)', async () => {
   const t = makeAxios();
-  const { bot } = loadBot({ axios: t.axios });
+  const { bot } = loadBot({ axios: t.axios, env: ON });
   const longContent = `✅ **สร้างข่าวสำเร็จ!**\n${'ข'.repeat(1900)}\n🔗 ดูผลลัพธ์เต็ม: http://api.test/generation-logs/05268`;
   const p1 = makeProcessingMsg('P1', { content: longContent });
   const r = await bot.handleReaction(makeReaction('👍', p1), human());
@@ -578,13 +654,13 @@ test('ข้อความผลยาวจนเติมบรรทัด�
   assert.equal(t.calls.patch.length, 1);
 });
 
-test('เส้นทางกู้หลังรีสตาร์ต (resumeTrackedJobs) โพสต์ผลแล้วก็ติดปุ่ม 3 อัน + จำ caseId เหมือนเส้นทางปกติ', async () => {
+test('เส้นทางกู้หลังรีสตาร์ต (resumeTrackedJobs): รุ่นปุ่ม (=1) ติดปุ่ม 3 อัน + จำ caseId · ค่าเริ่มต้นไม่ติดปุ่มแต่บรรทัดเตือนยังอยู่', async () => {
   const p1 = makeProcessingMsg('P1');
   const m1 = makeSourceMsg('M1', p1);
   const entry = { id: 'bt_JOB1', jobId: 'JOB1', channelId: 'CH1', messageId: 'P1', sourceMessageId: 'M1', guildId: 'G1', userId: 'U1',
     instance: 'oldhost_dead1', startedAt: ago(5), queueUrl: 'http://api.test/api/queue/add' };
   const t = makeAxios({ statuses: [PROCESSING(), DONE()], tracking: [entry] });
-  const { bot } = loadBot({ axios: t.axios, channels: { CH1: makeChannel({ P1: p1, M1: m1 }) } });
+  const { bot } = loadBot({ axios: t.axios, env: ON, channels: { CH1: makeChannel({ P1: p1, M1: m1 }) } });
   const summary = await bot.resumeTrackedJobs();
   assert.equal(summary.resumed, 1);
   assert.match(p1.edits[p1.edits.length - 1], /🔗 ดูผลลัพธ์เต็ม: http:\/\/api\.test\/generation-logs\/05268$/u);
@@ -598,4 +674,18 @@ test('เส้นทางกู้หลังรีสตาร์ต (resume
   assert.equal(r.ok, true);
   assert.equal(t.calls.patch[0].url, reviewUrl('05268'));
   assert.equal(t.calls.patch[0].body.status, 'used');
+
+  // ★ 3 ก.ย. 69 ค่าเริ่มต้น: เส้นทางกู้ก็ต้องไม่ติดปุ่ม แต่บรรทัดเตือนใน embed ยังอยู่ครบ
+  const p9 = makeProcessingMsg('P9');
+  const m9 = makeSourceMsg('M9', p9, 'CH9');
+  const entry9 = { id: 'bt_JOB1', jobId: 'JOB1', channelId: 'CH9', messageId: 'P9', sourceMessageId: 'M9', guildId: 'G1', userId: 'U1',
+    instance: 'oldhost_dead1', startedAt: ago(5), queueUrl: 'http://api.test/api/queue/add' };
+  const t9 = makeAxios({ statuses: [PROCESSING(), DONE()], tracking: [entry9] });
+  const d9 = loadBot({ axios: t9.axios, channels: { CH9: makeChannel({ P9: p9, M9: m9 }) } });
+  const sum9 = await d9.bot.resumeTrackedJobs();
+  assert.equal(sum9.resumed, 1);
+  assert.deepEqual(p9.reactions, [], 'ค่าเริ่มต้น = ไม่ติดปุ่มแม้ในเส้นทางกู้');
+  assert.equal(d9.bot.reviewCaseFor('P9'), null);
+  assert.equal(m9.replies[0].embeds[0].data.description, `เนื้อข่าว V1\n\n⚠️ ${DIVERSITY_TEXT}`, 'บรรทัดเตือนยังอยู่ในเส้นทางกู้');
+  assert.match(p9.edits[p9.edits.length - 1], /🔗 ดูผลลัพธ์เต็ม: http:\/\/api\.test\/generation-logs\/05268$/u);
 });
