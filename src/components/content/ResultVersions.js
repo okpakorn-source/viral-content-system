@@ -7,6 +7,72 @@ export function buildPostText(version) {
   return getPublishablePostText(version);
 }
 
+/** ★ R234(ง) 3 ก.ย. 69 — จัดรูปคำเตือน "อาจตกข้อเท็จจริง" จาก version._missingFacts (ด่าน L4.7 ใน correctionPipeline)
+ *  รับ { missing: [{type,text}], checked, coverage, truncated? } · คืน null = ไม่มีของหาย/รูปไม่ถูกต้อง → ไม่แสดงอะไรเลย
+ *  โชว์สูงสุด maxItems รายการ (ค่าปกติ 5) · moreCount/moreText "(+N)" นับรวมส่วนที่ด่านตัดทิ้งก่อนส่ง (truncated)
+ *  coverage 0-1 จากด่าน → coveragePercent 0-100 (คีย์ผิดชนิด/หาย = null · เกินช่วง = หนีบเข้า 0-100)
+ *  (จงใจไม่พึ่งตัวแปรนอกฟังก์ชัน — tests/web-missing-facts-warning.test.mjs สกัด source บล็อกนี้ไปรันตรง)
+ */
+export function formatMissingFactsWarning(missingFacts, maxItems = 5) {
+  if (!missingFacts || !Array.isArray(missingFacts.missing) || missingFacts.missing.length === 0) return null;
+  const typeLabels = { number: 'ตัวเลข', date: 'วันที่', quote: 'คำพูด', name: 'ชื่อ', detail: 'ประเด็น' };
+  const limit = Number.isInteger(maxItems) && maxItems > 0 ? maxItems : 5;
+  const items = missingFacts.missing.slice(0, limit).map((entry) => {
+    const text = String(entry?.text ?? '').trim();
+    return {
+      type: typeof entry?.type === 'string' ? entry.type : 'other',
+      label: typeLabels[entry?.type] || 'ข้อมูล',
+      text: text.length > 80 ? `${text.slice(0, 80)}…` : text,
+    };
+  });
+  const truncated = Number.isInteger(missingFacts.truncated) && missingFacts.truncated > 0 ? missingFacts.truncated : 0;
+  const totalMissing = missingFacts.missing.length + truncated;
+  const moreCount = totalMissing - items.length;
+  const coverageRaw = Number(missingFacts.coverage);
+  const coveragePercent = (missingFacts.coverage == null || !Number.isFinite(coverageRaw))
+    ? null
+    : Math.round(Math.min(1, Math.max(0, coverageRaw)) * 100);
+  return {
+    headline: `อาจตกข้อเท็จจริง ${totalMissing} จุด`,
+    items,
+    moreCount,
+    moreText: moreCount > 0 ? `(+${moreCount})` : '',
+    coveragePercent,
+    coverageText: coveragePercent == null ? '' : `ต้นฉบับครอบคลุม ${coveragePercent}%`,
+  };
+}
+
+/** ★ R234(ง) 3 ก.ย. 69 — บล็อกเหลืองอ่อนใต้ฉบับ: ข้อเท็จจริงจากต้นฉบับที่อาจตกหาย (เตือนอย่างเดียว ไม่แตะเนื้อ)
+ *  ข้อมูลรอดจาก pipeline ถึงหน้านี้ทั้งเส้นสด (/api/auto/process ตัดแค่ _blackbox/_rawModelDraft)
+ *  และเส้นกู้งาน (/api/queue/status ส่ง result เต็ม) — ไม่ต้องแก้ API
+ *  สวิตช์: NEXT_PUBLIC_SHOW_MISSING_FACTS=0 = ซ่อนทั้งบล็อก (ค่าเริ่มต้นเปิด · รับเฉพาะ '0' ตรงตัว
+ *  · ฝังตอน build — เปลี่ยนค่าแล้วต้อง build ใหม่ เหมือน NEXT_PUBLIC_WEB_NEWS_GEN ข้างล่าง)
+ */
+function MissingFactsWarning({ missingFacts }) {
+  if (process.env.NEXT_PUBLIC_SHOW_MISSING_FACTS === '0') return null;
+  const warn = formatMissingFactsWarning(missingFacts);
+  if (!warn) return null;
+  return (
+    <div style={{ marginTop: 10, padding: '10px 12px', background: 'var(--warning-bg)', borderLeft: '3px solid var(--warning)', borderRadius: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+        <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--warning)' }}>⚠️ {warn.headline}</span>
+        {warn.coverageText && (
+          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--warning)', opacity: 0.85 }}>{warn.coverageText}</span>
+        )}
+      </div>
+      {warn.items.map((item, idx) => (
+        <div key={idx} style={{ fontSize: 11, lineHeight: 1.7, color: 'var(--text-secondary)', display: 'flex', gap: 6 }}>
+          <span style={{ fontWeight: 700, color: 'var(--warning)', flexShrink: 0 }}>{item.label}</span>
+          <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{item.text}</span>
+        </div>
+      ))}
+      {warn.moreCount > 0 && (
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>{warn.moreText}</div>
+      )}
+    </div>
+  );
+}
+
 export default function ResultVersions({ states, handlers }) {
   const { analysisResult, composedImages, composingImage, imageLayout, newsData, copied, sentToReview, sendingReview, simulatedComments, loading, researchData, factPoolData } = states;
   const { copyText, handleSendToReview, setCopied, handleAnalyze, handleReset } = handlers;
@@ -292,7 +358,10 @@ export default function ResultVersions({ states, handlers }) {
                   </div>
                 )}
                 <div style={{ fontSize: 14, lineHeight: 2, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{buildPostText(v)}</div>
-                
+
+                {/* ⚠️ R234(ง) 3 ก.ย. 69: อาจตกข้อเท็จจริง (L4.7) — ใต้ฉบับ · ไม่มีของหาย/สวิตช์ปิด = ไม่แสดงอะไร */}
+                <MissingFactsWarning missingFacts={v._missingFacts} />
+
                 {/* 🔗 แสดงอ้างอิงตรงนี้เลย เพื่อให้ UI ชัดเจน */}
                 {(researchItems.length > 0 || newsData?.sourceUrl) && (
                   <div style={{ marginTop: 12, padding: 12, background: 'rgba(255,255,255,0.05)', borderRadius: 8, fontSize: 11, color: '#94a3b8' }}>
