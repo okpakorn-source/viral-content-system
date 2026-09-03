@@ -534,6 +534,35 @@ const _rankV2On = () => process.env.TEACHER_RANK_V2 !== '0';
 //     backfillMinRatio 0.4 = พื้นชั้น ก ของการเติม (ไลก์ ≥ 20,000 เมื่อพื้น 50k) — ลำดับชั้นดู teacherRank.js ข้อ 6
 const RANK_V2 = { k: 2, cap: 8, floor: 50000, rotate: 3, usageDays: 7, poolK: 16, backfillMinRatio: 0.4 };
 
+// 🎛️ 3 ก.ย. 69 (คำถามค้าง R234 ข): cap/floor/rotate/backfillMinRatio เดิมตรึงใน RANK_V2 → เปิดปรับทาง env
+//   TEACHER_RANK_CAP (8) · TEACHER_RANK_FLOOR (50000) · TEACHER_RANK_ROTATE (3) · TEACHER_RANK_BACKFILL_RATIO (0.4)
+//   ไม่ตั้ง/ว่าง = ค่าตรึงเดิมเงียบๆ (ท่อ + log เดิมไบต์ต่อไบต์ — สวิตช์ปิดคืนคือลบ env ออก) · k/usageDays/poolK ไม่เปิดปรับ
+//   ตั้งแล้วอ่านไม่ออก/ต่ำกว่าพื้น (cap·floor·ratio ≥ 0 · rotate ≥ 1) = ใช้ค่าตรึงเดิมตัวนั้น + console.warn ทุกครั้งที่หยิบ
+//   ค่าพิเศษตามนิยาม teacherRank.js: cap=0 ปิดกันซ้ำ · floor=0 ปิดพื้น · rotate=1 ไม่หมุน · เศษทศนิยมของจำนวนเต็มปัดลง
+//   🔴 teacherRank.js คง pure (รับ opts อย่างเดียว ห้ามอ่าน env) — ทั้ง 4 ตัวอ่านที่นี่จุดเดียว · export ให้ข้อสอบยิงตรง (แบบแผน _shortlistK)
+//   🔎 3 ก.ย. 69 (ผู้ตรวจไขว้): อ่านด้วยชื่อ literal ทีละตัว ห้าม _envTok(ตัวแปร) — scanner ทะเบียน (news-switch-registry) เป็น AST
+//     ตามชื่อผ่านตัวแปรไม่ได้ (จะติดข้อ dynamic-reader และ readBy ของ 4 สวิตช์นี้จะกลายเป็นอ้างไฟล์ที่ scanner มองไม่เห็นว่าอ่าน)
+export function _rankTuning() {
+  const out = { cap: RANK_V2.cap, floor: RANK_V2.floor, rotate: RANK_V2.rotate, backfillMinRatio: RANK_V2.backfillMinRatio, tuned: false };
+  const READ = [ // [ชื่อ env (ไว้พิมพ์ warn), ค่าดิบที่อ่าน ณ ตอนเรียก (literal ในฟังก์ชัน = สดทุกครั้ง), คีย์, ค่าต่ำสุดที่รับ, ปัดเป็นจำนวนเต็มไหม]
+    ['TEACHER_RANK_CAP', _envTok('TEACHER_RANK_CAP'), 'cap', 0, true],
+    ['TEACHER_RANK_FLOOR', _envTok('TEACHER_RANK_FLOOR'), 'floor', 0, true],
+    ['TEACHER_RANK_ROTATE', _envTok('TEACHER_RANK_ROTATE'), 'rotate', 1, true],
+    ['TEACHER_RANK_BACKFILL_RATIO', _envTok('TEACHER_RANK_BACKFILL_RATIO'), 'backfillMinRatio', 0, false],
+  ];
+  for (const [name, raw, key, min, isInt] of READ) {
+    if (!raw) continue; // ไม่ตั้ง/ว่าง = ค่าตรึงเดิม ไม่มี log (ทางปกติทุกวัน ห้ามส่งเสียง)
+    out.tuned = true; // ตั้งมา (แม้อ่านไม่ออก) → log rank-v2 พิมพ์ค่าที่ใช้จริงทั้ง 4
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < min) {
+      console.warn(`[ViralFewshot] ⚠️ ${name}="${raw}" อ่านไม่ออก/ต่ำกว่า ${min} → ใช้ค่าเริ่มต้น ${out[key]}`);
+      continue;
+    }
+    out[key] = isInt ? Math.floor(n) : n;
+  }
+  return out;
+}
+
 // 📒 นับการใช้ครูซ้ำจากสมุดประวัติเดิม (store viral_pick_history — ไฟล์นี้จดเองใน _recordPickHistory) ย้อนหลัง 7 วัน · แคช 5 นาที
 //   อ่านล้ม/หมดเวลา → ถือว่าใช้ 0 ทุกใบ (ห้ามให้ท่อข่าวล้ม) และลองใหม่ใน 60 วิ (บทเรียน "ตำราว่างเงียบๆ" 2 ส.ค.: ห้ามแคชความล้มเหลวยาว)
 let _usageCache = null, _usageAt = 0;
@@ -1176,13 +1205,15 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
       // ── 🎯 2 ก.ย. 69 rank-v2: แทนตัวสุ่มเฉพาะเมื่อชั้นเฉพาะกิจคัดโผสำเร็จ + สวิตช์เปิด ──
       //   ปิดสวิตช์ (TEACHER_RANK_V2=0) / โหมดอื่น / กติกาล้ม → บรรทัด weightedSample เดิมทุกไบต์
       let rk = null;
+      let rankTune = null; // 🎛️ R234 ข: ค่ากติกาที่ใช้จริง (env ปรับได้) — ไว้พิมพ์ใน log เมื่อมีการตั้ง env
       if (pickMode === 'shortlist' && slCands && slCands.length >= 2 && _rankV2On()) {
         try {
           const usage = await _loadRecentUsage();
+          rankTune = _rankTuning(); // 🎛️ R234 ข: cap/floor/rotate/ratio จาก env — ไม่ตั้ง = ค่าตรึง RANK_V2 เดิมทุกตัว
           rk = rankTeachers(slCands, {
             likesById: _readRealLikesFile()?.byId || {}, recentUsageById: usage,
-            k: RANK_V2.k, cap: RANK_V2.cap, floor: RANK_V2.floor, rotate: RANK_V2.rotate,
-            backfillMinRatio: RANK_V2.backfillMinRatio, // ★ รอบ 2: พื้นชั้น ก ของการเติม (≥ 20k) — เคสศรราม
+            k: RANK_V2.k, cap: rankTune.cap, floor: rankTune.floor, rotate: rankTune.rotate,
+            backfillMinRatio: rankTune.backfillMinRatio, // ★ รอบ 2: พื้นชั้น ก ของการเติม (≥ 20k เมื่อค่าตรึงเดิม) — เคสศรราม
           });
           if (!rk || !Array.isArray(rk.picks) || rk.picks.length < 2 || rk.picks.some((c) => !c?.row)) rk = null; // โผผิดรูป → ถอยตัวสุ่มเดิม
         } catch (e) { rk = null; console.log('[ViralFewshot] 🎯 rank-v2 ล้ม → ถอย weightedSample เดิม:', String(e?.message || e).slice(0, 60)); }
@@ -1191,7 +1222,9 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
         picks = rk.picks.map((c) => c.row);
         pickMode = 'rank-v2';
         rankInfo = rk.debug;
-        console.log(`[ViralFewshot] 🎯 rank-v2 หยิบ ${picks.map((r) => String(r.id).slice(0, 8)).join('+')} จากโผ ${slCands.length} ใบ · ${rk.debug.reason}`);
+        // 🎛️ R234 ข: ตั้ง env กติกาอย่างน้อย 1 ตัว → พิมพ์ค่าที่ใช้จริงทั้ง 4 · ไม่ตั้ง = บรรทัดเดิมไบต์ต่อไบต์
+        const tuneTxt = rankTune?.tuned ? ` (env: cap ${rankTune.cap} · พื้น ${rankTune.floor} · หมุน ${rankTune.rotate} · เติม≥${rankTune.backfillMinRatio})` : '';
+        console.log(`[ViralFewshot] 🎯 rank-v2 หยิบ ${picks.map((r) => String(r.id).slice(0, 8)).join('+')} จากโผ ${slCands.length} ใบ${tuneTxt} · ${rk.debug.reason}`);
       } else {
         picks = rotate ? weightedSample(usable, 2) : usable.slice(0, 2);
       }

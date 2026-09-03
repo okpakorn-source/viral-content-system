@@ -39,6 +39,20 @@
 //   N8 ชั้น ก ไม่มีพื้นไลก์ (ตัด `x.likes >= minLikes`)                    → ข้อ 6, 6ข, 6ค, 6ง แดง
 //   N9 reason นับ cap ผิด (`nCap = 0`)                                    → ข้อ 6ข, 13จ แดง
 //   ⚠️ harness รอบแรก baseline 23/24 ครั้งเดียว ไม่ได้จับชื่อข้อ (รันตรง 7 ครั้ง + harness รอบสอง = 24/24 ทุกครั้ง) — ถ้าเจออีกให้สงสัยสนามจำลอง (spawn ลูก + พอร์ตสุ่ม) ก่อนสงสัยกติกา
+//   ── 🎛️ 3 ก.ย. 69 (R234 ข — cap/floor/rotate/backfillMinRatio เป็น env: TEACHER_RANK_CAP/FLOOR/ROTATE/BACKFILL_RATIO) ──
+//   รอบแก้ผู้ตรวจไขว้ (harness: scratchpad/mutate-r234-round2.mjs ทุบจาก baseline คืนไบต์เดิม+ตรวจ md5 ทุกตัว · baseline 29/29):
+//   ผู้ตรวจ probe ตัดเส้น floor/rotate/ratio ที่จุดเรียกแล้วชุดเดิม 27/27 ยังเขียว (13ช กัดแค่เส้น cap) → เพิ่ม 13ฌ/13ญ แล้วทุบซ้ำครบทุกเส้น:
+//   O1 ตัดเส้น cap `cap: rankTune.cap` → `RANK_V2.cap`              → ข้อ 13ช, 13ฌ แดง (unit 6ฉ ไม่แดงโดยออกแบบ — ฉากสนามคือตัวกัดสายส่ง)
+//   O7 ตัดเส้น floor → `RANK_V2.floor`                              → ข้อ 13ญ แดง (เดิมเขียวทั้งชุด = ช่องที่ผู้ตรวจชี้ ปิดแล้ว)
+//   O8 ตัดเส้น rotate → `RANK_V2.rotate`                            → ข้อ 13ฌ แดง (เดิมเขียวทั้งชุด)
+//   O9 ตัดเส้น ratio → `RANK_V2.backfillMinRatio`                   → ข้อ 13ญ แดง (เดิมเขียวทั้งชุด)
+//   O2 ไม่อ่าน env เลย (literal `_envTok('TEACHER_RANK_…')` ทั้ง 4 → `''`) → ข้อ 6ฉ, 13ช, 13ซ, 13ฌ, 13ญ แดง
+//   O3 ตัด console.warn ของค่าขยะ                                   → ข้อ 6ฉ, 13ซ แดง
+//   O4 รับค่าติดลบ/rotate 0 (ตัดเช็ค `n < min`)                     → ข้อ 6ฉ, 13ซ แดง
+//   O5 ตัดท่อน log ค่าที่ใช้จริง (`rankTune?.tuned` → false)         → ข้อ 13ช, 13ซ, 13ฌ, 13ญ แดง
+//   O6 ปัดเศษจำนวนเต็มขึ้นแทนปัดลง (Math.floor → Math.ceil)          → ข้อ 6ฉ แดง
+//   O10 ถอยไปอ่านผ่านตัวแปร `_envTok(name)` (regression finding ผู้ตรวจ) → tests/news-switch-registry.test.mjs ข้อ dynamic-reader แดง
+//       (ชุดนี้เขียวตามเดิม — พฤติกรรมไม่เปลี่ยน แต่ scanner ทะเบียนจะมองไม่เห็นชื่อ 4 สวิตช์ → readBy ล้ม จึงต้องอ่านด้วย literal เท่านั้น)
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -46,7 +60,7 @@ import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { rankTeachers, likesFromMap, RANK_DEFAULTS } from '../src/lib/services/teacherRank.js';
-import { shortlistExamples, getViralFewshotBlock, pickLibraryCategory, pickLibraryCategoryV2, _shortlistK } from '../src/lib/services/viralFewshot.js';
+import { shortlistExamples, getViralFewshotBlock, pickLibraryCategory, pickLibraryCategoryV2, _shortlistK, _rankTuning } from '../src/lib/services/viralFewshot.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url)); // รากรีโป — viralFewshot อ่าน data/*.json ผ่าน process.cwd()
 const SELF = fileURLToPath(import.meta.url);
@@ -58,13 +72,16 @@ const SELF = fileURLToPath(import.meta.url);
 if (process.env.RANK_FIELD_CHILD === '1') {
   const logs = [];
   const orig = console.log;
+  const origWarn = console.warn; // 🎛️ R234 ข: จับ console.warn ด้วย — ตัวอ่าน env กติกา (_rankTuning) เตือนค่าขยะผ่านช่องนี้
   console.log = (...a) => { logs.push(a.map(String).join(' ')); };
+  console.warn = (...a) => { logs.push(a.map(String).join(' ')); };
   let block = '', err = null;
   try {
     const brief = JSON.parse(readFileSync(0, 'utf8'));
     block = await getViralFewshotBlock(brief);
   } catch (e) { err = String(e?.stack || e?.message || e); }
   console.log = orig;
+  console.warn = origWarn;
   // stdout ที่เป็นไปป์บน Windows เขียนแบบ async → ต้องรอเขียนเสร็จก่อน exit ไม่งั้น JSON หาย
   process.stdout.write(`\n__RANK_FIELD_JSON__${JSON.stringify({ block, logs, err })}\n`, () => process.exit(0));
   await new Promise(() => {}); // รอ callback ข้างบนปิดโปรเซส
@@ -255,6 +272,53 @@ test('6จ โผ K: สวิตช์เปิด + ไม่ตั้ง VIRA
     assert.equal(withEnvs({ TEACHER_RANK_V2: sw, VIRAL_SHORTLIST_K: '4' }, () => _shortlistK()), 6, 'พื้น 6 เดิม');
     assert.equal(withEnvs({ TEACHER_RANK_V2: sw, VIRAL_SHORTLIST_K: '99' }, () => _shortlistK()), 40, 'เพดาน 40 เดิม');
     assert.equal(withEnvs({ TEACHER_RANK_V2: sw, VIRAL_SHORTLIST_K: 'abc' }, () => _shortlistK()), 8, 'อ่านไม่ออก = 8 เดิม (env ถูกตั้งแล้ว ไม่ใช่ 16)');
+  }
+});
+
+// ═══ 🎛️ 3 ก.ย. 69 (R234 ข) — cap/floor/rotate/backfillMinRatio จาก env (_rankTuning ตัวจริงใน viralFewshot.js · ข้อ 13ช/13ซ พิสูจน์บนท่อจริงอีกชั้น) ═══
+const withWarns = (fn) => {
+  const ws = []; const orig = console.warn;
+  console.warn = (...a) => { ws.push(a.map(String).join(' ')); };
+  try { return { v: fn(), ws }; } finally { console.warn = orig; }
+};
+const ENV4 = { TEACHER_RANK_CAP: undefined, TEACHER_RANK_FLOOR: undefined, TEACHER_RANK_ROTATE: undefined, TEACHER_RANK_BACKFILL_RATIO: undefined };
+const RANK_ENV_NAMES = Object.keys(ENV4);
+
+test('6ฉ env กติกา (R234 ข): ไม่ตั้ง = ค่าตรึงเดิมเงียบๆ · ตั้ง = ส่งต่อถูก (ทนช่องว่าง/อัญประกาศ · ทศนิยมของ int ปัดลง · ค่าพิเศษ 0/1 ตามนิยาม teacherRank) · ขยะ/ติดลบ/rotate<1 = ค่าเดิมตัวนั้น + console.warn', () => {
+  { // ไม่ตั้งสักตัว = ค่าตรึงเดิมทุกตัว + ไม่มี warn (ทางปกติทุกวัน ห้ามส่งเสียง)
+    const { v, ws } = withWarns(() => withEnvs(ENV4, () => _rankTuning()));
+    assert.deepEqual(v, { cap: 8, floor: 50000, rotate: 3, backfillMinRatio: 0.4, tuned: false });
+    assert.deepEqual(ws, [], 'ไม่ตั้ง env ห้ามมี warn');
+    assert.deepEqual({ cap: v.cap, floor: v.floor, rotate: v.rotate, backfillMinRatio: v.backfillMinRatio },
+      { cap: RANK_DEFAULTS.cap, floor: RANK_DEFAULTS.floor, rotate: RANK_DEFAULTS.rotate, backfillMinRatio: RANK_DEFAULTS.backfillMinRatio },
+      'ค่าเริ่มต้น env ต้องเท่าค่าตรึงเดิมใน teacherRank');
+  }
+  { // ตั้งครบ = ส่งต่อถูก (ทนช่องว่าง + อัญประกาศ แบบแผน _envTok เดียวกับ VIRAL_SHORTLIST_K)
+    const { v, ws } = withWarns(() => withEnvs({ TEACHER_RANK_CAP: ' 2 ', TEACHER_RANK_FLOOR: '"60000"', TEACHER_RANK_ROTATE: '5', TEACHER_RANK_BACKFILL_RATIO: '0.8' }, () => _rankTuning()));
+    assert.deepEqual(v, { cap: 2, floor: 60000, rotate: 5, backfillMinRatio: 0.8, tuned: true });
+    assert.deepEqual(ws, []);
+  }
+  { // ตั้งตัวเดียว = ตัวอื่นคงค่าตรึงเดิม · floor=0 = ปิดพื้น (ค่าพิเศษที่ teacherRank นิยามไว้)
+    const { v, ws } = withWarns(() => withEnvs({ ...ENV4, TEACHER_RANK_FLOOR: '0' }, () => _rankTuning()));
+    assert.deepEqual(v, { cap: 8, floor: 0, rotate: 3, backfillMinRatio: 0.4, tuned: true });
+    assert.deepEqual(ws, []);
+  }
+  { // ค่าพิเศษ: cap=0 ปิดกันซ้ำ · rotate=1 ไม่หมุน · ratio=0 · ทศนิยมของจำนวนเต็มปัดลง
+    const { v, ws } = withWarns(() => withEnvs({ TEACHER_RANK_CAP: '0', TEACHER_RANK_FLOOR: '49999.9', TEACHER_RANK_ROTATE: '1', TEACHER_RANK_BACKFILL_RATIO: '0' }, () => _rankTuning()));
+    assert.deepEqual(v, { cap: 0, floor: 49999, rotate: 1, backfillMinRatio: 0, tuned: true });
+    assert.deepEqual(ws, []);
+  }
+  { // ขยะ/ติดลบ/rotate 0 = ค่าตรึงเดิมตัวต่อตัว + warn ระบุชื่อ env ครบ 4
+    const { v, ws } = withWarns(() => withEnvs({ TEACHER_RANK_CAP: 'abc', TEACHER_RANK_FLOOR: '-1', TEACHER_RANK_ROTATE: '0', TEACHER_RANK_BACKFILL_RATIO: '-0.5' }, () => _rankTuning()));
+    assert.deepEqual(v, { cap: 8, floor: 50000, rotate: 3, backfillMinRatio: 0.4, tuned: true });
+    assert.equal(ws.length, 4, `ต้อง warn ครบ 4 ตัว: ${ws.join(' | ')}`);
+    for (const name of RANK_ENV_NAMES) assert.ok(ws.some((w) => w.includes(name) && w.includes('ค่าเริ่มต้น')), `ต้อง warn ${name}`);
+  }
+  { // ขยะปนดี: ตัวดีส่งต่อ (Number รับ 1e2=100) ตัวขยะใช้ค่าเดิม + warn เฉพาะตัวขยะ
+    const { v, ws } = withWarns(() => withEnvs({ ...ENV4, TEACHER_RANK_CAP: '1e2', TEACHER_RANK_ROTATE: 'มั่ว' }, () => _rankTuning()));
+    assert.deepEqual(v, { cap: 100, floor: 50000, rotate: 3, backfillMinRatio: 0.4, tuned: true });
+    assert.equal(ws.length, 1);
+    assert.ok(ws[0].includes('TEACHER_RANK_ROTATE'));
   }
 });
 
@@ -507,6 +571,7 @@ test('13ก สนาม (สวิตช์ค่าเริ่มต้น): 
     for (const id of picked) assert.ok(ex.sortedIds.includes(id), `ใบที่หยิบต้องอยู่ในแถวผ่านด่าน: ${id}`);
     assertBlockHasTeachers(out.block, picked);
     assert.ok(out.logs.some((l) => l.includes('rank-v2 หยิบ') && l.includes('ด่านแมตช์')), 'log 1 บรรทัดพร้อมเหตุผลกติกา');
+    assert.ok(!out.logs.some((l) => l.includes('env: cap')), '🎛️ R234 ข: ไม่ตั้ง env กติกา = บรรทัด log เดิมไบต์ต่อไบต์ (ห้ามมีท่อนค่า env)');
     assert.ok(out.logs.some((l) => l.includes('คัดเข้ารอบ') && l.includes('(K=16)')), `★ รอบ 2: โผขยายเป็น 16 เมื่อ rank-v2 เปิด + ไม่ตั้ง env: ${out.logs.filter((l) => l.includes('K=')).join(' | ')}`);
     assert.ok(out.logs.some((l) => l.includes('rank-v2 ขยายโผ K=16')), 'log บอกว่าขยายโผเพราะ rank-v2');
     const reads = historyReads(st);
@@ -589,6 +654,92 @@ test('13ฉ สนาม VIRAL_SHORTLIST_K=10 + rank-v2: env ชนะ (โผ K
     assert.equal(d.poolSize, ex.listIds.length);
     assert.ok(out.logs.some((l) => l.includes('คัดเข้ารอบ') && l.includes('(K=10)')), `env ต้องชนะ: ${out.logs.filter((l) => l.includes('K=')).join(' | ')}`);
     assert.ok(!out.logs.some((l) => l.includes('ขยายโผ')), 'ตั้ง env แล้วต้องไม่ประกาศขยายโผ');
+    assertBlockHasTeachers(out.block, d.picks.map((p) => p.id));
+  });
+});
+
+// ═══ 🎛️ 3 ก.ย. 69 (R234 ข) — env กติกาบนท่อจริง: ค่าต้องถูก "ส่งต่อ" เข้า rankTeachers จริง ไม่ใช่แค่อ่านออก ═══
+test('13ช สนาม TEACHER_RANK_CAP=1: ใบท็อปที่ถูกใช้แค่ 1 ครั้งถูกข้ามจริง (cap 8 เดิมไม่มีทางข้าม) · log rank-v2 พิมพ์ค่าที่ใช้จริงทั้ง 4', async () => {
+  const ex = fieldExpect(EXP.libV2);
+  const capId = ex.sortedIds[0];
+  const usageRows = [{ picks: [{ id: capId, title: 'เก่า' }] }]; // ใช้ไป 1 ครั้งเท่านั้น — ข้ามได้ก็ต่อเมื่อ env cap=1 ถูกส่งต่อจริง
+  await withMockDb({ rows: FIELD_ROWS, usageRows }, async ({ port, st }) => {
+    const out = await runFieldChild(port, { TEACHER_RANK_CAP: '1' });
+    const d = historyRow(st);
+    assert.equal(d.mode, 'rank-v2');
+    const hit = (d.rank?.skipped || []).find((s) => s.id === capId);
+    assert.ok(hit, `cap=1 จาก env ต้องทำให้ ${capId.slice(0, 8)} ถูกข้าม: ${JSON.stringify(d.rank?.skipped)}`);
+    assert.match(hit.why, /ใช้ไป 1 ครั้ง\/7วัน ≥ cap 1/u);
+    assert.ok(!d.picks.map((p) => p.id).includes(capId), 'ใบติด cap (จาก env) ต้องไม่ถูกหยิบเมื่อยังมีใบอื่นพอ');
+    assert.ok(out.logs.some((l) => l.includes('rank-v2 หยิบ') && l.includes('env: cap 1 · พื้น 50000 · หมุน 3 · เติม≥0.4')),
+      `log ต้องพิมพ์ค่าที่ใช้จริงทั้ง 4: ${out.logs.filter((l) => l.includes('rank-v2')).join(' | ')}`);
+    assert.ok(!out.logs.some((l) => l.includes('TEACHER_RANK_CAP') && l.includes('ค่าเริ่มต้น')), 'ค่าดีต้องไม่มี warn');
+    assertBlockHasTeachers(out.block, d.picks.map((p) => p.id));
+  });
+});
+
+test('13ซ สนาม env ขยะทั้ง 4 ตัว: พฤติกรรม = ค่าตรึงเดิมทุกตัว (ใบใช้ไป 8 ครั้งยังถูกข้ามแบบฉาก 13จ) + console.warn ครบ 4 ชื่อ · log พิมพ์ค่าที่ใช้จริง (= ค่าเดิม)', async () => {
+  const ex = fieldExpect(EXP.libV2);
+  const capId = ex.sortedIds[0];
+  const usageRows = Array.from({ length: 8 }, (_, i) => ({ picks: [{ id: capId, title: `เก่า${i}` }] }));
+  await withMockDb({ rows: FIELD_ROWS, usageRows }, async ({ port, st }) => {
+    const out = await runFieldChild(port, { TEACHER_RANK_CAP: 'abc', TEACHER_RANK_FLOOR: '-5', TEACHER_RANK_ROTATE: '0', TEACHER_RANK_BACKFILL_RATIO: 'x' });
+    const d = historyRow(st);
+    assert.equal(d.mode, 'rank-v2');
+    const hit = (d.rank?.skipped || []).find((s) => s.id === capId);
+    assert.ok(hit, `cap ขยะต้องถอยเป็น 8 เดิม → ใบที่ใช้ไป 8 ครั้งยังถูกข้าม: ${JSON.stringify(d.rank?.skipped)}`);
+    assert.match(hit.why, /ใช้ไป 8 ครั้ง\/7วัน ≥ cap 8/u);
+    assert.ok(!d.picks.map((p) => p.id).includes(capId));
+    for (const name of RANK_ENV_NAMES) assert.ok(out.logs.some((l) => l.includes(name) && l.includes('ค่าเริ่มต้น')), `ต้อง warn ${name}: ${out.logs.filter((l) => l.includes('TEACHER_RANK')).join(' | ')}`);
+    assert.ok(out.logs.some((l) => l.includes('env: cap 8 · พื้น 50000 · หมุน 3 · เติม≥0.4')), 'ตั้ง env (แม้ขยะ) → log พิมพ์ค่าที่ใช้จริง = ค่าตรึงเดิม');
+    assertBlockHasTeachers(out.block, d.picks.map((p) => p.id));
+  });
+});
+
+// 🔎 3 ก.ย. 69 (ผู้ตรวจไขว้ R234): 13ช กัดสายส่งแค่เส้น cap — probe ตัดเส้น floor/rotate/ratio ที่จุดเรียกแล้ว 27/27 ยังเขียว
+//   (log ฝั่ง viralFewshot พิมพ์จาก rankTune ไม่ใช่ค่าที่ rankTeachers ได้รับจริง) → เพิ่ม 13ฌ/13ญ กัดสามเส้นที่เหลือ
+//   หลัก: assert จาก "เสียงสะท้อนในตัวกติกาเอง" (d.rank.reason/skipped สร้างใน rankTeachers จากค่าที่รับจริง) + ผลหยิบตายตัว
+test('13ฌ สนาม TEACHER_RANK_ROTATE=1 + CAP=5: หยิบตายตัว = สองใบถัดจากใบติด cap · reason ในกติกา echo "หมุนหัวแถว 1" + why echo "cap 5" (กัดเส้นส่ง rotate/cap ถึงใน rankTeachers จริง)', async () => {
+  const ex = fieldExpect(EXP.libV2);
+  const s = ex.sortedIds;
+  assert.ok(s.length >= 3, 'ฟิกซ์เจอร์ต้องมีใบผ่านด่าน ≥ 3 (ข้อ 13 คุมอยู่แล้ว)');
+  const usageRows = Array.from({ length: 5 }, (_, i) => ({ picks: [{ id: s[0], title: `เก่า${i}` }] }));
+  await withMockDb({ rows: FIELD_ROWS, usageRows }, async ({ port, st }) => {
+    const out = await runFieldChild(port, { TEACHER_RANK_CAP: '5', TEACHER_RANK_ROTATE: '1' });
+    const d = historyRow(st);
+    assert.equal(d.mode, 'rank-v2');
+    const hit = (d.rank?.skipped || []).find((x) => x.id === s[0]);
+    assert.ok(hit && /ใช้ไป 5 ครั้ง\/7วัน ≥ cap 5/u.test(String(hit?.why)), `cap=5 จาก env ต้องสะท้อนใน why (cap 8 เดิม: ใช้ 5 ครั้งไม่ติด): ${JSON.stringify(d.rank?.skipped)}`);
+    assert.ok(String(d.rank?.reason).includes('หมุนหัวแถว 1 ·'), `rotate=1 ต้องสะท้อนใน reason ของกติกา (เดิม "หมุนหัวแถว 3"): ${d.rank?.reason}`);
+    assert.deepEqual(d.picks.map((p) => p.id), [s[1], s[2]],
+      'rotate=1 = ไม่หมุน → หยิบเรียงตามไลก์ตายตัว (สองใบถัดจากใบติด cap) — rotate 3 เดิมสุ่มในหัวแถว ผลไม่ตายตัวแบบนี้');
+    assert.ok(out.logs.some((l) => l.includes('env: cap 5 · พื้น 50000 · หมุน 1 · เติม≥0.4')), `log ต้องพิมพ์ค่าที่ใช้จริง: ${out.logs.filter((l) => l.includes('rank-v2')).join(' | ')}`);
+    assert.ok(!out.logs.some((l) => l.includes('TEACHER_RANK') && l.includes('ค่าเริ่มต้น')), 'ค่าดีต้องไม่มี warn');
+    assertBlockHasTeachers(out.block, d.picks.map((p) => p.id));
+  });
+});
+
+test('13ญ สนาม TEACHER_RANK_FLOOR สูงกว่าใบที่ 2 + BACKFILL_RATIO=0.9: ใบต่ำกว่าพื้นถูกข้ามด้วยเลขพื้นจาก env · ชั้นเติม ก ใช้ minLikes = floor(พื้น×0.9) (ratio 0.4 เดิมได้คนละเลข — กัดเส้นส่ง floor/ratio)', async () => {
+  const ex = fieldExpect(EXP.libV2);
+  const s = ex.sortedIds;
+  const L = (id) => likesFromMap(LIKES_FILE, id);
+  assert.ok(L(s[0]) > L(s[1]), 'ฟิกซ์เจอร์ต้องมีท็อปไลก์เดี่ยว — ถ้าข้อมูลไลก์เปลี่ยนจนเสมอกัน ให้ปรับ FIELD_KEYS');
+  const F = L(s[1]) + 1;           // ท็อปใบเดียวถึงพื้น → ที่เหลือถูกข้าม "ต่ำกว่าพื้น F" (พื้น 50000 เดิมไม่ข้ามใครเลย — ข้อ 13 คุมไลก์ ≥ 50k ทุกใบ)
+  const MIN = Math.floor(F * 0.9); // พื้นชั้นเติม ก ที่กติกาคำนวณเองจากค่าที่รับจริง — ratio 0.4 เดิมให้ floor(F×0.4) คนละเลขเสมอ
+  await withMockDb({ rows: FIELD_ROWS }, async ({ port, st }) => {
+    const out = await runFieldChild(port, { TEACHER_RANK_FLOOR: String(F), TEACHER_RANK_BACKFILL_RATIO: '0.9' });
+    const d = historyRow(st);
+    assert.equal(d.mode, 'rank-v2');
+    const hit = (d.rank?.skipped || []).find((x) => x.id === s[1]);
+    assert.ok(hit && String(hit?.why).includes(`ต่ำกว่าพื้น ${F.toLocaleString('en-US')}`),
+      `floor จาก env ต้องสะท้อนเลขพื้นใน why: ${JSON.stringify(d.rank?.skipped)}`);
+    assert.ok(String(d.rank?.reason).includes(`พื้น ${F.toLocaleString('en-US')} บังคับ`), `reason ต้องสะท้อนพื้นจาก env: ${d.rank?.reason}`);
+    assert.ok(String(d.rank?.reason).includes(`ชั้น ก ต่ำกว่าพื้นแต่ ≥ ${Math.round(MIN / 1000)}k`),
+      `ratio=0.9 ต้องสะท้อน minLikes=${MIN} ในชั้นเติม (ratio 0.4 เดิม = ${Math.floor(F * 0.4)}): ${d.rank?.reason}`);
+    assert.deepEqual(d.picks.map((p) => p.id), [s[0], s[1]],
+      'หยิบตายตัว: ใบเดียวที่ถึงพื้น + เติมชั้น ก ใบไลก์สูงสุดที่ ≥ minLikes');
+    assert.ok(out.logs.some((l) => l.includes(`env: cap 8 · พื้น ${F} · หมุน 3 · เติม≥0.9`)), `log ต้องพิมพ์ค่าที่ใช้จริง: ${out.logs.filter((l) => l.includes('rank-v2')).join(' | ')}`);
+    assert.ok(!out.logs.some((l) => l.includes('TEACHER_RANK') && l.includes('ค่าเริ่มต้น')), 'ค่าดีต้องไม่มี warn');
     assertBlockHasTeachers(out.block, d.picks.map((p) => p.id));
   });
 });
