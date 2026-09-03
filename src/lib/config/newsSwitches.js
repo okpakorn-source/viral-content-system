@@ -19,6 +19,8 @@
  *     WRITER_SOURCE_CHARS (ตัวอ่านที่วิ่งจริงคือ newsForStage('WRITER') ไม่ตั้ง = ไม่จำกัด · _writerSourceText 12000 ไม่ถูกเรียก)
  *   · บอทดิสคอร์ด (discord-bot/index.js) ไม่ใช่ท่อข่าว ไม่อยู่ในชุดสแกน — แต่สวิตช์บอทลงทะเบียนได้ในหมวด "บอทดิสคอร์ด"
  *     (readBy ชี้ไฟล์บอท · เทสตรวจว่าอ่านจริงผ่าน envFlag('X', bool) — helper ของบอทเอง)
+ *   · ★ 3 ก.ย. 69: หมวด "หน้าเว็บผลลัพธ์" (src/components — client · NEXT_PUBLIC_*) และ "สคริปต์นำเข้าครู" (scripts/) อยู่นอกชุดสแกน
+ *     แบบเดียวกับบอท — สวิตช์ตกทะเบียนในไฟล์พวกนี้ไม่มีด่านอัตโนมัติจับ ต้องลงมือ · เทส readBy/ค่าเริ่มต้นยังตรวจจากไฟล์จริง
  * กติกาเขียนรายการ:
  *   name     ชื่อ env ตรงตัว
  *   default  ค่าเมื่อไม่ตั้ง env (สตริง; '' = ไม่ตั้ง/ว่าง) — ยืนยันจากโค้ดใน worktree เท่านั้น ห้ามลงทะเบียนล่วงหน้าจากแผน
@@ -479,6 +481,12 @@ export const NEWS_SWITCHES = Object.freeze([
     meaning: '=1 แนบคะแนน "โอกาสปัง" ต่อฉบับใน version._viralScore ({score 0-100 เปอร์เซ็นไทล์, band, bandLabel สูง/กลาง/ต่ำ, predictedReactions, topDrivers, warnings, modelVersion}) หลังเนื้อสุดท้ายนิ่งทุกสาขา (หลัง correction/factual editor/length gate ก่อนประกอบ response) — ridge ในเครื่องจาก data/viral-score-model.json (Spearman 0.30) ไม่ยิง API · คำเตือนให้พนักงาน ไม่ใช่คำตัดสิน (บอทแสดง "🔥 โอกาสปัง: สูง (72/100)") · โมเดลไม่มี/คำนวณล้ม = ไม่แนบคีย์ ไม่ล้มท่อ ⚠️ บน Vercel ไฟล์โมเดลต้องอยู่ใน outputFileTracingIncludes (next.config.mjs — เพิ่มครบ 4 route แล้ว)',
     since: '2 ก.ย. 69 (เฟส 3)', rollback: 'ลบ env หรือ =0 = ไม่ import โมดูล ไม่มีคีย์ _viralScore (response เดิมทุกไบต์)',
   },
+  {
+    name: 'SEMANTIC_FIX_SENTENCE_GUARD', default: '1', values: ['0 = ปิด (พฤติกรรมเดิมไบต์ต่อไบต์ รวมถึงไม่มี field/ธงใหม่ใน result)', '1/ไม่ตั้ง = เปิดด่าน'],
+    readBy: ['src/lib/correction/semanticSanityCheck.js'], group: 'ด่านแก้ไข/ตรวจ', kind: 'switch',
+    meaning: 'ด่านกลไกหลัง L4.6 Semantic Fix ลบข้อความ: หน่วยประโยคที่เหลือถ้าจบด้วยคำเชื่อม/คำต้องมีส่วนขยาย หรือเหลือเศษสั้น → ลบทั้งหน่วยแทน (เมื่อพิสูจน์ครบ 6 ข้อว่าไม่มีข้อเท็จจริงหายและไม่สร้างรอยใหม่) ไม่งั้นคืนเนื้อเดิมของประโยคนั้น (fail-safe ห้ามแย่กว่าเดิม) · อ่าน !== "0" สดทุกครั้งที่ด่านทำงาน',
+    since: '3 ก.ย. 69', rollback: 'SEMANTIC_FIX_SENTENCE_GUARD=0 (ไม่ต้อง redeploy — อ่านสดทุกครั้งที่ด่านทำงาน)',
+  },
 
   // ── ความยาว / กฎถอย (legacyLengthRules) ──
   {
@@ -581,6 +589,39 @@ export const NEWS_SWITCHES = Object.freeze([
     since: '2 ก.ย. 69', rollback: 'LIB_CLASSIFIER_V2=0',
   },
 
+  // ── ★ 3 ก.ย. 69 — สวิตช์ใหม่สายครูไวรัล: บริบทตัวจำแนก (promptMatcher) + ปุ่มปรับกติกา rank-v2 (viralFewshot) ──
+  //   ตัวเลข rank-v2 ทั้ง 4 อ่านใน _rankTuning ผ่าน _envTok ชื่อ literal — ตัวตีความค่าเริ่มต้นอัตโนมัติตามไม่ถึง (อยู่ใน array literal)
+  //   ค่าตรึงยืนยันด้วยตาจาก RANK_V2 = { cap: 8, floor: 50000, rotate: 3, backfillMinRatio: 0.4 } ใน viralFewshot.js (3 ก.ย. 69)
+  {
+    name: 'LIB_CLASSIFIER_CONTEXT', default: '1', values: ['0', '1'], readBy: [PROMPT_MATCHER], group: 'ครูตัวอย่างไวรัล', kind: 'switch',
+    meaning: 'ส่งบริบทเรื่อง (conflictTags/humanAngles จาก newsAnalysis/actualBreakdown) จากจุดเรียกใน summarizeServiceText เข้าตัวจำแนกหมวดหอสมุด V2 ให้ขั้น 2 "รูปเรื่อง" ใช้ถ่วงน้ำหนักหมวด แทนการเดาจากคีย์เวิร์ดในป้ายล้วน (แก้จำแนกผิด ~1/3) · อ่าน env จุดเดียวที่ buildLibClassifierContext ใน promptMatcher แบบ !== "0" (default เปิด) · =0 ตรงตัว = ประตูคืน {} = อาร์กิวเมนต์ getViralFewshotBlock เดิมไบต์ต่อไบต์',
+    since: '3 ก.ย. 69', rollback: 'LIB_CLASSIFIER_CONTEXT=0',
+  },
+  {
+    name: 'TEACHER_RANK_CAP', default: '8', values: ['ไม่ตั้ง/ว่าง = 8 เดิม', 'จำนวนเต็ม ≥ 0 (0 = ปิดกันซ้ำ · ทศนิยมปัดลง · ทนช่องว่าง/อัญประกาศ)', 'อ่านไม่ออก/ติดลบ = 8 + console.warn'],
+    readBy: [FEWSHOT], group: 'ครูตัวอย่างไวรัล', kind: 'value',
+    meaning: 'เพดานใช้ครูซ้ำใน 7 วัน (กติกาข้อ 4 ของ rank-v2) — ครูที่ถูกใช้ ≥ ค่านี้ถูกข้าม · อ่านด้วย _envTok ชื่อ literal ใน _rankTuning',
+    since: '3 ก.ย. 69', rollback: 'ลบ env ออก (หรือไม่ตั้ง) = ค่าตรึงเดิม 8 · ท่อ+log เดิมไบต์ต่อไบต์',
+  },
+  {
+    name: 'TEACHER_RANK_FLOOR', default: '50000', values: ['ไม่ตั้ง/ว่าง = 50000 เดิม', 'จำนวนเต็ม ≥ 0 (0 = ปิดพื้น · ทศนิยมปัดลง)', 'อ่านไม่ออก/ติดลบ = 50000 + console.warn'],
+    readBy: [FEWSHOT], group: 'ครูตัวอย่างไวรัล', kind: 'value',
+    meaning: 'พื้นไลก์คุณภาพ (กติกาข้อ 3 ของ rank-v2) — มีใบถึงพื้นแล้วใบต่ำกว่าถูกข้าม · เป็นฐานคูณของชั้นเติม ก ด้วย (× TEACHER_RANK_BACKFILL_RATIO) · อ่านด้วย _envTok ชื่อ literal ใน _rankTuning',
+    since: '3 ก.ย. 69', rollback: 'ลบ env ออก = ค่าตรึงเดิม 50000',
+  },
+  {
+    name: 'TEACHER_RANK_ROTATE', default: '3', values: ['ไม่ตั้ง/ว่าง = 3 เดิม', 'จำนวนเต็ม ≥ 1 (1 = ไม่หมุน หยิบหัวแถวเสมอ · ทศนิยมปัดลง)', 'อ่านไม่ออก/0/ติดลบ = 3 + console.warn'],
+    readBy: [FEWSHOT], group: 'ครูตัวอย่างไวรัล', kind: 'value',
+    meaning: 'ขนาดกลุ่มหัวแถวที่สุ่มถ่วง sqrt(likes) (กติกาข้อ 5 ของ rank-v2) — กันใบอันดับ 1 ผูกขาด · อ่านด้วย _envTok ชื่อ literal ใน _rankTuning',
+    since: '3 ก.ย. 69', rollback: 'ลบ env ออก = ค่าตรึงเดิม 3',
+  },
+  {
+    name: 'TEACHER_RANK_BACKFILL_RATIO', default: '0.4', values: ['ไม่ตั้ง/ว่าง = 0.4 เดิม', 'ทศนิยม ≥ 0 (พื้นชั้นเติม ก = floor × ค่านี้ · 0.4×50000 = 20,000)', 'อ่านไม่ออก/ติดลบ = 0.4 + console.warn'],
+    readBy: [FEWSHOT], group: 'ครูตัวอย่างไวรัล', kind: 'value',
+    meaning: 'สัดส่วนพื้นของชั้นเติม ก (กติกาข้อ 6 ของ rank-v2 — เคสศรราม): ใบต่ำกว่าพื้นแต่ไลก์ ≥ floor×ratio และไม่ติด cap ได้เติมก่อนใบติด cap · อ่านด้วย _envTok ชื่อ literal ใน _rankTuning',
+    since: '3 ก.ย. 69', rollback: 'ลบ env ออก = ค่าตรึงเดิม 0.4',
+  },
+
   // ── เพดานเนื้อข่าว (newsCap.js — ★ 2 ก.ย. 69 รอบยืนยัน ข้อ 1 · อ่านผ่าน newsForStage · ค่าเริ่มต้นทุกด่าน 0 = ไม่จำกัด) ──
   //   CARD_PICK_NEWS_CHARS / WRITER_SOURCE_CHARS ก็อยู่ในตารางนี้ด้วย — ลงทะเบียนไว้ในหมวดนักเขียนแล้ว (readBy รวม newsCap)
   newsCapRule('NEWS_CAP_DNA', 'DNA', 1500, 'ตั้งป้ายหมวด/อารมณ์ (ป้ายถูกใช้ต่อทั้งการให้คะแนนการ์ดและครู)'),
@@ -597,9 +638,34 @@ export const NEWS_SWITCHES = Object.freeze([
     since: '2 ก.ย. 69 (เคสหลวงปู่ศิลา 03:49Z)', rollback: 'BOT_RESUME_TRACKING=0 = บอททำงานเหมือนเดิมทุกไบต์ (ต้อง redeploy บอทบน Railway)',
   },
   {
-    name: 'BOT_REVIEW_REACTIONS', default: '1', values: ['0', '1'], readBy: [BOT], group: 'บอทดิสคอร์ด (discord-bot)', kind: 'switch',
-    meaning: 'บอทใส่ reaction 👍 ผ่าน / 👎 ไม่ผ่าน / 📌 ใช้แล้ว ใต้ผลข่าว แล้วบันทึกสถานะเข้า PATCH /api/generation-logs/[caseId] + โชว์บรรทัดเตือน (ข้อเท็จจริงหาย/ความคล้าย/โอกาสปัง) — ข้อ 6 แผนยกระดับ',
-    since: '2 ก.ย. 69 (เฟส 3)', rollback: 'BOT_REVIEW_REACTIONS=0 = ไม่ใส่ reaction ไม่ฟังการกด ไม่แสดงบรรทัดเตือน (ข้อความผลเหมือนเดิม)',
+    // ★ 3 ก.ย. 69 เจ้าของสั่ง "ไม่เอาปุ่ม": default เดิม '1' → '0' · บรรทัดเตือนแยกไปสวิตช์ BOT_RESULT_WARNINGS (ยาม: tests/bot-warning-switch-registry-guard.test.mjs)
+    name: 'BOT_REVIEW_REACTIONS', default: '0', values: ['0', '1'], readBy: [BOT], group: 'บอทดิสคอร์ด (discord-bot)', kind: 'switch',
+    meaning: 'ปุ่มพนักงาน 👍 ผ่าน / 👎 ไม่ผ่าน / 📌 ใช้แล้ว บนข้อความผล: ติด reaction + ฟัง messageReactionAdd (บันทึกสถานะเข้า PATCH /api/generation-logs/[caseId]) + ขอ intent GuildMessageReactions + partials Message/Reaction — คุมเฉพาะปุ่ม ไม่คุมบรรทัดเตือนแล้ว (3 ก.ย. 69 เจ้าของสั่งปิดปุ่ม default เดิม \'1\' → \'0\' · บรรทัดเตือนย้ายไป BOT_RESULT_WARNINGS)',
+    since: '2 ก.ย. 69 (เฟส 3 · ปิดปุ่มเป็นค่าเริ่มต้น 3 ก.ย. 69)', rollback: 'ตั้ง BOT_REVIEW_REACTIONS=1 (ฝั่ง Railway แล้ว redeploy บอท) → ปุ่ม+ตัวฟัง+intent+partials กลับมาแบบรุ่น 2 ก.ย. ทุกไบต์ (ต่างเฉพาะบรรทัด log ตอนตื่น: BOT_BUILD ใหม่ + warnings=on/off)',
+  },
+  {
+    // ★ 3 ก.ย. 69 — แยกจากสวิตช์ปุ่มเพื่อให้ปุ่มปิดแต่คำเตือนยังโชว์ · ไฟล์บอทนอกชุดสแกน — รายการนี้ลงมือ ห้ามพึ่งตัวสแกนอัตโนมัติ
+    //   ⚠️ tripwire: ถ้าวันหน้าเปลี่ยน default บรรทัดเตือนในโค้ดบอท ต้องแก้ SPEC ใน tests/bot-warning-switch-registry-guard.test.mjs:31-37 คู่กันในงานเดียว ไม่งั้นยามแดง (เจตนา)
+    name: 'BOT_RESULT_WARNINGS', default: '1', values: ['0', '1'], readBy: [BOT], group: 'บอทดิสคอร์ด (discord-bot)', kind: 'switch',
+    meaning: 'บรรทัดเตือนใต้เนื้อข่าวแต่ละเวอร์ชันใน embed ผลข่าว (⚠️ อาจตกข้อเท็จจริง จาก _missingFacts · ⚠️ ความคล้าย จาก _diversityWarning · 🔥 โอกาสปัง จาก _viralScore ซึ่งท่อยังไม่ส่งเพราะ VIRAL_SCORE_ANNOTATE ปิด) ผ่าน buildWarningLines/buildWarningTail — envFlag รับเฉพาะ "0"/"1" ตรงตัว ค่าอื่น = ค่าเริ่มต้นเปิด',
+    since: '3 ก.ย. 69', rollback: 'BOT_RESULT_WARNINGS=0 (ฝั่ง Railway แล้ว redeploy บอท) → description ของ embed เหลือเนื้อข่าวล้วนทุกไบต์ (ไม่มีบรรทัดเตือน) — พฤติกรรมส่วนอื่นไม่เปลี่ยน',
+  },
+
+  // ── หน้าเว็บผลลัพธ์ (src/components — ไฟล์ client นอกชุดสแกน NEWS_SWITCH_FILES · ลงทะเบียนมือเพราะเป็นสวิตช์ข่าวที่เจ้าของอาจต้องปิดคืน) ──
+  //   ★ 3 ก.ย. 69: NEXT_PUBLIC_* ฝังตอน build — เทส readBy/ค่าเริ่มต้นยังตรวจไฟล์นี้จริง (เหมือนหมวดบอท) · NEXT_PUBLIC_WEB_NEWS_GEN
+  //   ตัวเดิมในไฟล์เดียวกันยังไม่ลงทะเบียนตามแบบแผนเดิม — ถ้าวันหน้าจะดึง ResultVersions.js เข้าชุดสแกน ต้องลงทะเบียนตัวนั้นพร้อมกัน
+  {
+    name: 'NEXT_PUBLIC_SHOW_MISSING_FACTS', default: '1', values: ['0', '1'], readBy: ['src/components/content/ResultVersions.js'], group: 'หน้าเว็บผลลัพธ์', kind: 'switch',
+    meaning: 'แสดงบล็อก "⚠️ อาจตกข้อเท็จจริง" จาก version._missingFacts (ด่าน L4.7) ใต้แต่ละฉบับบนหน้าเว็บผลลัพธ์ · โค้ดอ่าน === "0" = ซ่อนทั้งบล็อก (ค่าเริ่มต้นเปิด · รับเฉพาะ "0" ตรงตัว) · เป็น NEXT_PUBLIC_* ฝังตอน build — เปลี่ยนค่าแล้วต้อง build ใหม่',
+    since: '3 ก.ย. 69', rollback: 'ตั้ง NEXT_PUBLIC_SHOW_MISSING_FACTS=0 แล้ว build ใหม่ (หรือ revert src/components/content/ResultVersions.js) — ปิดแล้ว DOM เท่าพฤติกรรมเดิมทุกไบต์ (component คืน null ไม่มี node เพิ่ม)',
+  },
+
+  // ── สคริปต์นำเข้าครู (viral-teachers-import — scripts/ นอกชุดสแกน · ไม่ถูก import โดยรันไทม์ · ลงทะเบียนเพราะเป็น env guard ที่เจ้าของใช้ตอน freeze) ──
+  {
+    name: 'TEACHER_IMPORT_APPLY', default: '1', values: ['0 = ปฏิเสธโหมด --apply ก่อนแตะทุกอย่าง (dry-run/--rollback ยังใช้ได้เสมอ — ห้ามบล็อกทางถอย)', '1/ไม่ตั้ง/ค่าอื่น = --apply ทำงานปกติ'],
+    readBy: ['scripts/import-new-teachers.mjs'], group: 'สคริปต์นำเข้าครู (viral-teachers-import)', kind: 'switch',
+    meaning: 'กันพลาดรัน --apply ผิดจังหวะ (เช่น ช่วง freeze) — ตั้ง 0 แล้วสคริปต์นำเข้าครูเขียนอะไรไม่ได้เลย (อ่าน === "0" จุดเดียวก่อนแตะไฟล์/DB) · สคริปต์ CLI ไม่ถูก import โดยโค้ดรันไทม์ใดๆ ไม่รัน = ระบบเดิมไบต์ต่อไบต์',
+    since: '3 ก.ย. 69', rollback: 'เอา env ออก = --apply กลับทำงานปกติ · ถอยการนำเข้าทั้งชุด: node scripts/import-new-teachers.mjs --rollback <manifest> (ลบแถวตาม id + คืนไฟล์ 2 ไฟล์จาก backup ไบต์เดิม)',
   },
 ]);
 

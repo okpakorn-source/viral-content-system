@@ -17,9 +17,9 @@
 | มุม 2 แปลก/ประเด็นซ้ำ | `ANGLE2_DISTINCT_V2=0` | การจัดสรรประเด็นแบบเดิม |
 | คำเตือนข้อเท็จจริงหายรบกวน | `MISSING_FACTS_GATE=0` | ไม่มี `_missingFacts` |
 | ครูตัวอย่างถูกหยิบแปลก | `TEACHER_RANK_V2=0` (และ/หรือ `LIB_CLASSIFIER_V2=0`) | กติกาหยิบครู/จำแนกหมวดเดิม |
-| ปุ่ม 👍👎📌 ในดิสคอร์ดมีปัญหา | `BOT_REVIEW_REACTIONS=0` (ฝั่ง Railway) | ข้อความผลเหมือนเดิม ไม่มีปุ่ม |
+| บรรทัดเตือนใต้ผลข่าวในดิสคอร์ด (⚠️/🔥) รบกวน | `BOT_RESULT_WARNINGS=0` (ฝั่ง Railway) | embed เหลือเนื้อข่าวล้วนทุกไบต์ (ไม่มีบรรทัดเตือน) |
 | บอทจำงานข้ามรีสตาร์ตทำงานผิด | `BOT_RESUME_TRACKING=0` (ฝั่ง Railway) | บอทแบบเดิม (ไม่กู้งานตอนบูต) |
-ค่าเริ่มต้นเดิมของสวิตช์ที่ **ปิดอยู่แล้ว** (ไม่ต้องทำอะไร): `WRITER_TRIM_PASS` · `WRITER_PROMPT_CACHE_V2` · `VIRAL_SCORE_ANNOTATE`
+ค่าเริ่มต้นเดิมของสวิตช์ที่ **ปิดอยู่แล้ว** (ไม่ต้องทำอะไร): `WRITER_TRIM_PASS` · `WRITER_PROMPT_CACHE_V2` · `VIRAL_SCORE_ANNOTATE` · `BOT_REVIEW_REACTIONS` (ปุ่ม 👍👎📌 — เจ้าของสั่งปิดเป็นค่าเริ่มต้น 3 ก.ย. 69 · อยากได้ปุ่มคืน: ตั้ง `BOT_REVIEW_REACTIONS=1` ฝั่ง Railway)
 
 ## ระดับ 2 — ถอย commit แบบเก็บประวัติ (push ธรรมดา · บอท Railway รีสตาร์ต)
 ```bash

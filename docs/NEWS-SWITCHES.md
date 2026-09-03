@@ -4,7 +4,7 @@
 > ด่านตรวจ: `node --test tests/news-switch-registry.test.mjs` (เพิ่ม `process.env.X` ในไฟล์ท่อข่าวโดยไม่ลงทะเบียน = แดง)
 > คีย์ลับ/ที่อยู่ (ชื่อเข้ารูป `(_KEY|_SECRET|_URL|_TOKEN|_PASSWORD|_DSN)$`) ไม่ใช่สวิตช์ ไม่อยู่ในทะเบียน
 
-สวิตช์ทั้งหมด: 101 ตัว · ไฟล์ที่สแกน: 43 ไฟล์
+สวิตช์ทั้งหมด: 110 ตัว · ไฟล์ที่สแกน: 43 ไฟล์
 
 ## วิธีอ่าน
 
@@ -85,6 +85,11 @@
 | `VIRAL_TEACHER_GUIDE` | `0` | 0 · 1 | =1 เติมคำแนะนำจากครู (teacher guide) ให้มุมที่มีสิทธิ์ (teacherGuideEligible) | `src/lib/services/viralFewshot.js` | 21 ส.ค. 69 (a56d011a) | ลบ env |
 | `TEACHER_RANK_V2` | `1` | 0 · 1 | กติกาหยิบครูใหม่ rank-v2 (แมตช์ก่อน แล้วยอดสูงนำ — src/lib/services/teacherRank.js) · =0 คืน weightedSample เดิมทุกไบต์ | `src/lib/services/viralFewshot.js` | 2 ก.ย. 69 | TEACHER_RANK_V2=0 |
 | `LIB_CLASSIFIER_V2` | `1` | 0 · 1 | แมปหมวดคลังครูจากช่อง breakdown (resolveLibraryCategory) แทนคีย์เวิร์ดอย่างเดียว · =0 คืน pickLibraryCategory เดิม | `src/lib/services/viralFewshot.js` | 2 ก.ย. 69 | LIB_CLASSIFIER_V2=0 |
+| `LIB_CLASSIFIER_CONTEXT` | `1` | 0 · 1 | ส่งบริบทเรื่อง (conflictTags/humanAngles จาก newsAnalysis/actualBreakdown) จากจุดเรียกใน summarizeServiceText เข้าตัวจำแนกหมวดหอสมุด V2 ให้ขั้น 2 "รูปเรื่อง" ใช้ถ่วงน้ำหนักหมวด แทนการเดาจากคีย์เวิร์ดในป้ายล้วน (แก้จำแนกผิด ~1/3) · อ่าน env จุดเดียวที่ buildLibClassifierContext ใน promptMatcher แบบ !== "0" (default เปิด) · =0 ตรงตัว = ประตูคืน {} = อาร์กิวเมนต์ getViralFewshotBlock เดิมไบต์ต่อไบต์ | `src/lib/services/promptMatcher.js` | 3 ก.ย. 69 | LIB_CLASSIFIER_CONTEXT=0 |
+| `TEACHER_RANK_CAP` | `8` | ไม่ตั้ง/ว่าง = 8 เดิม · จำนวนเต็ม ≥ 0 (0 = ปิดกันซ้ำ · ทศนิยมปัดลง · ทนช่องว่าง/อัญประกาศ) · อ่านไม่ออก/ติดลบ = 8 + console.warn | เพดานใช้ครูซ้ำใน 7 วัน (กติกาข้อ 4 ของ rank-v2) — ครูที่ถูกใช้ ≥ ค่านี้ถูกข้าม · อ่านด้วย _envTok ชื่อ literal ใน _rankTuning | `src/lib/services/viralFewshot.js` | 3 ก.ย. 69 | ลบ env ออก (หรือไม่ตั้ง) = ค่าตรึงเดิม 8 · ท่อ+log เดิมไบต์ต่อไบต์ |
+| `TEACHER_RANK_FLOOR` | `50000` | ไม่ตั้ง/ว่าง = 50000 เดิม · จำนวนเต็ม ≥ 0 (0 = ปิดพื้น · ทศนิยมปัดลง) · อ่านไม่ออก/ติดลบ = 50000 + console.warn | พื้นไลก์คุณภาพ (กติกาข้อ 3 ของ rank-v2) — มีใบถึงพื้นแล้วใบต่ำกว่าถูกข้าม · เป็นฐานคูณของชั้นเติม ก ด้วย (× TEACHER_RANK_BACKFILL_RATIO) · อ่านด้วย _envTok ชื่อ literal ใน _rankTuning | `src/lib/services/viralFewshot.js` | 3 ก.ย. 69 | ลบ env ออก = ค่าตรึงเดิม 50000 |
+| `TEACHER_RANK_ROTATE` | `3` | ไม่ตั้ง/ว่าง = 3 เดิม · จำนวนเต็ม ≥ 1 (1 = ไม่หมุน หยิบหัวแถวเสมอ · ทศนิยมปัดลง) · อ่านไม่ออก/0/ติดลบ = 3 + console.warn | ขนาดกลุ่มหัวแถวที่สุ่มถ่วง sqrt(likes) (กติกาข้อ 5 ของ rank-v2) — กันใบอันดับ 1 ผูกขาด · อ่านด้วย _envTok ชื่อ literal ใน _rankTuning | `src/lib/services/viralFewshot.js` | 3 ก.ย. 69 | ลบ env ออก = ค่าตรึงเดิม 3 |
+| `TEACHER_RANK_BACKFILL_RATIO` | `0.4` | ไม่ตั้ง/ว่าง = 0.4 เดิม · ทศนิยม ≥ 0 (พื้นชั้นเติม ก = floor × ค่านี้ · 0.4×50000 = 20,000) · อ่านไม่ออก/ติดลบ = 0.4 + console.warn | สัดส่วนพื้นของชั้นเติม ก (กติกาข้อ 6 ของ rank-v2 — เคสศรราม): ใบต่ำกว่าพื้นแต่ไลก์ ≥ floor×ratio และไม่ติด cap ได้เติมก่อนใบติด cap · อ่านด้วย _envTok ชื่อ literal ใน _rankTuning | `src/lib/services/viralFewshot.js` | 3 ก.ย. 69 | ลบ env ออก = ค่าตรึงเดิม 0.4 |
 
 ## โหมดถ้อยคำ (promptModes)
 
@@ -121,6 +126,7 @@
 | `MISSING_FACTS_GATE` | `1` | 0 · 1 | L4.7 ด่านข้อเท็จจริงหาย — เทียบต้นฉบับดิบกับผลสุดท้ายแล้วเตือนใน _missingFacts (เตือนเท่านั้น ไม่แก้เนื้อ · fail-open) · runMissingFactsGate อ่าน === "0" = ค่าเริ่มต้นเปิด | `src/lib/correction/correctionPipeline.js` | 2 ก.ย. 69 (เคสศรราม "ห่วงเรื่องการขับรถ" หาย) | MISSING_FACTS_GATE=0 = ไม่ทำอะไร (ผลลัพธ์เหมือนเดิมทุกไบต์) |
 | `RAW_FACT_COMPLETENESS_GATE` | `1` | 0 · 1 | ด่าน Sol ตรวจความครบของข้อเท็จจริงจากเนื้อดิบ (สาย TEXT เท่านั้น — autoFlowServiceText เรียก isRawFactCompletenessGateEnabled) · โค้ดอ่าน ?? "1" !== "0" = ค่าเริ่มต้นเปิด ⚠️ production ตั้ง =0 โดยเจตนา (สมุดสวิตช์ 24 ส.ค. 69: RAW_FACT=0) | `src/lib/services/rawFactCompletenessGate.js` | 21 ส.ค. 69 (a56d011a) | RAW_FACT_COMPLETENESS_GATE=0 = ข้ามด่าน (log "ปิดด่าน Sol ตรวจ RAW ชั่วคราว") |
 | `VIRAL_SCORE_ANNOTATE` | `0` | 0 · 1 | =1 แนบคะแนน "โอกาสปัง" ต่อฉบับใน version._viralScore ({score 0-100 เปอร์เซ็นไทล์, band, bandLabel สูง/กลาง/ต่ำ, predictedReactions, topDrivers, warnings, modelVersion}) หลังเนื้อสุดท้ายนิ่งทุกสาขา (หลัง correction/factual editor/length gate ก่อนประกอบ response) — ridge ในเครื่องจาก data/viral-score-model.json (Spearman 0.30) ไม่ยิง API · คำเตือนให้พนักงาน ไม่ใช่คำตัดสิน (บอทแสดง "🔥 โอกาสปัง: สูง (72/100)") · โมเดลไม่มี/คำนวณล้ม = ไม่แนบคีย์ ไม่ล้มท่อ ⚠️ บน Vercel ไฟล์โมเดลต้องอยู่ใน outputFileTracingIncludes (next.config.mjs — เพิ่มครบ 4 route แล้ว) | `src/lib/services/autoFlowServiceText.js` | 2 ก.ย. 69 (เฟส 3) | ลบ env หรือ =0 = ไม่ import โมดูล ไม่มีคีย์ _viralScore (response เดิมทุกไบต์) |
+| `SEMANTIC_FIX_SENTENCE_GUARD` | `1` | 0 = ปิด (พฤติกรรมเดิมไบต์ต่อไบต์ รวมถึงไม่มี field/ธงใหม่ใน result) · 1/ไม่ตั้ง = เปิดด่าน | ด่านกลไกหลัง L4.6 Semantic Fix ลบข้อความ: หน่วยประโยคที่เหลือถ้าจบด้วยคำเชื่อม/คำต้องมีส่วนขยาย หรือเหลือเศษสั้น → ลบทั้งหน่วยแทน (เมื่อพิสูจน์ครบ 6 ข้อว่าไม่มีข้อเท็จจริงหายและไม่สร้างรอยใหม่) ไม่งั้นคืนเนื้อเดิมของประโยคนั้น (fail-safe ห้ามแย่กว่าเดิม) · อ่าน !== "0" สดทุกครั้งที่ด่านทำงาน | `src/lib/correction/semanticSanityCheck.js` | 3 ก.ย. 69 | SEMANTIC_FIX_SENTENCE_GUARD=0 (ไม่ต้อง redeploy — อ่านสดทุกครั้งที่ด่านทำงาน) |
 
 ## ความยาว/กฎถอย
 
@@ -182,4 +188,17 @@
 | สวิตช์ | ค่าเริ่มต้น | ค่าที่รับ | ความหมาย | อ่านโดย | ตั้งแต่ | ถอยกลับ |
 |---|---|---|---|---|---|---|
 | `BOT_RESUME_TRACKING` | `1` | 0 · 1 | บอทจำงานที่กำลังตามอยู่ไว้ที่เซิร์ฟเวอร์ (/api/bot/tracking) — Railway redeploy/รีสตาร์ตแล้วบอทตัวใหม่ตามงานต่อเอง ไม่ค้าง "1%" · envFlag รับเฉพาะ "0"/"1" ตรงตัว ค่าอื่น = ค่าเริ่มต้นเปิด | `discord-bot/index.js` | 2 ก.ย. 69 (เคสหลวงปู่ศิลา 03:49Z) | BOT_RESUME_TRACKING=0 = บอททำงานเหมือนเดิมทุกไบต์ (ต้อง redeploy บอทบน Railway) |
-| `BOT_REVIEW_REACTIONS` | `1` | 0 · 1 | บอทใส่ reaction 👍 ผ่าน / 👎 ไม่ผ่าน / 📌 ใช้แล้ว ใต้ผลข่าว แล้วบันทึกสถานะเข้า PATCH /api/generation-logs/[caseId] + โชว์บรรทัดเตือน (ข้อเท็จจริงหาย/ความคล้าย/โอกาสปัง) — ข้อ 6 แผนยกระดับ | `discord-bot/index.js` | 2 ก.ย. 69 (เฟส 3) | BOT_REVIEW_REACTIONS=0 = ไม่ใส่ reaction ไม่ฟังการกด ไม่แสดงบรรทัดเตือน (ข้อความผลเหมือนเดิม) |
+| `BOT_REVIEW_REACTIONS` | `0` | 0 · 1 | ปุ่มพนักงาน 👍 ผ่าน / 👎 ไม่ผ่าน / 📌 ใช้แล้ว บนข้อความผล: ติด reaction + ฟัง messageReactionAdd (บันทึกสถานะเข้า PATCH /api/generation-logs/[caseId]) + ขอ intent GuildMessageReactions + partials Message/Reaction — คุมเฉพาะปุ่ม ไม่คุมบรรทัดเตือนแล้ว (3 ก.ย. 69 เจ้าของสั่งปิดปุ่ม default เดิม '1' → '0' · บรรทัดเตือนย้ายไป BOT_RESULT_WARNINGS) | `discord-bot/index.js` | 2 ก.ย. 69 (เฟส 3 · ปิดปุ่มเป็นค่าเริ่มต้น 3 ก.ย. 69) | ตั้ง BOT_REVIEW_REACTIONS=1 (ฝั่ง Railway แล้ว redeploy บอท) → ปุ่ม+ตัวฟัง+intent+partials กลับมาแบบรุ่น 2 ก.ย. ทุกไบต์ (ต่างเฉพาะบรรทัด log ตอนตื่น: BOT_BUILD ใหม่ + warnings=on/off) |
+| `BOT_RESULT_WARNINGS` | `1` | 0 · 1 | บรรทัดเตือนใต้เนื้อข่าวแต่ละเวอร์ชันใน embed ผลข่าว (⚠️ อาจตกข้อเท็จจริง จาก _missingFacts · ⚠️ ความคล้าย จาก _diversityWarning · 🔥 โอกาสปัง จาก _viralScore ซึ่งท่อยังไม่ส่งเพราะ VIRAL_SCORE_ANNOTATE ปิด) ผ่าน buildWarningLines/buildWarningTail — envFlag รับเฉพาะ "0"/"1" ตรงตัว ค่าอื่น = ค่าเริ่มต้นเปิด | `discord-bot/index.js` | 3 ก.ย. 69 | BOT_RESULT_WARNINGS=0 (ฝั่ง Railway แล้ว redeploy บอท) → description ของ embed เหลือเนื้อข่าวล้วนทุกไบต์ (ไม่มีบรรทัดเตือน) — พฤติกรรมส่วนอื่นไม่เปลี่ยน |
+
+## หน้าเว็บผลลัพธ์
+
+| สวิตช์ | ค่าเริ่มต้น | ค่าที่รับ | ความหมาย | อ่านโดย | ตั้งแต่ | ถอยกลับ |
+|---|---|---|---|---|---|---|
+| `NEXT_PUBLIC_SHOW_MISSING_FACTS` | `1` | 0 · 1 | แสดงบล็อก "⚠️ อาจตกข้อเท็จจริง" จาก version._missingFacts (ด่าน L4.7) ใต้แต่ละฉบับบนหน้าเว็บผลลัพธ์ · โค้ดอ่าน === "0" = ซ่อนทั้งบล็อก (ค่าเริ่มต้นเปิด · รับเฉพาะ "0" ตรงตัว) · เป็น NEXT_PUBLIC_* ฝังตอน build — เปลี่ยนค่าแล้วต้อง build ใหม่ | `src/components/content/ResultVersions.js` | 3 ก.ย. 69 | ตั้ง NEXT_PUBLIC_SHOW_MISSING_FACTS=0 แล้ว build ใหม่ (หรือ revert src/components/content/ResultVersions.js) — ปิดแล้ว DOM เท่าพฤติกรรมเดิมทุกไบต์ (component คืน null ไม่มี node เพิ่ม) |
+
+## สคริปต์นำเข้าครู (viral-teachers-import)
+
+| สวิตช์ | ค่าเริ่มต้น | ค่าที่รับ | ความหมาย | อ่านโดย | ตั้งแต่ | ถอยกลับ |
+|---|---|---|---|---|---|---|
+| `TEACHER_IMPORT_APPLY` | `1` | 0 = ปฏิเสธโหมด --apply ก่อนแตะทุกอย่าง (dry-run/--rollback ยังใช้ได้เสมอ — ห้ามบล็อกทางถอย) · 1/ไม่ตั้ง/ค่าอื่น = --apply ทำงานปกติ | กันพลาดรัน --apply ผิดจังหวะ (เช่น ช่วง freeze) — ตั้ง 0 แล้วสคริปต์นำเข้าครูเขียนอะไรไม่ได้เลย (อ่าน === "0" จุดเดียวก่อนแตะไฟล์/DB) · สคริปต์ CLI ไม่ถูก import โดยโค้ดรันไทม์ใดๆ ไม่รัน = ระบบเดิมไบต์ต่อไบต์ | `scripts/import-new-teachers.mjs` | 3 ก.ย. 69 | เอา env ออก = --apply กลับทำงานปกติ · ถอยการนำเข้าทั้งชุด: node scripts/import-new-teachers.mjs --rollback <manifest> (ลบแถวตาม id + คืนไฟล์ 2 ไฟล์จาก backup ไบต์เดิม) |
