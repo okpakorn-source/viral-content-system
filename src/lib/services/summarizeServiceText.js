@@ -1742,6 +1742,17 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
     let viralFewshotBlock = '';
     try {
       const { getViralFewshotBlock } = await import('@/lib/services/viralFewshot');
+      // 🧭 3 ก.ย. 69 (R234-ค): ส่ง "บริบทเรื่อง" (conflictTags/humanAngles จาก DNA ที่วิเคราะห์แล้ว) ให้ตัวจำแนกหมวด V2
+      //   ใช้ขั้น 2 "รูปเรื่อง" แทนการเดาจากคีย์เวิร์ดในป้ายล้วน — สวิตช์ LIB_CLASSIFIER_CONTEXT อ่าน "จุดเดียว"
+      //   ใน promptMatcher.js (=0/โหลดล้ม → {} → spread แล้วอาร์กิวเมนต์เท่าเดิมทุกไบต์ = พฤติกรรมเดิม)
+      let _libCtx = {};
+      try {
+        const { buildLibClassifierContext } = await import('@/lib/services/promptMatcher');
+        _libCtx = buildLibClassifierContext({
+          conflictTags: newsAnalysis?.conflictTags || actualBreakdown?.conflictTags || [],
+          humanAngles: newsAnalysis?.humanAngles || actualBreakdown?.humanAngles || [],
+        }) || {};
+      } catch { _libCtx = {}; /* บริบทหาย = ส่งว่าง — ห้ามล้มท่อครู */ }
       // 🎴 24 ส.ค. 69 การ์ดนำทางครู: ป้ายสาระของการ์ดที่เลือก (คลังเดียวกับสารบัญ) ส่งให้ตัวคัดครูเสมอ
       //   สวิตช์ CARD_TEACHER_MATCH ถูกอ่าน "จุดเดียว" ใน viralFewshot — ปิดสวิตช์ = ค่านี้ถูกทิ้ง ระบบเดิม 100%
       let _ctEss = {};
@@ -1758,6 +1769,7 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
         // 🎯 โหมดจับคู่ (VIRAL_MATCH_MODE): ส่ง "เนื้อดิบจริง + แก่นเรื่อง" ให้ตัวเลือกใช้แมชตามคำสั่งเจ้าของ
         newsBrief: { coreStory: actualBreakdown?.core_story || actualBreakdown?.coreStory || '', excerpt: newsForStage('VIRAL_MATCH', actualNewsBody) }, // ★ สคีมาจริงใช้ core_story (ผู้ตรวจจับได้)
         cardEssence: _ctEss[smartPrompt?.id] || '', // 🎴 ป้ายสาระการ์ดที่เลือก — ไม่มีการ์ด/ไม่มีป้าย = ว่าง
+        ..._libCtx, // 🧭 conflictTags/humanAngles เฉพาะเมื่อสวิตช์เปิดและมีข้อมูล — ปิด/ว่าง = ก้อนว่าง = อาร์กิวเมนต์เดิม
       });
     } catch (e) { console.log('[ViralFewshot] skip:', e.message?.slice(0, 40)); }
 

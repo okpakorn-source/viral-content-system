@@ -193,3 +193,45 @@ export function gradeMatch(score, dims = []) {
   if (score >= 40) return 'CLOSE';
   return 'BORROWED';
 }
+
+// ═══ 🧭 3 ก.ย. 69 (R234-ค) — ประตูบริบทตัวจำแนกหมวดหอสมุด (LIB_CLASSIFIER_CONTEXT) ═══
+// ปัญหา: จุดเรียกตัวจำแนกหมวด V2 ใน summarizeServiceText.js (บล็อก VIRAL FEW-SHOT ~1752) ส่งแค่
+//   category/emotionalTags/archetype → ขั้น 2 "รูปเรื่อง" ของ pickLibraryCategoryV2 (viralFewshot.js)
+//   ไม่เคยเห็น conflictTags/humanAngles ที่ท่อวิเคราะห์ (newsAnalysis/actualBreakdown) มีอยู่แล้ว
+//   → ข่าวที่ป้ายหมวดหลักไม่แมปตาราง ตกไปเดาจากคีย์เวิร์ดในป้าย/archetype ล้วน (จำแนกผิด ~1/3)
+//   เคสสนามจริง (news-r233-run/result-P2fix-บันเทิง-05233.json): ป้าย 'ความรักและชีวิตคู่ในช่วงเจ็บป่วย'
+//   ตกชั้น 'ข่าวเศร้า' เพราะคำ 'สูญเสีย' ในแท็กอารมณ์ ทั้งที่ conflictTags/humanAngles ('...อนาคตครอบครัว',
+//   'ความห่วงลูกที่ยังเล็กเมื่อครอบครัวเผชิญ...') ชี้ชัดว่าเป็นเรื่องครอบครัวประคองกัน → ที่ถูกคือ 'ดราม่าครอบครัว'
+// สูตรถ่วงน้ำหนัก (deterministic ทดสอบซ้ำได้ — โค้ดสูตรอยู่ pickLibraryCategoryV2 ขั้น 2 ใน viralFewshot.js
+//   ตัวนี้เป็น "ประตูส่งของ" เท่านั้น ไม่แตะสูตร):
+//   shapes = [archetype, ...humanAngles, ...conflictTags] · คะแนนชั้น = Σ ความยาววลี LIB_V2_SHAPES ที่พบใน shapes (วลีละครั้ง)
+//   ชั้นคะแนนรวมสูงสุดชนะ · เสมอ = ลำดับตาราง · ป้ายหมวดหลัก (ขั้น 1) ยังชนะบริบทเสมอ — บริบทมีผลเฉพาะข่าวที่ป้ายไม่แมป
+//   และบริบทชนะขั้น 3 (อารมณ์เศร้า) — ไม่มีสุ่ม ไม่มีสถานะสะสม อินพุตเดิมได้ผลเดิม 100%
+// การใช้: spread ผลลัพธ์เข้าอาร์กิวเมนต์ getViralFewshotBlock — สวิตช์ปิด/ไม่มีข้อมูล = {} = อาร์กิวเมนต์เดิมทุกไบต์
+// 🔴 ถอยกลับ: LIB_CLASSIFIER_CONTEXT=0 (รับเฉพาะ '0' ตรงตัว · ไม่ตั้ง = เปิด — แผนเดียวกับ LIB_CLASSIFIER_V2)
+export const libClassifierContextOn = () => process.env.LIB_CLASSIFIER_CONTEXT !== '0';
+
+// ล้างชนิดแนวเดียวกับ _v2List ฝั่งตัวจำแนก (บทเรียน TypeError 16 ส.ค. 69): รับ อาเรย์/สตริงเดี่ยว/ตัวเลข/null ไม่โยน
+const _ctxList = (v) => (Array.isArray(v) ? v : v === null || v === undefined || v === '' ? [] : [v])
+  .filter((x) => typeof x === 'string' || typeof x === 'number')
+  .map((x) => String(x).trim()).filter(Boolean);
+
+/**
+ * สร้างช่องบริบทสำหรับ spread เข้าอาร์กิวเมนต์ตัวจำแนกหมวด V2 (getViralFewshotBlock → resolveLibraryCategory)
+ * @param {object} context - { conflictTags, humanAngles, emotionalTags? } จาก DNA ที่ท่อวิเคราะห์ได้แล้ว
+ * @returns {object} {} เมื่อสวิตช์ปิด/ไม่มีข้อมูล · ไม่งั้นคืนเฉพาะช่องที่มีค่า (ไม่ปล่อยอาเรย์ว่างไปทับ default ปลายทาง)
+ *   emotionalTags เป็นช่องเสริมตามสเปก — จุดเรียก summarizeServiceText "ไม่ส่ง" ช่องนี้ เพราะอาร์กิวเมนต์เดิม
+ *   ส่งอยู่แล้วผ่านโซ่ fallback (emotionalTags→emotionalThemes→breakdown) — ส่งซ้ำทางนี้จะไปทับโซ่เดิม
+ */
+export function buildLibClassifierContext(context = {}) {
+  if (!libClassifierContextOn()) return {};
+  const src = context && typeof context === 'object' ? context : {};
+  const out = {};
+  const conflictTags = _ctxList(src.conflictTags);
+  const humanAngles = _ctxList(src.humanAngles);
+  const emotionalTags = _ctxList(src.emotionalTags);
+  if (conflictTags.length) out.conflictTags = conflictTags;
+  if (humanAngles.length) out.humanAngles = humanAngles;
+  if (emotionalTags.length) out.emotionalTags = emotionalTags;
+  return out;
+}
