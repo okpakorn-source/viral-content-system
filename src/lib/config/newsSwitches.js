@@ -539,6 +539,15 @@ export const NEWS_SWITCHES = Object.freeze([
     name: 'PORT', default: '3000', values: ['หมายเลขพอร์ต'], readBy: [QUEUE], group: 'แพลตฟอร์ม', kind: 'platform',
     meaning: 'พอร์ตเซิร์ฟเวอร์ที่ watchdog คิวใช้ปลุก /api/queue/worker ในเครื่อง (ค่าจาก Next/ระบบ)', since: '1 มิ.ย. 69', rollback: '— (ค่าแพลตฟอร์ม)',
   },
+  // ★ 4 ก.ย. 69 (WF5 ครู writers-v1): viralFewshot.js อ่าน VERCEL/VERCEL_ENV เป็นยาม fail-closed ของ TEACHER_POOL_FILE (แบบ persistStore.js:263) — ไฟล์อยู่ในชุดสแกน จึงต้องลงทะเบียน
+  {
+    name: 'VERCEL', default: '', values: ['1 บน Vercel (แพลตฟอร์มตั้งให้)', 'ไม่ตั้ง = นอก Vercel'], readBy: [FEWSHOT, 'src/lib/persistStore.js'], group: 'แพลตฟอร์ม', kind: 'platform',
+    meaning: 'ค่าแพลตฟอร์ม Vercel — ใช้เป็นยามให้ห้องแล็บ (TEACHER_POOL_FILE ใน viralFewshot · CARD_LIBRARY_LAB ใน persistStore) เพิกเฉยสวิตช์บน production (console.error ครั้งเดียว) · ⚠️ เครื่องทีมที่ vercel env pull อาจมี VERCEL=1 ใน .env.local — จะทำให้ห้องแล็บไม่ทำงาน', since: '3 ก.ย. 69', rollback: '— (ค่าแพลตฟอร์ม)',
+  },
+  {
+    name: 'VERCEL_ENV', default: '', values: ['production/preview/development (แพลตฟอร์มตั้งให้)', 'ไม่ตั้ง = นอก Vercel'], readBy: [FEWSHOT, 'src/lib/persistStore.js'], group: 'แพลตฟอร์ม', kind: 'platform',
+    meaning: 'ค่าแพลตฟอร์ม Vercel (คู่กับ VERCEL) — ยาม fail-closed ตัวเดียวกัน: พบค่าใดค่าหนึ่ง = ห้องแล็บ TEACHER_POOL_FILE/CARD_LIBRARY_LAB ถูกเพิกเฉย', since: '3 ก.ย. 69', rollback: '— (ค่าแพลตฟอร์ม)',
+  },
 
   // ── โมเดล / ไคลเอนต์ AI ──
   {
@@ -620,6 +629,22 @@ export const NEWS_SWITCHES = Object.freeze([
     readBy: [FEWSHOT], group: 'ครูตัวอย่างไวรัล', kind: 'value',
     meaning: 'สัดส่วนพื้นของชั้นเติม ก (กติกาข้อ 6 ของ rank-v2 — เคสศรราม): ใบต่ำกว่าพื้นแต่ไลก์ ≥ floor×ratio และไม่ติด cap ได้เติมก่อนใบติด cap · อ่านด้วย _envTok ชื่อ literal ใน _rankTuning',
     since: '3 ก.ย. 69', rollback: 'ลบ env ออก = ค่าตรึงเดิม 0.4',
+  },
+
+  // ── ★ 4 ก.ย. 69 (WF5 ครู writers-v1) — พูลครูป้าย igdara-writers-v1 (Nisada Jaraket · Po Ny 28 ใบ) ใน viralFewshot.js ──
+  //   TEACHER_POOL อ่านผ่าน _envTok ชื่อ literal ใน _teacherPool (เทียบ === 'writers-v1' — ตัวตีความบอกได้แค่ "ไม่ใช่ค่านั้น")
+  //   TEACHER_POOL_FILE อ่าน ?? '' ใน _poolFileActive (ตีความไม่ได้ = ค่าว่าง = ปิด) · ยามเฉพาะสาย: tests/teacher-pool-writers-v1.test.mjs (พาริตี้ HEAD)
+  {
+    name: 'TEACHER_POOL', default: '', values: ['writers-v1 = เฉพาะแถว tags มี igdara-writers-v1', 'ไม่ตั้ง/ว่าง = พูลเดิมทุกใบ — โค้ดเดิมทุกไบต์'],
+    readBy: [FEWSHOT], group: 'ครูตัวอย่างไวรัล', kind: 'value',
+    meaning: 'เลือกพูลครูตัวอย่างไวรัล: writers-v1 = ดึงทั้งคลัง (limit 300 + คอลัมน์ tags) แล้วกรองเฉพาะแถวที่ tags มี igdara-writers-v1 ฝั่ง client · แคชคนละคีย์กับพูลเดิม (__all__|pool:writers-v1) · โหมดไม่กว้าง (rotate/top2) กรองหมวดจากพูลฝั่ง client — หมวดว่างในพูล = ใช้ทั้งพูลแบบข้ามหมวด (หัวบล็อกไม่ประกาศหมวด) ห้ามถอยไปแถวไม่มีป้าย · พูลว่าง (ยังไม่ import) = ไม่มีครู + console.log "ไม่พบครูป้าย … ไม่ถอยไปพูลเดิม" · ชั้นเฉพาะกิจ/rank-v2/ไลก์จริง/บัตร/สมุดประวัติ ทำงานเหมือนเดิมบนพูลที่กรองแล้ว · log ✅ ต่อท้าย "· พูล writers-v1 (N ใบ)" · ค่าอื่น = ถือว่าไม่ตั้ง + console.log อ่านไม่ออกครั้งเดียวต่อค่า',
+    since: '4 ก.ย. 69', rollback: 'unset',
+  },
+  {
+    name: 'TEACHER_POOL_FILE', default: '', values: ['พาธไฟล์ JSON โครง data/teachers-writers-v1.json ({ teachers: [...] }) หรืออาเรย์ teachers ตรงๆ', 'ไม่ตั้ง/ว่าง = ปิด — เส้นเดิม'],
+    readBy: [FEWSHOT], group: 'ครูตัวอย่างไวรัล — ห้องแล็บ', kind: 'value',
+    meaning: 'ห้องแล็บครูจากไฟล์ — ทำงานเฉพาะเมื่อ CARD_LIBRARY_LAB=1 และไม่พบ VERCEL/VERCEL_ENV (พบ Vercel = console.error ครั้งเดียว + เพิกเฉย · ตั้งไฟล์แต่ LAB ไม่ใช่ 1 = console.log "ถูกเพิกเฉย" ครั้งเดียว + เส้นเดิม) · เมื่อทำงาน: ไม่ยิง viral_examples เลย (rows = teachers จากไฟล์ อ่านสดทุกครั้ง ไม่ใช้แคช) · ไฟล์หาย/JSON พัง/ไม่มี teachers = console.error + throw ข้อความมี TEACHER_POOL_FILE (ผู้เรียกครอบ catch → ไม่มีครู ห้ามถอยไป Supabase) · ไลก์จริง = byId ไฟล์ data/viral-likes-real.json + engagement_likes จากไฟล์ (matchedBy pool-file) ถึงทั้ง _applyRealLikes และ rank-v2 · บัตรลักษณะ = data/viral-essences.json + essence จากไฟล์ · ไม่จดสมุดประวัติ (log "[TeacherPoolLab] ข้ามการจดสมุดประวัติ") · ประกาศตัวครั้งเดียว "[TeacherPoolLab] โหมดแล็บทำงาน — อ่านครูจากไฟล์: <พาธ> (N ใบ)" · ตั้งคู่ TEACHER_POOL=writers-v1 = กรองป้ายบนไฟล์ด้วย',
+    since: '4 ก.ย. 69', rollback: 'unset',
   },
 
   // ── เพดานเนื้อข่าว (newsCap.js — ★ 2 ก.ย. 69 รอบยืนยัน ข้อ 1 · อ่านผ่าน newsForStage · ค่าเริ่มต้นทุกด่าน 0 = ไม่จำกัด) ──

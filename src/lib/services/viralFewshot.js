@@ -158,6 +158,117 @@ const CACHE_MS = 10 * 60 * 1000;
 // ★ สวิตช์ถอย: VIRAL_ROTATE=0 = พฤติกรรมเดิมเป๊ะ (หยิบ 2 ใบไลก์สูงสุดตายตัว)
 const _rotateOn = () => process.env.VIRAL_ROTATE !== '0';
 
+// ═══ ★ 4 ก.ย. 69 (WF5 ครู writers-v1) — สวิตช์ TEACHER_POOL (พูลครูป้าย) + TEACHER_POOL_FILE (ห้องแล็บ อ่านครูจากไฟล์) ═══
+//   สัญญาหลัก: ไม่ตั้งทั้งคู่ = ทุก helper คืนค่าที่ทำให้บรรทัดเดิมทำงานเหมือนเดิมทุกไบต์ (บล็อก · คำขอ PostgREST · log · สมุดประวัติ)
+//   พิสูจน์ด้วย tests/teacher-pool-writers-v1.test.mjs (ชุด ก fuzz เทียบโมดูล HEAD ในสนาม PostgREST จำลอง)
+//   TEACHER_POOL=writers-v1 (production): ดึงทั้งคลัง (limit 300 + คอลัมน์ tags) แล้วกรองแถวที่ tags มี POOL_TAG ฝั่ง client
+//     · แคชคนละคีย์กับพูลเดิม · โหมดไม่กว้างกรองหมวดฝั่ง client จากพูล · หมวดว่างในพูล = ใช้ทั้งพูล + ข้ามหมวด (ห้ามถอยไปแถวไม่มีป้าย)
+//     · พูลว่าง (ยังไม่ --apply) = ไม่มีครู + log ดัง ไม่ถอยไปพูลเดิม · ไลก์จริง/บัตร/สมุดประวัติ ทำงานเหมือนเดิมบนพูลที่กรองแล้ว
+//   TEACHER_POOL_FILE (ห้องแล็บเท่านั้น): ทำงานเฉพาะ CARD_LIBRARY_LAB=1 และไม่พบ VERCEL/VERCEL_ENV (fail-closed แบบ persistStore.js)
+//     · ไม่ยิง viral_examples · อ่านไฟล์สดทุกครั้ง ไม่ใช้ _cache · ไลก์+บัตรจากไฟล์รวมกับไฟล์ data/ · ไม่จดสมุดประวัติ
+const POOL_TAG = 'igdara-writers-v1';
+const POOL_NAMES = Object.freeze({ 'writers-v1': POOL_TAG }); // ชื่อพูล → ป้ายใน viral_examples.tags
+const POOL_SELECT_BASE = 'id, title, content, writing_notes, category, engagement_likes'; // สตริง select เดิม (ห้ามเปลี่ยน)
+const POOL_OFF_RE = /^(|0|false|off|no)$/; // ค่าปิดสามัญ = ไม่ตั้ง ไม่เตือน (แบบแผน VIRAL_SHORTLIST/SL_OFF_RE — "ห้ามเตือนค่าปิดสามัญ" ผู้ตรวจ 16 ส.ค.)
+let _poolWarned = '';
+function _teacherPool() {
+  const v = _envTok('TEACHER_POOL');
+  if (!v || POOL_OFF_RE.test(v)) return '';
+  if (POOL_NAMES[v]) return v;
+  if (_poolWarned !== v) {
+    _poolWarned = v;
+    console.log(`[ViralFewshot] 🧑‍🏫 TEACHER_POOL="${v}" อ่านไม่ออก → ถือว่าไม่ตั้ง (พูลเดิมทุกใบ · ค่าที่รับ: writers-v1)`);
+  }
+  return '';
+}
+const _poolSelect = (poolName) => (poolName ? `${POOL_SELECT_BASE}, tags` : POOL_SELECT_BASE);
+const _poolCacheKey = (baseKey, poolName) => (poolName ? `__all__|pool:${poolName}` : baseKey); // พูลดึงทั้งคลังเสมอ → คีย์เดียวต่อพูล
+const _poolLogTail = (poolName, n) => (poolName ? ` · พูล ${poolName} (${n} ใบ)` : '');
+// tags จาก PostgREST เป็นอาเรย์ (text[]) — รับสตริง JSON/คั่นจุลภาคด้วยเผื่อแถวที่ถูกเติมมือ
+function _rowTags(r) {
+  let t = r?.tags;
+  if (typeof t === 'string') { try { t = JSON.parse(t); } catch { t = t.split(','); } }
+  return Array.isArray(t) ? t.map((x) => String(x).trim()) : [];
+}
+const _rowInPool = (r, tag) => _rowTags(r).includes(tag);
+
+let _poolLabIgnoredWarned = false, _poolLabVercelWarned = false, _poolLabAnnounced = false;
+/** พาธไฟล์พูลเมื่อห้องแล็บทำงานจริง · '' = เส้นเดิม (ไม่ตั้ง / LAB ไม่ใช่ '1' / อยู่บน Vercel) */
+function _poolFileActive() {
+  const file = String(process.env.TEACHER_POOL_FILE ?? '').trim();
+  if (!file) return '';
+  if (process.env.CARD_LIBRARY_LAB !== '1') {
+    if (!_poolLabIgnoredWarned) {
+      _poolLabIgnoredWarned = true;
+      console.log(`[TeacherPoolLab] TEACHER_POOL_FILE ถูกเพิกเฉย — ต้องตั้ง CARD_LIBRARY_LAB=1 ด้วย (ตอนนี้วิ่งเส้นเดิม อ่านครูจาก viral_examples)`);
+    }
+    return '';
+  }
+  if (process.env.VERCEL || process.env.VERCEL_ENV) {
+    if (!_poolLabVercelWarned) {
+      _poolLabVercelWarned = true;
+      console.error(`[TeacherPoolLab] TEACHER_POOL_FILE ถูกเพิกเฉย — ตรวจพบ Vercel env (VERCEL/VERCEL_ENV) ห้องแล็บใช้ได้เฉพาะนอก production → อ่านครูจาก viral_examples ตามเดิม`);
+    }
+    return '';
+  }
+  return file;
+}
+/** อ่านไฟล์พูลสด (โครง data/teachers-writers-v1.json หรืออาเรย์ teachers ตรงๆ) → { rows, likesById, essences } · พัง = console.error + throw (ข้อความมี TEACHER_POOL_FILE) */
+function _loadPoolFile(file) {
+  const fail = (why) => {
+    const msg = `[TeacherPoolLab] TEACHER_POOL_FILE อ่านไม่ได้ — ${why}: ${file}`;
+    console.error(msg);
+    throw new Error(msg);
+  };
+  let raw = '';
+  try { raw = fs.readFileSync(file, 'utf8'); } catch (e) { fail(`ไฟล์หาย/เปิดไม่ได้ (${String(e?.message || e).slice(0, 80)})`); }
+  let parsed = null;
+  try { parsed = JSON.parse(raw); } catch (e) { fail(`JSON พัง (${String(e?.message || e).slice(0, 80)})`); }
+  const teachers = Array.isArray(parsed) ? parsed : parsed?.teachers;
+  if (!Array.isArray(teachers) || !teachers.length) fail('ไม่มี teachers (ต้องเป็นอาเรย์ หรือ { teachers: [...] } ที่ไม่ว่าง)');
+  const rows = [], likesById = {}, essences = {};
+  let shortCut = 0; // ใบเนื้อสั้น (≤ 200) — เกณฑ์เดียวกับเส้น Supabase (rows.filter content.length > 200) ให้แล็บคัดเหมือน production
+  for (const t of teachers) {
+    if (!t || typeof t !== 'object' || !t.id) continue;
+    if (String(t.content ?? '').length <= 200) { shortCut++; continue; }
+    rows.push({
+      id: String(t.id), title: String(t.title ?? ''), content: String(t.content ?? ''), writing_notes: String(t.writing_notes ?? ''),
+      category: String(t.category ?? ''), engagement_likes: Number(t.engagement_likes) || 0, tags: Array.isArray(t.tags) ? t.tags : [],
+    });
+    const likes = Number(t.engagement_likes);
+    if (likes > 0) likesById[t.id] = { likes, matchedBy: 'pool-file' };
+    if (t.essence && typeof t.essence === 'object') essences[t.id] = t.essence;
+  }
+  if (!rows.length) fail(`ไม่มี teachers ที่ใช้ได้ (ต้องมี id และเนื้อ > 200 ตัวอักษร · ตัดเนื้อสั้น ${shortCut}/${teachers.length})`);
+  if (!_poolLabAnnounced) {
+    _poolLabAnnounced = true;
+    console.log(`[TeacherPoolLab] โหมดแล็บทำงาน — อ่านครูจากไฟล์: ${file} (${rows.length} ใบ${shortCut ? ` · ตัดเนื้อสั้น ${shortCut}` : ''}) · ไม่แตะ viral_examples · ไม่จดสมุดประวัติ`);
+  }
+  return { file, rows, likesById, essences };
+}
+/** map ไลก์จริงสำหรับ _applyRealLikes: lab null = undefined (= เรียกแบบเดิมไม่ส่ง override) · lab = รวม byId ไฟล์ data/ + ไฟล์พูล · VIRAL_HITS_FORMULA=0 = null (ไม่ถ่วง เหมือนเดิม) */
+function _likesMapForPick(lab) {
+  if (!lab) return undefined;
+  if (!_hitsOn()) return null;
+  return { byId: { ...(_readRealLikesFile()?.byId || {}), ...lab.likesById } };
+}
+/** likesById ของ rank-v2: lab null = ค่าเดิมเป๊ะ · lab = รวมไฟล์พูล */
+function _likesByIdForRank(lab) {
+  const base = _readRealLikesFile()?.byId || {};
+  return lab ? { ...base, ...lab.likesById } : base;
+}
+/** บัตรลักษณะ: lab null = _loadEssences() ก้อนเดิม (identity เดิม — แคชน้ำหนักคำยังติด) · lab = รวมบัตรจากไฟล์พูล (ครูใหม่มีบัตรตอนคัดโผ) */
+let _poolLabEssNoted = false;
+function _essencesForPick(lab) {
+  const base = _loadEssences();
+  if (!lab) return base;
+  if (!_poolLabEssNoted && !Object.keys(base).length) { // บรรทัด ⚠️ ของ _loadEssences (ทุก 60 วิ) ไม่มีผลในโหมดแล็บ — บอกผู้รันให้ชัด (ห้ามแตะ _loadEssences เอง = เส้นปิด)
+    _poolLabEssNoted = true;
+    console.log(`[TeacherPoolLab] บัตรลักษณะใน data/viral-essences.json ว่าง — ใช้บัตรจากไฟล์พูล ${Object.keys(lab.essences).length} ใบ (ชั้นเฉพาะกิจไม่ถอย)`);
+  }
+  return { ...base, ...lab.essences };
+}
+
 /**
  * 📒 สมุดประวัติการหยิบ (8 ส.ค. 69 เจ้าของสั่ง "เก็บประวัติแม่นยำ ตัวไหนถูกเรียก")
  * จดลง Supabase store_items/viral_pick_history: ใบไหน (id+ชื่อ) · หมวด · ขนาดโผ · หัวข่าว · เวลา
@@ -166,6 +277,8 @@ const _rotateOn = () => process.env.VIRAL_ROTATE !== '0';
  */
 async function _recordPickHistory(libCat, picks, meta = {}) {
   try {
+    // ★ 4 ก.ย. 69 (WF5 ครู writers-v1): ห้องแล็บไฟล์พูลไม่จดสมุดประวัติ (ปิด = '' → บรรทัดเดิม)
+    if (_poolFileActive()) { console.log('[TeacherPoolLab] ข้ามการจดสมุดประวัติ (โหมดแล็บ TEACHER_POOL_FILE)'); return; }
     const sb = getSupabase();
     if (!sb || !picks.length || meta.noHistory) return;
     const nowIso = new Date().toISOString();
@@ -1070,19 +1183,31 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
     //   (สวิตช์ปิด libCat เป็นสตริงเสมอ → noShelf=false → บรรทัดเดิมทุกไบต์)
     const noShelf = libCat == null;
     const wide = mode || shortlistOn || noShelf;
-    const cacheKey = wide ? '__all__' : libCat;
+    // ★ 4 ก.ย. 69 (WF5 ครู writers-v1): พูลครูป้าย + ห้องแล็บไฟล์ — ปิดทั้งคู่: poolName '' · lab null → ทุก helper คืนค่าเดิม
+    //   ไฟล์พูลหาย/พัง = โยนที่นี่ → catch ก้อนนอกครอบ (ไม่มีครู · ห้ามถอยไป Supabase)
+    const poolName = _teacherPool();
+    const labFile = _poolFileActive();
+    const lab = labFile ? _loadPoolFile(labFile) : null;
+    const poolTag = poolName ? POOL_NAMES[poolName] : '';
+    const fetchWide = wide || !!poolName; // พูลป้ายดึงทั้งคลังเสมอ (limit 300) แล้วกรองหมวดฝั่ง client
+    let poolTotal = 0; // จำนวนแถวที่ดึงมาก่อนกรองป้าย (ไว้พิมพ์ log พูลว่าง)
+    const cacheKey = _poolCacheKey(wide ? '__all__' : libCat, poolName);
     let rows = null;
     const cached = _cache.get(cacheKey);
-    if (cached && cached.rows && Date.now() - cached.at < CACHE_MS) {
+    if (lab) {
+      rows = lab.rows; // ★ WF5 ห้องแล็บ: ไม่ยิง viral_examples · ไม่ใช้ _cache (อ่านสดทุกครั้ง)
+      poolTotal = rows.length;
+    } else if (cached && cached.rows && Date.now() - cached.at < CACHE_MS) {
       rows = cached.rows;
+      poolTotal = Number(cached.total) || 0;
     } else {
       const sb = getSupabase();
       if (sb) {
         let q = sb.from('viral_examples')
-          .select('id, title, content, writing_notes, category, engagement_likes')
+          .select(_poolSelect(poolName)) // ★ WF5: ปิด = สตริงเดิม · พูลป้าย = เติม ", tags"
           .order('engagement_likes', { ascending: false });
         const WIDE_LIMIT = 300;
-        q = wide ? q.limit(WIDE_LIMIT) : q.eq('category', libCat).limit(rotate ? 100 : 6); // ★ 8 ส.ค. 69: โหมดจับคู่/ชั้นเฉพาะกิจ=ทั้งคลัง · โหมดเดิม=ทั้งหมวด (ใหญ่สุดจริง 64 ใบ)
+        q = fetchWide ? q.limit(WIDE_LIMIT) : q.eq('category', libCat).limit(rotate ? 100 : 6); // ★ 8 ส.ค. 69: โหมดจับคู่/ชั้นเฉพาะกิจ=ทั้งคลัง · โหมดเดิม=ทั้งหมวด (ใหญ่สุดจริง 64 ใบ)
         const { data, error } = await q;
         // ★ 1 ก.ย. 69 (บั๊กระดับกลาง พิสูจน์แล้ว): เดิมกลืน error แล้วแคช "ไม่มีครู" ไว้ 10 นาที → ข่าวทุกใบช่วงนั้นเขียนโดยไม่มีครูไวรัล
         if (error) console.warn(`[ViralFewshot] ⚠️ ดึงคลังครูล้ม (${error.message}) — ไม่แคชผลว่าง จะลองใหม่ข่าวถัดไป`);
@@ -1090,17 +1215,30 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
         //   engagement_likes ในตารางเป็น 0 ทั้งคลัง ⇒ .order() เรียงจากคีย์เท่ากันหมด = Postgres ไม่รับประกันลำดับ
         //   พอคลังโตเกิน 300 ใบ "โผกว้าง" จะกลายเป็น 300 ใบที่ไม่นิ่ง และคำสัญญา "ครูทุกใบมีสิทธิ์" จะไม่จริง
         //   ยังไม่แก้เองเพราะทางแก้จริงอยู่นอกไฟล์นี้ (เติมไลก์จริงลงตาราง หรือเพิ่มคีย์เรียงรอง) — ตะโกนไว้ก่อน
-        if (wide && (data || []).length >= WIDE_LIMIT) {
+        if (fetchWide && (data || []).length >= WIDE_LIMIT) {
           console.log(`[ViralFewshot] ⚠️ คลังชนเพดานดึง ${WIDE_LIMIT} แถว — ครูบางใบเข้าไม่ถึงตัวเลือกแล้ว (และลำดับไม่นิ่งเพราะ engagement_likes เป็น 0 ทั้งตาราง) → ต้องเคาะเพดาน/คีย์เรียงใหม่`);
         }
         rows = (data || []).filter(r => (r.content || '').length > 200);
-        if (!error) _cache.set(cacheKey, { rows, at: Date.now() }); // ★ 1 ก.ย. 69: แคชเฉพาะผลที่ดึงสำเร็จ
+        if (poolName) { poolTotal = (data || []).length; rows = rows.filter((r) => _rowInPool(r, poolTag)); } // ★ WF5: กรองป้ายฝั่ง client
+        if (!error) _cache.set(cacheKey, poolName ? { rows, at: Date.now(), total: poolTotal } : { rows, at: Date.now() }); // ★ 1 ก.ย. 69: แคชเฉพาะผลที่ดึงสำเร็จ (★ WF5: พูลจดจำนวนดิบไว้พิมพ์ log)
         if (_cache.size > 30) _cache = new Map([..._cache].slice(-15));
       }
     }
 
+    // ★ 4 ก.ย. 69 (WF5 ครู writers-v1): พูลป้าย/ไฟล์ — โหมดไม่กว้างกรองหมวดฝั่ง client · หมวดว่างในพูล = ทั้งพูล + ข้ามหมวด (ห้ามถอยไปแถวไม่มีป้าย)
+    let poolCross = false, poolSize = 0;
+    if (poolName || lab) {
+      if (lab && poolName) rows = (rows || []).filter((r) => _rowInPool(r, poolTag)); // ตั้งทั้งคู่: พูลป้าย = กรองป้ายบนไฟล์ด้วย
+      poolSize = (rows || []).length;
+      if (poolName && !poolSize) console.log(`[ViralFewshot] 🧑‍🏫 TEACHER_POOL=${poolName} แต่ไม่พบครูป้าย ${poolTag} ในตาราง (0/${poolTotal} แถว) → ไม่มีครูตัวอย่าง ไม่ถอยไปพูลเดิม`);
+      if (!wide) {
+        const inCat = (rows || []).filter((r) => r.category === libCat);
+        if (inCat.length) rows = inCat; else poolCross = true;
+      }
+    }
+
     // ★ 14 ส.ค. 69: สวิตช์สูตรแสนไลก์เปิด → ทับไลก์จริงก่อนเข้าตัวเลือก (idempotent — ทับซ้ำได้ค่าเดิม)
-    rows = _applyRealLikes(rows);
+    rows = _applyRealLikes(rows, _likesMapForPick(lab)); // ★ WF5: lab null = undefined = เรียกแบบเดิม
 
     // ── ขั้น 2: เลือก 2 ใบ ──
     //   โหมดจับคู่ (เจ้าของสั่ง 8 ส.ค. "ห้ามสุ่ม"): ai → บรรณารักษ์เลือกพร้อมเหตุผล · score → คะแนนแมชนิ่งๆ
@@ -1115,7 +1253,9 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
     if (mode === 'ai' || mode === 'score') {
       // แคชต่อข่าวแบบ "แชร์สัญญา": ทุกเวอร์ชันของข่าวเดียวกัน (รวมที่วิ่งขนานพร้อมกัน) รอผลบรรณารักษ์ก้อนเดียว
       // = จ่าย AI ครั้งเดียว/ข่าว + ได้ครูคู่เดียวกันทุกเวอร์ชัน (จับตอนเทสจริง: 2 เวอร์ชันขนานเคยเบิก 2 รอบ)
-      const mKey = newsTitle ? `${String(newsTitle).slice(0, 80)}|${libCat ?? ''}|${mode}` : ''; // 🗂️ V2 คืน null → คีย์ว่าง ไม่ใช่ข้อความ "null" (สวิตช์ปิด libCat ไม่มีทางเป็น null)
+      // ★ 4 ก.ย. 69 (WF5 ทีมหักล้าง): แคชโหมดจับคู่เก็บ "ครูที่เลือกแล้ว" → ต้องแยกคีย์ต่อพูล/ไฟล์แล็บด้วย ไม่งั้นสลับพูลในโปรเซสเดียวได้ครูชุดเดิมหลุด (ปิดทั้งคู่ = ท้ายว่าง = คีย์เดิมไบต์ต่อไบต์)
+      const mPoolSfx = (poolName || labFile) ? `|pool:${poolName}|lab:${labFile}` : '';
+      const mKey = newsTitle ? `${String(newsTitle).slice(0, 80)}|${libCat ?? ''}|${mode}${mPoolSfx}` : ''; // 🗂️ V2 คืน null → คีย์ว่าง ไม่ใช่ข้อความ "null" (สวิตช์ปิด libCat ไม่มีทางเป็น null)
       let mEntry = mKey ? _matchCache.get(mKey) : null;
       if (!(mEntry && Date.now() - mEntry.at < MATCH_CACHE_MS)) {
         const brief = { title: newsTitle, category, emotionalTags, archetype, libCat,
@@ -1123,7 +1263,7 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
         mEntry = {
           at: Date.now(),
           promise: (async () => {
-            const ess = _loadEssences();
+            const ess = _essencesForPick(lab); // ★ WF5: lab null = _loadEssences() เดิม
             if (mode === 'ai') {
               try {
                 const m = await aiMatchExamples(brief, rows || [], ess);
@@ -1160,7 +1300,7 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
       //      ⇒ ของใหม่รั่วไปเปลี่ยนหัวบล็อกของโหมดเก่า ทั้งที่แบตช์นี้สัญญาว่า "ปิดสวิตช์=ไม่แตะอะไรเลย"
       //      (ผู้ตรวจทำให้เกิดบน HEAD ได้จริงด้วยข่าวหมวด 'ข่าวบันเทิง' ที่ชั้นว่าง — ไม่ใช่เคสที่เกิดไม่ได้)
       //      → ผูกกับ shortlistOn อย่างเดียว: โหมดเก่าคงพฤติกรรมเดิมเป๊ะ ของใหม่รับผิดชอบเฉพาะของใหม่
-      crossCat = (shortlistOn && !pool.length) || noShelf; // 🗂️ noShelf: หัวบล็อก/log ห้ามประกาศหมวดที่ไม่มี
+      crossCat = (shortlistOn && !pool.length) || noShelf || poolCross; // 🗂️ noShelf: หัวบล็อก/log ห้ามประกาศหมวดที่ไม่มี · ★ WF5 poolCross: พูลไม่มีหมวดนี้ (ปิด = false)
       if (mode) pickMode = 'rotate-fallback';
       // ── 🎚️ ชั้นวางเฉพาะกิจ: เปลี่ยนแค่ว่า "usable คือใคร" — ตัวสุ่มบรรทัดล่างคือบรรทัดเดิมทั้งดุ้น ──
       //   ลำดับห้ามสลับ: ดึงแถว → _applyRealLikes(rows) → คัดโผ → weightedSample
@@ -1172,7 +1312,7 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
           { title: newsTitle, category, emotionalTags, archetype, libCat,
             coreStory: newsBrief?.coreStory || '', excerpt: newsBrief?.excerpt || '',
             cardEssence: cardEss },
-          rows || [], _loadEssences(), K,
+          rows || [], _essencesForPick(lab), K, // ★ WF5: lab null = _loadEssences() เดิม
         );
         if (sl.list.length) {
           usable = sl.list;
@@ -1191,7 +1331,7 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
           //   ไม่ใช่ค่ากลางของชั้นแบบวิธีเดิม → น้ำหนักสุ่มเพี้ยนได้ถึง ~31% (ข่าวการเมือง 347→239 · ช่วยเหลือกัน 288→239)
           //   แก้ให้ตรงคำ: คิดน้ำหนักไลก์ใหม่บน "เฉพาะแถวของชั้นนี้" ก่อนส่งเข้าตัวสุ่ม = เท่าวิธีเดิมจริง
           //   (_applyRealLikes อ่านไลก์จริงจาก map ตาม id ไม่ได้อ่านจากค่าที่ทับไว้ในแถว → เรียกซ้ำได้ ไม่สะสมความเพี้ยน)
-          usable = _applyRealLikes(usable);
+          usable = _applyRealLikes(usable, _likesMapForPick(lab)); // ★ WF5: lab null = undefined = เรียกแบบเดิม
           // 🔴 16 ส.ค. 69 รอบ 2 (ผู้ตรวจยิงซ้ำ): log เดิมพิมพ์ `ในชั้น "${libCat}"` เสมอ
           //   แต่ถ้าชั้นนั้นว่าง usable = ทั้งคลัง ⇒ log โกหกแทนหัวบล็อก (แก้หัวบล็อกแล้วแต่ลืม log)
           // 🗂️ 2 ก.ย. 69 (ผู้ตรวจไขว้ — ข้อความ log): V2 คืน null เคยพิมพ์ `ชั้น "null"` · สวิตช์ปิด libCat เป็นสตริงเสมอ = ข้อความเดิมทุกไบต์
@@ -1211,7 +1351,7 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
           const usage = await _loadRecentUsage();
           rankTune = _rankTuning(); // 🎛️ R234 ข: cap/floor/rotate/ratio จาก env — ไม่ตั้ง = ค่าตรึง RANK_V2 เดิมทุกตัว
           rk = rankTeachers(slCands, {
-            likesById: _readRealLikesFile()?.byId || {}, recentUsageById: usage,
+            likesById: _likesByIdForRank(lab), recentUsageById: usage, // ★ WF5: lab null = _readRealLikesFile()?.byId || {} เดิม
             k: RANK_V2.k, cap: rankTune.cap, floor: rankTune.floor, rotate: rankTune.rotate,
             backfillMinRatio: rankTune.backfillMinRatio, // ★ รอบ 2: พื้นชั้น ก ของการเติม (≥ 20k เมื่อค่าตรึงเดิม) — เคสศรราม
           });
@@ -1276,7 +1416,7 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
       const _poolTxt = samplePool
         ? `จากโผ ${samplePool.length} ใบ (คลัง ${(rows || []).length})`
         : `จากโผ ${(rows || []).length} ใบ`;
-      console.log(`[ViralFewshot] ✅ ${picks.length} ตัวอย่าง [${pickMode}] ${_poolTxt}${pickReason ? ` | เหตุผล: ${pickReason.slice(0, 90)}` : ''} (ข่าว: ${String(newsTitle || category || '?').slice(0, 40)})`);
+      console.log(`[ViralFewshot] ✅ ${picks.length} ตัวอย่าง [${pickMode}] ${_poolTxt}${pickReason ? ` | เหตุผล: ${pickReason.slice(0, 90)}` : ''} (ข่าว: ${String(newsTitle || category || '?').slice(0, 40)})${_poolLogTail(poolName, poolSize)}`); // ★ WF5: ปิด = '' ท้ายบรรทัดเดิม
       // 📒 8 ส.ค. 69 เจ้าของสั่ง: จดสมุดประวัติถาวร — ข่าวไหนได้ตัวอย่างใบไหน + วิธีเลือก + เหตุผล
       // ★ 16 ส.ค. 69 (ผู้ตรวจอิสระ): โหมดชั้นเฉพาะกิจจด poolSize = โผที่ตัวสุ่มเห็นจริง (8 ใบ) + libSize = คลังทั้งก้อน
       //   ของเดิมจด 202 ทั้งที่ตัวสุ่มเห็น 8 → เจ้าของเปิด ?action=pick-stats แล้วอ่านผิด
