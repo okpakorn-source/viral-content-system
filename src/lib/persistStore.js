@@ -152,9 +152,128 @@ function _primaryReadError(name, error) {
   return failure;
 }
 
+// === Card-Library Lab Overlay (F2 — 3 ก.ย. 69) ===
+// CARD_LIBRARY_LAB === '1' (default ไม่ตั้ง = ปิด = ทุกเส้นทางเดิมไบต์ต่อไบต์) — เปิดเฉพาะ store 'prompt-library':
+//   ทุก op อ่านจากไฟล์ CARD_LIBRARY_OVERLAY_FILE (คลังทั้งชุดของแขนทดลอง) แบบ short-circuit
+//   "ก่อน" ถึงสาย Supabase — เพราะ getAll ฝั่ง Supabase sync ทับ data/<name>.json ทุกครั้งที่อ่านสำเร็จ
+//   (ดู _fileFallbackSave ใน getAll ด้านล่าง) hook หลัง fetch ไม่ได้ mirror จะถูกทับด้วยคลังแขนทดลอง
+//   ทุก op เขียน = no-op ที่คืนค่าเหมือนสำเร็จ + console.warn ครั้งแรก (กัน usage/track ของแล็บปนเปื้อน store จริง)
+//   ห้องแล็บต้องไม่เงียบ: ไม่ตั้งพาธ/ไฟล์หาย/JSON พัง/ไม่ใช่ array = throw ทันที ห้าม fallback เงียบๆ
+//   ★ ผู้ตรวจไขว้ 3 ก.ย.: ผู้เรียกหลักสายสรุปข่าว (ไฟล์ล็อก) ครอบ getAll ด้วย try/catch — บางจุด catch ว่างเปล่า
+//     (`catch (e) { }` ใน getTopPrompts ทั้งสองไฟล์) แล้ว fallback อ่าน data/prompt-library.json ตรง
+//     → throw ของแล็บถูกกลืนไร้ร่องรอย แขนทดลองวิ่งด้วยการ์ด prod ทั้งรอบโดยระบบดูปกติ
+//     แล็บจึงส่งเสียงเอง ไม่พึ่งผู้เรียก: (ก) ประกาศตัวครั้งเดียวตอนสร้าง store (console.warn + พาธไฟล์แขน)
+//     (ข) อ่านพัง = console.error เองทุกครั้งก่อน throw (_labFail) — เสียงรอดแม้ catch ว่าง
+//     runbook ทุกรอบแล็บ: grep "CardLibraryLab" ใน log เซิร์ฟ — ไม่มีบรรทัดประกาศตัว = แล็บไม่ได้ทำงาน (เช่น env
+//     ไม่ถึงเซิร์ฟ) · เจอบรรทัด "อ่านไฟล์ overlay"/"CARD_LIBRARY_OVERLAY_FILE" ฝั่ง error = ทิ้งผลรอบนั้นทันที
+//     (พรีเช็คต่อแขนก่อนเชื่อผล Gate เป็นงานสาย F: เทียบจำนวน+ชุด id ผ่าน GET /api/prompt-library กับไฟล์แขน)
+//   กันพลาดบน production: ตรวจพบ VERCEL/VERCEL_ENV = เพิกเฉยสวิตช์ + console.error แล้วใช้เส้นทางเดิม
+//   (หมายเหตุ: `vercel env pull` อาจติด VERCEL=1 มาใน .env.local ของเครื่อง dev — ด่านนี้ตั้งใจ fail-closed
+//    ถ้าแล็บไม่ยอมทำงานทั้งที่อยู่บนเครื่อง dev ให้ลบตัวแปรนั้นออกจาก env ของรอบรันแล็บ)
+const LAB_STORE_NAME = 'prompt-library';
+const _labWarnedOnce = new Set();
+
+function _labLogOnce(key, log) {
+  if (_labWarnedOnce.has(key)) return;
+  _labWarnedOnce.add(key);
+  log();
+}
+
+// อ่าน overlay พัง = ความผิดปกติที่ทำให้ผล A/B ทั้งรอบใช้ไม่ได้ — ส่งเสียงทุกครั้ง (ไม่กดเงียบแบบ no-op warn)
+// เพราะผู้เรียกบางจุดกลืน throw ด้วย catch ว่าง แต่ละบรรทัด error คือหลักฐานหนึ่ง op ที่ไถลไปใช้การ์ด prod
+function _labFail(message) {
+  console.error(message);
+  return new Error(message);
+}
+
+async function _labOverlayLoad(name) {
+  const overlayPath = process.env.CARD_LIBRARY_OVERLAY_FILE;
+  if (!overlayPath) {
+    throw _labFail(`[CardLibraryLab:${name}] CARD_LIBRARY_LAB=1 แต่ไม่ได้ตั้ง CARD_LIBRARY_OVERLAY_FILE — ห้องแล็บไม่เดาไฟล์เอง`);
+  }
+  let raw;
+  try {
+    raw = await readFile(overlayPath, 'utf-8');
+  } catch (error) {
+    throw _labFail(`[CardLibraryLab:${name}] อ่านไฟล์ overlay ไม่ได้ (${overlayPath}): ${error?.message || 'unknown error'}`);
+  }
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (error) {
+    throw _labFail(`[CardLibraryLab:${name}] ไฟล์ overlay ไม่ใช่ JSON ที่อ่านได้ (${overlayPath}): ${error?.message || 'unknown error'}`);
+  }
+  if (!Array.isArray(data)) {
+    throw _labFail(`[CardLibraryLab:${name}] ไฟล์ overlay ต้องเป็น JSON array (${overlayPath})`);
+  }
+  return data.map(_decodeValue);
+}
+
+function _createLabOverlayStore(name) {
+  const noopWrite = (method, result) => {
+    _labLogOnce(`${name}:noop:${method}`, () =>
+      console.warn(`[CardLibraryLab:${name}] ${method}() เป็น no-op ในโหมดแล็บ — ไม่เขียน Supabase/ไฟล์ overlay/ไฟล์ mirror`));
+    return result;
+  };
+  return {
+    async getAll() {
+      return [...(await _labOverlayLoad(name))];
+    },
+    async findById(id) {
+      const items = await _labOverlayLoad(name);
+      return items.find(i => i.id === id) || null;
+    },
+    async count() {
+      return (await _labOverlayLoad(name)).length;
+    },
+    async add(item) {
+      return noopWrite('add', item);
+    },
+    async addMany(newItems) {
+      return noopWrite('addMany', newItems || []);
+    },
+    async update(id, updateFn) {
+      // อ่านจาก overlay เพื่อคืนค่ารูปเดียวกับ store จริง (สัญญาแบบ Supabase mode) — แต่ไม่เขียนอะไรทั้งสิ้น
+      const items = await _labOverlayLoad(name);
+      const existing = items.find(i => i.id === id);
+      if (!existing) throw new Error(`ไม่พบ id: ${id}`);
+      let updated;
+      if (typeof updateFn === 'function') {
+        updated = updateFn(existing);
+      } else {
+        updated = { ...existing, ...updateFn };
+      }
+      updated.updatedAt = new Date().toISOString();
+      return noopWrite('update', updated);
+    },
+    async remove(_id) {
+      return noopWrite('remove', { removed: true });
+    },
+    async removeAll() {
+      return noopWrite('removeAll', { removedAll: true });
+    },
+  };
+}
+
 // === Main Store Factory ===
 export function createStore(name) {
-  
+
+  // ===== CARD-LIBRARY LAB OVERLAY (F2) — ต้องมาก่อนสาย Supabase เสมอ =====
+  if (process.env.CARD_LIBRARY_LAB === '1' && name === LAB_STORE_NAME) {
+    if (process.env.VERCEL || process.env.VERCEL_ENV) {
+      _labLogOnce(`${name}:vercel`, () =>
+        console.error(`[CardLibraryLab:${name}] CARD_LIBRARY_LAB=1 ถูกเพิกเฉย — ตรวจพบ Vercel env (VERCEL/VERCEL_ENV) ห้องแล็บใช้ได้เฉพาะนอก production`));
+    } else {
+      // ประกาศตัวครั้งเดียวต่อ process: runbook grep "CardLibraryLab" ใช้บรรทัดนี้ยืนยันว่าแล็บทำงานจริง
+      // และตรวจว่าใช้ไฟล์แขนถูกตัว — ไม่มีบรรทัดนี้ในรอบที่ตั้งใจเปิดแล็บ = env ไม่ถึงเซิร์ฟ ทิ้งผลรอบนั้น
+      // อ่านใส่ตัวแปรก่อนค่อยเติมข้อความ "ยังไม่ตั้ง" — กันตัวสแกนทะเบียนสวิตช์ตีความสตริงนี้เป็น default ของ env
+      const overlayPathShown = process.env.CARD_LIBRARY_OVERLAY_FILE;
+      _labLogOnce(`${name}:active`, () =>
+        console.warn(`[CardLibraryLab:${name}] โหมดแล็บทำงาน — อ่านทุก op จากไฟล์ overlay: ${overlayPathShown || '<CARD_LIBRARY_OVERLAY_FILE ยังไม่ตั้ง — ทุกการอ่านจะ throw>'} · ทุกการเขียนไม่แตะ Supabase/mirror`));
+      return _createLabOverlayStore(name);
+    }
+  }
+
   // ===== SUPABASE MODE =====
   if (isSupabaseReady()) {
     return {
