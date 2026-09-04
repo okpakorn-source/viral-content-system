@@ -10,6 +10,7 @@ import { logPipeline } from '@/lib/pipelineLogger';
 import { getSession } from '@/lib/auth';
 import { buildNarrativePayload, formatNarrativePayload, checkNarrativeSimilarity } from '@/lib/input-engine/narrativePayload';
 import { clusterMatch, findClusterScore, mapCategory, EMOTION_CLUSTERS, CONFLICT_CLUSTERS } from '@/lib/ai/semanticClusters';
+import { isCardSelectable, selectableCards } from '@/lib/ai/libraryStatus'; // 🎛️ 3 ก.ย. 69 (F7): ท่อข่าวไม่หยิบใบ archived/proposed — กรองที่ทางเข้ารายการการ์ดเท่านั้น (CARD_LIBRARY_V2=0 = เห็นทุกใบเหมือนเดิม) ห้ามอ่าน env เอง
 import { MODEL_PRIMARY, MODEL_FAST, MODEL_HEAVY_FALLBACK , MODEL_BLUEPRINT } from '@/lib/ai/modelConfig';
 import { withTimeout } from '@/lib/utils/withTimeout';
 
@@ -783,7 +784,7 @@ export async function performSummarize({
         }
 
         totalPromptsLoaded = promptLib.length;
-        const validPrompts = promptLib.filter(p => p.promptText);
+        const validPrompts = promptLib.filter(p => p.promptText && isCardSelectable(p)); // ★ F7: ตัดใบ archived/proposed ก่อนให้ระบบเลือก
         validPromptsCount = validPrompts.length;
         if (validPrompts.length > 0) {
           // --- STAGE 1: DEEP DNA NEWS ANALYZER (12 Dimensions) ---
@@ -1144,7 +1145,7 @@ ${_aiPickerOn ? `เกณฑ์สำคัญ (เรียงตามน้�
           const _p = _join2(process.cwd(), 'data', 'prompt-library.json');
           _allPrompts = JSON.parse(await _rf2(_p, 'utf-8'));
         } catch (_e) { /* ignore */ }
-        const fallbackPrompt = _allPrompts.find(p => p.promptText && p.toneClass !== 'negative') || null;
+        const fallbackPrompt = _allPrompts.find(p => p.promptText && isCardSelectable(p) && p.toneClass !== 'negative') || null; // ★ F7: fallback อ่านไฟล์ตรง ต้องกรองสถานะด้วย
         if (fallbackPrompt) {
           console.log(`[ToneFilter] ✅ Fallback selected: ${fallbackPrompt.id} (toneClass=${fallbackPrompt.toneClass || 'unspecified'})`);
           smartPrompt = fallbackPrompt;
@@ -1892,6 +1893,7 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
           const mixPromptStore = createStore('prompt-library');
           let promptLib = [];
           try { promptLib = await mixPromptStore.getAll(); } catch (e) { console.warn('[Mix-Service] Prompt library load:', e.message); }
+          promptLib = selectableCards(promptLib); // ★ F7: กรองก่อนทั้ง matched และ fallback sort()[0] — ปิดสวิตช์ = คืน reference เดิม ให้ sort() ทับอาเรย์ของ getAll เหมือนก่อน F7
 
           if (promptLib.length > 0) {
             const matched = promptLib
@@ -2195,7 +2197,7 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
   // ★ BUG-4 FIX: ใช้ cached prompt library ถ้ามี (ไม่ต้องโหลดซ้ำ 4 ครั้ง)
   let validPrompts = [];
   if (_cachedPromptLib && _cachedPromptLib.length > 0) {
-    validPrompts = _cachedPromptLib.filter(p => p.promptText && !excludePromptIds.includes(p.id));
+    validPrompts = _cachedPromptLib.filter(p => p.promptText && isCardSelectable(p) && !excludePromptIds.includes(p.id)); // ★ F7
     console.log(`[Analyze-Service] ♻️ Reusing cached prompt lib: ${validPrompts.length} valid (excluded ${excludePromptIds.length})`);
   } else {
     try {
@@ -2217,7 +2219,7 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
           console.warn('[Analyze-Service] ⚠️ JSON fallback failed:', fileErr.message);
         }
       }
-      validPrompts = promptLib.filter(p => p.promptText && !excludePromptIds.includes(p.id));
+      validPrompts = promptLib.filter(p => p.promptText && isCardSelectable(p) && !excludePromptIds.includes(p.id)); // ★ F7
     } catch (err) {
       console.warn('[Analyze-Service] Failed to load prompt library in getTopPrompts:', err.message);
     }
