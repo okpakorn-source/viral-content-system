@@ -107,7 +107,9 @@ test('3) โครงแถว insert = คอลัมน์จริงที�
   }
   // สัญญากับผู้อ่านจริง: คอลัมน์ที่ viralFewshot.js select ต้องเป็นส่วนย่อยของคอลัมน์ที่เรา insert
   const src = readRoot('src/lib/services/viralFewshot.js');
-  const m = src.match(/from\(\s*'viral_examples'\s*\)[\s\r\n]*\.select\('([^']+)'\)/);
+  // ★ 4 ก.ย. 69 (WF5): select ผ่าน _poolSelect(poolName) — ปิดสวิตช์ = POOL_SELECT_BASE (สตริงเดิม) · เทสนี้ตรวจสัญญาตอนปิดสวิตช์
+  const m = src.match(/from(s*'viral_examples's*)[s
+]*.select('([^']+)')/) || src.match(/const POOL_SELECT_BASE = '([^']+)'/);
   assert.ok(m, 'ต้องเจอบรรทัด select ของ viral_examples ใน viralFewshot.js (สัญญาคอลัมน์เปลี่ยน = มาแก้ที่นี่)');
   const readCols = m[1].split(',').map((s) => s.trim());
   for (const c of readCols) assert.ok(INSERT_COLUMNS.includes(c), `ระบบอ่านคอลัมน์ ${c} แต่แถวนำเข้าไม่มี`);
