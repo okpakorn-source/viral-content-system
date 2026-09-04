@@ -19,6 +19,16 @@ const CATEGORY_COLORS = {
   'ข่าวคอมเมนต์เดือด': '#f59e0b',
 };
 
+// ★ 3 ก.ย. 69 (F14 แบบ FINAL card-library): สถานะการ์ด — ใบที่ไม่มี field status = ใช้งาน (ทั้งคลังเดิม)
+//   สวิตช์ฝั่ง client: NEXT_PUBLIC_CARD_LIBRARY_V2 default เปิด ('0' = หน้าเดิมทุกจุด — ปุ่มลบเดิม ไม่มีป้าย/ตัวกรอง)
+const CARD_LIB_V2_UI = process.env.NEXT_PUBLIC_CARD_LIBRARY_V2 !== '0';
+const STATUS_META = {
+  active: { label: 'ใช้งาน', icon: '✅', color: '#22c55e' },
+  archived: { label: 'พัก', icon: '⏸️', color: '#f59e0b' },
+  proposed: { label: 'เสนอ', icon: '🧪', color: '#06b6d4' },
+};
+const statusOf = (p) => (p?.status === 'archived' || p?.status === 'proposed') ? p.status : 'active';
+
 export default function PromptLibraryPage() {
   const [prompts, setPrompts] = useState([]);
   const [stats, setStats] = useState({ total: 0, categories: {} });
@@ -27,6 +37,7 @@ export default function PromptLibraryPage() {
   const [search, setSearch] = useState('');
   const [expandedId, setExpandedId] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
+  const [statusFilter, setStatusFilter] = useState('all'); // ★ 3 ก.ย. 69 (F14): ทั้งหมด/ใช้งาน/พัก/เสนอ
 
   const loadPrompts = useCallback(async () => {
     try {
@@ -48,9 +59,42 @@ export default function PromptLibraryPage() {
 
   useEffect(() => { loadPrompts(); }, [loadPrompts]);
 
+  // เส้นทางเดิม — ใช้เฉพาะตอนปิดสวิตช์ NEXT_PUBLIC_CARD_LIBRARY_V2 ('0') เท่านั้น
   const handleDelete = async (id) => {
     if (!confirm('ลบ Prompt นี้?')) return;
     await fetch(`/api/prompt-library?id=${id}`, { method: 'DELETE' });
+    loadPrompts();
+  };
+
+  // ★ 3 ก.ย. 69 (F14): พัก/กู้คืนรายใบ — ไม่ลบออกจากคลัง เคสเก่ายังอ้าง promptId ได้เสมอ
+  const handleStatusAction = async (id, action) => {
+    try {
+      const res = await fetch('/api/prompt-library', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!data.success) alert(data.error || (action === 'archive' ? 'พักการ์ดไม่สำเร็จ' : 'กู้คืนไม่สำเร็จ'));
+    } catch (err) {
+      alert(err.message || 'ทำรายการไม่สำเร็จ');
+    }
+    loadPrompts();
+  };
+
+  // ★ 3 ก.ย. 69 (F14): ลบถาวรต้องยืนยัน 2 ชั้น (กดยืนยัน + พิมพ์ id) — API กันซ้ำอีกชั้น (confirm + ห้ามลบใบที่เคยใช้)
+  const handleHardDelete = async (p) => {
+    if (!confirm(`⚠️ ลบถาวร "${p.promptName || p.id}"?\n\nการ์ดจะหายจากคลังจริง ย้อนกลับไม่ได้ — ถ้าแค่เลิกใช้ ให้กด "พัก" แทน`)) return;
+    const typed = window.prompt(`ชั้นยืนยันสุดท้าย: พิมพ์ id ให้ตรงเป๊ะเพื่อลบถาวร\n\n${p.id}`);
+    if (typed === null) return;
+    if (typed.trim() !== p.id) { alert('id ไม่ตรง — ยกเลิกการลบ'); return; }
+    try {
+      const res = await fetch(`/api/prompt-library?id=${encodeURIComponent(p.id)}&confirm=${encodeURIComponent(p.id)}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!data.success) alert(data.error || 'ลบไม่สำเร็จ');
+    } catch (err) {
+      alert(err.message || 'ลบไม่สำเร็จ');
+    }
     loadPrompts();
   };
 
@@ -80,6 +124,13 @@ export default function PromptLibraryPage() {
   };
 
   const categoryEntries = Object.entries(stats.categories || {}).sort((a, b) => b[1] - a[1]);
+
+  // ★ 3 ก.ย. 69 (F14): นับ+กรองสถานะฝั่ง client (GET ไม่กรอง — เห็นใบพักได้เสมอ) · สวิตช์ปิด = ใช้ลิสต์เดิมตรงๆ
+  const statusCounts = { active: 0, archived: 0, proposed: 0 };
+  if (CARD_LIB_V2_UI) prompts.forEach(p => { statusCounts[statusOf(p)] += 1; });
+  const visiblePrompts = (CARD_LIB_V2_UI && statusFilter !== 'all')
+    ? prompts.filter(p => statusOf(p) === statusFilter)
+    : prompts;
 
   return (
     <>
@@ -124,6 +175,32 @@ export default function PromptLibraryPage() {
                 }}>{cat} ({count})</button>
             );
           })}
+
+          {/* ★ 3 ก.ย. 69 (F14): แถวตัวกรองสถานะ — ทั้งหมด/ใช้งาน/พัก/เสนอ */}
+          {CARD_LIB_V2_UI && (
+            <div style={{
+              width: '100%', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center',
+              marginTop: 6, paddingTop: 10, borderTop: '1px dashed var(--border)',
+            }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginRight: 2 }}>สถานะ:</span>
+              <button onClick={() => setStatusFilter('all')}
+                style={{
+                  padding: '4px 12px', borderRadius: 20, border: 'none',
+                  background: statusFilter === 'all' ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
+                  color: statusFilter === 'all' ? '#fff' : 'var(--text-muted)',
+                  fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.2s',
+                }}>ทั้งหมด ({prompts.length})</button>
+              {['active', 'archived', 'proposed'].map(st => (
+                <button key={st} onClick={() => setStatusFilter(st)}
+                  style={{
+                    padding: '4px 12px', borderRadius: 20, border: 'none',
+                    background: statusFilter === st ? STATUS_META[st].color : 'rgba(255,255,255,0.06)',
+                    color: statusFilter === st ? '#fff' : STATUS_META[st].color,
+                    fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.2s',
+                  }}>{STATUS_META[st].icon} {STATUS_META[st].label} ({statusCounts[st]})</button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Search */}
@@ -153,14 +230,20 @@ export default function PromptLibraryPage() {
             <div className="empty-state-title">ยังไม่มี Prompt ในหอสมุด</div>
             <div className="empty-state-text">ไปที่ "หอสมุดไวรัล" เพื่อป้อนเนื้อหาแล้วให้ AI สร้าง Prompt</div>
           </div>
+        ) : visiblePrompts.length === 0 ? (
+          // ★ 3 ก.ย. 69 (F14): กรองสถานะแล้วว่าง (ถึงจุดนี้ได้เฉพาะตอนสวิตช์เปิด — prompts มีของแต่สถานะนี้ไม่มี)
+          <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)', fontSize: 12 }}>
+            ไม่มีการ์ดสถานะ “{statusFilter === 'all' ? 'ทั้งหมด' : STATUS_META[statusFilter]?.label}” — เปลี่ยนตัวกรองด้านบน
+          </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {prompts.map(p => {
+            {visiblePrompts.map(p => {
               const isExpanded = expandedId === p.id;
               const color = CATEGORY_COLORS[p.category] || '#888';
+              const st = CARD_LIB_V2_UI ? statusOf(p) : 'active'; // ★ F14: สวิตช์ปิด = ทุกใบถือเป็นใช้งาน (หน้าเดิม)
 
               return (
-                <div key={p.id} className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                <div key={p.id} className="card" style={{ padding: 0, overflow: 'hidden', ...(st === 'archived' ? { opacity: 0.62 } : {}) }}>
                   {/* Header */}
                   <div onClick={() => setExpandedId(isExpanded ? null : p.id)}
                     style={{
@@ -174,6 +257,15 @@ export default function PromptLibraryPage() {
                       color, background: `${color}15`, border: `1px solid ${color}30`,
                       whiteSpace: 'nowrap',
                     }}>🏷️ {p.category}</span>
+
+                    {/* ★ 3 ก.ย. 69 (F14): ป้ายสถานะ — โชว์เฉพาะใบที่ไม่ใช่ "ใช้งาน" ให้คลังหลักสะอาดเหมือนเดิม */}
+                    {st !== 'active' && (
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
+                        color: STATUS_META[st].color, background: `${STATUS_META[st].color}15`,
+                        border: `1px solid ${STATUS_META[st].color}30`, whiteSpace: 'nowrap',
+                      }}>{STATUS_META[st].icon} {STATUS_META[st].label}</span>
+                    )}
 
                     <div style={{ flex: 1, minWidth: 120 }}>
                       <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.4 }}>
@@ -299,10 +391,42 @@ export default function PromptLibraryPage() {
                           }}>
                           {copiedId === p.id ? '✅ คัดลอกแล้ว!' : '📋 คัดลอก Prompt'}
                         </button>
-                        <button onClick={() => handleDelete(p.id)}
-                          style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>
-                          🗑️ ลบ
-                        </button>
+                        {CARD_LIB_V2_UI ? (
+                          // ★ 3 ก.ย. 69 (F14): ปุ่มลบตรง (ไม่มีด่าน) → พัก/กู้คืน · ลบถาวรเหลือเฉพาะใบที่พัก/เสนอ + ยืนยัน 2 ชั้น
+                          <>
+                            {st === 'archived' ? (
+                              <button onClick={() => handleStatusAction(p.id, 'restore')}
+                                style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.35)', background: 'rgba(34,197,94,0.08)', color: '#22c55e', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                                ♻️ กู้คืน
+                              </button>
+                            ) : (
+                              <button onClick={() => handleStatusAction(p.id, 'archive')}
+                                title="เอาออกจากการหมุนเวียน — ข้อมูลยังอยู่ กู้คืนได้ทุกเมื่อ"
+                                style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid rgba(245,158,11,0.35)', background: 'rgba(245,158,11,0.08)', color: '#f59e0b', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                                ⏸️ พัก
+                              </button>
+                            )}
+                            {st !== 'active' && (
+                              (p.usageCount || 0) > 0 ? (
+                                <button disabled title={`เคยถูกใช้ ${p.usageCount} ครั้ง — ลบถาวรไม่ได้ (เคสเก่าอ้างถึง promptId)`}
+                                  style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontSize: 11, fontFamily: 'inherit', opacity: 0.5, cursor: 'not-allowed' }}>
+                                  🗑️ ลบถาวร
+                                </button>
+                              ) : (
+                                <button onClick={() => handleHardDelete(p)}
+                                  title="ลบออกจากคลังจริง — ต้องพิมพ์ id ยืนยัน"
+                                  style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.35)', background: 'transparent', color: '#ef4444', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>
+                                  🗑️ ลบถาวร
+                                </button>
+                              )
+                            )}
+                          </>
+                        ) : (
+                          <button onClick={() => handleDelete(p.id)}
+                            style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>
+                            🗑️ ลบ
+                          </button>
+                        )}
 
                         {/* Usage Stats Bar */}
                         <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center', fontSize: 10, color: 'var(--text-muted)' }}>

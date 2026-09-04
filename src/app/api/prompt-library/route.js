@@ -4,6 +4,11 @@ import { createStore } from '@/lib/persistStore';
 
 const store = createStore('prompt-library');
 
+// ★ 3 ก.ย. 69 (F14 แบบ FINAL card-library): สถานะการ์ด active/archived/proposed — ใบที่ไม่มี field = active (ทั้งคลังเดิม)
+//   สวิตช์ CARD_LIBRARY_V2 default เปิด ('0' = พฤติกรรมเดิมทุกเส้นทาง) — อ่านตอนรับ request จะได้สลับโดยไม่ต้อง build ใหม่
+const CARD_STATUSES = ['active', 'archived', 'proposed'];
+const isCardLibV2 = () => process.env.CARD_LIBRARY_V2 !== '0';
+
 // GET — ดึง prompt ทั้งหมด + filter + search + match
 export async function GET(request) {
   try {
@@ -130,9 +135,16 @@ export async function PUT(request) {
         }
         existing.successCount = (existing.successCount || 0) + 1;
         existing.totalEngagement = (existing.totalEngagement || 0) + totalEngagement;
+      } else if (isCardLibV2() && (body.action === 'archive' || body.action === 'restore')) {
+        // ★ 3 ก.ย. 69 (F14): พัก/กู้คืนรายใบแบบ action เดียวกับ use/success — ไม่ลบ (เคสเก่าอ้าง promptId ได้เสมอ)
+        //   CARD_LIBRARY_V2=0 → action นี้ตกลง else ข้างล่างเหมือนโค้ดเดิม (ไม่แตะ status)
+        existing.status = body.action === 'archive' ? 'archived' : 'active';
       } else {
         const fields = ['promptName', 'category', 'emotionalType', 'hookStyle', 'tone', 'structure', 'ctaStyle', 'writingStyle', 'promptText', 'viralScore', 'narrativeArchetype', 'targetCategories', 'emotionalTags', 'conflictTags'];
         fields.forEach(f => { if (body[f] !== undefined) existing[f] = body[f]; });
+        // ★ 3 ก.ย. 69 (F14): เปิดรับ status ผ่าน PUT เฉพาะค่าที่รู้จักใต้สวิตช์ — ค่าอื่น/ไม่ส่ง = เมินเงียบเหมือน field นอก whitelist เดิม
+        //   (viral-library spread payload จาก AI เข้า PUT ตรงๆ — ถ้าตอบ 400 ใส่ค่าเพี้ยนจะพังท่อบันทึกเดิม)
+        if (isCardLibV2() && CARD_STATUSES.includes(body.status)) existing.status = body.status;
       }
       return existing;
     });
@@ -164,7 +176,31 @@ export async function DELETE(request) {
       const result = await store.removeAll();
       return NextResponse.json({ success: true, ...result });
     }
-    
+
+    // ★ 3 ก.ย. 69 (F14): ลบถาวรรายใบเดิมไม่มีด่าน (store.remove ตรง) — เพิ่ม 2 ชั้น: ยืนยันซ้ำด้วย ?confirm=<id>
+    //   (client ให้ผู้ใช้พิมพ์ id) + ห้ามลบใบที่เคยถูกใช้ (usageCount > 0 — เคสเก่าอ้าง promptId ให้ "พัก" แทน)
+    //   CARD_LIBRARY_V2=0 → ลบตรงแบบเดิมทุกไบต์
+    if (isCardLibV2()) {
+      if (!id || searchParams.get('confirm') !== id) {
+        return NextResponse.json({
+          success: false,
+          error: 'ลบถาวรต้องยืนยันซ้ำ: ส่ง confirm=<id> ให้ตรงกับ id — ถ้าแค่เลิกใช้ ให้พักการ์ด (PUT action: archive) แทน',
+          errorType: 'CONFIRM_REQUIRED',
+        }, { status: 400 });
+      }
+      const target = await store.findById(id);
+      if (!target) {
+        return NextResponse.json({ success: false, error: `ไม่พบ id: ${id}`, errorType: 'NOT_FOUND' }, { status: 404 });
+      }
+      if ((target.usageCount || 0) > 0) {
+        return NextResponse.json({
+          success: false,
+          error: `ใบนี้ถูกใช้ไปแล้ว ${target.usageCount} ครั้ง — ลบถาวรไม่ได้ (เคสเก่ายังอ้าง promptId อยู่) ให้พักการ์ดแทน`,
+          errorType: 'USAGE_PROTECTED',
+        }, { status: 409 });
+      }
+    }
+
     const result = await store.remove(id);
     return NextResponse.json({ success: true, ...result });
   } catch (error) {
