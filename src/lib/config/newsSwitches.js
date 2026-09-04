@@ -693,7 +693,7 @@ export const NEWS_SWITCHES = Object.freeze([
     since: '3 ก.ย. 69', rollback: 'เอา env ออก = --apply กลับทำงานปกติ · ถอยการนำเข้าทั้งชุด: node scripts/import-new-teachers.mjs --rollback <manifest> (ลบแถวตาม id + คืนไฟล์ 2 ไฟล์จาก backup ไบต์เดิม)',
   },
 
-  // ── ★ 3 ก.ย. 69 — คลังการ์ดเฟส 1 (WF3 · แบบ docs/proposals/NEWS-CARD-LIBRARY-DESIGN-FINAL-3sep69.md · สเปกสวิตช์ C:/tmp/news-r233-run/resume-3sep69/wf3-switches.json) ──
+  // ── ★ 3 ก.ย. 69 — คลังการ์ดเฟส 1 (WF3 · แบบ docs/proposals/NEWS-CARD-LIBRARY-DESIGN-FINAL-3sep69.md) ──
   //   ไฟล์อ่านทั้งหมดอยู่นอกชุดสแกน NEWS_SWITCH_FILES (persistStore/semanticClusters/route/page/สคริปต์ migrate) —
   //   ลงทะเบียนมือแบบหมวดบอท · เทส readBy/ค่าเริ่มต้นตรวจจากไฟล์จริงตาม readBy · ยามเฉพาะสาย: tests/{card-library-lab-overlay,new-card-cats-v1,prompt-library-status-route,card-status-scripts}.test.mjs
   {
