@@ -667,6 +667,46 @@ export const NEWS_SWITCHES = Object.freeze([
     meaning: 'กันพลาดรัน --apply ผิดจังหวะ (เช่น ช่วง freeze) — ตั้ง 0 แล้วสคริปต์นำเข้าครูเขียนอะไรไม่ได้เลย (อ่าน === "0" จุดเดียวก่อนแตะไฟล์/DB) · สคริปต์ CLI ไม่ถูก import โดยโค้ดรันไทม์ใดๆ ไม่รัน = ระบบเดิมไบต์ต่อไบต์',
     since: '3 ก.ย. 69', rollback: 'เอา env ออก = --apply กลับทำงานปกติ · ถอยการนำเข้าทั้งชุด: node scripts/import-new-teachers.mjs --rollback <manifest> (ลบแถวตาม id + คืนไฟล์ 2 ไฟล์จาก backup ไบต์เดิม)',
   },
+
+  // ── ★ 3 ก.ย. 69 — คลังการ์ดเฟส 1 (WF3 · แบบ docs/proposals/NEWS-CARD-LIBRARY-DESIGN-FINAL-3sep69.md · สเปกสวิตช์ C:/tmp/news-r233-run/resume-3sep69/wf3-switches.json) ──
+  //   ไฟล์อ่านทั้งหมดอยู่นอกชุดสแกน NEWS_SWITCH_FILES (persistStore/semanticClusters/route/page/สคริปต์ migrate) —
+  //   ลงทะเบียนมือแบบหมวดบอท · เทส readBy/ค่าเริ่มต้นตรวจจากไฟล์จริงตาม readBy · ยามเฉพาะสาย: tests/{card-library-lab-overlay,new-card-cats-v1,prompt-library-status-route,card-status-scripts}.test.mjs
+  {
+    name: 'CARD_LIBRARY_LAB', default: '0', values: ['1 = เปิดห้องแล็บ overlay (เฉพาะ store "prompt-library")', 'ไม่ตั้ง/ค่าอื่นใด = ปิด — โค้ดเดิมทุกเส้นทาง'],
+    readBy: ['src/lib/persistStore.js'], group: 'คลังการ์ดเฟส 1 — ห้องแล็บ overlay (F2)', kind: 'switch',
+    meaning: 'เปิดแล้ว createStore("prompt-library") คืน store ห้องแล็บ: อ่านทุก op จากไฟล์ CARD_LIBRARY_OVERLAY_FILE ก่อนถึงสาย Supabase (mirror data/prompt-library.json ไม่ถูก sync ทับ) · ทุก op เขียน (add/addMany/update/remove/removeAll) เป็น no-op คืนค่าเหมือนสำเร็จ + console.warn ครั้งแรกต่อ method · ไฟล์หาย/JSON พัง/ไม่ใช่ array/ไม่ตั้งพาธ = console.error เองก่อน throw ชัด (เสียงรอดแม้ผู้เรียกครอบ catch ว่าง) · ประกาศตัวครั้งเดียวต่อ process ตอนสร้าง store ("[CardLibraryLab:prompt-library] โหมดแล็บทำงาน" + พาธไฟล์แขน) — runbook: grep "CardLibraryLab" ใน log เซิร์ฟทุกรอบแล็บ ไม่มีบรรทัดประกาศ = แล็บไม่ทำงาน · เจอบรรทัด error อ่านพัง = ทิ้งผลรอบนั้น · store ชื่ออื่นไม่ถูกแตะ · ตรวจพบ VERCEL/VERCEL_ENV = เพิกเฉยสวิตช์ + console.error ครั้งเดียวแล้วใช้เส้นทางเดิม',
+    since: '3 ก.ย. 69', rollback: 'unset (หรือค่าที่ไม่ใช่ "1") = พฤติกรรมเดิมไบต์ต่อไบต์ — snapshot test เทียบ HEAD พิสูจน์ทั้งโหมด Supabase และ file fallback · revert คอมมิตเดียว',
+  },
+  {
+    name: 'CARD_LIBRARY_OVERLAY_FILE', default: '', values: ['พาธไฟล์ JSON array คลังการ์ดของแขนทดลอง (เช่นไฟล์แขน B/C)', 'ไม่ตั้งขณะ CARD_LIBRARY_LAB=1 = ทุก op อ่าน console.error + throw ชัด (ห้องแล็บไม่เดาไฟล์เอง) และบรรทัดประกาศตัวระบุ "ยังไม่ตั้ง"'],
+    readBy: ['src/lib/persistStore.js'], group: 'คลังการ์ดเฟส 1 — ห้องแล็บ overlay (F2)', kind: 'value',
+    meaning: 'ชี้ไฟล์คลังแขนที่ห้องแล็บใช้เป็นแหล่งอ่านเดียว (มีผลเฉพาะเมื่อ CARD_LIBRARY_LAB=1 และไม่อยู่บน Vercel) · เนื้อการ์ดผ่าน _decodeValue เหมือนสาย store จริง · อ่านสดทุก op ไม่มี cache สลับไฟล์แขนได้ทันที · พาธถูกพิมพ์ในบรรทัดประกาศตัว [CardLibraryLab] ให้ผู้รันแล็บตรวจว่ารันถูกแขน',
+    since: '3 ก.ย. 69', rollback: 'unset — ไม่มีผลใดๆ เมื่อ CARD_LIBRARY_LAB ปิด (สวิตช์หลักคุมทั้งคู่)',
+  },
+  {
+    name: 'NEW_CARD_CATS_V1', default: '0', values: ['1 = เปิด (หมวดใหม่ 3 หมวด + ย้าย mapping ตาม FINAL F9 ครบ 3 ก้อน)', 'ค่าอื่น/ไม่ตั้ง = ปิด (mapCategory ผลเดิมไบต์ต่อไบต์ — พิสูจน์เทียบ HEAD 48f41228 จริง 3,118 อินพุต ต่าง 0)'],
+    readBy: ['src/lib/ai/semanticClusters.js'], group: 'คลังการ์ดเฟส 1 — ตัวจำแนกหมวด', kind: 'switch',
+    meaning: 'เปิดตัวจำแนกหมวดการ์ดใหม่: เพิ่มหมวดปลายทาง คดีความ/ศาสนา-งานบุญ/กีฬาแข่งขัน (ชั้นคีย์เฉพาะทางตรวจก่อนคีย์เดิม เรียงยาว→สั้น · "ชนะ/แพ้/เสมอ" จับเฉพาะป้ายตรงตัว) + ย้าย mapping ตามแบบ: อาชญากรรม+ข่าวอาชญากรรม→คดีความ · กีฬา→กีฬาแข่งขัน · จิตอาสา/ฮีโร่ชาวบ้าน/ฮีโร่→ช่วยเหลือกัน + getKnownCategories() สัญญา F11: ปิด=10 หมวดเดิม · เปิด=11 หมวด (3 ใหม่เข้า · ฮีโร่ชาวบ้าน+ข่าวอาชญากรรม ถูกโอนออกทั้งใบ) · จุดอ่าน env จุดเดียว: newCardCatsOn (เทส source contract ⑪ ค้ำ)',
+    since: '3 ก.ย. 69', rollback: 'ลบ/ตั้ง env เป็นค่าอื่นที่ไม่ใช่ "1" — กลับพฤติกรรมเดิมทันที (อ่าน env สดทุกเรียก · เทส ⑦ flip ไปกลับใน process เดียวพิสูจน์)',
+  },
+  {
+    name: 'CARD_LIBRARY_V2', default: '1', values: ['0 = ปิด (พฤติกรรมเดิมทุกเส้นทาง)', 'อื่นๆ/ไม่ตั้ง = เปิด'],
+    readBy: ['src/app/api/prompt-library/route.js', 'src/lib/ai/libraryStatus.js'], group: 'คลังการ์ดเฟส 1 — สถานะการ์ด (UI/API)', kind: 'switch',
+    meaning: 'ฝั่ง API คลังการ์ด: PUT action archive/restore ตั้ง status · PUT whitelist รับ field status เฉพาะ active|archived|proposed (ค่าเพี้ยนเมินเงียบ) · DELETE รายใบต้อง confirm=<id> + ห้ามลบใบ usageCount>0 · ไม่มีผลกับข้อมูลจนกว่าใบจะมี field status (GET/POST ไม่แตะ) · อ่านตอนรับ request (isCardLibV2) สลับได้ไม่ต้อง build · F7: ท่อข่าวไม่หยิบใบ archived/proposed (libraryStatus.isCardSelectable ที่ทางเข้า 8 จุด ใน summarizeServiceText.js + summarizeService.js — analyze/getTopPrompts×2 ต่อไฟล์ + mix ต่อไฟล์ผ่าน libraryStatus.selectableCards (ปิด = คืน reference เดิมให้ sort() ทับอาเรย์ของ getAll เหมือนก่อน F7 — memCache/ไฟล์ sync ลำดับเดิม) + ToneFilter fallback ที่อ่าน data/prompt-library.json ตรงอีกไฟล์ละ 1 จุด · persistStore/GET ไม่กรอง — UI/สถิติ/track เห็นทุกใบ)',
+    since: '3 ก.ย. 69', rollback: 'ตั้ง CARD_LIBRARY_V2=0 = พฤติกรรมเดิม (พิสูจน์ด้วยเทส stringify เท่ากันทุกไบต์ + mutation M3) · ลบ field status รายใบคืนสภาพข้อมูล',
+  },
+  {
+    name: 'NEXT_PUBLIC_CARD_LIBRARY_V2', default: '1', values: ['0 = ปิด (หน้าเดิม: ปุ่มลบเดิม ไม่มีป้าย/ตัวกรอง)', 'อื่นๆ/ไม่ตั้ง = เปิด'],
+    readBy: ['src/app/prompt-library/page.js'], group: 'คลังการ์ดเฟส 1 — สถานะการ์ด (UI/API)', kind: 'switch',
+    meaning: 'ฝั่ง client หน้า /prompt-library: ป้ายสถานะ + แถวตัวกรองสถานะ + ปุ่มพัก/กู้คืน/ลบถาวร 2 ชั้น แทนปุ่มลบตรงเดิม (CARD_LIB_V2_UI — NEXT_PUBLIC_* ฝังค่าตอน build)',
+    since: '3 ก.ย. 69', rollback: 'ตั้ง "0" แล้วต้อง rebuild/redeploy (NEXT_PUBLIC ฝังตอน build ไม่ใช่ runtime) — JSX เส้นเดิม (handleDelete + ปุ่มลบเดิม) เก็บไว้ครบตัวอักษร',
+  },
+  {
+    name: 'CARD_MIGRATE_APPLY', default: '1', values: ['ไม่ตั้ง/อื่นๆ = --apply ทำงานปกติ', '0 = ปฏิเสธโหมด --apply ของ migrate.mjs (dry-run และ restore.mjs ใช้ได้เสมอ — ทางถอยไม่ถูกบล็อก)'],
+    readBy: ['scripts/card-status/migrate.mjs'], group: 'คลังการ์ดเฟส 1 — สคริปต์ย้ายข้อมูล (F13)', kind: 'switch',
+    meaning: 'kill-switch ของสคริปต์ (แบบแผน TEACHER_IMPORT_APPLY): ปิดช่องเขียน store จริงของ migrate ชั่วคราวโดยไม่ต้องแตะโค้ด (runMigrate เช็ค === "0" ก่อนเขียน) · สคริปต์ CLI ไม่ถูก import โดยโค้ดรันไทม์ใดๆ ไม่รันสคริปต์ = ระบบเดิมไบต์ต่อไบต์ · หมายเหตุ: ด่านแขนแล็บใน getRealStore ไม่ใช่สวิตช์และจงใจไม่มีทางข้าม (fail-safe ของสคริปต์ล้วน ไม่บล็อกทางถอย)',
+    since: '3 ก.ย. 69', rollback: 'ตั้ง CARD_MIGRATE_APPLY=0 หรือไม่รันสคริปต์ · เทสพิสูจน์: ปิดแล้ว apply โยน error โดยไม่มีการเขียนใดๆ + dry-run ยังใช้ได้',
+  },
 ]);
 
 /** หาสวิตช์ตามชื่อ — คืน undefined ถ้าไม่มีในทะเบียน */

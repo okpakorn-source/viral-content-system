@@ -4,7 +4,7 @@
 > ด่านตรวจ: `node --test tests/news-switch-registry.test.mjs` (เพิ่ม `process.env.X` ในไฟล์ท่อข่าวโดยไม่ลงทะเบียน = แดง)
 > คีย์ลับ/ที่อยู่ (ชื่อเข้ารูป `(_KEY|_SECRET|_URL|_TOKEN|_PASSWORD|_DSN)$`) ไม่ใช่สวิตช์ ไม่อยู่ในทะเบียน
 
-สวิตช์ทั้งหมด: 110 ตัว · ไฟล์ที่สแกน: 43 ไฟล์
+สวิตช์ทั้งหมด: 120 ตัว · ไฟล์ที่สแกน: 43 ไฟล์
 
 ## วิธีอ่าน
 
@@ -90,6 +90,7 @@
 | `TEACHER_RANK_FLOOR` | `50000` | ไม่ตั้ง/ว่าง = 50000 เดิม · จำนวนเต็ม ≥ 0 (0 = ปิดพื้น · ทศนิยมปัดลง) · อ่านไม่ออก/ติดลบ = 50000 + console.warn | พื้นไลก์คุณภาพ (กติกาข้อ 3 ของ rank-v2) — มีใบถึงพื้นแล้วใบต่ำกว่าถูกข้าม · เป็นฐานคูณของชั้นเติม ก ด้วย (× TEACHER_RANK_BACKFILL_RATIO) · อ่านด้วย _envTok ชื่อ literal ใน _rankTuning | `src/lib/services/viralFewshot.js` | 3 ก.ย. 69 | ลบ env ออก = ค่าตรึงเดิม 50000 |
 | `TEACHER_RANK_ROTATE` | `3` | ไม่ตั้ง/ว่าง = 3 เดิม · จำนวนเต็ม ≥ 1 (1 = ไม่หมุน หยิบหัวแถวเสมอ · ทศนิยมปัดลง) · อ่านไม่ออก/0/ติดลบ = 3 + console.warn | ขนาดกลุ่มหัวแถวที่สุ่มถ่วง sqrt(likes) (กติกาข้อ 5 ของ rank-v2) — กันใบอันดับ 1 ผูกขาด · อ่านด้วย _envTok ชื่อ literal ใน _rankTuning | `src/lib/services/viralFewshot.js` | 3 ก.ย. 69 | ลบ env ออก = ค่าตรึงเดิม 3 |
 | `TEACHER_RANK_BACKFILL_RATIO` | `0.4` | ไม่ตั้ง/ว่าง = 0.4 เดิม · ทศนิยม ≥ 0 (พื้นชั้นเติม ก = floor × ค่านี้ · 0.4×50000 = 20,000) · อ่านไม่ออก/ติดลบ = 0.4 + console.warn | สัดส่วนพื้นของชั้นเติม ก (กติกาข้อ 6 ของ rank-v2 — เคสศรราม): ใบต่ำกว่าพื้นแต่ไลก์ ≥ floor×ratio และไม่ติด cap ได้เติมก่อนใบติด cap · อ่านด้วย _envTok ชื่อ literal ใน _rankTuning | `src/lib/services/viralFewshot.js` | 3 ก.ย. 69 | ลบ env ออก = ค่าตรึงเดิม 0.4 |
+| `TEACHER_POOL` | `(ว่าง)` | writers-v1 = เฉพาะแถว tags มี igdara-writers-v1 · ไม่ตั้ง/ว่าง = พูลเดิมทุกใบ — โค้ดเดิมทุกไบต์ | เลือกพูลครูตัวอย่างไวรัล: writers-v1 = ดึงทั้งคลัง (limit 300 + คอลัมน์ tags) แล้วกรองเฉพาะแถวที่ tags มี igdara-writers-v1 ฝั่ง client · แคชคนละคีย์กับพูลเดิม (__all__\|pool:writers-v1) · โหมดไม่กว้าง (rotate/top2) กรองหมวดจากพูลฝั่ง client — หมวดว่างในพูล = ใช้ทั้งพูลแบบข้ามหมวด (หัวบล็อกไม่ประกาศหมวด) ห้ามถอยไปแถวไม่มีป้าย · พูลว่าง (ยังไม่ import) = ไม่มีครู + console.log "ไม่พบครูป้าย … ไม่ถอยไปพูลเดิม" · ชั้นเฉพาะกิจ/rank-v2/ไลก์จริง/บัตร/สมุดประวัติ ทำงานเหมือนเดิมบนพูลที่กรองแล้ว · log ✅ ต่อท้าย "· พูล writers-v1 (N ใบ)" · ค่าอื่น = ถือว่าไม่ตั้ง + console.log อ่านไม่ออกครั้งเดียวต่อค่า · ควรเปิดคู่ VIRAL_SHORTLIST=1 (โหมดกว้าง — production ตั้งอยู่แล้ว): โหมดไม่กว้าง หมวดที่พูลมีครูใบเดียวจะได้ตัวอย่าง 1 ใบ ไม่เติมจากพูล (ทีมหักล้าง 4 ก.ย. 69) | `src/lib/services/viralFewshot.js` | 4 ก.ย. 69 | unset |
 
 ## โหมดถ้อยคำ (promptModes)
 
@@ -153,6 +154,8 @@
 | สวิตช์ | ค่าเริ่มต้น | ค่าที่รับ | ความหมาย | อ่านโดย | ตั้งแต่ | ถอยกลับ |
 |---|---|---|---|---|---|---|
 | `PORT` | `3000` | หมายเลขพอร์ต | พอร์ตเซิร์ฟเวอร์ที่ watchdog คิวใช้ปลุก /api/queue/worker ในเครื่อง (ค่าจาก Next/ระบบ) | `src/lib/services/queueService.js` | 1 มิ.ย. 69 | — (ค่าแพลตฟอร์ม) |
+| `VERCEL` | `(ว่าง)` | 1 บน Vercel (แพลตฟอร์มตั้งให้) · ไม่ตั้ง = นอก Vercel | ค่าแพลตฟอร์ม Vercel — ใช้เป็นยามให้ห้องแล็บ (TEACHER_POOL_FILE ใน viralFewshot · CARD_LIBRARY_LAB ใน persistStore) เพิกเฉยสวิตช์บน production (console.error ครั้งเดียว) · ⚠️ เครื่องทีมที่ vercel env pull อาจมี VERCEL=1 ใน .env.local — จะทำให้ห้องแล็บไม่ทำงาน | `src/lib/services/viralFewshot.js`<br>`src/lib/persistStore.js` | 3 ก.ย. 69 | — (ค่าแพลตฟอร์ม) |
+| `VERCEL_ENV` | `(ว่าง)` | production/preview/development (แพลตฟอร์มตั้งให้) · ไม่ตั้ง = นอก Vercel | ค่าแพลตฟอร์ม Vercel (คู่กับ VERCEL) — ยาม fail-closed ตัวเดียวกัน: พบค่าใดค่าหนึ่ง = ห้องแล็บ TEACHER_POOL_FILE/CARD_LIBRARY_LAB ถูกเพิกเฉย | `src/lib/services/viralFewshot.js`<br>`src/lib/persistStore.js` | 3 ก.ย. 69 | — (ค่าแพลตฟอร์ม) |
 
 ## โมเดล/ไคลเอนต์ AI
 
@@ -171,6 +174,12 @@
 |---|---|---|---|---|---|---|
 | `WITHTIMEOUT_ABORT` | `0` | 0 · 1 | =1 บังคับสร้าง AbortController ใน withTimeout แม้ไม่มี pipeline deadline/parent signal | `src/lib/utils/withTimeout.js` | 16 ก.ค. 69 | ลบ env |
 | `NEWS_RESEARCH` | `0` | 0 · 1 (รับ 1/on/true/yes) | เปิดค้นข้อมูลเสริมจากเน็ต (Serper/Tavily/ปุ่มหน้าเว็บ) — ค่าเริ่มต้นปิดในโค้ดตามคำสั่งเจ้าของ | `src/lib/utils/researchSwitch.js` | 16 ส.ค. 69 | ลบ env = ปิด |
+
+## ครูตัวอย่างไวรัล — ห้องแล็บ
+
+| สวิตช์ | ค่าเริ่มต้น | ค่าที่รับ | ความหมาย | อ่านโดย | ตั้งแต่ | ถอยกลับ |
+|---|---|---|---|---|---|---|
+| `TEACHER_POOL_FILE` | `(ว่าง)` | พาธไฟล์ JSON โครง data/teachers-writers-v1.json ({ teachers: [...] }) หรืออาเรย์ teachers ตรงๆ · ไม่ตั้ง/ว่าง = ปิด — เส้นเดิม | ห้องแล็บครูจากไฟล์ — ทำงานเฉพาะเมื่อ CARD_LIBRARY_LAB=1 และไม่พบ VERCEL/VERCEL_ENV (พบ Vercel = console.error ครั้งเดียว + เพิกเฉย · ตั้งไฟล์แต่ LAB ไม่ใช่ 1 = console.log "ถูกเพิกเฉย" ครั้งเดียว + เส้นเดิม) · เมื่อทำงาน: ไม่ยิง viral_examples เลย (rows = teachers จากไฟล์ อ่านสดทุกครั้ง ไม่ใช้แคช) · ไฟล์หาย/JSON พัง/ไม่มี teachers = console.error + throw ข้อความมี TEACHER_POOL_FILE (ผู้เรียกครอบ catch → ไม่มีครู ห้ามถอยไป Supabase) · ไลก์จริง = byId ไฟล์ data/viral-likes-real.json + engagement_likes จากไฟล์ (matchedBy pool-file) ถึงทั้ง _applyRealLikes และ rank-v2 · บัตรลักษณะ = data/viral-essences.json + essence จากไฟล์ · ไม่จดสมุดประวัติ (log "[TeacherPoolLab] ข้ามการจดสมุดประวัติ") · ประกาศตัวครั้งเดียว "[TeacherPoolLab] โหมดแล็บทำงาน — อ่านครูจากไฟล์: <พาธ> (N ใบ)" · ตั้งคู่ TEACHER_POOL=writers-v1 = กรองป้ายบนไฟล์ด้วย | `src/lib/services/viralFewshot.js` | 4 ก.ย. 69 | unset |
 
 ## เพดานเนื้อข่าว (newsCap)
 
@@ -202,3 +211,29 @@
 | สวิตช์ | ค่าเริ่มต้น | ค่าที่รับ | ความหมาย | อ่านโดย | ตั้งแต่ | ถอยกลับ |
 |---|---|---|---|---|---|---|
 | `TEACHER_IMPORT_APPLY` | `1` | 0 = ปฏิเสธโหมด --apply ก่อนแตะทุกอย่าง (dry-run/--rollback ยังใช้ได้เสมอ — ห้ามบล็อกทางถอย) · 1/ไม่ตั้ง/ค่าอื่น = --apply ทำงานปกติ | กันพลาดรัน --apply ผิดจังหวะ (เช่น ช่วง freeze) — ตั้ง 0 แล้วสคริปต์นำเข้าครูเขียนอะไรไม่ได้เลย (อ่าน === "0" จุดเดียวก่อนแตะไฟล์/DB) · สคริปต์ CLI ไม่ถูก import โดยโค้ดรันไทม์ใดๆ ไม่รัน = ระบบเดิมไบต์ต่อไบต์ | `scripts/import-new-teachers.mjs` | 3 ก.ย. 69 | เอา env ออก = --apply กลับทำงานปกติ · ถอยการนำเข้าทั้งชุด: node scripts/import-new-teachers.mjs --rollback <manifest> (ลบแถวตาม id + คืนไฟล์ 2 ไฟล์จาก backup ไบต์เดิม) |
+
+## คลังการ์ดเฟส 1 — ห้องแล็บ overlay (F2)
+
+| สวิตช์ | ค่าเริ่มต้น | ค่าที่รับ | ความหมาย | อ่านโดย | ตั้งแต่ | ถอยกลับ |
+|---|---|---|---|---|---|---|
+| `CARD_LIBRARY_LAB` | `0` | 1 = เปิดห้องแล็บ overlay (เฉพาะ store "prompt-library") · ไม่ตั้ง/ค่าอื่นใด = ปิด — โค้ดเดิมทุกเส้นทาง | เปิดแล้ว createStore("prompt-library") คืน store ห้องแล็บ: อ่านทุก op จากไฟล์ CARD_LIBRARY_OVERLAY_FILE ก่อนถึงสาย Supabase (mirror data/prompt-library.json ไม่ถูก sync ทับ) · ทุก op เขียน (add/addMany/update/remove/removeAll) เป็น no-op คืนค่าเหมือนสำเร็จ + console.warn ครั้งแรกต่อ method · ไฟล์หาย/JSON พัง/ไม่ใช่ array/ไม่ตั้งพาธ = console.error เองก่อน throw ชัด (เสียงรอดแม้ผู้เรียกครอบ catch ว่าง) · ประกาศตัวครั้งเดียวต่อ process ตอนสร้าง store ("[CardLibraryLab:prompt-library] โหมดแล็บทำงาน" + พาธไฟล์แขน) — runbook: grep "CardLibraryLab" ใน log เซิร์ฟทุกรอบแล็บ ไม่มีบรรทัดประกาศ = แล็บไม่ทำงาน · เจอบรรทัด error อ่านพัง = ทิ้งผลรอบนั้น · store ชื่ออื่นไม่ถูกแตะ · ตรวจพบ VERCEL/VERCEL_ENV = เพิกเฉยสวิตช์ + console.error ครั้งเดียวแล้วใช้เส้นทางเดิม | `src/lib/persistStore.js`<br>`src/lib/services/viralFewshot.js` | 3 ก.ย. 69 | unset (หรือค่าที่ไม่ใช่ "1") = พฤติกรรมเดิมไบต์ต่อไบต์ — snapshot test เทียบ HEAD พิสูจน์ทั้งโหมด Supabase และ file fallback · revert คอมมิตเดียว |
+| `CARD_LIBRARY_OVERLAY_FILE` | `(ว่าง)` | พาธไฟล์ JSON array คลังการ์ดของแขนทดลอง (เช่นไฟล์แขน B/C) · ไม่ตั้งขณะ CARD_LIBRARY_LAB=1 = ทุก op อ่าน console.error + throw ชัด (ห้องแล็บไม่เดาไฟล์เอง) และบรรทัดประกาศตัวระบุ "ยังไม่ตั้ง" | ชี้ไฟล์คลังแขนที่ห้องแล็บใช้เป็นแหล่งอ่านเดียว (มีผลเฉพาะเมื่อ CARD_LIBRARY_LAB=1 และไม่อยู่บน Vercel) · เนื้อการ์ดผ่าน _decodeValue เหมือนสาย store จริง · อ่านสดทุก op ไม่มี cache สลับไฟล์แขนได้ทันที · พาธถูกพิมพ์ในบรรทัดประกาศตัว [CardLibraryLab] ให้ผู้รันแล็บตรวจว่ารันถูกแขน | `src/lib/persistStore.js` | 3 ก.ย. 69 | unset — ไม่มีผลใดๆ เมื่อ CARD_LIBRARY_LAB ปิด (สวิตช์หลักคุมทั้งคู่) |
+
+## คลังการ์ดเฟส 1 — ตัวจำแนกหมวด
+
+| สวิตช์ | ค่าเริ่มต้น | ค่าที่รับ | ความหมาย | อ่านโดย | ตั้งแต่ | ถอยกลับ |
+|---|---|---|---|---|---|---|
+| `NEW_CARD_CATS_V1` | `0` | 1 = เปิด (หมวดใหม่ 3 หมวด + ย้าย mapping ตาม FINAL F9 ครบ 3 ก้อน) · ค่าอื่น/ไม่ตั้ง = ปิด (mapCategory ผลเดิมไบต์ต่อไบต์ — พิสูจน์เทียบ HEAD 48f41228 จริง 3,118 อินพุต ต่าง 0) | เปิดตัวจำแนกหมวดการ์ดใหม่: เพิ่มหมวดปลายทาง คดีความ/ศาสนา-งานบุญ/กีฬาแข่งขัน (ชั้นคีย์เฉพาะทางตรวจก่อนคีย์เดิม เรียงยาว→สั้น · "ชนะ/แพ้/เสมอ" จับเฉพาะป้ายตรงตัว) + ย้าย mapping ตามแบบ: อาชญากรรม+ข่าวอาชญากรรม→คดีความ · กีฬา→กีฬาแข่งขัน · จิตอาสา/ฮีโร่ชาวบ้าน/ฮีโร่→ช่วยเหลือกัน + getKnownCategories() สัญญา F11: ปิด=10 หมวดเดิม · เปิด=11 หมวด (3 ใหม่เข้า · ฮีโร่ชาวบ้าน+ข่าวอาชญากรรม ถูกโอนออกทั้งใบ) · จุดอ่าน env จุดเดียว: newCardCatsOn (เทส source contract ⑪ ค้ำ) | `src/lib/ai/semanticClusters.js` | 3 ก.ย. 69 | ลบ/ตั้ง env เป็นค่าอื่นที่ไม่ใช่ "1" — กลับพฤติกรรมเดิมทันที (อ่าน env สดทุกเรียก · เทส ⑦ flip ไปกลับใน process เดียวพิสูจน์) |
+
+## คลังการ์ดเฟส 1 — สถานะการ์ด (UI/API)
+
+| สวิตช์ | ค่าเริ่มต้น | ค่าที่รับ | ความหมาย | อ่านโดย | ตั้งแต่ | ถอยกลับ |
+|---|---|---|---|---|---|---|
+| `CARD_LIBRARY_V2` | `1` | 0 = ปิด (พฤติกรรมเดิมทุกเส้นทาง) · อื่นๆ/ไม่ตั้ง = เปิด | ฝั่ง API คลังการ์ด: PUT action archive/restore ตั้ง status · PUT whitelist รับ field status เฉพาะ active\|archived\|proposed (ค่าเพี้ยนเมินเงียบ) · DELETE รายใบต้อง confirm=<id> + ห้ามลบใบ usageCount>0 · ไม่มีผลกับข้อมูลจนกว่าใบจะมี field status (GET/POST ไม่แตะ) · อ่านตอนรับ request (isCardLibV2) สลับได้ไม่ต้อง build · F7: ท่อข่าวไม่หยิบใบ archived/proposed (libraryStatus.isCardSelectable ที่ทางเข้า 8 จุด ใน summarizeServiceText.js + summarizeService.js — analyze/getTopPrompts×2 ต่อไฟล์ + mix ต่อไฟล์ผ่าน libraryStatus.selectableCards (ปิด = คืน reference เดิมให้ sort() ทับอาเรย์ของ getAll เหมือนก่อน F7 — memCache/ไฟล์ sync ลำดับเดิม) + ToneFilter fallback ที่อ่าน data/prompt-library.json ตรงอีกไฟล์ละ 1 จุด · persistStore/GET ไม่กรอง — UI/สถิติ/track เห็นทุกใบ) | `src/app/api/prompt-library/route.js`<br>`src/lib/ai/libraryStatus.js` | 3 ก.ย. 69 | ตั้ง CARD_LIBRARY_V2=0 = พฤติกรรมเดิม (พิสูจน์ด้วยเทส stringify เท่ากันทุกไบต์ + mutation M3) · ลบ field status รายใบคืนสภาพข้อมูล |
+| `NEXT_PUBLIC_CARD_LIBRARY_V2` | `1` | 0 = ปิด (หน้าเดิม: ปุ่มลบเดิม ไม่มีป้าย/ตัวกรอง) · อื่นๆ/ไม่ตั้ง = เปิด | ฝั่ง client หน้า /prompt-library: ป้ายสถานะ + แถวตัวกรองสถานะ + ปุ่มพัก/กู้คืน/ลบถาวร 2 ชั้น แทนปุ่มลบตรงเดิม (CARD_LIB_V2_UI — NEXT_PUBLIC_* ฝังค่าตอน build) | `src/app/prompt-library/page.js` | 3 ก.ย. 69 | ตั้ง "0" แล้วต้อง rebuild/redeploy (NEXT_PUBLIC ฝังตอน build ไม่ใช่ runtime) — JSX เส้นเดิม (handleDelete + ปุ่มลบเดิม) เก็บไว้ครบตัวอักษร |
+
+## คลังการ์ดเฟส 1 — สคริปต์ย้ายข้อมูล (F13)
+
+| สวิตช์ | ค่าเริ่มต้น | ค่าที่รับ | ความหมาย | อ่านโดย | ตั้งแต่ | ถอยกลับ |
+|---|---|---|---|---|---|---|
+| `CARD_MIGRATE_APPLY` | `1` | ไม่ตั้ง/อื่นๆ = --apply ทำงานปกติ · 0 = ปฏิเสธโหมด --apply ของ migrate.mjs (dry-run และ restore.mjs ใช้ได้เสมอ — ทางถอยไม่ถูกบล็อก) | kill-switch ของสคริปต์ (แบบแผน TEACHER_IMPORT_APPLY): ปิดช่องเขียน store จริงของ migrate ชั่วคราวโดยไม่ต้องแตะโค้ด (runMigrate เช็ค === "0" ก่อนเขียน) · สคริปต์ CLI ไม่ถูก import โดยโค้ดรันไทม์ใดๆ ไม่รันสคริปต์ = ระบบเดิมไบต์ต่อไบต์ · หมายเหตุ: ด่านแขนแล็บใน getRealStore ไม่ใช่สวิตช์และจงใจไม่มีทางข้าม (fail-safe ของสคริปต์ล้วน ไม่บล็อกทางถอย) | `scripts/card-status/migrate.mjs` | 3 ก.ย. 69 | ตั้ง CARD_MIGRATE_APPLY=0 หรือไม่รันสคริปต์ · เทสพิสูจน์: ปิดแล้ว apply โยน error โดยไม่มีการเขียนใดๆ + dry-run ยังใช้ได้ |
