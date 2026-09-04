@@ -197,6 +197,17 @@ const normTs = (s) => String(s)
   .replace(/\d+(\.\d+)? ?ms\b/g, '<ms>');
 const normReq = (st) => st.requests.map((r) => `${r.m} ${normTs(decodeURIComponent(r.url))}`);
 const normInserted = (st) => st.inserted.map((b) => normTs(JSON.stringify(b)));
+// ซ็อกเก็ตท้องถิ่นสะดุด (fetch failed ไปหา mock 127.0.0.1 — เครื่องโหลด/พอร์ตชั่วคราว) = เรื่องของเครื่อง ไม่ใช่โค้ด → ลองซ้ำได้อีก 2 ครั้งก่อนตัดสินพาริตี้
+const FETCH_FAIL_RE = /TypeError: fetch failed/;
+async function stable(run) {
+  let out;
+  for (let k = 0; k < 3; k++) {
+    out = await run();
+    const rs = Array.isArray(out.r) ? out.r : [out.r];
+    if (!rs.some((x) => (x.logs || []).some((l) => FETCH_FAIL_RE.test(l)) || FETCH_FAIL_RE.test(String(x.err || '')))) break;
+  }
+  return out;
+}
 
 // ═══ ฟิกซ์เจอร์ต้องกัดได้จริง ═══
 test('0 ฟิกซ์เจอร์: 40 แถว · ป้าย 18/ไม่ป้าย 22 · หมวดข่าว A/B/C ตามตัวจำแนก V2 (A มีทั้งสองแบบ · B ไม่มีแถว · C ไม่มีป้าย) · ข่าว N ไม่มีชั้นตรง', async () => {
@@ -217,6 +228,24 @@ test('0 ฟิกซ์เจอร์: 40 แถว · ป้าย 18/ไม�
 // ═══ ชุด ก — พาริตี้ HEAD (fuzz): ไม่ตั้ง TEACHER_POOL/TEACHER_POOL_FILE = ทุกอย่างเท่า HEAD เป๊ะ ═══
 //   ครอบทุกค่า: VIRAL_SHORTLIST {unset,1} × VIRAL_ROTATE {unset,0} × TEACHER_RANK_V2 {unset,0} × VIRAL_MATCH_MODE {unset,score} × LIB_CLASSIFIER_V2 {unset,0}
 //   + ข่าว 4 แบบ (A มีชั้น · B ชั้นว่าง · C · N ไม่มีชั้นตรง) + TEACHER_POOL='' + TEACHER_POOL_FILE ตั้งแต่ LAB ไม่ตั้ง + TEACHER_POOL=writers-v9
+test('0ข กันชน env: เชลล์คนรันมีกุญแจ Supabase จริง/SUPABASE_DISABLED ค้าง → โปรเซสลูกเห็นแต่ PostgREST จำลอง (ไม่ยิง DB จริง · ไม่ถูกปิด)', async () => {
+  const leaked = { NEXT_PUBLIC_SUPABASE_URL: 'https://real-project.supabase.co', SUPABASE_URL: 'https://real-project.supabase.co', SUPABASE_SERVICE_KEY: 'real-key', SUPABASE_SERVICE_ROLE_KEY: 'real-key', NEXT_PUBLIC_SUPABASE_ANON_KEY: 'real-anon', SUPABASE_DISABLED: '1', SUPABASE_RESILIENCE_MODE: 'team', VIRAL_SHORTLIST: '0' };
+  const saved = Object.fromEntries(Object.keys(leaked).map((k) => [k, process.env[k]]));
+  Object.assign(process.env, leaked);
+  try {
+    await withMockDb({}, async ({ port, st }) => {
+      const t0 = Date.now();
+      const r = await runOne({ port, brief: BRIEF_A, env: { VIRAL_SHORTLIST: '1' } });
+      assert.equal(r.err, null, r.err);
+      assert.ok(getsViral(st).length >= 1, 'ต้องมี GET viral_examples ถึง mock (env จริงถูกล้างก่อน spawn)');
+      assert.ok(blockHasExamples(r.block), 'ต้องได้ครูจาก mock (ไม่ใช่ถูก SUPABASE_DISABLED ปิด)');
+      assert.ok(Date.now() - t0 < 10000, 'ต้องจบเร็ว (ถ้าช้า = หลุดไปยิง DB จริง/รอ timeout)');
+    });
+  } finally {
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  }
+});
+
 const U = null;
 const FUZZ = [
   { name: 'ค่าเริ่มต้นล้วน · A', env: {}, brief: BRIEF_A },
@@ -249,21 +278,22 @@ const FUZZ = [
 for (const [i, fz] of FUZZ.entries()) {
   test(`ก${i + 1} พาริตี้ HEAD: ${fz.name}`, async () => {
     const usageRows = [{ picks: [{ id: ROWS[9].id }, { id: ROWS[9].id }] }]; // สมุด 7 วันมีของ (rank-v2 อ่าน)
-    const wt = await withMockDb({ usageRows }, async ({ port, st }) => ({ st, r: await runOne({ port, brief: fz.brief, env: fz.env, seed: 11 + i }) }));
-    const hd = await withMockDb({ usageRows }, async ({ port, st }) => ({ st, r: await runOne({ port, brief: fz.brief, env: fz.env, seed: 11 + i, module: HEAD_PATH }) }));
+    const wt = await stable(() => withMockDb({ usageRows }, async ({ port, st }) => ({ st, r: await runOne({ port, brief: fz.brief, env: fz.env, seed: 11 + i }) })));
+    const hd = await stable(() => withMockDb({ usageRows }, async ({ port, st }) => ({ st, r: await runOne({ port, brief: fz.brief, env: fz.env, seed: 11 + i, module: HEAD_PATH }) })));
     try {
       assert.equal(wt.r.err, null, `worktree โยน: ${wt.r.err}`);
       assert.equal(hd.r.err, null, `HEAD โยน: ${hd.r.err}`);
       assert.equal(wt.r.block, hd.r.block, 'บล็อกต้องเท่า HEAD ทุกไบต์');
       assert.deepEqual(normReq(wt.st), normReq(hd.st), 'ลำดับ+URL คำขอที่ถึง PostgREST จำลองต้องเท่า HEAD');
       for (const r of getsViral(wt.st)) assert.ok(!/tags/.test(r.select), `select ต้องไม่มี tags เมื่อปิดสวิตช์: ${r.select}`);
-      let logs = wt.r.logs;
+      let logs = wt.r.logs, headLogs = hd.r.logs;
       if (fz.allowExtra) {
         const extra = logs.filter((l) => fz.allowExtra.test(l));
         assert.equal(extra.length, 1, `ต้องมี log ที่ยกเว้นได้ 1 บรรทัดพอดี: ${JSON.stringify(extra)}`);
         logs = logs.filter((l) => !fz.allowExtra.test(l));
+        headLogs = headLogs.filter((l) => !fz.allowExtra.test(l)); // HEAD ที่ commit สวิตช์นี้ไปแล้วก็พิมพ์บรรทัดยกเว้นเหมือนกัน → ตัดทั้งสองฝั่ง (เทียบเฉพาะเส้นเดิม)
       }
-      assert.deepEqual(logs.map(normTs), hd.r.logs.map(normTs), 'console.log/warn/error ทั้งหมดต้องเท่า HEAD');
+      assert.deepEqual(logs.map(normTs), headLogs.map(normTs), 'console.log/warn/error ทั้งหมดต้องเท่า HEAD');
       assert.deepEqual(normInserted(wt.st), normInserted(hd.st), 'body ที่ POST viral_pick_history ต้องเท่า HEAD');
       assert.ok(blockHasExamples(wt.r.block) || fz.brief === BRIEF_B, 'ฉากที่มีชั้น/ข้ามหมวดได้ต้องมีครู (กันเทสผ่านเพราะทั้งคู่ว่าง)');
     } catch (e) {
@@ -561,16 +591,16 @@ for (const [i, fz] of X.entries()) {
     const mk = (module) => withMockDb({ usageRows, rows: fz.rows, viralStatus: fz.viralStatus }, async ({ port, st }) => ({
       st, r: await runChild({ port, module, env: fz.env, seed: 101 + i, calls: fz.calls.map((brief, j) => ({ brief, env: (fz.callEnvs || [])[j] || {} })) }),
     }));
-    const wt = await mk(SRC_PATH), hd = await mk(HEAD_PATH);
+    const wt = await stable(() => mk(SRC_PATH)), hd = await stable(() => mk(HEAD_PATH));
     try {
       assert.equal(wt.r.length, hd.r.length);
       let extraSeen = 0;
       for (let j = 0; j < wt.r.length; j++) {
         assert.equal(wt.r[j].err, hd.r[j].err, `call ${j} err`);
         assert.equal(wt.r[j].block, hd.r[j].block, `call ${j} บล็อกต้องเท่า HEAD ทุกไบต์`);
-        let logs = wt.r[j].logs;
-        if (fz.allowExtra) { const ex = logs.filter((l) => fz.allowExtra.test(l)); extraSeen += ex.length; logs = logs.filter((l) => !fz.allowExtra.test(l)); }
-        assert.deepEqual(logs.map(normTs), hd.r[j].logs.map(normTs), `call ${j} logs`);
+        let logs = wt.r[j].logs, headLogs = hd.r[j].logs;
+        if (fz.allowExtra) { const ex = logs.filter((l) => fz.allowExtra.test(l)); extraSeen += ex.length; logs = logs.filter((l) => !fz.allowExtra.test(l)); headLogs = headLogs.filter((l) => !fz.allowExtra.test(l)); } // ตัดบรรทัดยกเว้นทั้งสองฝั่ง (HEAD อาจมีสวิตช์นี้แล้ว)
+        assert.deepEqual(logs.map(normTs), headLogs.map(normTs), `call ${j} logs`);
       }
       if (fz.allowExtra) assert.equal(extraSeen, 1, 'log ยกเว้นต้องมี 1 บรรทัดพอดีทั้งโปรเซส');
       assert.deepEqual(normReq(wt.st), normReq(hd.st), 'คำขอ PostgREST ทั้งโปรเซสต้องเท่า HEAD');

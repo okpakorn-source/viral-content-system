@@ -2,6 +2,8 @@
 // รัน: node --test tests/import-writer-teachers.test.mjs (ไม่ต้องตั้ง env · ห้ามแตะ DB — pure functions + spawn dry-run จริง 1 ครั้ง)
 // ข้อมูลจริงล้วน อ่านอย่างเดียว: data/teachers-writers-v1.json + data/viral-likes-real.json + data/viral-essences.json
 // ไฟล์ที่เขียนอยู่ใน tmpdir เท่านั้น
+// เขียวทั้ง "ก่อน" และ "หลัง" นำเข้าจริง: ข้อ 1-7/9-10 ใช้ "ภาพก่อนนำเข้า" ที่สร้างในหน่วยความจำ (ตัดรายการ writers-v1 ออกจากไฟล์จริง)
+// ข้อ 11 ตรวจสภาพหลังนำเข้า (วงจรซ้ำต้องเป็นศูนย์) · ข้อ 8/14 spawn บนไฟล์จริงตามสภาพปัจจุบัน
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -24,13 +26,38 @@ const readRoot = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 // ── ข้อมูลจริง (อ่านครั้งเดียว — เทสห้ามเขียนไฟล์พวกนี้) ──
 const dataFile = JSON.parse(readRoot('data/teachers-writers-v1.json'));
 const teachers = dataFile.teachers;
-const likesRaw = readRoot('data/viral-likes-real.json');
-const essencesRaw = readRoot('data/viral-essences.json');
+// ไฟล์จริง "ตามสภาพปัจจุบัน" (ก่อนหรือหลัง --apply ก็ได้) — ใช้เฉพาะข้อที่ต้องดูสภาพจริง (8, 11, 14)
+const likesRealRaw = readRoot('data/viral-likes-real.json');
+const essencesRealRaw = readRoot('data/viral-essences.json');
+const likesRealData = JSON.parse(likesRealRaw);
+const essRealData = JSON.parse(essencesRealRaw);
+// "ภาพก่อนนำเข้า" ในหน่วยความจำ: ตัดรายการของ writers-v1 (matchedBy = ป้ายชุด หรือ id อยู่ในชุด) ออกจากไฟล์จริง
+// แล้ว serialize กลับด้วย format เดิมของไฟล์ → ไม่ขึ้นกับว่าเจ้าของรัน --apply ไปแล้วหรือยัง
+const TEACHER_IDS = new Set(teachers.map((t) => t.id));
+function stripWritersV1(raw, kind) {
+  const { data, fmt } = assertRoundTrip(raw, 'ไฟล์จริง ' + kind);
+  if (kind === 'likes') {
+    const byId = {};
+    for (const [id, e] of Object.entries(data.byId)) if (!(e?.matchedBy === MATCHED_BY || TEACHER_IDS.has(id))) byId[id] = e;
+    const out = {};
+    for (const k of Object.keys(data)) out[k] = k === 'byId' ? byId : data[k];
+    return serializeJson(out, fmt);
+  }
+  const out = {};
+  for (const [id, card] of Object.entries(data)) if (!TEACHER_IDS.has(id)) out[id] = card;
+  return serializeJson(out, fmt);
+}
+const likesRaw = stripWritersV1(likesRealRaw, 'likes');
+const essencesRaw = stripWritersV1(essencesRealRaw, 'essences');
 const likesData = JSON.parse(likesRaw);
 const essData = JSON.parse(essencesRaw);
+// สภาพไฟล์จริงตอนนี้: จำนวนใบของชุดที่อยู่ในไฟล์จริงแล้ว (ครบ = นำเข้าแล้ว · 0 = ยังไม่นำเข้า · อื่นๆ = งานค้าง ข้อ 11 จะแดง)
+const inLikesReal = teachers.filter((t) => likesRealData.byId[t.id]).length;
+const inEssReal = teachers.filter((t) => essRealData[t.id]).length;
 
 // ค่าคงที่ของชุด (เขียนซ้ำอิสระจากสคริปต์ — ใครแก้ฝั่งสคริปต์ต้องแดงที่นี่)
 const EXPECTED_TOTAL = 28;
+const IMPORTED = inLikesReal === EXPECTED_TOTAL && inEssReal === EXPECTED_TOTAL;
 const EXPECTED_AUTHORS = { 'Nisada Jaraket': 17, 'Po Ny': 11 };
 const EXPECTED_MASTERS = 4;
 const V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -382,6 +409,41 @@ test('10) buildVerifyReport: ครบ = ok · ขาดในตาราง/�
   const wrong = buildVerifyReport({ teachers: dataFile, likesRaw: JSON.stringify(wrongLikes), essencesRaw: plan.essences.after, existingRows: full });
   assert.deepEqual(wrong.likesWrong, [teachers[0].id]);
   assert.equal(wrong.ok, false);
+});
+
+test('11) สภาพหลังนำเข้าแล้ว: planImport บนไฟล์ที่เติมครบ + ตารางครบ → insert 0 · เติมไฟล์ 0 · ไฟล์ไบต์เดิม · verify ok (ไฟล์จริงปัจจุบันต้องเป็น "ครบ 28" หรือ "ไม่มีเลย" เท่านั้น)', () => {
+  const full = teachers.map((t) => buildInsertRow(t));
+  const after = freshPlan(); // ภาพก่อนนำเข้า + เติม 28 = ภาพหลังนำเข้า (จำลองในหน่วยความจำ)
+  const check = (likesR, essR, label) => {
+    const plan = planImport({ teachers: dataFile, likesRaw: likesR, essencesRaw: essR, existingRows: full });
+    assert.equal(plan.insertRows.length, 0, label + ': insert ต้อง 0');
+    assert.equal(plan.skipped.length, EXPECTED_TOTAL);
+    assert.ok(plan.skipped.every((e) => e.skip.reason === 'id-in-table'), label + ': ทุกใบต้องข้ามเพราะ id อยู่ในตาราง');
+    assert.deepEqual(plan.warnings, []);
+    assert.deepEqual(plan.likes.added, [], label + ': likes ห้ามเติมซ้ำ');
+    assert.deepEqual(plan.essences.added, [], label + ': บัตรห้ามเติมซ้ำ');
+    assert.deepEqual(plan.likes.skippedExisting, teachers.map((t) => t.id));
+    assert.deepEqual(plan.essences.skippedExisting, teachers.map((t) => t.id));
+    assert.equal(plan.likes.after, likesR, label + ': likes ต้องไบต์เดิม (ไม่มีอะไรเติม)');
+    assert.equal(plan.essences.after, essR, label + ': บัตรต้องไบต์เดิม');
+    const v = buildVerifyReport({ teachers: dataFile, likesRaw: likesR, essencesRaw: essR, existingRows: full });
+    assert.deepEqual([v.likesMissing, v.likesWrong, v.essMissing], [[], [], []], label + ': ไฟล์ต้องครบ+ค่าตรง');
+    assert.equal(v.ok, true, label + ': verify ต้อง ok');
+    assert.equal(v.table.taggedRows, EXPECTED_TOTAL);
+    const offline = buildVerifyReport({ teachers: dataFile, likesRaw: likesR, essencesRaw: essR, existingRows: null });
+    assert.equal(offline.ok, true, label + ': verify offline ต้อง ok');
+  };
+  check(after.likes.after, after.essences.after, 'ภาพจำลองหลังนำเข้า');
+  // ไฟล์จริงปัจจุบัน: ต้องครบ 28 ทั้งสองไฟล์ (นำเข้าแล้ว) หรือไม่มีเลย (ยังไม่นำเข้า) — ครึ่งๆ = งานค้าง ต้องมาดู
+  assert.ok(IMPORTED || (inLikesReal === 0 && inEssReal === 0), `ไฟล์จริงค้างครึ่งทาง: likes ${inLikesReal}/${EXPECTED_TOTAL} · บัตร ${inEssReal}/${EXPECTED_TOTAL} — รัน --verify/--apply ให้จบ`);
+  if (IMPORTED) {
+    check(likesRealRaw, essencesRealRaw, 'ไฟล์จริงปัจจุบัน (นำเข้าแล้ว)');
+    for (const t of teachers) assert.deepEqual(likesRealData.byId[t.id], { likes: t.engagement_likes, matchedBy: MATCHED_BY });
+    for (const t of teachers) assert.deepEqual(essRealData[t.id], t.essence);
+  } else {
+    assert.equal(likesRealRaw, likesRaw, 'ยังไม่นำเข้า: ภาพก่อนนำเข้าต้องเท่าไฟล์จริงไบต์ต่อไบต์');
+    assert.equal(essencesRealRaw, essencesRaw);
+  }
 });
 
 test('12) assertInsertReturned: ครบ = คืน id เรียง · ขาด/เกิน/แปลกปลอม/null = โยน', () => {
