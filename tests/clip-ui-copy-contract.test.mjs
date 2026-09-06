@@ -36,16 +36,18 @@ function loadInsightCard() {
       buildClipSubStoryText: (s) => `ก้อนย่อย: ${s?.rawData || ''}`,
     },
     './BrainBox': { __esModule: true, default: () => null },
+    './TopicCard': { __esModule: true, default: () => null },
+    '@/lib/services/clipBrain/topicMetrics': { countThaiWords: () => 0 },
   };
-  const module = { exports: {} };
+  const sandboxModule = { exports: {} };
   const localRequire = (name) => {
     if (name in fakeModules) return fakeModules[name];
     if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
     return require(name);
   };
   // ts เปลี่ยน JSX เป็น React.createElement — ต้องมี React ในขอบเขตที่รัน
-  new Function('require', 'module', 'exports', 'React', out)(localRequire, module, module.exports, React);
-  return module.exports.default || module.exports;
+  new Function('require', 'module', 'exports', 'React', out)(localRequire, sandboxModule, sandboxModule.exports, React);
+  return sandboxModule.exports.default || sandboxModule.exports;
 }
 
 /** เดินต้นไม้ element หาปุ่มที่ข้อความตรงเงื่อนไข แล้วกด onClick */

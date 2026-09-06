@@ -14,6 +14,8 @@ import { useState } from 'react';
 import { platformIcon, fmtDurSec, fmtMs, fmtClock } from './statusMeta';
 import { buildClipNewsReadyText, buildClipSubStoryText } from '@/lib/services/clipNewsReadyText';
 import BrainBox from './BrainBox';
+import TopicCard, { TopicChip, issueLabel, wordBand } from './TopicCard';
+import { countThaiWords } from '@/lib/services/clipBrain/topicMetrics';
 
 const C = { card: '#1f2937', sub: '#111827', line: '#374151', text: '#e5e7eb', muted: '#9ca3af', accent: '#38bdf8' };
 
@@ -45,6 +47,10 @@ function safeSubText(s, i) {
   try { return buildClipSubStoryText(s, i) || ''; } catch { return s?.rawData || ''; }
 }
 
+function LegacyDetails({ enabled, children }) {
+  return enabled ? <details style={{ marginTop: 12 }}><summary style={{ cursor: 'pointer', color: C.muted, marginBottom: 10 }}>ของเดิม / เนื้อเต็ม</summary>{children}</details> : children;
+}
+
 export default function InsightCard({ rec, live = false, copiedKey, onCopy, onDelete, onPin, onRetry }) {
   // ★ 26 ส.ค. 69 (เจ้าของแจ้ง): เนื้อเต็มทั้งคลิปต้องเห็นเสมอ — บางข่าวใช้ก้อนรวม ไม่ได้ใช้แยกรายประเด็น
   //   เดิมพับไว้ในคลัง (กางเฉพาะผลสด) ทำให้พนักงานเปิดเคสเก่าแล้วนึกว่าหาย
@@ -63,6 +69,11 @@ export default function InsightCard({ rec, live = false, copiedKey, onCopy, onDe
   const qualityNote = r.qualityNote || ins.qualityNote;
   const cached = r.cached || ins.cached;
   const cachedAt = r.cachedAt || ins.cachedAt;
+  const hasTopicsV2 = ins.topicsV2?.schemaVersion === 2;
+  const topics = hasTopicsV2 ? [...(ins.topicsV2.stories || [])].sort((a, b) =>
+    Number(b.id === ins.topicsV2.mainTopicId) - Number(a.id === ins.topicsV2.mainTopicId) || (b.sharePct ?? -1) - (a.sharePct ?? -1)) : [];
+  const mainStory = ins.mainStory ?? ins.topicsV2?.mainStory ?? '';
+  const mainWords = hasTopicsV2 ? countThaiWords(mainStory) : 0;
 
   return (
     <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14, color: C.text }}>
@@ -102,6 +113,23 @@ export default function InsightCard({ rec, live = false, copiedKey, onCopy, onDe
         </div>
       </div>
 
+      {hasTopicsV2 && (
+        <section aria-label="เรื่อง v2" style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
+          <article style={{ border: `1px solid ${C.accent}66`, background: C.sub, borderRadius: 10, padding: 13 }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+              <strong>เรื่องหลักทั้งคลิป</strong>
+              <TopicChip label={`${mainWords} คำ`} tone={wordBand(mainWords)} title="กรอบเนื้อพร้อมใช้ 100–170 คำ" />
+              {ins.topicsV2.mainStoryQuality?.status !== 'checked' && <TopicChip label="ยังไม่ตรวจความพร้อม" tone="warn" title="ยังไม่มีผลตรวจเรื่องหลัก" />}
+              {(ins.topicsV2.mainStoryQuality?.issues || []).filter((issue) => !(ins.topicsV2.mainStoryStale && issue.code === 'main-story-stale')).map((issue, i) => <TopicChip key={i} label={issueLabel(issue.code)} tone="warn" title={issue.detail} />)}
+              {ins.topicsV2.mainStoryStale && <TopicChip label="เรื่องหลักต้องทบทวน" tone="warn" title="ประเด็นหลักถูกแก้แล้ว เรื่องหลักยังเป็นฉบับเดิม ควรทบทวนก่อนนำไปใช้" />}
+              <button onClick={() => copy(k('main-v2'), safeReadyText(ins))} style={btn(isCopied(k('main-v2')))}>{isCopied(k('main-v2')) ? '✓ คัดลอกแล้ว' : 'คัดลอกเรื่องหลัก'}</button>
+            </div>
+            <div style={{ fontSize: 13.5, lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>{mainStory || 'ยังไม่มีเรื่องหลักทั้งคลิป'}</div>
+          </article>
+          {topics.map((story) => <TopicCard key={story.id} story={story} siblings={ins.topicsV2.stories} isMain={story.id === ins.topicsV2.mainTopicId} copy={copy} copiedKey={copiedKey} copyKey={k('topic-' + story.id)} />)}
+        </section>
+      )}
+
       {/* ── แถวป้ายเตือน ── */}
       {lowQuality && (
         <div style={{ fontSize: 12.5, padding: '8px 11px', borderRadius: 9, background: 'rgba(239,68,68,.08)', border: '1px solid #ef444455', color: '#f87171', marginBottom: 10 }}>
@@ -124,6 +152,7 @@ export default function InsightCard({ rec, live = false, copiedKey, onCopy, onDe
       {/* ── ผลตรวจสอบหลังถอด ── */}
       <BrainBox brain={ins.brain} />
 
+      <LegacyDetails enabled={hasTopicsV2}>
       {/* ── ป้ายชนิดคลิป + ผู้พูด + วิธีใช้ (โชว์ทั้ง 2 สาขา — เดิมสาขาคลิปยาวตกหล่น) ── */}
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
         {ins.clipTypeLabel && <span style={chip('#a78bfa', 'rgba(167,139,250,.12)')}>{ins.emoji || '🎬'} {ins.clipTypeLabel}</span>}
@@ -251,6 +280,7 @@ export default function InsightCard({ rec, live = false, copiedKey, onCopy, onDe
           </div>
         </div>
       )}
+      </LegacyDetails>
     </div>
   );
 }

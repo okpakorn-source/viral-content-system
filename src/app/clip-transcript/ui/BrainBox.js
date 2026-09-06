@@ -6,6 +6,7 @@
  *    (ที่มา: survey-result-data-shape.md ข้อ 2 + PROBLEMS)
  */
 import { getBrainMeta, fmtMs } from './statusMeta';
+import { issueLabel } from './TopicCard';
 
 const C = { text: '#e5e7eb', muted: '#9ca3af', line: '#374151', sub: '#111827' };
 
@@ -23,6 +24,10 @@ function degradeText(d) {
   if (t === 'repair-failed') return 'ซ่อมไม่สำเร็จ';
   if (t === 'answer-truncated') return 'คำตอบถูกตัด';
   if (t === 'model-fallback') return 'สลับรุ่นสำรอง';
+  if (t === 'topics-v2-failed') return 'แยกประเด็น v2 ไม่สำเร็จ';
+  if (t === 'topics-v2-crashed') return 'แยกประเด็น v2 สะดุด';
+  if (t === 'topics-v2-skipped-no-truth') return 'ข้ามประเด็น v2 เพราะไม่มีบทถอดสำหรับตรวจ';
+  if (t === 'readiness-crashed') return 'ตรวจความพร้อมไม่สำเร็จ';
   return t || 'มีข้อจำกัดระหว่างถอด';
 }
 
@@ -32,10 +37,11 @@ function countSeverity(brain) {
     ...(Array.isArray(brain?.check?.code?.findings) ? brain.check.code.findings : []),
     ...(Array.isArray(brain?.check?.ai?.findings) ? brain.check.ai.findings : []),
   ];
-  const c = { สูง: 0, กลาง: 0, ต่ำ: 0, total: all.length };
+  const c = { สูง: 0, กลาง: 0, ต่ำ: 0, total: 0 };
   for (const f of all) {
     const s = f?.severity;
-    if (s === 'สูง' || s === 'กลาง' || s === 'ต่ำ') c[s] += 1;
+    if (f?.side === 'ความพร้อม' || s === 'ข้อสังเกต') continue;
+    if (s === 'สูง' || s === 'กลาง' || s === 'ต่ำ') { c[s] += 1; c.total += 1; }
   }
   return c;
 }
@@ -64,6 +70,14 @@ export default function BrainBox({ brain }) {
   const repairUSD = Number(costs.repairUSD) || 0;
   const planUSD = Number(costs.planUSD) || 0;
   const took = fmtMs(brain.elapsedMs);
+  const truthFindings = [...(code?.findings || []), ...(ai?.findings || [])]
+    .filter((f) => f?.side !== 'ความพร้อม' && ['สูง', 'กลาง', 'ต่ำ'].includes(f?.severity));
+  const readiness = brain.check?.readiness;
+  const topicsV2 = brain.topicsV2;
+  const attempts = Array.isArray(topicsV2?.attempts) ? topicsV2.attempts : [];
+  const topicCount = Array.isArray(topicsV2?.stories) ? topicsV2.stories.length : (readiness?.counts?.stories ?? 0);
+  const topicCost = attempts.reduce((sum, attempt) => sum + (Number(attempt.costUSD) || 0), 0);
+  const topicTime = topicsV2?.elapsedMs ?? attempts.reduce((sum, attempt) => sum + (Number(attempt.elapsedMs) || 0), 0);
 
   return (
     <div style={{ background: C.sub, border: `1px solid ${C.line}`, borderRadius: 12, padding: '12px 14px', marginBottom: 12 }}>
@@ -79,14 +93,28 @@ export default function BrainBox({ brain }) {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {topicsV2 && <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>
+          ประเด็น v2: {topicCount} เรื่อง · {topicsV2.gate?.pass === true ? 'ผ่านด่าน' : 'ไม่ผ่าน'}
+          {' · สมอง '}{attempts.length ? attempts.map((a) => `${a.brain || a.model || 'ไม่ระบุ'}${a.brain && a.model ? ` / ${a.model}` : ''}${a.effort ? ` (${a.effort})` : ''}`).join(' → ') : 'ไม่มีข้อมูล'}
+          {' · '}{fmtMs(topicTime) || '0 วิ'} · {attempts.some((a) => a.costUSD != null) ? `$${topicCost.toFixed(4)}` : 'ไม่มีข้อมูลค่าใช้จ่าย'}
+          {topicsV2.reason && <div style={{ color: '#fbbf24' }}>{topicsV2.reason}</div>}
+          {topicsV2.gate?.pass === false && topicsV2.gate.reasons?.length > 0 && <div style={{ color: '#fbbf24' }}>{topicsV2.gate.reasons.join(' · ')}</div>}
+        </div>}
+        <div style={{ fontWeight: 700, fontSize: 13 }}>ความจริง</div>
         <Row label="ใครตรวจ">
           <span>ชั้นโค้ด{code?.rev ? ` (${code.rev})` : ''}</span>
           <span style={{ color: C.muted }}> · </span>
           {ai ? <span>ชั้นสมอง{ai.verdict ? ` — ${ai.verdict}` : ''}</span> : <span style={{ color: '#fbbf24' }}>ข้ามชั้นสมอง</span>}
         </Row>
 
+        {brain.check?.lowCount > 0 && <div style={{ fontSize: 11.5, color: C.muted }}>คำพูดสั้นตรวจไม่ได้ {brain.check.lowCount}</div>}
+        {truthFindings.length > 0 && <details style={{ fontSize: 12, lineHeight: 1.7 }}>
+          <summary style={{ cursor: 'pointer', color: C.muted }}>จุดตรวจความจริง {truthFindings.length}</summary>
+          {truthFindings.map((f, i) => <div key={i} title={f.where}>• {f.severity}: {f.detail}{f.fix ? ` · ${f.fix}` : ''}</div>)}
+        </details>}
+
         <Row label="เจอ">
-          {sev.total === 0 ? <span style={{ color: '#22c55e' }}>ไม่พบจุดผิด</span> : (
+          {sev.total === 0 ? <span style={{ color: code || ai ? '#22c55e' : C.muted }}>{code || ai ? 'ไม่พบจุดผิด' : 'ยังไม่ได้ตรวจความจริง'}</span> : (
             <span>
               รวม {sev.total} จุด
               {sev.สูง > 0 && <span style={{ color: '#f97316' }}> · สูง {sev.สูง}</span>}
@@ -125,6 +153,17 @@ export default function BrainBox({ brain }) {
           </Row>
         )}
 
+        {readiness && <div style={{ borderTop: `1px solid ${C.line}`, paddingTop: 8, marginTop: 4, fontSize: 12, lineHeight: 1.75 }}>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>ความพร้อม</div>
+          {readiness.note && <div style={{ color: '#fbbf24' }}>{readiness.note}</div>}
+          <div style={{ color: C.muted }}>ตรวจ {readiness.counts?.stories ?? 0} เรื่อง · มีข้อสังเกต {readiness.counts?.withIssues ?? 0} เรื่อง</div>
+          <div style={{ color: '#fbbf24' }}>{Object.entries(readiness.counts?.byCode || {}).map(([code, count]) => `${issueLabel(code)} ${count}`).join(' · ')}</div>
+          {readiness.findings?.length > 0 ? <details>
+            <summary style={{ cursor: 'pointer' }}>ข้อสังเกตความพร้อม {readiness.findings.length}</summary>
+            {readiness.findings.map((f, i) => <div key={i} title={f.where}>• {f.detail}{f.fix ? ` · ${f.fix}` : ''}</div>)}
+          </details> : <div style={{ color: '#22c55e' }}>ไม่พบข้อสังเกตความพร้อม</div>}
+        </div>}
+
         {(tokens > 0 || repairUSD > 0 || planUSD > 0 || took) && (
           <Row label="ต้นทุน">
             {tokens > 0 && <span>{tokens.toLocaleString()} โทเคน</span>}
@@ -137,7 +176,7 @@ export default function BrainBox({ brain }) {
         {degradations.length > 0 && (
           <Row label="ข้อจำกัด">
             <div>{degradations.map((d, i) => (
-              <div key={i} style={{ color: '#fbbf24' }}>• {degradeText(d)}{d?.note ? <span style={{ color: C.muted }}> — {d.note}</span> : null}</div>
+              <div key={i} style={{ color: '#fbbf24' }}>• {degradeText(d)}{(d?.note || d?.why || d?.reason) ? <span style={{ color: C.muted }}> — {d.note || d.why || d.reason}</span> : null}</div>
             ))}</div>
           </Row>
         )}

@@ -27,7 +27,19 @@ function timeLabel(start, end) {
   return `${a || '?'}–${b || '?'}`;
 }
 
+/** V2: keep the wording, fold prose into one paragraph, then append verified quotes. */
+export function buildClipTopicReadyText(story, { mainStory } = {}) {
+  const body = clean(mainStory ?? story?.story).replace(/\s+/g, ' ');
+  const quotes = (Array.isArray(story?.quotes) ? story.quotes : [])
+    .filter((quote) => quote?.verification === 'verified' && clean(quote.text))
+    .map((quote) => `คำพูด${clean(quote.speaker) ? ` (${clean(quote.speaker)})` : ''}: "${quote.text}"`);
+  return [body, ...quotes].filter(Boolean).join('\n');
+}
+
 export function buildClipSubStoryText(story, index = 0) {
+  if (story?.storyId && (Object.hasOwn(story, 'highlight') || Object.hasOwn(story, 'quality'))) {
+    return buildClipTopicReadyText({ ...story, story: story.story ?? story.rawData ?? story.summary });
+  }
   const topic = clean(story?.topic || story?.title);
   const body = clean(story?.rawData || story?.summary);
   if (!body) return '';
@@ -60,6 +72,12 @@ function buildLegacyTopicText(topic, index) {
  */
 export function buildClipNewsReadyText(insight) {
   if (!insight || typeof insight !== 'object') return '';
+
+  if (insight.topicsV2?.schemaVersion === 2) {
+    const main = (Array.isArray(insight.topicsV2.stories) ? insight.topicsV2.stories : [])
+      .find((story) => story.id === insight.topicsV2.mainTopicId);
+    return buildClipTopicReadyText(main, { mainStory: insight.mainStory ?? insight.topicsV2.mainStory ?? '' });
+  }
 
   if (insight.multiTopic && Array.isArray(insight.topics) && insight.topics.length) {
     return insight.topics.map(buildLegacyTopicText).filter(Boolean).join('\n\n');
