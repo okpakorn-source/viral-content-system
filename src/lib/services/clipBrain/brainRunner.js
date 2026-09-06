@@ -292,13 +292,26 @@ export function isAuthMessage(s) { return AUTH_RE.test(String(s || '')); }
 //    (วัดจริง: แคชอุ่น $0.039/ครั้ง · แคชเย็น $0.22/ครั้ง)
 const CLAUDE_SYSTEM = 'You are a careful Thai news editor. Follow the user instructions exactly and output only what is requested.';
 
+// P2: only fixed allowlisted effort values reach argv. Claude CLI help on
+// 2026-09-06 supports low|medium|high|xhigh|max; claude-auto.ps1 -Effort
+// forwards the same --effort flag. No new wrapper launch path is needed.
+const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'ultra', 'max']);
+function effortOptions(opts, brain) {
+  let value;
+  try { value = opts.effort; } catch { return { effortIgnored: true }; }
+  if (value === undefined || value === null) return {};
+  if (typeof value !== 'string' || !EFFORTS.has(value) || (brain === 'claude' && value === 'ultra')) return { effortIgnored: true };
+  return { effortIgnored: false, effortApplied: brain === 'codex' && value === 'max' ? 'ultra' : value };
+}
+
 const BRAINS = {
   claude: {
     binEnv: 'CLIP_BRAIN_CLAUDE_BIN',
     defBin: 'claude',
-    buildArgs(opts) {
+    buildArgs(opts, effort) {
       const model = safeModel(opts.model || process.env.CLIP_BRAIN_WRITER_MODEL, 'sonnet');
       const args = ['-p', '--model', model, '--output-format', 'json'];
+      if (effort) args.push('--effort', effort);
       // ⚠️ ไม่ครอบ quote เองแล้ว — args ส่งเป็น "อาร์เรย์" ตรงเข้า spawn (shell:false) ค่าที่ CLI ได้รับ
       //    เท่ากับของเดิมทุกตัวอักษร (เมื่อก่อน shell เป็นคนแกะ quote ออกให้) → แคชฝั่งผู้ให้บริการไม่หลุด
       if (process.env.CLIP_BRAIN_LEAN !== '0') {
@@ -329,12 +342,13 @@ const BRAINS = {
   codex: {
     binEnv: 'CLIP_BRAIN_CODEX_BIN',
     defBin: 'codex',
-    buildArgs(opts) {
+    buildArgs(opts, effort) {
       // --ephemeral = ไม่เขียนไฟล์ session ลงดิสก์ · --ignore-user-config = ไม่โหลด config/MCP/hook ของผู้ใช้
       // (ตรวจจาก `codex exec --help` บนเครื่องนี้ 26 ส.ค. ว่ามีธงสองตัวนี้จริง — ไม่ใส่ธงที่ไม่มี)
       const args = ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--ephemeral', '--ignore-user-config'];
       const m = opts.model ? safeModel(opts.model, '') : '';
       if (m) args.push('-m', m);
+      if (effort) args.push('-c', `model_reasoning_effort="${effort}"`);
       args.push('-'); // อ่านพรอมต์จาก stdin
       return args;
     },
@@ -418,7 +432,11 @@ function execBrain({ file, args, cwdDir, timeoutMs, prompt, accountDirs = null }
         //   ปลอดภัยเพราะทุกชิ้นผ่านด่านแล้ว: ไม่มี " % & | < > ^ ` $ หรือขึ้นบรรทัดใหม่ เหลือรอด
         //   (path ผ่าน SAFE_BIN_TOKEN · model ผ่าน SAFE_MODEL · ที่เหลือเป็นค่าคงที่ในไฟล์นี้)
         const q = (s) => `"${String(s).replace(/"/g, '')}"`;
-        const line = [q(found.exe), ...spawnArgs.map(q)].join(' ');
+        // Preserve TOML quotes only for this fixed allowlisted P2 argument.
+        // General argv still uses the original restrictive quote sanitizer.
+        const qEffort = (s) => /^model_reasoning_effort="(?:low|medium|high|xhigh|ultra)"$/.test(s)
+          ? '"' + s.replace(/"/g, '\\"') + '"' : q(s);
+        const line = [q(found.exe), ...spawnArgs.map(qEffort)].join(' ');
         spawnFile = process.env.COMSPEC || 'cmd.exe';
         spawnArgs = ['/d', '/s', '/c', `"${line}"`];
         spawnOpts.windowsVerbatimArguments = true;
@@ -507,7 +525,7 @@ function execBrain({ file, args, cwdDir, timeoutMs, prompt, accountDirs = null }
 
 /**
  * เรียกสมอง 1 ครั้ง — ไม่โยน error เด็ดขาด
- * @param {object} opts { brain:'claude'|'codex', prompt, expectJson=true, timeoutMs?, model?, label? }
+ * @param {object} opts { brain:'claude'|'codex', prompt, expectJson=true, timeoutMs?, model?, effort?, label? }
  * @returns {Promise<{ok:boolean, brain, label, text?, json?, costUSD?, tokensUsed?, elapsedMs, errorType?, error?, rawSample?, truncated?}>}
  */
 export async function runBrain(rawOpts) {
@@ -518,7 +536,7 @@ export async function runBrain(rawOpts) {
   const pick = (k) => { try { const v = opts[k]; return v == null ? '' : String(v); } catch { return ''; } };
   const kind = pick('brain');
   const label = pick('label') || kind || 'brain';
-  const base = { brain: kind, label };
+  const base = { brain: kind, label, ...effortOptions(opts, kind) };
   const fail = (errorType, error, extra = {}) => {
     const r = { ok: false, ...base, errorType, error: head(error || errorType, 500), elapsedMs: Date.now() - t0, ...extra };
     try { console.warn(`[ClipBrain] ✗ ${label} (${kind || '?'}) ${errorType} ${r.elapsedMs}ms`); } catch {}
@@ -536,7 +554,7 @@ export async function runBrain(rawOpts) {
     let launch;
     try {
       const parsed = parseBin(bin, spec.defBin);
-      launch = { file: parsed.file, args: [...parsed.preArgs, ...spec.buildArgs(opts)] };
+      launch = { file: parsed.file, args: [...parsed.preArgs, ...spec.buildArgs(opts, base.effortApplied)] };
     } catch (e) {
       if (e instanceof BadModelError) return fail('BRAIN_BAD_MODEL', e.message);
       if (e instanceof BadBinError) return fail('BRAIN_BAD_BIN', `${spec.binEnv}: ${e.message}`);
