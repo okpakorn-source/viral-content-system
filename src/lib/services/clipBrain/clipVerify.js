@@ -68,21 +68,94 @@ export const isRolePlaceholder = (s) => {
   return !splitTokens(t).some(looksLikeName);      // เหลือชื่อคนพ่วงมาด้วยไหม
 };
 
-/** 🐞 บั๊ก #4b: จับคำพูดแบบ "ต้องตรงเป๊ะ 24 ตัวแรก" พลาดง่ายมาก (25/30 คำพูดถูกตีว่าไม่ตรง)
- *  เพราะคำพูดมักมีชื่อผู้พูดพ่วงหน้า/ท้าย และปลายประโยคถูกเกลาเล็กน้อย
- *  → เปลี่ยนเป็นเลื่อนหน้าต่าง: ถ้ามี "ท่อนต่อเนื่อง 14 ตัวอักษร" ตรงกับเฉลยที่ใดก็ตาม = ถือว่าตรง */
-function quoteFoundInTruth(quote, T) {
-  let body = String(quote || '')
+const quoteBody = (quote) => toArabic(norm(String(quote || '')
     .replace(/^[^:：]{0,40}[:：]\s*/, '')          // ตัดชื่อผู้พูดนำหน้า
     .replace(/\s*[-–—]\s*[^-–—]{0,40}$/, '')       // ตัดชื่อผู้พูดต่อท้าย " - ชื่อ"
-    .replace(/\([^)]{0,40}\)\s*$/, '');            // ตัดชื่อผู้พูดในวงเล็บท้าย
-  const s = toArabic(norm(body));
-  if (s.length < 14) return true;                  // สั้นเกินกว่าจะตัดสิน — ไม่เตือน
-  // 🐞 บั๊ก CB-11: เดิมเลื่อนทีละ 4 ตัว ข้าม offset 1-3 → คำพูดที่ตรงจริงแต่เหลื่อมนิดเดียวถูกตีว่าไม่ตรง
+    .replace(/\([^)]{0,40}\)\s*$/, '')));          // ตัดชื่อผู้พูดในวงเล็บท้าย
+
+/** สัดส่วนตัวอักษรที่อยู่ในท่อนตรงกัน ≥14 ตัว (0–1); ไม่ยืนยันผู้พูดหรือความหมาย */
+export function quoteCoverage(quote, T) {
+  const s = quoteBody(quote);
+  if (s.length < 14) return 0;                     // หลักฐานไม่พอ ไม่ใช่คำพูดที่ยืนยันแล้ว
+  const truth = toArabic(norm(T));
+  let covered = 0;
+  let coveredEnd = 0;
+  // เลื่อนทีละตัวเหมือน CB-11; นับ union ของช่วงที่ตรง ไม่บวกทับตัวอักษรเดิม
   for (let i = 0; i + 14 <= s.length; i += 1) {
-    if (T.includes(s.slice(i, i + 14))) return true;
+    if (!truth.includes(s.slice(i, i + 14))) continue;
+    covered += i + 14 - Math.max(i, coveredEnd);
+    coveredEnd = i + 14;
   }
-  return false;
+  return covered / s.length;
+}
+
+/** Readiness diagnostics only; never rewrite text or feed factual repair/status.
+ * Load metrics only for v2, keeping legacy module-hook fixtures dependency-free.
+ * Quote verification is textual coverage, not speaker or factual verification.
+ */
+export async function assessReadiness(insight, { truth = '' } = {}) {
+  const result = { findings: [], stories: [], mainStory: { issues: [] } };
+  const doc = insight?.topicsV2;
+  if (!doc || doc.schemaVersion !== 2) return result;
+  const { countThaiWords, lengthBand, bureaucraticRate, longSentenceCount, crossStoryOverlap } = await import('./topicMetrics.js');
+  const list = (v) => Array.isArray(v) ? v : [];
+  const text = (v) => typeof v === 'string' ? v : '';
+  const fixes = {
+    'length-short': 'เติมรายละเอียดที่มีหลักฐานให้ครบ 100–170 คำ โดยไม่แต่งข้อมูลเพิ่ม',
+    'length-long': 'เรียบเรียงให้กระชับในช่วง 100–170 คำ โดยเก็บสาระสำคัญ',
+    'no-highlight': 'เลือกประโยคไฮไลท์ที่ตรงกับเนื้อเรื่องและหลักฐาน',
+    bureaucratic: 'ปรับคำราชการเป็นภาษาที่อ่านเข้าใจง่าย',
+    'long-sentence': 'แบ่งประโยคยาวให้ติดตามได้ง่าย โดยคงความหมายเดิม',
+    overlap: 'ทบทวนข้อความซ้ำกับเรื่องที่ระบุ และเก็บบริบทเท่าที่จำเป็น',
+    'quote-unverified': 'ตรวจคำพูดกับเสียงต้นทางก่อนนำไปใช้',
+    'quote-short': 'ตรวจคำพูดสั้นกับเสียงต้นทางด้วยคน',
+    'no-facts': 'เพิ่มข้อเท็จจริงพร้อมหลักฐานของประเด็นนี้',
+    missing: 'เขียนเรื่องเล่าหลักจากประเด็นและหลักฐานที่มี',
+    'main-story-stale': 'ทบทวนเรื่องเล่าหลักให้สอดคล้องกับประเด็นที่แก้แล้ว',
+  };
+  const add = (issues, where, code, detail, value) => {
+    issues.push({ code, detail, ...(value === undefined ? {} : { value }) });
+    result.findings.push({ side: 'ความพร้อม', severity: 'ข้อสังเกต', kind: 'ความพร้อมใช้งาน',
+      where, detail, fix: fixes[code] });
+  };
+  const proseIssues = (body, issues, where) => {
+    const words = countThaiWords(body);
+    const band = lengthBand(words);
+    if (band !== 'ok') add(issues, where, `length-${band}`, `มี ${words} คำ ควรอยู่ในช่วง 100–170 คำ`, words);
+    const rate = bureaucraticRate(body);
+    if (rate >= 0.8) add(issues, where, 'bureaucratic', `พบคำราชการ ${rate.toFixed(2)} ครั้งต่อ 1,000 ตัวอักษร`, rate);
+  };
+  const stories = list(doc.stories);
+  const overlaps = crossStoryOverlap(stories).pairs;
+  stories.forEach((story, i) => {
+    const issues = [];
+    const where = `topicsV2.stories[${i}]`;
+    const body = text(story?.story);
+    proseIssues(body, issues, where);
+    if (!text(story?.highlight).trim()) add(issues, where, 'no-highlight', 'ยังไม่มีประโยคไฮไลท์');
+    const long = longSentenceCount(body, 60);
+    if (long) add(issues, where, 'long-sentence', `มี ${long} ประโยคที่ยาวเกิน 60 คำ`, long);
+    const id = story?.id ?? i;
+    const peers = new Set(overlaps.flatMap((p) => p.a === id ? [p.b] : p.b === id ? [p.a] : []));
+    for (const peer of peers) add(issues, where, 'overlap', `พบข้อความที่อาจซ้ำกับเรื่อง ${peer}`, peer);
+    list(story?.quotes).forEach((quote, j) => {
+      const value = text(quote?.text);
+      if (quoteBody(value).length < 14) {
+        add(issues, where, 'quote-short', `คำพูดลำดับ ${j + 1} สั้นกว่า 14 ตัวหลังปรับรูป จึงยังยืนยันไม่ได้`, j);
+      } else {
+        const coverage = quoteCoverage(value, truth);
+        if (coverage < 0.6) add(issues, where, 'quote-unverified', `คำพูดลำดับ ${j + 1} ตรงกับเฉลย ${Math.round(coverage * 100)}% ยังยืนยันไม่ได้`, coverage);
+      }
+    });
+    if (!list(story?.facts).some((f) => text(f?.text).trim())) add(issues, where, 'no-facts', 'ยังไม่มีข้อเท็จจริงของประเด็นนี้');
+    result.stories.push({ id: story?.id, issues });
+  });
+  const main = text(insight.mainStory ?? doc.mainStory);
+  if (!main.trim()) add(result.mainStory.issues, 'mainStory', 'missing', 'ยังไม่มีเรื่องเล่าหลัก');
+  else proseIssues(main, result.mainStory.issues, 'mainStory');
+  if (doc.mainStoryStale === true) add(result.mainStory.issues, 'mainStory', 'main-story-stale',
+    'ประเด็นหลักถูกแก้แล้ว เรื่องเล่าหลักยังเป็นฉบับเดิม ควรทบทวนความสอดคล้องก่อนนำไปใช้');
+  return result;
 }
 
 export function checkAgainstTruth(insight, truth, { caption = '', plannedSegments = null } = {}) {
@@ -122,11 +195,16 @@ export function checkAgainstTruth(insight, truth, { caption = '', plannedSegment
   // ③ คำพูดในเครื่องหมายคำพูดต้องมีในเฉลย (ยอมให้เพี้ยนเล็กน้อยได้)
   const allQuotes = [...(insight?.quotes || []), ...(insight?.subStories || []).flatMap((s) => s?.quotes || [])];
   for (const q of allQuotes) {
-    if (!quoteFoundInTruth(q, T)) {
+    const short = quoteBody(q).length < 14;
+    const coverage = quoteCoverage(q, T);
+    if (short || coverage < 0.6) {
       findings.push({
-        kind: 'คำพูดไม่ตรงคลิป', severity: 'สูง', where: `"${String(q).slice(0, 55)}"`,
-        detail: 'ยกมาเป็นคำพูดตรง แต่หาข้อความต่อเนื่องนี้ในคลิปไม่เจอเลย',
-        fix: 'แก้ให้ตรงคำที่พูดจริง หรือเลิกใส่เครื่องหมายคำพูด',
+        kind: short ? 'คำพูดสั้นตรวจไม่ได้' : (coverage >= 0.3 ? 'คำพูดตรงบางส่วน' : 'คำพูดไม่ตรงคลิป'),
+        severity: short ? 'ต่ำ' : (coverage >= 0.3 ? 'กลาง' : 'สูง'),
+        where: `"${String(q).slice(0, 55)}"`, coverage,
+        detail: short ? 'คำพูดสั้นกว่า 14 ตัวหลังปรับรูป จึงยังยืนยันด้วยตัวตรวจโค้ดไม่ได้'
+          : `พบท่อนตรงกันครอบคลุม ${Math.round(coverage * 100)}% ของคำพูด ยังยืนยันทั้งประโยคไม่ได้`,
+        fix: short ? 'ตรวจคำพูดสั้นกับเสียงต้นทาง' : 'แก้ให้ตรงคำที่พูดจริง หรือเลิกใส่เครื่องหมายคำพูด',
       });
     }
   }
@@ -198,7 +276,7 @@ export function checkAgainstTruth(insight, truth, { caption = '', plannedSegment
   return {
     rev: VERIFY_REV,
     verdict: high ? 'ต้องตรวจ' : (findings.length ? 'มีข้อสังเกต' : 'สะอาด'),
-    findings,
+    findings: findings.map((f) => ({ ...f, side: 'ความจริง' })),
     stats: { truthChars: String(truth || '').length, coverage, quotesChecked: allQuotes.length, timelineChecked: (insight?.timeline || []).length },
   };
 }
@@ -222,6 +300,7 @@ export function buildReviewPrompt({ insight, truth, caption = '', codeFindings =
 ${codeFindings.length ? `หมายเหตุ: ตัวตรวจอัตโนมัติชี้ไว้แล้ว ${codeFindings.length} จุด (ดูซ้ำได้ แต่ไม่ต้องรายงานซ้ำถ้าเห็นตรงกัน):\n${codeFindings.map((f) => `- [${f.kind}] ${f.where}`).join('\n')}\n` : ''}
 === แคปชั่นต้นทาง ===
 ${String(caption || '(ไม่มี)').slice(0, 500)}
+แคปชั่นส่วนนี้มาจากต้นทางเท่านั้น; headline ในผลถอดเป็นข้อความที่ AI สร้างและต้องตรวจ ห้ามใช้เป็นหลักฐาน
 
 === เฉลยจากคลิป (คำพูดคำต่อคำ + ตัวหนังสือบนจอ) ===
 ${String(truth || '').slice(0, 60000)}
@@ -368,6 +447,94 @@ export function repairFabricatedNames(insight, truth, { caption = '' } = {}) {
   return { insight: out, changes, ops, unresolved };
 }
 
+/** เลือกข้อความต้นฉบับรอบหลักฐานของแต่ละ finding; งบรวมเครื่องหมายคั่นช่วงด้วย */
+export function selectTruthForFindings(truth, findings, { maxChars = 12000, window = 600 } = {}) {
+  const text = String(truth || '');
+  const cap = Number.isFinite(maxChars) ? Math.max(0, Math.floor(maxChars)) : 12000;
+  const radius = Number.isFinite(window) ? Math.max(0, Math.floor(window)) : 600;
+  if (text.length <= cap) return text;
+  if (!cap) return '';
+  const separator = '\n…\n';
+  const fallback = () => {
+    if (cap <= separator.length) return text.slice(0, cap);
+    const budget = cap - separator.length;
+    const head = Math.ceil(budget / 2);
+    return text.slice(0, head) + separator + text.slice(text.length - (budget - head));
+  };
+
+  // เก็บตำแหน่งกลับไปยังต้นฉบับ เพื่อค้นแบบไม่สนช่องว่าง/เลขไทย แต่ไม่แก้ข้อความหลักฐาน
+  const offsets = [];
+  let searchable = '';
+  for (let i = 0; i < text.length; i += 1) {
+    const c = toArabic(norm(text[i]));
+    if (c) { searchable += c; offsets.push(i); }
+  }
+  const segmenter = new Intl.Segmenter('th', { granularity: 'word' });
+  const groups = (Array.isArray(findings) ? findings : []).map((f) => {
+    const terms = new Set();
+    for (const key of ['quote', 'name', 'topic', 'where', 'detail', 'fix']) {
+      const raw = typeof f?.[key] === 'string' ? f[key].slice(0, 4000) : '';
+      const parts = [raw, ...raw.split(/[\s"'“”‘’()[\],;：/|]+/)];
+      for (const part of parts) {
+        const term = toArabic(norm(part));
+        if (term.length >= 3 || /^\d{2,}$/.test(term)) terms.add(term);
+      }
+      for (const part of segmenter.segment(raw)) {
+        const term = toArabic(norm(part.segment));
+        if (part.isWordLike && (term.length >= 3 || /^\d{2,}$/.test(term))) terms.add(term);
+      }
+    }
+    const candidates = [];
+    for (const term of [...terms].sort((a, b) => b.length - a.length).slice(0, 128)) {
+      const matches = [];
+      let from = 0;
+      for (let count = 0; count < 4; count += 1) {
+        const i = searchable.indexOf(term, from);
+        if (i < 0) break;
+        const start = offsets[i];
+        const end = offsets[i + term.length - 1] + 1;
+        matches.push({ start, end });
+        from = i + term.length;
+      }
+      // คำทั่วไปที่ซ้ำหลายครั้งต้องไม่เบียดชื่อ/ตัวเลขเฉพาะช่วงท้ายออกจากงบ
+      for (const match of matches) candidates.push({ ...match, score: term.length / matches.length });
+    }
+    const hits = [];
+    for (const candidate of candidates.sort((a, b) => b.score - a.score || a.start - b.start)) {
+      if (hits.some((hit) => candidate.start >= hit.start && candidate.end <= hit.end)) continue;
+      hits.push({ start: Math.max(0, candidate.start - radius), end: Math.min(text.length, candidate.end + radius), focus: candidate.start });
+      if (hits.length >= 4) break;
+    }
+    return hits;
+  });
+  const merge = (ranges) => {
+    const merged = [];
+    for (const range of [...ranges].sort((a, b) => a.start - b.start)) {
+      const prev = merged[merged.length - 1];
+      if (prev && range.start <= prev.end) prev.end = Math.max(prev.end, range.end);
+      else merged.push({ ...range });
+    }
+    return merged;
+  };
+  const size = (ranges) => ranges.reduce((sum, r) => sum + r.end - r.start, 0) + Math.max(0, ranges.length - 1) * separator.length;
+  let selected = [];
+  // กระจายงบ: หลักฐานแรกของทุก finding มาก่อนช่วงเพิ่มเติมของ finding เดียว
+  for (let rank = 0; rank < 4; rank += 1) {
+    for (const group of groups) {
+      const hit = group[rank];
+      if (!hit) continue;
+      const merged = merge([...selected, hit]);
+      if (size(merged) <= cap) { selected = merged; continue; }
+      const remaining = cap - size(selected) - (selected.length ? separator.length : 0);
+      if (remaining <= 0) continue;
+      const start = Math.max(hit.start, Math.min(hit.focus - Math.floor(remaining / 2), hit.end - remaining));
+      const clipped = merge([...selected, { start, end: Math.min(hit.end, start + remaining) }]);
+      if (size(clipped) <= cap) selected = clipped;
+    }
+  }
+  return selected.length ? selected.map((r) => text.slice(r.start, r.end)).join(separator) : fallback();
+}
+
 /** พรอมต์ให้ตัวซ่อม (Claude) แก้เฉพาะจุดที่ผู้ตรวจชี้ */
 export function buildRepairPrompt({ insight, truth, findings }) {
   return `คุณคือบรรณาธิการ แก้ "ผลถอดคลิป" เฉพาะจุดที่ผู้ตรวจชี้เท่านั้น
@@ -380,14 +547,18 @@ export function buildRepairPrompt({ insight, truth, findings }) {
 - ถ้าจำเป็นต้อง **เพิ่มประเด็นย่อยก้อนใหม่** ให้ใส่ "fromFinding" = เลขข้อใน "จุดที่ต้องแก้" ที่สั่งให้เพิ่มก้อนนั้น
   ก้อนใหม่ที่ไม่มี fromFinding หรืออ้างเลขข้อที่ไม่มีจริง จะถูกทิ้งทั้งก้อน (กันการแต่งประเด็นใหม่เข้ามาเอง)
 
-ตอบ JSON บรรทัดเดียว: {"patch":{"headline":"...","overview":"...","rawData":"...","speakers":[...],"quotes":[...],"subStories":[{"no":1,"topic":"...","timeRange":"...","rawData":"...","quotes":[...],"fromFinding":"เลขข้อ (ใส่เฉพาะก้อนที่เพิ่มใหม่)"}]},"changed":["สรุปสั้นว่าแก้อะไรไปบ้าง"],"unfixed":["จุดที่แก้ไม่ได้ พร้อมเหตุผล"]}
+ตอบ JSON บรรทัดเดียว: {"patch":{"headline":"...","overview":"...","rawData":"...","speakers":[...],"quotes":[...],"subStories":[{"no":1,"topic":"...","timeRange":"...","rawData":"...","quotes":[...],"fromFinding":"เลขข้อ (ใส่เฉพาะก้อนที่เพิ่มใหม่)"}]},"changed":[{"fromFinding":1,"summary":"สรุปสิ่งที่แก้","edits":[{"path":"rawData","before":"ข้อความเดิมตรงตัว","after":"ข้อความใหม่ตรงตัว"}]}],"unfixed":[{"fromFinding":2,"reason":"เหตุผลที่แก้ไม่ได้"}]}
 ใส่เฉพาะช่องที่แก้จริงใน patch — ช่องที่ไม่ได้แก้ไม่ต้องใส่
+changed ต้องอ้างเลข finding ทีละข้อ พร้อม edits ทุกจุดที่จำเป็นต่อการแก้ข้อนั้นครบแล้วเท่านั้น
+path ใช้ headline/overview/rawData/speakers/quotes หรือ subStories.<no>.topic/timeRange/rawData/quotes (no ตามผลถอดปัจจุบัน)
+before/after เป็นข้อความตรงตัวในช่องนั้นที่ถูกเปลี่ยนจริง; เพิ่มข้อความใช้ before="" ลบข้อความใช้ after=""
+ถ้าแก้ได้เพียงบางส่วน ให้คง finding นั้นใน unfixed; คำบอกว่าแก้แล้วลอยๆ ไม่ถือเป็นการแก้สำเร็จ
 
 === จุดที่ต้องแก้ ===
 ${findings.map((f, i) => `${i + 1}. [${f.kind}] ${f.where}\n   ปัญหา: ${f.detail}\n   ควรแก้: ${f.fix}`).join('\n')}
 
 === เฉลยจากคลิป (ใช้ยืนยันข้อเท็จจริง) ===
-${String(truth || '').slice(0, 12000)}
+${selectTruthForFindings(truth, findings)}
 
 === ผลถอดปัจจุบัน ===
 ${JSON.stringify({
@@ -463,11 +634,47 @@ const normNo = (v) => {
   return Number.isInteger(n) && n > 0 && n <= 999 ? n : null;
 };
 
+/** รับรองเฉพาะการเปลี่ยนข้อความที่รับจริงและผูกเลข finding ชัดเจน ไม่ใช่การตรวจความหมายซ้ำ */
+function confirmedRepairFindings(findings, report, appliedEdits) {
+  if (!Array.isArray(findings) || !Array.isArray(report?.changed) || !Array.isArray(report?.unfixed)) return [];
+  const findingNo = (v) => {
+    const n = (typeof v === 'number' || (typeof v === 'string' && /^\d+$/.test(v))) ? Number(v) : 0;
+    return Number.isInteger(n) && n >= 1 && n <= findings.length ? n : null;
+  };
+  const blocked = new Set();
+  for (const item of report.unfixed) {
+    const n = findingNo(item?.fromFinding);
+    if (n) { blocked.add(n); continue; }
+    // รายงานรุ่นเก่าเป็นข้อความ: จับเลขข้อที่ต้นประโยคหรือ where ที่ชัดเจนเท่านั้น
+    const s = typeof item === 'string' ? item.trim() : '';
+    const match = s.match(/^(?:#|ข้อ\s*)?(\d{1,3})(?=[\s.:)\-]|$)/);
+    const ref = match && findingNo(match[1]);
+    if (ref) { blocked.add(ref); continue; }
+    const matches = findings.map((f, i) => ({ no: i + 1, where: norm(f?.where) }))
+      .filter((f) => f.where.length >= 4 && norm(s).includes(f.where));
+    if (matches.length === 1) blocked.add(matches[0].no);
+    else return []; // มีข้อที่ยังแก้ไม่ได้แต่ไม่รู้ข้อไหน จึงยังล้างธงไม่ได้
+  }
+  const confirmed = new Map();
+  for (const item of report.changed) {
+    const n = findingNo(item?.fromFinding);
+    if (!n || blocked.has(n)) continue;
+    const valid = Array.isArray(item?.edits) && item.edits.length > 0 && item.edits.every((edit) => {
+      const actual = appliedEdits.get(edit?.path);
+      if (!actual || typeof edit.before !== 'string' || typeof edit.after !== 'string' || edit.before === edit.after) return false;
+      return (!edit.before || (actual.before.includes(edit.before) && !actual.after.includes(edit.before)))
+        && (!edit.after || (!actual.before.includes(edit.after) && actual.after.includes(edit.after)));
+    });
+    confirmed.set(n, valid && confirmed.get(n) !== false);
+  }
+  return [...confirmed].filter(([, valid]) => valid).map(([n]) => n);
+}
+
 /**
  * เอา patch จากตัวซ่อมมาทับผลเดิม — ทับเฉพาะช่องที่ส่งมาและผ่านด่าน · คืน {insight, changed, rejected}
  * @param {object} insight ผลถอดเดิม
  * @param {object} patch แพตช์จากตัวซ่อม (เชื่อไม่ได้ ต้องผ่านด่านทุกช่อง)
- * @param {object|Array} opts {findings} = จุดที่ส่งไปให้ซ่อมรอบนี้ (ส่ง array ตรงๆ ก็ได้)
+ * @param {object|Array} opts {findings, changed, unfixed} = findings และรายงานจากตัวซ่อม (ส่ง array findings ตรงๆ ก็ได้)
  *   ใช้ตรวจว่า "ก้อนย่อยใหม่" ที่ตัวซ่อมเพิ่มมา ผูกกับจุดที่ผู้ตรวจชี้จริงไหม
  *   ไม่ส่งมา = ห้ามเพิ่มก้อนใหม่ (ค่าเริ่มต้นปลอดภัย · ของเดิมยังแก้ได้ตามปกติ)
  */
@@ -478,11 +685,16 @@ export function applyRepairPatch(insight, patch, opts) {
   const out = { ...base };
   const changed = [];
   const rejected = [];
+  const appliedEdits = new Map();
+  const recordEdit = (path, before, after) => {
+    const asText = (v) => Array.isArray(v) ? v.join('\n') : String(v ?? '');
+    appliedEdits.set(path, { before: appliedEdits.get(path)?.before ?? asText(before), after: asText(after) });
+  };
   const rej = (where, why) => { rejected.push({ where, why }); };
   try {
     if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
       rej('patch', 'แพตช์ไม่ใช่ออบเจกต์ — ไม่ทับอะไรเลย');
-      return { insight: out, changed: [], rejected };
+      return { insight: out, changed: [], rejected, resolvedFindings: [] };
     }
 
     // ① ช่องข้อความ
@@ -494,6 +706,7 @@ export function applyRepairPatch(insight, patch, opts) {
       if (after === before) { rej(key, 'ค่าเท่าเดิม ไม่ต้องทับ'); return; }
       if (shrankTooMuch(before, after)) { rej(key, `เนื้อหดผิดปกติ ${before.length}→${after.length} ตัว`); return; }
       out[key] = after; changed.push(key);
+      recordEdit(key, before, after);
     };
     guardText('headline', patch.headline);
     guardText('overview', patch.overview);
@@ -519,6 +732,7 @@ export function applyRepairPatch(insight, patch, opts) {
       if (after.length < before.length) { rej(key, `รายการหด ${before.length}→${after.length} — ไม่รับ`); return; }
       if (after.length === before.length && after.every((x, i) => x === before[i])) { rej(key, 'ค่าเท่าเดิม ไม่ต้องทับ'); return; }
       out[key] = after; changed.push(key);
+      recordEdit(key, before, after);
     };
     guardList('speakers');
     guardList('quotes');
@@ -562,6 +776,7 @@ export function applyRepairPatch(insight, patch, opts) {
             if (p.keyPoints != null && !Array.isArray(p.keyPoints)) rej(`subStories no.${no} keyPoints`, 'ไม่ใช่ array — ทิ้ง');
             const timeRange = typeof p.timeRange === 'string' && p.timeRange.length <= MAX_TIMERANGE_LEN ? p.timeRange : '';
             byNo.set(no, { no, topic, timeRange, rawData, quotes, keyPoints, directLead: '', interviewEventIsNews: false, fromFinding: ref });
+            for (const key of ['topic', 'timeRange', 'rawData', 'quotes']) recordEdit(`subStories.${no}.${key}`, '', byNo.get(no)[key]);
             added += 1; touched = true;
             changed.push(`subStories+เพิ่มก้อนใหม่ no.${no}`);
             continue;
@@ -598,7 +813,12 @@ export function applyRepairPatch(insight, patch, opts) {
               else { merged.quotes = afterQ; hit = true; }
             }
           }
-          if (hit) { byNo.set(no, merged); touched = true; }
+          if (hit) {
+            for (const key of ['topic', 'timeRange', 'rawData', 'quotes']) {
+              if (merged[key] !== cur[key]) recordEdit(`subStories.${no}.${key}`, cur[key], merged[key]);
+            }
+            byNo.set(no, merged); touched = true;
+          }
         }
         if (touched) {
           out.subStories = [...byNo.values()]
@@ -608,10 +828,11 @@ export function applyRepairPatch(insight, patch, opts) {
         } else if (patch.subStories.length) rej('subStories', 'ไม่มีช่องไหนผ่านด่าน');
       }
     }
-    return { insight: out, changed: [...new Set(changed)], rejected };
+    return { insight: out, changed: [...new Set(changed)], rejected,
+      resolvedFindings: confirmedRepairFindings(findings, opts, appliedEdits) };
   } catch (e) {
     // สัญญา fail-open: แพตช์ผิดรูปแค่ไหนก็ห้ามโยนออกไปให้ท่อพัง — คืนของเดิม
     rej('patch', `แพตช์ผิดรูป: ${String(e?.message || e).slice(0, 120)}`);
-    return { insight: { ...base }, changed: [], rejected };
+    return { insight: { ...base }, changed: [], rejected, resolvedFindings: [] };
   }
 }
