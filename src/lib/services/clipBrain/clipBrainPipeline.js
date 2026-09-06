@@ -16,6 +16,7 @@
  *      ผ่าน field `spentTokens` — ผู้เรียกตัดสินใจได้ว่าจะถอยหรือใช้ของที่ได้มา
  */
 import { callClipGeminiVideo } from './clipGeminiVideo.js';
+import { llmCost } from '../../costRates.js';
 import { buildPlanPrompt, validatePlan, fallbackPlan } from './segmentPlan.js';
 import { runBrain } from './brainRunner.js';
 import {
@@ -42,6 +43,7 @@ const log = (...a) => { try { console.log('[ClipBrainPipeline]', ...a); } catch 
  *   durationSec    ความยาวคลิป (0 = ไม่รู้ ให้ AI บอกเอง)
  *   caption        แคปชั่น/ชื่อคลิป (ใช้เป็นหลักฐานตอนตรวจชื่อ)
  *   model          รุ่น Gemini (ไม่ส่ง = ค่าเริ่มต้นของระบบ)
+ *   usageLogger    Optional logApiUsage replacement; CLIP_USAGE_LOG=0 disables persistence
  * @returns {Promise<{ok:boolean, insight?:object, brain:object, errorType?:string, error?:string, spentTokens:number}>}
  */
 export async function runClipBrainPipeline(rawOpts) {
@@ -58,17 +60,48 @@ export async function runClipBrainPipeline(rawOpts) {
   const brain = {
     rev: PIPELINE_REV, verifyRev: VERIFY_REV, source: isYT ? 'link' : 'file',
     steps: [], costs: {}, degradations: [],
+    usage: { inputTokens: 0, outputTokens: 0, cachedTokens: 0, totalTokens: 0, cachedPct: 0, estUsd: 0 },
   };
   let durSec = Number(pick("durationSec")) || 0;
+
+  // 📐 เลข "รวม" มี 2 ตัวโดยตั้งใจ (ผู้ตรวจไขว้ 6 ก.ย. 69):
+  //   brain.usage.* และ steps[i].inputTokens|outputTokens|cachedTokens = รวม "ทุก attempt" ที่ Gemini คืน usage (= บิลจริง รวมรอบที่ retry)
+  //   brain.totalTokens / spentTokens / steps[i].tokens / brain.costs = เฉพาะ "รอบสุดท้ายที่รับผล" (ของเดิม หน้าเว็บ BrainBox อ่านอยู่ ห้ามเปลี่ยน)
+  //   estUsd = ประมาณการจาก costRates คิดโทเคนแคชราคาเต็ม → สูงกว่าบิลจริง (Gemini คิดแคชถูกกว่า) — ยังไม่ใส่ส่วนลดจนเจ้าของเคาะอัตรา
+  const usageLogger = pick('usageLogger');
+  const onUsage = async (usage) => {
+    // Count every Gemini attempt, even failed responses and when persistence is disabled.
+    const sum = brain.usage;
+    sum.inputTokens += usage.inputTokens;
+    sum.outputTokens += usage.outputTokens;
+    sum.cachedTokens += usage.cachedTokens;
+    sum.totalTokens += usage.totalTokens;
+    sum.cachedPct = sum.inputTokens > 0 ? Math.round(Math.min(100, Math.max(0, sum.cachedTokens / sum.inputTokens * 100))) : 0; // จำนวนเต็ม 0-100 ตามสเปก
+    // Estimate only: existing rates do not apply a cached-input discount.
+    sum.estUsd += llmCost('gemini', usage.model, usage.inputTokens, usage.outputTokens);
+    if (process.env.CLIP_USAGE_LOG === '0') return;
+    try {
+      const logger = typeof usageLogger === 'function'
+        ? usageLogger
+        : (await import('../../ai/usageLogger.js')).logApiUsage;
+      await logger(usage);
+    } catch { /* Missing DB/imports and logger failures must not fail the pipeline. */ }
+  };
 
   const step = (name) => { brain.steps.push({ name, at: new Date().toISOString() }); log(name); };
   const spent = () => Object.values(brain.costs)
     .filter((v) => typeof v === 'number' && v > 100).reduce((a, b) => a + b, 0);
   const track = (label, r) => {
+    const usage = (r.receipt?.attempts || []).reduce((sum, attempt) => ({
+      inputTokens: sum.inputTokens + (attempt.usage?.promptTokenCount || 0),
+      outputTokens: sum.outputTokens + (attempt.usage?.candidatesTokenCount || 0),
+      cachedTokens: sum.cachedTokens + (attempt.usage?.cachedContentTokenCount || 0),
+    }), { inputTokens: 0, outputTokens: 0, cachedTokens: 0 });
     brain.steps.push({
       name: label, model: r.receipt?.model, ok: r.ok, ms: r.receipt?.elapsedMs,
       attempts: r.receipt?.attempts?.length, tokens: r.receipt?.usage?.totalTokenCount || 0,
       finishReason: r.receipt?.finishReason, errorType: r.errorType,
+      ...usage,
     });
     brain.costs[label] = r.receipt?.usage?.totalTokenCount || 0;
     if (r.receipt?.degradations?.length) {
@@ -91,6 +124,7 @@ export async function runClipBrainPipeline(rawOpts) {
     step('แผนที่ประเด็น');
     const mapRes = await callClipGeminiVideo({
       ...linkArgs, maxTokens: 8000, ...(model ? { model } : {}),
+      feature: 'clipBrain-map', onUsage,
       prompt: 'ดูคลิปนี้ทั้งคลิปแล้วทำ "แผนที่ประเด็น" — คลิปพูดเรื่องอะไรบ้าง แต่ละเรื่องอยู่ช่วงเวลาไหน\nตอบ JSON บรรทัดเดียว: {"timeline":[{"time":"0:00-1:30","topic":"ชื่อประเด็น"}],"headline":"พาดหัวสั้นๆ","clipDurationSec":ความยาวคลิปเป็นวินาที}',
     });
     track('แผนที่ประเด็น', mapRes);
@@ -135,6 +169,7 @@ export async function runClipBrainPipeline(rawOpts) {
         callClipGeminiVideo({
           ...linkArgs, prompt: VIDEO_INSIGHT_PROMPT, videoRange: [s.startSec, s.endSec],
           maxTokens: 32000, ...(model ? { model } : {}),
+          feature: 'clipBrain-segment', onUsage,
         }).then((r) => { track(`ถอดช่วง ${i + 1} (${mmss(s.startSec)}-${mmss(s.endSec)})`, r); return { seg: s, r }; })));
       const okRes = results.filter((x) => x.r.ok);
       if (!okRes.length) return fail('PIPE_EXTRACT_FAILED', 'ถอดไม่สำเร็จสักช่วง');
@@ -144,7 +179,7 @@ export async function runClipBrainPipeline(rawOpts) {
       }
       insight = normalizeInsight(mergeSegments(okRes, map, durSec), 'clip-brain');
     } else {
-      const r = await callClipGeminiVideo({ ...linkArgs, prompt: VIDEO_INSIGHT_PROMPT, maxTokens: 32000, ...(model ? { model } : {}) });
+      const r = await callClipGeminiVideo({ ...linkArgs, prompt: VIDEO_INSIGHT_PROMPT, maxTokens: 32000, ...(model ? { model } : {}), feature: 'clipBrain-segment', onUsage });
       track('ถอดทั้งคลิป', r);
       if (!r.ok) return fail(r.errorType || 'PIPE_EXTRACT_FAILED', r.error || 'ถอดไม่สำเร็จ');
       insight = normalizeInsight({ ...r.data, clipDurationSec: durSec || r.data?.clipDurationSec }, 'clip-brain');
@@ -155,7 +190,7 @@ export async function runClipBrainPipeline(rawOpts) {
     // 🔑 ตั้งแต่จุดนี้ไป "ล้มก็ยังส่งของได้" — เนื้อถอดเสร็จแล้ว การตรวจเป็นของแถมที่ดี
     //    ถ้าขอเฉลย/ตรวจ/ซ่อม ล้ม → คืนเนื้อพร้อมธงบอกว่าไม่ได้ตรวจ ดีกว่าทิ้งเงินที่จ่ายไปแล้ว
     step('ขอเฉลยจากคลิป');
-    const truthRes = await callClipGeminiVideo({ ...linkArgs, prompt: TRUTH_PROMPT, maxTokens: 60000, ...(model ? { model } : {}) });
+    const truthRes = await callClipGeminiVideo({ ...linkArgs, prompt: TRUTH_PROMPT, maxTokens: 60000, ...(model ? { model } : {}), feature: 'clipBrain-truth', onUsage });
     track('เฉลย', truthRes);
     // เฉลยกลับมาเป็น JSON (transcription + onScreenText) → แปลงเป็นข้อความให้ตัวตรวจใช้
     const truthText = truthRes.ok

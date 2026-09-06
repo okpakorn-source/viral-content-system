@@ -109,6 +109,8 @@ export async function callClipGeminiVideo(rawOpts = {}) {
     youtubeUrl = '',            // ★ ใช้ลิงก์แทนไฟล์ (YouTube เท่านั้น) — ไม่ต้องโหลด ไม่ต้องบีบ ภาพต้นฉบับ 100%
     mimeType = 'video/mp4',
     model = DEFAULT_MODEL,
+    feature = 'clipBrain',      // ASCII usage label; never included in the Gemini request
+    onUsage,                   // Optional, best-effort callback for every usage-bearing attempt
     temperature = 0.2,
     maxTokens = 32000,
     videoRange = null,          // [startSec, endSec] — ให้ดูเฉพาะช่วง (ประหยัดและตรงจุด)
@@ -181,6 +183,22 @@ export async function callClipGeminiVideo(rawOpts = {}) {
         });
         httpStatus = res.status;
         json = await res.json().catch(() => null);
+        if (json?.usageMetadata) {
+          rec.usage = json.usageMetadata;
+          if (typeof onUsage === 'function') {
+            const usage = json.usageMetadata;
+            try {
+              Promise.resolve(onUsage({
+                provider: useLink ? 'gemini_video' : 'gemini_video_file', model: m,
+                inputTokens: usage.promptTokenCount || 0,
+                outputTokens: usage.candidatesTokenCount || 0,
+                cachedTokens: usage.cachedContentTokenCount || 0,
+                totalTokens: usage.totalTokenCount ?? ((usage.promptTokenCount || 0) + (usage.candidatesTokenCount || 0)),
+                feature,
+              })).catch(() => { /* Usage logging must never affect video processing. */ });
+            } catch { /* Also isolate synchronous callback failures. */ }
+          }
+        }
         if (json?.error) errMsg = `${json.error.code || res.status} ${json.error.message || ''}`;
         const cand = (json?.candidates || [])[0] || {};
         finishReason = cand.finishReason || null;
