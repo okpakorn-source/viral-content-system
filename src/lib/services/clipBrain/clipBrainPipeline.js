@@ -57,6 +57,7 @@ export async function runClipBrainPipeline(rawOpts) {
   const isYT = !!pick('isYouTube');
   const caption = String(pick('caption') == null ? '' : pick('caption'));
   const model = typeof pick('model') === 'string' ? pick('model') : '';
+  const topicsV2Enabled = process.env.CLIP_TOPIC_V2 === '1';
   const brain = {
     rev: PIPELINE_REV, verifyRev: VERIFY_REV, source: isYT ? 'link' : 'file',
     steps: [], costs: {}, degradations: [],
@@ -164,6 +165,8 @@ export async function runClipBrainPipeline(rawOpts) {
     // ── ③ ถอดเนื้อ ───────────────────────────────────────────────────
     step('ถอดเนื้อ');
     let insight;
+    let segmentResults = [];
+    let syncTopicsV2FromLegacy;
     if (segments) {
       const results = await Promise.all(segments.map((s, i) =>
         callClipGeminiVideo({
@@ -172,6 +175,7 @@ export async function runClipBrainPipeline(rawOpts) {
           feature: 'clipBrain-segment', onUsage,
         }).then((r) => { track(`ถอดช่วง ${i + 1} (${mmss(s.startSec)}-${mmss(s.endSec)})`, r); return { seg: s, r }; })));
       const okRes = results.filter((x) => x.r.ok);
+      segmentResults = okRes;
       if (!okRes.length) return fail('PIPE_EXTRACT_FAILED', 'ถอดไม่สำเร็จสักช่วง');
       if (okRes.length < results.length) {
         brain.degradations.push({ type: 'segment-incomplete', got: okRes.length, want: results.length, note: 'บางช่วงถอดไม่สำเร็จ เนื้ออาจขาด' });
@@ -182,6 +186,7 @@ export async function runClipBrainPipeline(rawOpts) {
       const r = await callClipGeminiVideo({ ...linkArgs, prompt: VIDEO_INSIGHT_PROMPT, maxTokens: 32000, ...(model ? { model } : {}), feature: 'clipBrain-segment', onUsage });
       track('ถอดทั้งคลิป', r);
       if (!r.ok) return fail(r.errorType || 'PIPE_EXTRACT_FAILED', r.error || 'ถอดไม่สำเร็จ');
+      segmentResults = [{ seg: { no: 1, startSec: 0, endSec: durSec || null }, r }];
       insight = normalizeInsight({ ...r.data, clipDurationSec: durSec || r.data?.clipDurationSec }, 'clip-brain');
     }
     log(`⇒ เนื้อ ${String(insight.rawData || '').length} ตัว · ประเด็นย่อย ${(insight.subStories || []).length} · คำพูด ${(insight.quotes || []).length}`);
@@ -198,24 +203,74 @@ export async function runClipBrainPipeline(rawOpts) {
       : '';
     if (!truthText || truthText.length < TRUTH_MIN_CHARS) {
       brain.degradations.push({ type: 'truth-unavailable', why: truthRes.errorType || 'เฉลยสั้นเกินไป' });
+      if (topicsV2Enabled) brain.degradations.push({ type: 'topics-v2-skipped-no-truth' });
       brain.status = 'ไม่ได้ตรวจ';
       brain.check = { code: null, ai: null, repair: null };
       return done(insight, brain, t0, spent());
     }
     log(`เฉลย ${truthText.length} ตัวอักษร`);
 
+    // Optional P3: keep the completed extraction when composition fails. The CLI
+    // dependency stays injected, so disabled runs never import the composer.
+    if (topicsV2Enabled) {
+      step('เรียบเรียงประเด็น v2');
+      const composeStarted = Date.now();
+      try {
+        const [{ buildEvidencePackFromPipeline }, { composeTopics }, schema] = await Promise.all([
+          import('./topicEvidence.js'), import('./composeTopics.js'), import('./topicSchema.js'),
+        ]);
+        const evidencePack = buildEvidencePackFromPipeline({
+          truth: truthRes.data, segmentResults, plannedSegments: segments, map, durSec,
+          clipMeta: { url, title: caption, platform: isYT ? 'youtube' : 'file' },
+        });
+        const envText = (key) => String(process.env[key] || '').trim();
+        const primary = { brain: 'codex', model: envText('CLIP_TOPIC_MODEL') || 'gpt-6-astra',
+          effort: envText('CLIP_TOPIC_EFFORT') || 'ultra' };
+        const fallback = { brain: 'claude', model: envText('CLIP_TOPIC_FALLBACK_MODEL') || 'claude-fable-5',
+          effort: envText('CLIP_TOPIC_FALLBACK_EFFORT') || 'max' };
+        const requestedTimeout = Number(envText('CLIP_TOPIC_TIMEOUT_MS'));
+        const timeoutMs = Number.isSafeInteger(requestedTimeout) && requestedTimeout > 0 && requestedTimeout <= 2147483647
+          ? requestedTimeout : 1200000;
+        const composed = await composeTopics({ evidencePack, runBrain, primary, fallback, timeoutMs });
+        const attempts = Array.isArray(composed.attempts) ? structuredClone(composed.attempts) : [];
+        const composeUSD = attempts.reduce((sum, a) => sum + (Number.isFinite(a.costUSD) && a.costUSD >= 0 ? a.costUSD : 0), 0);
+        if (composed.ok) {
+          const attached = normalizeInsight(schema.toLegacyInsight(composed.doc, insight), 'clip-brain');
+          const receipt = { ok: true, gate: composed.gate, summary: composed.metrics?.summary,
+            stories: composed.doc.stories.length, attempts, elapsedMs: Date.now() - composeStarted };
+          insight = attached;
+          syncTopicsV2FromLegacy = schema.syncTopicsV2FromLegacy;
+          brain.topicsV2 = receipt;
+          brain.costs.composeUSD = composeUSD;
+          log(`ประเด็น v2: ${receipt.stories} เรื่อง · ${attempts.length} attempts · $${composeUSD.toFixed(4)}`);
+        } else {
+          const reason = composed.errorType || composed.gate?.reasons?.join('; ') || 'COMPOSE_FAILED';
+          brain.topicsV2 = { ok: false, attempts, reason };
+          brain.costs.composeUSD = composeUSD;
+          brain.degradations.push({ type: 'topics-v2-failed', why: reason });
+          log(`ประเด็น v2 ไม่สำเร็จ (${reason}) → ใช้ผลถอดเดิม`);
+        }
+      } catch (error) {
+        const why = String(error?.message || error).slice(0, 500);
+        brain.topicsV2 = { ok: false, attempts: [], reason: why };
+        brain.degradations.push({ type: 'topics-v2-crashed', why });
+        log(`ประเด็น v2 ขัดข้อง (${why}) → ใช้ผลถอดเดิม`);
+      }
+    }
+
     // ── ⑤ ตรวจ 2 ชั้น ────────────────────────────────────────────────
     step('ตรวจเทียบเฉลย');
-    const codeCheck = checkAgainstTruth(insight, truthText, { caption: caption || map.headline || '', plannedSegments: segments });
+    const codeCheck = checkAgainstTruth(insight, truthText, { caption, plannedSegments: segments });
     log(`ชั้นโค้ด: ${codeCheck.verdict} · เจอ ${codeCheck.findings.length} จุด`);
 
     let aiCheck = null;
     const cr = await runBrain({
       brain: 'codex', label: 'ผู้ตรวจ', timeoutMs: 300000,
-      prompt: buildReviewPrompt({ insight, truth: truthText, caption: caption || map.headline || '', codeFindings: codeCheck.findings }),
+      prompt: buildReviewPrompt({ insight, truth: truthText, caption, codeFindings: codeCheck.findings }),
     });
     if (cr.ok && cr.json) {
-      aiCheck = cr.json;
+      aiCheck = { ...cr.json, ...(Array.isArray(cr.json.findings)
+        ? { findings: cr.json.findings.map((f) => ({ ...f, side: 'ความจริง' })) } : {}) };
       log(`ชั้นสมอง: ${aiCheck.verdict} · เจอ ${(aiCheck.findings || []).length} จุด`);
     } else {
       brain.degradations.push({ type: 'reviewer-unavailable', why: cr.errorType });
@@ -223,35 +278,79 @@ export async function runClipBrainPipeline(rawOpts) {
     }
 
     // ── ⑥ ซ่อมเฉพาะจุด ───────────────────────────────────────────────
-    const high = [...codeCheck.findings, ...((aiCheck?.findings) || [])].filter((f) => f.severity === 'สูง');
+    const aiFindings = Array.isArray(aiCheck?.findings) ? aiCheck.findings : [];
+    const aiHigh = aiFindings.filter((f) => f?.severity === 'สูง');
+    const high = [...codeCheck.findings, ...aiHigh].filter((f) => f.severity === 'สูง');
     let repair = null;
     if (high.length) {
       step(`ซ่อมเฉพาะจุด (${high.length} จุด)`);
       const toFix = high.slice(0, REPAIR_CAP);
+      repair = { changed: [], unverifiedAi: aiHigh };
       if (high.length > REPAIR_CAP) brain.degradations.push({ type: 'repair-capped', got: REPAIR_CAP, want: high.length });
       const rr = await runBrain({
         brain: 'claude', label: 'ตัวซ่อม', timeoutMs: 600000,
         prompt: buildRepairPrompt({ insight, truth: truthText, findings: toFix }),
       });
       if (rr.ok && rr.json?.patch) {
-        const applied = applyRepairPatch(insight, rr.json.patch, { findings: toFix });
+        const applied = applyRepairPatch(insight, rr.json.patch, { findings: toFix, changed: rr.json.changed, unfixed: rr.json.unfixed });
         insight = applied.insight;
-        repair = { changed: applied.changed, note: rr.json.changed, unfixed: rr.json.unfixed, rejected: applied.rejected, costUSD: rr.costUSD };
+        const unverifiedAi = aiHigh.filter((f) => !applied.resolvedFindings.includes(toFix.indexOf(f) + 1));
+        // คง note/unfixed เป็น array ข้อความสำหรับผู้ใช้ข้อมูลเดิม; เก็บ findings เดิมครบใน unverifiedAi
+        const reportText = (items, key) => Array.isArray(items)
+          ? items.map((item) => typeof item === 'string' ? item : `#${item?.fromFinding ?? '?'} ${String(item?.[key] || '')}`)
+          : items;
+        repair = { changed: applied.changed, note: reportText(rr.json.changed, 'summary'), unfixed: reportText(rr.json.unfixed, 'reason'),
+          rejected: applied.rejected, costUSD: rr.costUSD, unverifiedAi, resolvedFindings: applied.resolvedFindings };
         brain.costs.repairUSD = rr.costUSD || 0;
-        const re = checkAgainstTruth(insight, truthText, { caption: caption || map.headline || '', plannedSegments: segments });
-        brain.recheck = { verdict: re.verdict, findings: re.findings.length, high: re.findings.filter((f) => f.severity === 'สูง').length };
-        log(`ซ่อมแล้ว: ${(applied.changed || []).join(', ') || '(ไม่มีช่องผ่านด่าน)'} · ตรวจซ้ำ ${re.verdict}`);
+        const re = checkAgainstTruth(insight, truthText, { caption, plannedSegments: segments });
+        brain.recheck = { verdict: unverifiedAi.length ? 'ต้องตรวจ' : re.verdict, findings: re.findings.length,
+          high: re.findings.filter((f) => f.severity === 'สูง').length, unverifiedAi: unverifiedAi.length };
+        log(`ซ่อมแล้ว: ${(applied.changed || []).join(', ') || '(ไม่มีช่องผ่านด่าน)'} · ตรวจซ้ำ ${brain.recheck.verdict} · AI ยังไม่ยืนยัน ${unverifiedAi.length} จุด`);
       } else {
         brain.degradations.push({ type: 'repair-failed', why: rr.errorType });
         log(`⚠ ซ่อมไม่สำเร็จ (${rr.errorType}) — เก็บของเดิมพร้อมธง`);
       }
     }
 
+    if (insight.topicsV2 && syncTopicsV2FromLegacy) {
+      const synced = syncTopicsV2FromLegacy(insight);
+      insight = synced.insight;
+      brain.topicsV2.syncedAfterRepair = synced.changed;
+    }
+
     brain.check = { code: codeCheck, ai: aiCheck, repair };
+    if (insight.topicsV2?.schemaVersion === 2) {
+      try {
+        const { assessReadiness, quoteCoverage } = await import('./clipVerify.js');
+        const readiness = await assessReadiness(insight, { truth: truthText });
+        const qualityById = new Map(readiness.stories.map((s) => [s.id, { status: 'checked', issues: s.issues }]));
+        for (const story of insight.topicsV2.stories || []) {
+          story.quality = structuredClone(qualityById.get(story.id));
+          for (const quote of story.quotes || []) {
+            quote.verification = quoteCoverage(quote.text, truthText) >= 0.6 ? 'verified' : 'unverified';
+          }
+        }
+        insight.topicsV2.mainStoryQuality = { status: 'checked', issues: readiness.mainStory.issues };
+        for (const story of insight.subStories || []) {
+          if (qualityById.has(story.storyId)) story.quality = structuredClone(qualityById.get(story.storyId));
+        }
+        const byCode = {};
+        for (const issue of [...readiness.stories.flatMap((s) => s.issues), ...readiness.mainStory.issues]) {
+          byCode[issue.code] = (byCode[issue.code] || 0) + 1;
+        }
+        brain.check.readiness = { findings: readiness.findings, counts: { stories: readiness.stories.length,
+          withIssues: readiness.stories.filter((s) => s.issues.length).length, byCode } };
+      } catch (e) {
+        brain.degradations.push({ type: 'readiness-crashed', why: String(e?.message || e) });
+      }
+    }
     const highLeft = brain.recheck
-      ? brain.recheck.high
-      : [...codeCheck.findings, ...((aiCheck?.findings) || [])].filter((f) => f.severity === 'สูง').length;
-    const anyFinding = codeCheck.findings.length + ((aiCheck?.findings) || []).length;
+      ? brain.recheck.high + brain.recheck.unverifiedAi
+      : high.length;
+    const truthFindings = [...codeCheck.findings, ...aiFindings];
+    const lowCount = truthFindings.filter((f) => f?.severity === 'ต่ำ').length;
+    if (lowCount) brain.check.lowCount = lowCount;
+    const anyFinding = truthFindings.filter((f) => f?.severity === 'สูง' || f?.severity === 'กลาง').length;
     brain.status = repair
       ? (highLeft ? 'ต้องตรวจ' : 'ซ่อมแล้ว')
       : (highLeft ? 'ต้องตรวจ' : (anyFinding ? 'มีข้อสังเกต' : 'สะอาด'));

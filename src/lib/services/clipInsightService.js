@@ -303,10 +303,17 @@ export function normalizeInsight(p, engine) {
     rawData: cut(s?.rawData, LIM.subRawData, `เนื้อประเด็นย่อยที่ ${i + 1}`),
     keyPoints: cutList(s?.keyPoints, LIM.keyPointsN, `ข้อสรุปประเด็นย่อยที่ ${i + 1}`).map(k => cut(k?.point || k, LIM.keyPointDetail, 'ข้อสรุป')).filter(Boolean),
     quotes: cutList(s?.quotes, LIM.subQuotesN, `คำพูดในประเด็นย่อยที่ ${i + 1}`).map(q => cut(q, LIM.quoteText, 'คำพูด')).filter(Boolean),
+    ...(typeof s?.storyId === 'string' ? { storyId: s.storyId } : {}),
+    ...(typeof s?.highlight === 'string' ? { highlight: cut(s.highlight, LIM.directLead, 'ไฮไลต์ประเด็นย่อย') } : {}),
+    ...(s?.sharePct === null || (Number.isFinite(s?.sharePct) && s.sharePct >= 0 && s.sharePct <= 100) ? { sharePct: s.sharePct } : {}),
+    ...(typeof s?.standalone === 'boolean' ? { standalone: s.standalone } : {}),
+    ...(Array.isArray(s?.overlaps) ? { overlaps: structuredClone(s.overlaps) } : {}),
+    ...(s?.quality && typeof s.quality === 'object' && !Array.isArray(s.quality) ? { quality: structuredClone(s.quality) } : {}),
   })).filter(s => s.topic && s.rawData) : [];
   const editorialWarnings = [
-    ...assessClipDirectLead({ directLead, rawData, interviewEventIsNews, label: 'ก้อนรวม' }),
-    ...subStories.flatMap((story) => assessClipDirectLead({
+    // v2 uses highlights as directLead; its readiness checks cover the prose instead.
+    ...(p.topicsV2?.schemaVersion === 2 ? [] : assessClipDirectLead({ directLead, rawData, interviewEventIsNews, label: 'ก้อนรวม' })),
+    ...subStories.filter((story) => !story.storyId).flatMap((story) => assessClipDirectLead({
       directLead: story.directLead,
       rawData: story.rawData,
       interviewEventIsNews: story.interviewEventIsNews,
@@ -341,6 +348,9 @@ export function normalizeInsight(p, engine) {
     editorialWarnings: [...new Set(editorialWarnings)],
     // ★ 25 มิ.ย. — เนื้อดิบแยกประเด็น (เพิ่มจาก rawData รวม) — ว่างได้ถ้าคลิปเรื่องเดียว
     subStories,
+    ...(typeof p.mainStory === 'string' ? { mainStory: cut(p.mainStory, LIM.rawData, 'เรื่องหลัก v2') } : {}),
+    ...(p.topicsV2 && typeof p.topicsV2 === 'object' && !Array.isArray(p.topicsV2) && p.topicsV2.schemaVersion === 2
+      ? { topicsV2: structuredClone(p.topicsV2) } : {}),
   };
 }
 
