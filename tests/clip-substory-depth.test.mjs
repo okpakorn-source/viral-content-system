@@ -32,7 +32,7 @@ export async function callAI(args) {
 const hook = `
 const MOCK = ${JSON.stringify(MOCK_AI_SRC)};
 export async function resolve(specifier, context, nextResolve) {
-  if (specifier === '@/lib/ai/openai') return { url: 'mockai:openai', shortCircuit: true, format: 'module' };
+  if (specifier === '@/lib/services/clipAI/openai') return { url: 'mockai:openai', shortCircuit: true, format: 'module' };
   if (specifier.startsWith('@/')) {
     const mapped = new URL(specifier.slice(2) + (specifier.endsWith('.js') || specifier.endsWith('.mjs') ? '' : '.js'), ${JSON.stringify(SRC_ROOT)}).href;
     return nextResolve(mapped, context);

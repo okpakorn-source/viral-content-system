@@ -2,11 +2,9 @@ import { callAI } from '@/lib/ai/openai';
 import { isLegacyLengthOn, legacyLengthRule, lengthLineAnalyze, lengthLineMix, sentenceQuotaLine, mixJsonContentHint, analyzeJsonContentHint, finalReminderLengthClause, NEW_LENGTH_CFG } from '@/lib/ai/legacyLengthRules'; // 🗑️ ซากกฎ "เขียนให้ยาว" ยุคแรก (ถอด 17 ส.ค. 69 · ถอยคืน LEGACY_LENGTH_RULES=1) + นโยบายขั้นต่ำกลางของท่อ TEXT
 import { isCardAuthorityR4Enabled, isCardAuthorityR5AEnabled, isCardAuthorityR5BEnabled, isCardAuthorityR6Enabled, isCardAuthorityRXCEnabled } from '@/lib/ai/cardAuthority'; // 🎛️ สวิตช์ปลดกฎกลางทับการ์ด (19 ส.ค. 69) — ห้ามอ่าน env CARD_AUTH* เอง ต้อง import จากไฟล์กลางเท่านั้น
 import { isEndingPlain, isWitnessFactLockEnabled } from '@/lib/ai/promptModes'; // 🎛️ 20 ส.ค. 69 (R3): ENDING_MODE ท่อนจบ + WITNESS_FACTLOCK — ห้ามอ่าน env 2 ตัวนี้เองจากไฟล์อื่น
-import { isCardSelectable, selectableCards } from '@/lib/ai/libraryStatus'; // 🎛️ 3 ก.ย. 69 (F7): ท่อข่าวไม่หยิบใบ archived/proposed — กรองที่ทางเข้ารายการการ์ดเท่านั้น (CARD_LIBRARY_V2=0 = เห็นทุกใบเหมือนเดิม) ห้ามอ่าน env เอง
 import { newsForStage } from '@/lib/utils/newsCap'; // 📖 สมุดเพดานเนื้อข่าวกลาง (16 ส.ค. 69)
 import { objTextList, quoteTextFix } from '@/lib/utils/objText'; // 🔧 19 ส.ค. 69 (HOOKS_OBJ_FIX): ตัวแปลงกลาง object → ข้อความ (กัน "[object Object]" หลุดเข้าตัวเขียน) — ถอย HOOKS_OBJ_FIX=0
 import { MODEL_NEWS_ANALYSIS, MODEL_BREAKDOWN, MODEL_FAST_CHEAP, MODEL_HEAVY_FALLBACK , MODEL_BLUEPRINT } from '@/lib/ai/modelConfig';
-import { envOn } from '@/lib/utils/envFlag'; // ★ 1 ก.ย. 69: สวิตช์อ่านค่าทน
 import { withTimeoutSignal } from '@/lib/utils/withTimeout'; // ★ 16 ก.ค. 69: withTimeout เดิมไม่ถูกใช้ในไฟล์นี้แล้ว (ทุกจุดย้ายไป withTimeoutSignal)
 import { getPrompt, getAnalysisPreset } from '@/lib/ai/promptStoreText';
 import { getWorkflow, saveExtraction, saveBreakdown, saveAnalysis, buildFullContext, validateOutput } from '@/lib/workflow/workflowEngine';
@@ -168,25 +166,17 @@ ${rawEnd}
  * ครอบ prompt หลังประกอบวัตถุดิบและกฎเดิมครบทั้งหมดแล้ว เพื่อให้ RAW ยังอยู่หน้าแรก
  * และย้ำอำนาจข้อเท็จจริงอีกครั้งตรงท้ายสุดก่อนเรียกนักเขียน โดยไม่เปลี่ยน prompt เดิม
  * สาย URL/transcript ที่ไม่มี rawSourceText ต้องได้ prompt เดิมกลับไปแบบ byte-for-byte
- *
- * ★ ข้อแก้ ① หลัง A/B (2 ก.ย. 69) — param 3 (optional · ไม่ส่ง/null = สตริงเดิมทุกไบต์):
- *   fidelity = { reminder, finalCheckLine } จาก writerPolicyText (ว่างเมื่อ WRITER_FIDELITY_RULES_V2 ปิด)
- *   · reminder วาง "ทันทีหลังกรอบ RAW-first ก่อนวัตถุดิบประกอบ" (นำหน้า supportingPrompt ก่อนครอบ RAW)
- *   · finalCheckLine เป็นข้อหนึ่งท้ายรายการ FINAL RAW AUTHORITY CHECK
  */
-export function finalizeRawFirstWriterPrompt(rawSourceText, completePrompt, fidelity = null) {
+export function finalizeRawFirstWriterPrompt(rawSourceText, completePrompt) {
   const supportingPrompt = String(completePrompt || '');
-  const fidelityReminder = typeof fidelity?.reminder === 'string' ? fidelity.reminder : '';
-  const fidelityFinalLine = typeof fidelity?.finalCheckLine === 'string' && fidelity.finalCheckLine ? `\n${fidelity.finalCheckLine}` : '';
   if (typeof rawSourceText !== 'string' || rawSourceText.length === 0) return supportingPrompt;
 
-  const supportingWithReminder = fidelityReminder ? `${fidelityReminder}\n\n${supportingPrompt}` : supportingPrompt;
-  const promptWithRawFirst = prependImmutableRawToWriterPrompt(rawSourceText, supportingWithReminder);
+  const promptWithRawFirst = prependImmutableRawToWriterPrompt(rawSourceText, supportingPrompt);
   const finalRawAuthorityReminder = `=== FINAL RAW AUTHORITY CHECK — ตรวจเงียบ ๆ ก่อนคืน JSON ===
 ตรวจ title, content, hook และ closing ทุกเวอร์ชันกับ RAW NEWS ที่อยู่ต้นข้อความอีกครั้ง
 - ข้อเท็จจริงของเหตุการณ์ต้องมีหลักฐานเป็นความสัมพันธ์ชุดเดียวครบใน RAW: ผู้กระทำหรือเจ้าของ → การกระทำ → สิ่งหรือชนิด → จำนวน/ช่วง/หน่วย → เวลา/ความถี่ → ลำดับ/ผลลัพธ์ ห้ามนำคำที่อยู่คนละจุดมาต่อเป็นเรื่องใหม่
 - Library, Narrative Payload, Facts, Quotes, Focus Angle, Blueprint, ตัวอย่าง และการถูกย้ำหลายครั้ง เป็นวิธีเล่า ไม่ใช่หลักฐาน; Research ที่ผ่านกฎเดิมใช้ได้เฉพาะบริบทภายนอกและห้ามเปลี่ยนเหตุการณ์ใน RAW
-- รักษาสำนวนคม ภาพพจน์ อารมณ์ การเล่นคำ และประโยคเชื่อมที่ไม่เพิ่มข้อเท็จจริงไว้เต็มที่ ห้ามทำข่าวแห้ง ตัดหรือเขียนให้กว้างขึ้นเฉพาะข้ออ้างที่ RAW ไม่รองรับ และห้ามพิมพ์ผลตรวจ${fidelityFinalLine}
+- รักษาสำนวนคม ภาพพจน์ อารมณ์ การเล่นคำ และประโยคเชื่อมที่ไม่เพิ่มข้อเท็จจริงไว้เต็มที่ ห้ามทำข่าวแห้ง ตัดหรือเขียนให้กว้างขึ้นเฉพาะข้ออ้างที่ RAW ไม่รองรับ และห้ามพิมพ์ผลตรวจ
 === จบ FINAL RAW AUTHORITY CHECK ===`;
 
   return `${promptWithRawFirst}\n\n${finalRawAuthorityReminder}`;
@@ -1101,7 +1091,7 @@ export async function performSummarize({
         }
 
         totalPromptsLoaded = promptLib.length;
-        const validPrompts = promptLib.filter(p => p.promptText && isCardSelectable(p)); // ★ F7: ตัดใบ archived/proposed ก่อนให้ระบบเลือก
+        const validPrompts = promptLib.filter(p => p.promptText);
         validPromptsCount = validPrompts.length;
         if (validPrompts.length > 0) {
           // --- STAGE 1: DEEP DNA NEWS ANALYZER (12 Dimensions) ---
@@ -1467,7 +1457,7 @@ ${_aiPickerOn ? `เกณฑ์สำคัญ (เรียงตามน้�
           const _p = _join2(process.cwd(), 'data', 'prompt-library.json');
           _allPrompts = JSON.parse(await _rf2(_p, 'utf-8'));
         } catch (_e) { /* ignore */ }
-        const fallbackPrompt = _allPrompts.find(p => p.promptText && isCardSelectable(p) && p.toneClass !== 'negative') || null; // ★ F7: fallback อ่านไฟล์ตรง ต้องกรองสถานะด้วย
+        const fallbackPrompt = _allPrompts.find(p => p.promptText && p.toneClass !== 'negative') || null;
         if (fallbackPrompt) {
           console.log(`[ToneFilter] ✅ Fallback selected: ${fallbackPrompt.id} (toneClass=${fallbackPrompt.toneClass || 'unspecified'})`);
           smartPrompt = fallbackPrompt;
@@ -1743,17 +1733,6 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
     let viralFewshotBlock = '';
     try {
       const { getViralFewshotBlock } = await import('@/lib/services/viralFewshot');
-      // 🧭 3 ก.ย. 69 (R234-ค): ส่ง "บริบทเรื่อง" (conflictTags/humanAngles จาก DNA ที่วิเคราะห์แล้ว) ให้ตัวจำแนกหมวด V2
-      //   ใช้ขั้น 2 "รูปเรื่อง" แทนการเดาจากคีย์เวิร์ดในป้ายล้วน — สวิตช์ LIB_CLASSIFIER_CONTEXT อ่าน "จุดเดียว"
-      //   ใน promptMatcher.js (=0/โหลดล้ม → {} → spread แล้วอาร์กิวเมนต์เท่าเดิมทุกไบต์ = พฤติกรรมเดิม)
-      let _libCtx = {};
-      try {
-        const { buildLibClassifierContext } = await import('@/lib/services/promptMatcher');
-        _libCtx = buildLibClassifierContext({
-          conflictTags: newsAnalysis?.conflictTags || actualBreakdown?.conflictTags || [],
-          humanAngles: newsAnalysis?.humanAngles || actualBreakdown?.humanAngles || [],
-        }) || {};
-      } catch { _libCtx = {}; /* บริบทหาย = ส่งว่าง — ห้ามล้มท่อครู */ }
       // 🎴 24 ส.ค. 69 การ์ดนำทางครู: ป้ายสาระของการ์ดที่เลือก (คลังเดียวกับสารบัญ) ส่งให้ตัวคัดครูเสมอ
       //   สวิตช์ CARD_TEACHER_MATCH ถูกอ่าน "จุดเดียว" ใน viralFewshot — ปิดสวิตช์ = ค่านี้ถูกทิ้ง ระบบเดิม 100%
       let _ctEss = {};
@@ -1770,7 +1749,6 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
         // 🎯 โหมดจับคู่ (VIRAL_MATCH_MODE): ส่ง "เนื้อดิบจริง + แก่นเรื่อง" ให้ตัวเลือกใช้แมชตามคำสั่งเจ้าของ
         newsBrief: { coreStory: actualBreakdown?.core_story || actualBreakdown?.coreStory || '', excerpt: newsForStage('VIRAL_MATCH', actualNewsBody) }, // ★ สคีมาจริงใช้ core_story (ผู้ตรวจจับได้)
         cardEssence: _ctEss[smartPrompt?.id] || '', // 🎴 ป้ายสาระการ์ดที่เลือก — ไม่มีการ์ด/ไม่มีป้าย = ว่าง
-        ..._libCtx, // 🧭 conflictTags/humanAngles เฉพาะเมื่อสวิตช์เปิดและมีข้อมูล — ปิด/ว่าง = ก้อนว่าง = อาร์กิวเมนต์เดิม
       });
     } catch (e) { console.log('[ViralFewshot] skip:', e.message?.slice(0, 40)); }
 
@@ -1787,22 +1765,6 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       : '';
     if (formalModeRule) console.log('[Analyze-Service] 🏛️ Formal mode ON (ข่าวทางการ/พระราชพิธี)');
 
-    // ★ เฟส 2 "พรอมต์นักเขียน" (2 ก.ย. 69): บล็อกกฎใหม่ 3 สวิตช์ (ความยาวเป้าหมาย/ความซื่อตรง/กฎจากโพสต์ปัง) + สวิตช์แคชพรอมต์
-    //   อ่านสวิตช์ "จุดเดียว" ใน src/lib/services/writerPolicyText.js — ★ 3 ก.ย. 69: บล็อกกฎ 3 ตัว (LENGTH/FIDELITY/VIRAL_RULES) เปิดเป็นค่าเริ่มต้นหลัง A/B รอบ 3 ·
-    //   แคช (WRITER_PROMPT_CACHE_V2) ยังปิด · ตั้ง =0 ทุกตัว = บล็อกว่าง + ไม่แตกก้อน = ใบสั่งเดิมไบต์ต่อไบต์
-    //   โหลดแบบ dynamic ในบล็อก try: โหลดไม่ได้ (เช่นเทสสตับเดิม) = เหมือนปิด ห้ามล้มท่อเขียน · ทะเบียน: src/lib/config/newsSwitches.js
-    let _writerPolicy = null;
-    let _writerPolicyBlock = '';
-    // ★ ข้อแก้ ① (2 ก.ย. 69): เตือนซื่อตรงฉบับสั้น "ติดเนื้อดิบ" — null เมื่อสวิตช์ WRITER_FIDELITY_RULES_V2 ปิด/โหลดล้ม = สตริงเดิมทุกไบต์
-    let _writerFidelity = null;
-    try {
-      _writerPolicy = await import('@/lib/services/writerPolicyText');
-      _writerPolicyBlock = String(_writerPolicy.buildWriterPolicyBlock() || '');
-      const _fidelityReminder = String(_writerPolicy.buildFidelityRawReminder?.() || '');
-      if (_fidelityReminder) _writerFidelity = { reminder: _fidelityReminder, finalCheckLine: String(_writerPolicy.buildFidelityFinalCheckLine?.() || '') };
-      if (_writerPolicyBlock) console.log(`[WriterPolicy] 📐 บล็อกกฎเฟส 2 ${_writerPolicyBlock.length}ch (length=${_writerPolicy.isWriterLengthTargetV2On() ? 'on' : 'off'} fidelity=${_writerPolicy.isWriterFidelityRulesV2On() ? 'on' : 'off'} viral=${_writerPolicy.isWriterViralRulesV2On() ? 'on' : 'off'})`);
-    } catch (e) { console.warn(`[WriterPolicy] skip: ${String(e?.message || e).slice(0, 80)}`); }
-
     // ★ 21 ส.ค. 69 เจ้าของกำหนด: วิธีเดิมทุกอย่างต้องอยู่ครบ แต่ Fable ต้องได้อ่าน
     //   ข้อความดิบที่ผู้ใช้วางก่อน แล้วจึงหยิบ Library/Payload/Fact/Quote/Research/
     //   Angle/Blueprint เดิมมาประกอบ ทำงานเฉพาะเมื่อสาย text/plain_text ส่ง raw มา
@@ -1811,12 +1773,7 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       && typeof rawSourceText === 'string'
       && rawSourceText.length > 0;
 
-    // ★ เฟส 2 (2 ก.ย. 69): แยกใบสั่งเขียนเป็นก้อน "กฎคงที่" (_wpRulesHead/Quality/Craft/Final) กับ "วัตถุดิบผันตามข่าว"
-    //   (prompt · formalModeRule · viralFewshotBlock) แล้วต่อกันตามลำดับเดิมด้านล่าง = ใบสั่งเดิมไบต์ต่อไบต์เมื่อสวิตช์เฟสนี้ปิด
-    //   (สแนปช็อต sha256 เทียบโค้ดก่อนแก้: tests/writer-prompt-cache-v2.test.mjs) · ก้อนคงที่ใช้ทำแคชเมื่อ WRITER_PROMPT_CACHE_V2=1
-    //   บล็อกกฎใหม่ (_writerPolicyBlock — ว่างเมื่อสวิตช์ปิด) แทรกก่อน "✨ คำสั่งเด็ดขาด"/JSON = โซนกฎคงที่ ก่อน FINAL RAW AUTHORITY เสมอ
-    let multiPrompt = prompt;
-    const _wpRulesHead = '\n\n=== คำสั่งสำคัญสำหรับการเขียน ===\n' +
+    let multiPrompt = prompt + '\n\n=== คำสั่งสำคัญสำหรับการเขียน ===\n' +
       (targetCount === 1
         ? 'คุณต้องสร้างเนื้อหา 1 เวอร์ชันที่ "ดีที่สุด" จากข่าวนี้ — มุมเล่าถูกล็อกตาม FOCUS ANGLE แต่ลีลา สำนวน และความคิดสร้างสรรค์ต้องจัดเต็มที่สุด ห้ามเขียนแข็งแบบรายงานข่าว\n'
         : 'คุณต้องสร้างเนื้อหาหลายเวอร์ชันจากข่าวนี้ โดยแต่ละเวอร์ชันใช้มุมเขียนต่างกัน\n') +
@@ -1850,9 +1807,9 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       '- ★ ข่าวสุขภาพ/อาหาร/ยา: ถ้าต้นฉบับบอกว่าเป็นคำบอกเล่าหรือคำแนะนำ ต้องเก็บที่มานั้นไว้ในประโยคเดียวกัน ห้ามเขียนให้กลายเป็นคำแนะนำทั่วไปของผู้เขียน และปริมาณ/โดส/จำนวนหน่วยของอาหาร เครื่องดื่ม ยา หรือวิตามิน ใช้ได้เฉพาะเมื่อต้นฉบับระบุจำนวนและหน่วยนั้นจริง ไม่แน่ใจให้ตัดจำนวนออก ห้ามกะหรือเติมเอง\n' +
       '- ★ เรื่องเวลานอน: คำว่า “ทุกคืน” ใช้ได้เฉพาะเมื่อต้นฉบับระบุคำนี้ตรงๆ ห้ามเติมเพื่อทำพาดหัวหรือเนื้อหาให้แรงขึ้น\n' +
       '- ★ จากข้อความดิบ ห้ามเสกอุปกรณ์/ท่าทางเพื่อสร้างประโยคแบบ "ภาพ..." เช่น ต้นฉบับมีแค่ "กวาดลาน" ห้ามเติม "ภาพเด็กถือไม้กวาด" ให้เล่าตรงตามกริยาที่มีเท่านั้น\n' +
-      '- ⚠️ ห้ามตั้งคำถามปิดท้ายเด็ดขาด ห้ามจบด้วย "คุณคิดยังไง?", "เห็นด้วยไหม?" หรือคำถามใดๆ\n\n';
-    // (formalModeRule — ผันตามข่าว — แทรกระหว่าง _wpRulesHead กับ _wpRulesQuality ตอนประกอบด้านล่าง ตำแหน่งเดิม)
-    const _wpRulesQuality = '=== 🔍 QUALITY + WRITING STYLE (MANDATORY) ===\n' +
+      '- ⚠️ ห้ามตั้งคำถามปิดท้ายเด็ดขาด ห้ามจบด้วย "คุณคิดยังไง?", "เห็นด้วยไหม?" หรือคำถามใดๆ\n\n' +
+      formalModeRule +
+      '=== 🔍 QUALITY + WRITING STYLE (MANDATORY) ===\n' +
       '1. ห้ามเปิดเรื่องซ้ำกัน — แต่ละเวอร์ชันต้องเปิดด้วยประโยคแรกที่ต่างกัน\n' +
       // 🎛️ 20 ส.ค. 69 (R3 ข้อ 2): "ไม่สรุปข้อคิดชีวิต" = วรรคที่ 4 ที่ขัดกับฝั่งสัจธรรม · ENDING_MODE=plain คืนกลับมาทุกไบต์
       `2. ย่อหน้าสุดท้ายกระชับ — ปิดท้ายไม่เกิน 2 ประโยค${isEndingPlain() ? ' ไม่สรุปข้อคิดชีวิต' : ''}\n` +
@@ -1879,9 +1836,9 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       '[ FORBIDDEN PATTERNS — คำห้าม 10 คำ ]\n' +
       '❌ ห้ามใช้: ซึ่ง, ดังกล่าว, ท่ามกลาง, สร้างความฮือฮา, อย่างไรก็ตาม, กล่าวได้ว่า, เป็นที่ทราบกันดีว่า, ไม่ว่าจะ...ก็ตาม, แม้จะ...แต่ก็\n' +
       '❌ ห้ามขึ้นต้นด้วย "ลองนึก/ลองคิด/ลองจินตนาการ" ทุกรูปแบบ (ลองนึกภาพว่า, ลองนึกถึง, ลองคิดดู, ลองจินตนาการ), Angle:, มุมมอง:, Focus:\n' +
-      '❌ ห้ามบอกอารมณ์แทนคนอ่าน: สะเทือนใจชาวเน็ต, ทำให้คนดูน้ำตาไหล, สร้างความตื่นเต้น\n\n';
-    // (viralFewshotBlock — ครูตัวอย่างผันตามข่าว — แทรกระหว่าง _wpRulesQuality กับ _wpRulesCraft ตอนประกอบด้านล่าง ตำแหน่งเดิม)
-    const _wpRulesCraft = '=== ✒️ PROSE CRAFT — ลายมือการเขียน (บังคับทุกย่อหน้า) ===\n' +
+      '❌ ห้ามบอกอารมณ์แทนคนอ่าน: สะเทือนใจชาวเน็ต, ทำให้คนดูน้ำตาไหล, สร้างความตื่นเต้น\n\n' +
+      viralFewshotBlock +
+      '=== ✒️ PROSE CRAFT — ลายมือการเขียน (บังคับทุกย่อหน้า) ===\n' +
       '- จังหวะ: สลับประโยคสั้น-ยาว และทุกย่อหน้าต้องมี "ประโยคทุบ" สั้นๆ ที่มีน้ำหนัก อย่างน้อย 1 ประโยค\n' +
       // 🎛️ 20 ส.ค. 69 (R3 ข้อ 3): บรรทัดนี้บังคับ "ทุกย่อหน้าต้องมีภาพ" — ต้นฉบับไม่มีภาพให้ก็ต้องเสก ⇒ เติมหางชุดเดียวกับ The Witness
       `- ภาพ: ทุกย่อหน้าต้องมีรายละเอียดที่มองเห็น/จับต้องได้อย่างน้อย 1 จุด (สิ่งของ ท่าทาง เสียง ความเงียบ)${isWitnessFactLockEnabled() ? ' — ใช้ได้เฉพาะรายละเอียดที่ต้นฉบับบรรยายไว้จริงเท่านั้น ต้นฉบับไม่มีก็ไม่ต้องมี ห้ามเสกขึ้นเอง' : ''}\n` +
@@ -1920,9 +1877,7 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       'หลักการ: เปลี่ยน "ความแรง" → "อารมณ์" เน้น emotional storytelling ไม่ใช่ shock/gore\n' +
       'ห้าม clickbait: "คุณจะไม่เชื่อ", "แชร์ด่วน", "ดูก่อนโดนลบ"\n' +
       'ห้าม engagement bait: "พิมพ์ 1", "เมนต์ 99", "ใครเห็นด้วยกดไลก์"\n' +
-      '=== จบกฎ FACEBOOK SAFETY ===\n\n';
-    // (_writerPolicyBlock — บล็อกกฎเฟส 2 · ว่างเมื่อสวิตช์ปิด — แทรกระหว่าง _wpRulesCraft กับ _wpRulesFinal ตอนประกอบด้านล่าง)
-    const _wpRulesFinal =
+      '=== จบกฎ FACEBOOK SAFETY ===\n\n' +
       // 🔴 17 ส.ค. 69: "ความยาวตามที่กำหนด" กลายเป็นคำสั่งลอยหลังถอดพื้นคำออก (เฟเบิ้ลจับได้)
       //    ตำแหน่งท้ายสุดของใบสั่งงาน = โมเดลให้น้ำหนักสูงสุด · ถอย LEGACY_LENGTH_RULES=1
       `✨✨✨ คำสั่งเด็ดขาด: ต้องสร้างผลลัพธ์ให้ครบจำนวน ${targetCount || 2} เวอร์ชัน ห้ามขาดหาย${finalReminderLengthClause(lenCfg)} ✨✨✨\n\n` +
@@ -1934,36 +1889,10 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       '  ],\n' +
       '  "news_reference": "สรุปข่าวต้นฉบับที่ใช้อ้างอิง 2-3 ประโยค"\n' +
       '}';
-    // ประกอบตามลำดับเดิมทุกก้อน (ก่อน 2 ก.ย. 69 คือนิพจน์เดียว prompt + … ลำดับเดียวกันนี้) — เพิ่มเฉพาะ _writerPolicyBlock ที่ว่างเมื่อสวิตช์ปิด
-    multiPrompt += _wpRulesHead + formalModeRule + _wpRulesQuality + viralFewshotBlock + _wpRulesCraft + _writerPolicyBlock + _wpRulesFinal;
 
     if (_hasImmutableRawSource) {
-      // ★ ข้อแก้ ①: _writerFidelity (null เมื่อสวิตช์ปิด = อาร์กิวเมนต์เฉย ไบต์เดิม) — reminder หลังกรอบ RAW + ข้อตรวจใน FINAL CHECK
-      multiPrompt = finalizeRawFirstWriterPrompt(rawSourceText, multiPrompt, _writerFidelity);
+      multiPrompt = finalizeRawFirstWriterPrompt(rawSourceText, multiPrompt);
       console.log(`[Analyze-Service] 🧭 RAW-FIRST: ข้อความดิบ ${rawSourceText.length}ch อยู่หน้าแรก และ FINAL RAW AUTHORITY อยู่ท้าย prompt`);
-    } else if (_writerFidelity) {
-      // ★ ข้อแก้ ①: ไม่มีเนื้อดิบ (สาย URL/transcript — ไม่มีกรอบ RAW) → เตือนซื่อตรงวางท้ายพรอมต์ ใกล้จุดที่โมเดลเริ่มเขียนที่สุด
-      multiPrompt = `${multiPrompt}\n\n${_writerFidelity.reminder}`;
-      console.log('[WriterPolicy] 🧷 เตือนซื่อตรง (ไม่มีเนื้อดิบ) วางท้ายพรอมต์');
-    }
-
-    // ★ เฟส 2 (WRITER_PROMPT_CACHE_V2=1): จัดลำดับใหม่ให้แคชพรอมต์ได้ — ก้อนคงที่ (กฎทั้งหมด + JSON ไม่ผันตามข่าว) ขึ้นก่อนแบบ cache:true
-    //   ก้อนผันตามข่าว (RAW-first + การ์ด/ครู/ประเด็น/ทางการ + FINAL RAW AUTHORITY ท้ายสุด) ตามหลัง · ส่งเป็น promptBlocks ผ่าน aiRouter → callClaude
-    //   multiPrompt สตริง = ก้อนต่อกัน (ตัวสำรอง Sol/preview/log ได้เนื้อเดียวกัน) · สวิตช์ปิด = ไม่แตะ multiPrompt ที่ประกอบไว้ด้านบนเลย
-    let _writerPromptBlocks = null;
-    if (_writerPolicy?.isWriterPromptCacheV2On?.()) {
-      // ★ ข้อแก้ ①: เตือนซื่อตรงต้องอยู่ก้อนผันตามข่าว (blocks[1]) เสมอ ห้ามปนก้อน cache:true —
-      //   มีเนื้อดิบ = ส่งผ่าน finalizeRawFirst (หลังกรอบ RAW + ใน FINAL CHECK) · ไม่มีเนื้อดิบ = ต่อท้ายก้อน variable
-      //   _writerFidelity=null (สวิตช์ปิด) = ก้อนเดิมทุกไบต์ (wrapper เรียก finalizer 3-arg ด้วย null = 2-arg เดิม)
-      const _split = _writerPolicy.splitWriterPromptForCache({
-        constant: _wpRulesHead + _wpRulesQuality + _wpRulesCraft + _writerPolicyBlock + _wpRulesFinal,
-        variable: prompt + formalModeRule + viralFewshotBlock + (!_hasImmutableRawSource && _writerFidelity ? `\n\n${_writerFidelity.reminder}` : ''),
-        rawSourceText: _hasImmutableRawSource ? rawSourceText : '',
-        finalizeRawFirst: (rawText, supporting) => finalizeRawFirstWriterPrompt(rawText, supporting, _writerFidelity),
-      });
-      multiPrompt = _split.prompt;
-      _writerPromptBlocks = _split.blocks;
-      console.log(`[WriterCacheV2] 🧊 ก้อนคงที่ ${_split.constantChars}ch (cache:true) · ก้อนผันตามข่าว ${_split.variableChars}ch · รวม ${multiPrompt.length}ch${_hasImmutableRawSource ? ' · RAW-first อยู่หัวก้อนผันตามข่าว + FINAL RAW AUTHORITY ท้ายสุด' : ''}`);
     }
 
     console.log(`\n📦 ${'─'.repeat(50)}`);
@@ -1990,8 +1919,6 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
           maxTokens: 10000,
           signal: requestSignal,
           textNewsLengthPolicy: true,
-          // ★ เฟส 2 (WRITER_PROMPT_CACHE_V2): ก้อนพรอมต์แคช — ไม่มีก้อน = ไม่มีคีย์ = การเรียกเดิมทุกไบต์
-          ...(_writerPromptBlocks ? { promptBlocks: _writerPromptBlocks } : {}),
         }),
         270000, 'write_inner', signal
       );
@@ -2021,17 +1948,12 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
         promptPreview: multiPrompt.slice(0, 500) + '...',
         immutableRawFirst: _hasImmutableRawSource,
         immutableRawSourceChars: _hasImmutableRawSource ? rawSourceText.length : 0,
-        // ★ เฟส 2: โหมดแคช (WRITER_PROMPT_CACHE_V2) เนื้อดิบอยู่หัว "ก้อนผันตามข่าว" (blocks[1]) ไม่ใช่หัว multiPrompt — ตรวจที่ก้อนนั้น
         immutableRawStartsTaskPrompt: _hasImmutableRawSource
-          ? (_writerPromptBlocks ? _writerPromptBlocks[1].text : multiPrompt).startsWith('=== ขั้นที่ 1: อ่านและประเมินเนื้อดิบเต็มก่อนวัตถุดิบอื่น ===')
+          ? multiPrompt.startsWith('=== ขั้นที่ 1: อ่านและประเมินเนื้อดิบเต็มก่อนวัตถุดิบอื่น ===')
           : false,
         immutableRawFinalAuthorityLast: _hasImmutableRawSource
           ? multiPrompt.endsWith('=== จบ FINAL RAW AUTHORITY CHECK ===')
           : false,
-        writerPolicyBlockChars: _writerPolicyBlock.length, // ★ เฟส 2: 0 = สวิตช์กฎใหม่ปิดทั้งหมด
-        promptCacheV2: _writerPromptBlocks
-          ? { constantChars: _writerPromptBlocks[0].text.length, variableChars: _writerPromptBlocks[1].text.length }
-          : null,
         aiError,
         aiWarning,
         sourceRemovedFromCompose: false, sourceExcerptChars: _srcExcerpt.length,
@@ -2183,7 +2105,7 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       //   เหตุ: "ประโยคทุบท้าย" กลางใบเดียวแชร์ทุกมุม → ท่อนจบ 2 เวอร์ชันออกมาแฝดกัน (RUN5 นกจริยา)
       //   เปิด: ANGLE_CLOSING_SPLIT=1 + autoFlow ส่ง angleList ≥2 มุม · ขาดอย่างใดอย่างหนึ่ง = สองตัวแปรล่างเป็น ''
       //   → prompt ประกอบออกมาไบต์ต่อไบต์เท่าของเดิม (พิสูจน์ด้วย harness เทียบ .bak-preD)
-      const _closingSplitAngles = (envOn('ANGLE_CLOSING_SPLIT') && Array.isArray(angleList))
+      const _closingSplitAngles = (process.env.ANGLE_CLOSING_SPLIT === '1' && Array.isArray(angleList))
         ? angleList.filter((a) => a && String(a.angle_name || '').trim()).slice(0, 4)
         : [];
       const _closingSplitOn = _closingSplitAngles.length >= 2;
@@ -2497,7 +2419,6 @@ ${_timelineFlowGuidance}
           const mixPromptStore = createStore('prompt-library');
           let promptLib = [];
           try { promptLib = await mixPromptStore.getAll(); } catch (e) { console.warn('[Mix-Service] Prompt library load:', e.message); }
-          promptLib = selectableCards(promptLib); // ★ F7: กรองก่อนทั้ง matched และ fallback sort()[0] — ปิดสวิตช์ = คืน reference เดิม ให้ sort() ทับอาเรย์ของ getAll เหมือนก่อน F7
 
           if (promptLib.length > 0) {
             const matched = promptLib
@@ -2806,7 +2727,7 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
   // ★ BUG-4 FIX: ใช้ cached prompt library ถ้ามี
   let validPrompts = [];
   if (_cachedPromptLib && _cachedPromptLib.length > 0) {
-    validPrompts = _cachedPromptLib.filter(p => p.promptText && isCardSelectable(p) && !excludePromptIds.includes(p.id)); // ★ F7
+    validPrompts = _cachedPromptLib.filter(p => p.promptText && !excludePromptIds.includes(p.id));
     console.log(`[Analyze-Service] ♻️ Reusing cached prompt lib: ${validPrompts.length} valid (excluded ${excludePromptIds.length})`);
   } else {
     try {
@@ -2827,7 +2748,7 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
           console.warn('[Analyze-Service] ⚠️ JSON fallback failed:', fileErr.message);
         }
       }
-      validPrompts = promptLib.filter(p => p.promptText && isCardSelectable(p) && !excludePromptIds.includes(p.id)); // ★ F7
+      validPrompts = promptLib.filter(p => p.promptText && !excludePromptIds.includes(p.id));
     } catch (err) {
       console.warn('[Analyze-Service] Failed to load prompt library in getTopPrompts:', err.message);
     }
@@ -2967,8 +2888,6 @@ ${newsForStage('CATALOG', actualNewsBody, { squash: true })}
       rethrowPipelineDeadline(_catErr, 'card_catalog_picker');
       _catalogPicks = []; // ลองแล้วล้ม — จำไว้ ไม่จ่ายซ้ำมุมถัดไป (Opus P2-C)
       console.warn('[📖 Catalog] ล้ม — ถอยใช้ top-8 สูตรเดิม:', _catErr.message);
-      // ★ 1 ก.ย. 69 (บั๊กระดับสูง พิสูจน์แล้ว): ถอยเงียบไม่มีร่องรอย → ลงบันทึกท่อเป็น warning ให้ /pipeline-logs และตัวตรวจสุขภาพเห็น
-      logPipeline({ workflowId, step: 'card_catalog_picker', status: 'warning', error: String(_catErr.message || _catErr).slice(0, 200), detail: 'AI บรรณารักษ์ล้ม → ถอยใช้สูตรคะแนน' }).catch(() => {});
     }
   }
 
@@ -3104,8 +3023,6 @@ ${_aiCands.join('\n')}
     } catch (_pickErr) {
       rethrowPipelineDeadline(_pickErr, 'card_final_picker');
       console.warn(`[🤖 CardPicker] ${_pickerModelB} ล่ม — ใช้ลำดับสูตรเดิม:`, _pickErr.message);
-      // ★ 1 ก.ย. 69: ร่องรอยการถอย (เดิมเงียบ ค้างได้เป็นวันโดยไม่มีใครรู้ว่าคุณภาพการ์ดตก)
-      logPipeline({ workflowId, step: 'card_final_picker', status: 'warning', model: _pickerModelB, error: String(_pickErr.message || _pickErr).slice(0, 200), detail: 'AI ผู้เคาะการ์ดล้ม → ใช้ลำดับสูตร' }).catch(() => {});
     }
   }
 

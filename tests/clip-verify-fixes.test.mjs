@@ -29,7 +29,7 @@ register('data:text/javascript,' + encodeURIComponent(`
     if (spec === '../../ai/usageLogger.js' && ctx.parentURL === ${JSON.stringify(PIPE_URL.href)}) {
       return { url: 'data:text/javascript,export async function logApiUsage() {}', shortCircuit: true };
     }
-    if (spec === '@/lib/ai/openai') {
+    if (spec === '@/lib/services/clipAI/openai') {
       return { url: 'data:text/javascript,export function callAI() { throw new Error("Unexpected AI call"); }', shortCircuit: true };
     }
     if (spec.startsWith('@/')) return next(new URL(spec.slice(2) + (hasExt(spec) ? '' : '.js'), ${JSON.stringify(SRC)}).href, ctx);

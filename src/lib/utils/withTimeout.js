@@ -44,19 +44,7 @@ export function withTimeout(promise, ms, stepName = 'unknown') {
  */
 export function withTimeoutSignal(factory, ms, stepName = 'unknown', parentSignal) {
   const pipelineDeadline = getActivePipelineDeadline();
-  if (pipelineDeadline) {
-    // ★ 1 ก.ย. 69 (บั๊กระดับกลาง พิสูจน์แล้ว): เดิม "จอง" งบเต็ม ms ทุกขั้น รวมกันเกินงบทั้งระบบ
-    //   ขั้นก่อนหน้าช้า (เช่นแตกประเด็นถอยตัวสำรอง) → ขั้นเขียนถูกโยนทิ้งทั้งที่เวลาเหลือพอเขียน
-    //   ใหม่: ต้องเหลืออย่างน้อย MIN_STEP_MS ถึงเริ่ม แล้วหั่น ms ให้พอดีเวลาที่เหลือ (เผื่อ 5s ให้ชั้นนอกรายงานผล)
-    const MIN_STEP_MS = 60_000;
-    const remaining = pipelineDeadline.assertCanStart(stepName, Math.min(ms, MIN_STEP_MS));
-    if (remaining < ms) {
-      // remaining ≥ MIN_STEP_MS รับประกันจาก assertCanStart แล้ว → หักเผื่อ 5s ตรงๆ (ผู้ตรวจจับ: พื้น MIN เดิมกินเผื่อเมื่อ remaining ∈ [60s,65s])
-      const clamped = Math.max(1_000, remaining - 5_000);
-      console.warn(`[withTimeout] ⏱️ ${stepName}: งบ ${Math.round(ms / 1000)}s แต่เหลือ ${Math.round(remaining / 1000)}s → หั่นเหลือ ${Math.round(clamped / 1000)}s`);
-      ms = clamped;
-    }
-  }
+  pipelineDeadline?.assertCanStart(stepName, ms);
   const abortOn = (pipelineDeadline || parentSignal || process.env.WITHTIMEOUT_ABORT === '1')
     && typeof AbortController !== 'undefined';
   if (!abortOn) {

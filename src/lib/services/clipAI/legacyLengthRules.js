@@ -114,7 +114,10 @@ export function ironRule5LengthLine(side, useTextNewsLengthPolicy = false) {
 
 /** เปิดโหมดถอยหรือยัง — อ่านทุกครั้งที่เรียก (ไม่แคช) เพื่อให้เทสสลับค่าได้ */
 export function isLegacyLengthOn() {
-  return process.env.LEGACY_LENGTH_RULES === '1';
+  // ★ 1 ก.ย. 69: รับ 1/true/on/yes ทนช่องว่าง+อัญประกาศ (เดิมต้อง '1' เป๊ะ ผิดนิดเดียวคือเงียบ)
+  //   จงใจไม่ import envFlag — ไฟล์นี้ถูกเทสแบบโหลดเดี่ยว (data: URL) ต้องปลอด import
+  const v = String(process.env.LEGACY_LENGTH_RULES ?? '').trim().replace(/^["']+|["']+$/g, '').toLowerCase();
+  return v === '1' || v === 'true' || v === 'on' || v === 'yes';
 }
 
 /**

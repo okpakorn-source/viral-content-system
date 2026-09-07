@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { createStore } from '@/lib/persistStore';
 import { getClipVideoQueue } from '@/lib/services/clipQueue';
 import { randomUUID } from 'crypto';
-import { callAI } from '@/lib/ai/openai';
+import { callAI } from '@/lib/services/clipAI/openai';
 import { MODEL_FAST } from '@/lib/ai/modelConfig';
 
 /**

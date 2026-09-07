@@ -11,8 +11,6 @@ import { callAI } from '@/lib/ai/openai';
 import { MODEL_FAST } from '@/lib/ai/modelConfig';
 // ★ 1 ส.ค. 69 (เกราะแก่นข่าว): ใช้ตัวสกัด "เลขเด่น" ตัวเดียวกับ flagFixer — แหล่งความจริงเดียว ไม่ก๊อปตรรกะซ้ำ
 import { keyNumbersOf, hasKeyNumber } from './flagFixerService';
-// ★ 1 ก.ย. 69: แทนคำต้องห้ามด้วย pattern เดิมของ L2 (เคารพ whitelist ศัพท์แพทย์) — บั๊ก "ยาฆ่าเชื้อ→ยาก่อเหตุเชื้อ"
-import { guardedReplace, sortLongestFirst } from './guardedReplace';
 
 // ═══ ★ 1 ส.ค. 69 (เกราะแก่นข่าว) ═══════════════════════════════════════════
 // เหตุ (พิสูจน์แล้ว 1 ส.ค.): เวอร์ชันที่ติดป้าย _correctionApplied=true มีเนื้อพัง —
@@ -144,12 +142,11 @@ export async function safeCorrect(content, issues) {
     }
 
     // === Layer 3A: Direct replacement (คำที่ replace ตรงๆ ได้ไม่เพี้ยน) ===
-    // ★ 1 ก.ย. 69: คำยาวก่อนคำสั้น ("ฆ่าตัวตาย" ก่อน "ฆ่า") + แทน "ตำแหน่งแรกที่ผ่านกันชน" ไม่ใช่ตำแหน่งแรกในบทความ
-    for (const issue of sortLongestFirst(directReplaceIssues)) {
+    for (const issue of directReplaceIssues) {
       try {
         if (issue.type === 'forbidden_word' && issue.suggestion) {
           const before = correctedContent;
-          correctedContent = guardedReplace(correctedContent, issue, { all: false });
+          correctedContent = correctedContent.replace(issue.text, issue.suggestion);
           if (correctedContent !== before) {
             corrections.push({
               type: 'regex_replace',

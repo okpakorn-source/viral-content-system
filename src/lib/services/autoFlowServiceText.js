@@ -552,24 +552,6 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   // 🎛️ CARD_AUTHORITY R6 (19 ส.ค. 69): เปิดสวิตช์ = ถอดหาง " ห้ามขึ้นต้นด้วยวันที่" ทั้ง 4 สูตร + หางพร้อมท์ด้านล่าง · ปิด (default) = ข้อความเดิมทุกไบต์
   const _caR6Tail = isCardAuthorityR6Enabled() ? '' : ' ห้ามขึ้นต้นด้วยวันที่';
   const blueprintPlansForRepair = new Array(anglesToUse.length).fill(null);
-  // ★ 2 ก.ย. 69 ANGLE2_DISTINCT_V2 (ค่าเริ่มต้นเปิด · ปิดคืน ANGLE2_DISTINCT_V2=0 = ข้อความส่งนักเขียนเหมือนเดิมทุกไบต์)
-  //   ที่มา: เทสสนามจริงเคสศรราม 2 ก.ย. — 2 มุมเขียนขนานกัน ย่อหน้ากลางซ้ำเกือบคำต่อคำ (คล้าย 38–42%) เพราะแกนจองกันแค่ประโยคแรก
-  //   → จัดสรร key_points ให้แต่ละมุม "เล่าเต็ม" ไม่ซ้ำกันก่อนยิงขนาน (ฟังก์ชันบริสุทธิ์ท้ายไฟล์ · มุมเดียว/ประเด็น<2 = ไม่เติม)
-  //   ล้ม (throw) = fail-open เหมือนด่าน L4.7: แผน null → นักเขียนได้ข้อความเหมือนสวิตช์ปิด ไม่ล้มทั้งงานข่าว (ผู้ตรวจไขว้ 2 ก.ย. 69)
-  // ── ANGLE2_DISTINCT_V2 plan start ── (เทสดึงบล็อกนี้ไปรันกับ stub ที่ throw — ห้ามย้าย/เปลี่ยนชื่อตัวแปรโดยไม่แก้ tests/angle2-distinct-v2)
-  let _anglePointPlan = null;
-  if (isAngle2DistinctV2Enabled()) {
-    try {
-      _anglePointPlan = assignKeyPointsToAngles(breakdownData?.key_points, anglesToUse);
-      if (anglesToUse.some((_, i) => buildAnglePointsText(_anglePointPlan, i))) {
-        addLog('AngleDistinct', `🧭 จัดสรรประเด็นต่อมุมไม่ซ้ำ: ${_anglePointPlan.map((p, i) => `A${i + 1}=${p.primary.length} ประเด็น`).join(' · ')} (ANGLE2_DISTINCT_V2)`);
-      }
-    } catch (planErr) {
-      _anglePointPlan = null;
-      addLog('AngleDistinct', `⚠️ จัดสรรประเด็นล้ม — ใช้มุมเดิม (${planErr?.message || planErr})`);
-    }
-  }
-  // ── ANGLE2_DISTINCT_V2 plan end ──
 
   // === PARALLEL GENERATE: สร้างเนื้อหาขนานด้วย prompt ที่เลือกไว้แล้ว ===
   const generationTasks = anglesToUse.map((angleObj, index) => {
@@ -584,10 +566,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         .map(item => `${item?.angle_name || ''}: ${item?.description || ''}`.trim())
         .filter(Boolean);
       const _openingStyle = buildAngleOpeningContract(index, _promptHook, _reservedOpeningAngles, _caR6Tail);
-      const writeAngle = _openingStyle ? `${focusAngle}\nสไตล์เปิดเรื่องบังคับของเวอร์ชันนี้: ${_openingStyle}` : focusAngle; // ★ 2 ก.ย. 69 สัญญาว่าง (สวิตช์ทดลอง) → ไม่ใส่บรรทัดเปล่า
-      // ★ 2 ก.ย. 69 ANGLE2_DISTINCT_V2: ต่อท้ายมุมด้วย "ประเด็นที่มุมนี้ต้องเล่าเต็ม / ประเด็นที่มุมอื่นเล่าเต็มแล้วให้ย่อ" — สวิตช์ปิด/มุมเดียว/ประเด็น<2 คืน '' = writeAngle เดิม
-      const _pointsText = buildAnglePointsText(_anglePointPlan, index);
-      const writeAngleWithPoints = _pointsText ? `${writeAngle}\n${_pointsText}` : writeAngle;
+      const writeAngle = `${focusAngle}\nสไตล์เปิดเรื่องบังคับของเวอร์ชันนี้: ${_openingStyle}`;
       
       // 1. Research for this angle
       const resResult = await performResearch({
@@ -652,7 +631,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         emotionalBlueprint: angleBlueprint, // ★ สวิตช์ปิด = ตัวแปรนี้คือ blueprint ก้อนเดิมเป๊ะ (reference เดียวกัน)
         researchData: researchItems.length > 0 ? { items: researchItems } : null,
         factPool: factPool,
-        focusAngle: writeAngleWithPoints, // ★ มุมเล่า + สไตล์เปิดเรื่องบังคับของ angle นี้ (+ ประเด็นต่อมุม ANGLE2_DISTINCT_V2 — ว่าง = writeAngle เดิม)
+        focusAngle: writeAngle, // ★ มุมเล่า + สไตล์เปิดเรื่องบังคับของ angle นี้
         workflowId: _autoWorkflowId,
         deferAnalysisPersistence: true,
         user: _user,
@@ -804,51 +783,6 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   const groundingSourceText = (detectedType === 'text' || detectedType === 'plain_text')
     ? rawText
     : newsData.newsBody;
-
-  // ★ เฟส 2 "พรอมต์นักเขียน" (2 ก.ย. 69 · WRITER_TRIM_PASS=1 · ค่าเริ่มต้นปิด = ไม่ยิง AI ไม่แตะเวอร์ชันเลย):
-  //   ฉบับที่ยาวเกิน 220 คำ → luna ตัดเฉพาะประโยคที่ไม่มีข้อเท็จจริงใหม่ให้เหลือ ~180 คำ (src/lib/services/writerTrimPass.js)
-  //   fail-safe ในตัว: ข้อเท็จจริงหายเพิ่ม (findMissingFacts เทียบเนื้อดิบ) / สั้นกว่า 146 / ไม่สั้นลง / AI ล้ม / หมดเวลา = ใช้ร่างเดิม
-  //   จุดต่อสาย: หลังได้ร่างครบทุกมุม ก่อน correctionPipeline · งบ 25s ใต้ pipeline deadline เดิม (เหลือ < 60s = ข้าม ไม่เบียดด่านแก้ไข)
-  //   ผลอยู่ใน version._trimPass · provenance (usedModel/promptId/_source) คงเดิม · ทะเบียนสวิตช์: src/lib/config/newsSwitches.js
-  //   dependency โหลดแบบ dynamic ในบล็อก try — เทสสตับเดิมที่โหลดไฟล์นี้ไม่ต้องรู้จักโมดูลใหม่
-  //   ★ ข้อแก้ ① หลัง A/B (2 ก.ย. 69): ฉีด extractFacts = extractSourceFactsDetailed ให้ตัวตัดเห็น "รายการข้อเท็จจริงห้ามหาย"
-  //     ในพรอมต์ก่อนตัด + ด่านกลไกประโยคคุ้มครอง (คำพูด/สมณศักดิ์-ยศ/วันที่/ตัวเลข) อยู่ใน writerTrimPass เอง
-  if (process.env.WRITER_TRIM_PASS === '1') {
-    const _trimDeadline = getActivePipelineDeadline();
-    if (_trimDeadline && _trimDeadline.remainingMs() < 60_000) {
-      addLog('TrimPass', `⏭️ ข้าม trim pass — งบท่อเหลือ ${Math.round(_trimDeadline.remainingMs() / 1000)}s ไม่พอ (ต้องเหลือ ≥ 60s)`);
-    } else {
-      try {
-        const [{ trimIfTooLong }, { callAI }, { MODEL_FAST_CHEAP }, { findMissingFacts, extractSourceFactsDetailed }, { countPublishableThaiWords }] = await Promise.all([
-          import('@/lib/services/writerTrimPass'),
-          import('@/lib/ai/openai'),
-          import('@/lib/ai/modelConfig'),
-          import('@/lib/correction/missingFactsGate'),
-          import('@/lib/utils/publishablePostText'),
-        ]);
-        const trimmedVersions = await withTimeoutSignal(
-          (requestSignal) => Promise.all(allVersions.map((version) => trimIfTooLong(version, {
-            raw: groundingSourceText,
-            callAI,
-            model: MODEL_FAST_CHEAP,
-            findMissingFacts,
-            extractFacts: extractSourceFactsDetailed, // ★ ข้อแก้ ①: รายการข้อเท็จจริง (รวมชนิด detail) เข้าพรอมต์ตัด
-            countWords: (text) => countPublishableThaiWords({ content: text }),
-            signal: requestSignal,
-            timeoutMs: 24_000,
-          }))),
-          25_000, 'writer_trim_pass', _trimDeadline?.signal,
-        );
-        trimmedVersions.forEach((version, index) => { allVersions[index] = version; });
-        const trimmedCount = trimmedVersions.filter((version) => version?._trimPass?.applied).length;
-        addLog('TrimPass', `✂️ Trim pass: ตัด ${trimmedCount}/${trimmedVersions.length} ฉบับ (${trimmedVersions.map((version, index) => `V${index + 1} ${version?._trimPass?.before ?? '?'}→${version?._trimPass?.after ?? '?'} ${version?._trimPass?.reason || ''}`).join(' · ')})`);
-      } catch (trimErr) {
-        rethrowPipelineDeadline(trimErr, 'writer_trim_pass');
-        addLog('TrimPass', `⚠️ Trim pass ล้ม — ใช้ร่างนักเขียนเดิมทุกฉบับ (${trimErr?.message || trimErr})`);
-      }
-    }
-  }
-
   try {
     // ★ 14 ส.ค. 69: ส่งข้อเท็จจริงรีเสิร์ชให้ด่าน L1.8 — ของจริงจากรีเสิร์ชไม่ใช่ "ของเกิน"
     finalVersions = await runCorrectionPipeline(
@@ -889,8 +823,6 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   const diversity = assessVersionDiversity(finalVersions);
   let diversityWarning = '';
   ({ versions: finalVersions, warning: diversityWarning } = annotateDiversityWarning(finalVersions, diversity));
-  // ★ 2 ก.ย. 69 ANGLE2_DISTINCT_V2: บันทึกตัวเลขความคล้ายลงทุกเวอร์ชันเสมอ (_diversitySimilarity) — เกณฑ์บล็อก 37%/50% ไม่เปลี่ยน
-  if (isAngle2DistinctV2Enabled()) finalVersions = stampDiversitySimilarity(finalVersions, diversity);
   if (diversityWarning) {
     pipelineQualityWarnings.push(diversityWarning);
     addLog('Quality', `⚠️ ${diversityWarning}`);
@@ -994,7 +926,6 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
           return withoutOldWarning;
         });
         diversityWarning = '';
-        if (isAngle2DistinctV2Enabled()) finalVersions = stampDiversitySimilarity(finalVersions, postFactDiversity); // ★ 2 ก.ย. 69 ตัวเลขความคล้ายหลัง factual editor
         if (!postFactDiversity.ok) {
           ({ versions: finalVersions, warning: diversityWarning } = annotateDiversityWarning(
             finalVersions,
@@ -1043,30 +974,6 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
       addLog('LengthGate', `✅ ผลสุดท้ายทุกฉบับยาวอย่างน้อย ${NEW_LENGTH_CFG.min} คำ · ไม่มีเพดานสูงสุด`);
     }
   }
-
-  // ── VIRAL_SCORE_ANNOTATE wiring start ──
-  // ★ เฟส 3 ข้อ 7 (2 ก.ย. 69 · VIRAL_SCORE_ANNOTATE=1 · ค่าเริ่มต้นปิด = ไม่ import โมดูล ไม่มีคีย์ _viralScore สักฉบับ):
-  //   แนบคะแนน "โอกาสปัง" (src/lib/feedback/viralScore.js — ridge ในเครื่อง ไม่ยิง API) ลง version._viralScore ต่อฉบับ
-  //   จุดนี้คือจุดเดียวที่เนื้อสุดท้ายนิ่งแล้วทุกสาขา: หลัง correction fallback + diversity + factual editor (map finalVersions ใหม่)
-  //   + length gate (กรองฉบับสั้นออกแล้ว — ให้คะแนนเฉพาะชุดที่ส่งจริง) · ก่อน buildPublishableAnalysisResult ประกอบ response
-  //   → _viralScore ติดไป analysisResult.versions ถึงบอท (discord-bot/index.js readViralScore รองรับล่วงหน้าแล้ว ห้ามแก้บอท)
-  //   fail-safe: โมเดลไม่มี/scorer คืน null = ไม่แนบคีย์ · import หรือคำนวณล้ม = addLog เตือน 1 บรรทัด ห้ามล้มท่อ
-  //   ⚠️ Generation Log (generationLogger compactVersions) เป็น whitelist — คะแนนไม่เข้าสมุดสถิติ (เหมือน _missingFacts/_diversityWarning)
-  //   ทะเบียนสวิตช์: src/lib/config/newsSwitches.js · เทส: tests/viral-score-annotate.test.mjs
-  if (process.env.VIRAL_SCORE_ANNOTATE === '1') {
-    try {
-      const { scoreVersion, getModelMetrics } = await loadViralScoreModule();
-      const scored = annotateViralScores(finalVersions, {
-        scoreVersion,
-        metrics: typeof getModelMetrics === 'function' ? getModelMetrics() : null,
-      });
-      finalVersions = scored.versions;
-      addLog('ViralScore', scored.logLine);
-    } catch (viralScoreError) {
-      addLog('ViralScore', `⚠️ โอกาสปัง: คำนวณไม่ได้ (${viralScoreError?.message || viralScoreError}) — ส่งข่าวต่อโดยไม่มีคะแนน`);
-    }
-  }
-  // ── VIRAL_SCORE_ANNOTATE wiring end ──
 
   ({ classic: classicVersionCount, enhanced: enhancedVersionCount } = countFinalVersionSources(finalVersions));
   usedPreset = resolveFinalUsedPreset(finalVersions, usedPresetByPromptId, usedPreset);
@@ -1239,17 +1146,7 @@ export function stampWriterModel(version, model) {
  * กำหนดตระกูลบทเปิดไม่ซ้ำต่อมุม โดยให้ hook จากการ์ดเป็นเทคนิครองเท่านั้น
  * การ์ดคนละใบในคลังอาจมี hookStyle เดียวกัน จึงห้ามให้การ์ดทับ family ที่จองไว้
  */
-// ★ 2 ก.ย. 69 — สวิตช์ทดลองเปิดเรื่อง (ค่าเริ่มต้น = พฤติกรรมเดิม 100% · เจ้าของสั่ง 18 ส.ค. "ห้ามสั่งทับการ์ด" จึงไม่เปิดเอง)
-//   ที่มา: เทสสนามจริงเคส #05234 V2 — มุมที่ 2 ถูกสัญญานี้บังคับตระกูล "ความต่าง" → นักเขียนเปิดเป็นฉากปัจจุบัน
-//   ("สายโทรศัพท์กลางดึกยังดังขึ้นเสมอ") ทั้งที่พ่อเสียชีวิตแล้ว และไม่บอกว่าป๋าเดียร์คือใครจนประโยคที่ 3 → คนอ่านงง "สลับบริบท"
-//   ★ 2 ก.ย. 69 เย็น — เจ้าของเคาะ "เคาะเปลี่ยน" หลังศึกโมเดล 7 แขน (กรรมการปิดชื่อ: เปิดทั้งคู่ 30.5/40 ชนะทุกแขน)
-//   → เปิดเป็นค่าเริ่มต้นในโค้ด (ตั้ง env บน Vercel จากเครื่องทีมไม่ได้) · สวิตช์กลายเป็น "ปิดคืน":
-//   OPENING_FAMILY_CONTRACT=1 → กลับไปบังคับตระกูลเปิดต่อมุมแบบเดิม · OPENING_IDENTITY_RULE=0 → ถอดกติกาใคร/อะไร/เมื่อไหร่
-//   (ค่าเริ่มต้น = เลิกบังคับตระกูล + เติมกติกา · ถอยทั้งก้อน = git revert commit นี้)
-export const OPENING_IDENTITY_RULE_TEXT = 'ไม่ว่าจะเปิดแบบไหน ภายในสองประโยคแรกคนอ่านต้องรู้ว่า ใคร (ชื่อจริง + ความสัมพันธ์หรือบทบาทตามต้นฉบับ) เกิดอะไร และเป็นเรื่องช่วงเวลาไหน — ถ้าต้นฉบับบอกว่าบุคคลเสียชีวิตแล้ว ห้ามเล่าเหมือนเหตุการณ์ยังเกิดอยู่ตอนนี้ (เช่น "ยัง…อยู่เสมอ") ให้เล่าเป็นความทรงจำหรืออดีตตั้งแต่ประโยคแรก';
 export function buildAngleOpeningContract(index, cardHook = '', reservedAngles = [], tail = '') {
-  const familyContractOff = process.env.OPENING_FAMILY_CONTRACT !== '1'; // ค่าเริ่มต้น: ไม่บังคับตระกูล (=1 คืนของเดิม)
-  const identityRuleOn = process.env.OPENING_IDENTITY_RULE !== '0';       // ค่าเริ่มต้น: เติมกติกา (=0 ปิด)
   const families = [
     'เปิดด้วยภาพหรือการกระทำจริงที่อยู่ในต้นฉบับ แล้วพาคนอ่านเข้าเหตุการณ์ทันที',
     'เปิดด้วยตัวเลขหรือความต่างที่มีอยู่จริงในต้นฉบับ และเขียนเป็นประโยคสมบูรณ์',
@@ -1263,155 +1160,13 @@ export function buildAngleOpeningContract(index, cardHook = '', reservedAngles =
     .map(value => String(value || '').replace(/\s+/gu, ' ').trim())
     .filter(Boolean);
   return [
-    familyContractOff ? '' : `${primaryFamily}${String(tail || '')} — นี่คือตระกูลเปิดหลัก ห้ามเปลี่ยนไปใช้ตระกูลของมุมอื่น`,
-    cleanHook
-      ? (familyContractOff ? `เทคนิคเปิดเรื่องจากการ์ด (แนวทาง ไม่ใช่คำสั่งทับ): ${cleanHook}` : `เทคนิคจากการ์ดใช้ปรับจังหวะภายในตระกูลนี้เท่านั้น: ${cleanHook}`)
-      : '',
+    `${primaryFamily}${String(tail || '')} — นี่คือตระกูลเปิดหลัก ห้ามเปลี่ยนไปใช้ตระกูลของมุมอื่น`,
+    cleanHook ? `เทคนิคจากการ์ดใช้ปรับจังหวะภายในตระกูลนี้เท่านั้น: ${cleanHook}` : '',
     cleanReserved.length > 0
       ? `แกนที่มุมก่อนหน้าจองใช้เปิดแล้ว ห้ามใช้เป็นแกนประโยคแรกซ้ำ: ${cleanReserved.join(' | ')}`
       : '',
-    identityRuleOn ? OPENING_IDENTITY_RULE_TEXT : '',
   ].filter(Boolean).join('\n');
 }
-
-// ── ANGLE2_DISTINCT_V2 block start ── (★ 2 ก.ย. 69 — ฟังก์ชันบริสุทธิ์ ใช้แค่ process.env + Intl เพื่อให้เทสดึงไปรันแยกได้ · ห้ามเพิ่ม import)
-//   ที่มา: เทสสนามจริงเคสศรราม 2 ก.ย. 69 — 2 มุมเขียนขนาน ย่อหน้ากลางซ้ำเกือบคำต่อคำ (คล้าย 38–42%) เพราะแกนจอง (_reservedOpeningAngles) กันแค่ประโยคแรก
-//   ค่าเริ่มต้นเปิด · ปิดคืน: ANGLE2_DISTINCT_V2=0 (รับเฉพาะ '0' ตรงตัว) → ข้อความส่งนักเขียน/ผลลัพธ์เหมือนเดิมทุกไบต์ · ถอยทั้งก้อน = git revert
-export function isAngle2DistinctV2Enabled() {
-  return process.env.ANGLE2_DISTINCT_V2 !== '0';
-}
-
-// คำเชื่อม/คำทั่วไปที่ไม่บอกว่าประเด็นเป็นของมุมไหน (ตัดออกก่อนวัดความทับซ้อน)
-const ANGLE_POINT_STOPWORDS = new Set(['ที่', 'ซึ่ง', 'และ', 'กับ', 'ของ', 'ใน', 'ให้', 'ได้', 'ไม่', 'แต่', 'ก็', 'จะ', 'ว่า', 'เป็น', 'มี', 'ยัง', 'แล้ว', 'จาก', 'ถึง', 'ผ่าน', 'เพื่อ', 'โดย', 'หรือ', 'นี้', 'นั้น', 'กัน', 'อยู่', 'มา', 'ไป', 'ทั้ง', 'ต่าง', 'เรื่อง', 'การ', 'ความ', 'คน', 'เขา', 'เธอ', 'ตัว', 'ตน', 'ครั้ง', 'เมื่อ', 'จน', 'ต่อ', 'ด้วย', 'ตาม', 'อย่าง', 'แบบ', 'หลัง', 'ก่อน', 'คือ', 'ใช้', 'ทำ', 'ถูก', 'ต้อง', 'กว่า', 'มาก', 'น้อย', 'เคย', 'แค่', 'เลย', 'ๆ']);
-
-/** ตัดคำไทยด้วย Intl.Segmenter (สำรอง: ตัดตามช่องว่าง/เครื่องหมาย) — คืนคำยาว ≥ 2 ตัว ไม่รวมคำเชื่อม */
-export function tokenizeThaiWords(text) {
-  const clean = String(text || '').normalize('NFC').toLowerCase();
-  let words = [];
-  try {
-    if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
-      for (const s of new Intl.Segmenter('th', { granularity: 'word' }).segment(clean)) if (s.isWordLike) words.push(s.segment);
-    }
-  } catch {
-    words = [];
-  }
-  if (words.length === 0) words = clean.split(/[^\p{L}\p{M}\p{N}]+/u);
-  return words.map(w => w.trim()).filter(w => w.length >= 2 && !ANGLE_POINT_STOPWORDS.has(w));
-}
-
-/**
- * จัดสรร key_points ให้แต่ละมุม "เล่าเต็ม" คนละชุด — ประเด็นหนึ่งเป็น primary ได้มุมเดียว · ที่เหลือเป็น secondary (มุมอื่นเล่าเต็มแล้ว)
- * คะแนน = สัดส่วนคำของประเด็นที่โผล่ในชื่อ+คำอธิบายมุม (คำในชื่อประเด็นน้ำหนัก 2 · รายละเอียด 1)
- * เสมอ → มุมที่มี primary น้อยกว่า → ดัชนีต่ำกว่า · มุมที่ว่างดึงประเด็นที่เข้ากับตัวเองที่สุดจากมุมที่มี ≥2 · ต่างกัน ≥2 ประเด็นและคะแนนก้ำกึ่ง (≤0.25) ย้ายมาถ่วง
- * @param {Array<string|{point?:string,detail?:string}>} keyPoints breakdownData.key_points
- * @param {Array<string|{angle_name?:string,description?:string}>} angles มุมที่จะเขียน (ลำดับเดียวกับ anglesToUse)
- * @returns {Array<{ primary: string[], secondary: string[] }>} ยาวเท่าจำนวนมุม (ป้ายประเด็นตัด 80 ตัว)
- */
-export function assignKeyPointsToAngles(keyPoints, angles) {
-  const angleList = (Array.isArray(angles) ? angles : [])
-    .map(a => (typeof a === 'string' ? { angle_name: a, description: '' } : (a && typeof a === 'object' ? a : {})));
-  const clip = value => String(value || '').replace(/\s+/gu, ' ').trim().slice(0, 80);
-  const pointList = (Array.isArray(keyPoints) ? keyPoints : [])
-    .map(kp => (typeof kp === 'string'
-      ? { label: clip(kp), detail: '' }
-      : { label: clip(kp?.point || kp?.title || kp?.text || ''), detail: String(kp?.detail || kp?.description || '') }))
-    .filter(p => p.label)
-    // ป้ายซ้ำ (key_points ซ้ำกัน / ตัด 80 ตัวแล้วชนกัน) นับเป็นประเด็นเดียว — ไม่งั้นโผล่ "ซ้ำ | ซ้ำ" ในพรอมต์ (ผู้ตรวจไขว้ 2 ก.ย. 69)
-    .filter((p, i, all) => all.findIndex(q => q.label === p.label) === i);
-  const plan = angleList.map(() => ({ primary: [], secondary: [] }));
-  if (angleList.length === 0 || pointList.length === 0) return plan;
-  const angleTokens = angleList.map(a => new Set(tokenizeThaiWords(`${a.angle_name || ''} ${a.description || ''}`)));
-  const scores = pointList.map(p => {
-    const labelTokens = tokenizeThaiWords(p.label);
-    const detailTokens = tokenizeThaiWords(p.detail);
-    return angleTokens.map(set => {
-      let hit = 0;
-      let total = 0;
-      for (const t of labelTokens) { total += 2; if (set.has(t)) hit += 2; }
-      for (const t of detailTokens) { total += 1; if (set.has(t)) hit += 1; }
-      return total > 0 ? hit / total : 0;
-    });
-  });
-  const owner = new Array(pointList.length).fill(0);
-  const counts = new Array(angleList.length).fill(0);
-  const EPS = 1e-9;
-  pointList.forEach((_, pi) => {
-    let best = 0;
-    for (let ai = 1; ai < angleList.length; ai++) {
-      const diff = scores[pi][ai] - scores[pi][best];
-      if (diff > EPS || (Math.abs(diff) <= EPS && counts[ai] < counts[best])) best = ai;
-    }
-    owner[pi] = best;
-    counts[best]++;
-  });
-  const moveBest = (toAngle, minOwnerCount, maxMargin) => {
-    let pick = -1;
-    let pickMargin = Infinity;
-    for (let pi = 0; pi < pointList.length; pi++) {
-      if (owner[pi] === toAngle || counts[owner[pi]] < minOwnerCount) continue;
-      const margin = scores[pi][owner[pi]] - scores[pi][toAngle];
-      if (margin > maxMargin + EPS) continue;
-      if (margin < pickMargin - EPS) { pick = pi; pickMargin = margin; }
-    }
-    if (pick < 0) return false;
-    counts[owner[pick]]--;
-    owner[pick] = toAngle;
-    counts[toAngle]++;
-    return true;
-  };
-  // ทุกมุมต้องมีประเด็นให้เล่าเต็มอย่างน้อย 1
-  for (let ai = 0; ai < angleList.length; ai++) if (counts[ai] === 0) moveBest(ai, 2, Infinity);
-  // ถ่วงให้ใกล้เคียง: มุมที่ได้น้อยกว่า ≥2 ประเด็น ดึงประเด็นคะแนนก้ำกึ่งจากมุมที่ได้มากสุด
-  for (let guard = 0; guard < pointList.length; guard++) {
-    const most = counts.indexOf(Math.max(...counts));
-    const least = counts.indexOf(Math.min(...counts));
-    if (counts[most] - counts[least] < 2) break;
-    const before = counts[least];
-    let moved = false;
-    for (let pi = 0; pi < pointList.length && !moved; pi++) {
-      if (owner[pi] !== most) continue;
-      moved = moveBest(least, counts[most], 0.25);
-    }
-    if (!moved || counts[least] === before) break;
-  }
-  pointList.forEach((p, pi) => {
-    plan.forEach((slot, ai) => { (owner[pi] === ai ? slot.primary : slot.secondary).push(p.label); });
-  });
-  return plan;
-}
-
-/** ข้อความต่อท้าย focusAngle ของมุมที่ index — '' เมื่อสวิตช์ปิด / มุม < 2 / ประเด็นรวม < 2 / มุมนี้ไม่มีประเด็นให้เล่าเต็ม (= ไม่เติมอะไรตามเดิม) */
-export function buildAnglePointsText(plan, index) {
-  if (!isAngle2DistinctV2Enabled()) return '';
-  if (!Array.isArray(plan) || plan.length < 2) return '';
-  const total = plan.reduce((n, slot) => n + (Array.isArray(slot?.primary) ? slot.primary.length : 0), 0);
-  if (total < 2) return '';
-  const me = Number.isInteger(index) ? plan[index] : null;
-  if (!me) return '';
-  const uniqueLabels = list => [...new Set((Array.isArray(list) ? list : []).map(v => String(v || '').trim()).filter(Boolean))];
-  const own = uniqueLabels(me.primary);
-  // มุมที่ไม่มีประเด็นให้เล่าเต็ม (มุม > ประเด็น เช่น GEN_ANGLES=3 กับ 2 ประเด็น) = ไม่เติมข้อความ (เหมือนเดิม) — ห้ามสั่งนักเขียน "ย่อ/ข้ามทุกประเด็น" (ผู้ตรวจไขว้ 2 ก.ย. 69)
-  if (own.length === 0) return '';
-  const others = uniqueLabels(me.secondary).filter(label => !own.includes(label));
-  const parts = [`ประเด็นที่มุมนี้ต้องเล่าเต็ม: ${own.join(' | ')}`];
-  if (others.length > 0) parts.push(`ประเด็นที่มุมอื่นเล่าเต็มแล้ว ให้ย่อเป็นประโยคเดียวหรือข้าม: ${others.join(' | ')}`);
-  return parts.join(' · ');
-}
-
-/** ติดตัวเลขความคล้ายสูงสุดของแต่ละเวอร์ชัน (_diversitySimilarity 0–1 · ทศนิยม 3 ตำแหน่ง) — ไม่แตะเนื้อ/คำเตือน · ไม่มีคู่เทียบ = คืน array เดิม */
-export function stampDiversitySimilarity(versions, report) {
-  const list = Array.isArray(versions) ? versions : [];
-  const pairs = Array.isArray(report?.pairs) ? report.pairs : [];
-  if (list.length === 0 || pairs.length === 0) return list;
-  return list.map((version, i) => {
-    let max = 0;
-    for (const pair of pairs) {
-      if (pair && (pair.left === i || pair.right === i)) max = Math.max(max, Number(pair.similarity) || 0);
-    }
-    return { ...version, _diversitySimilarity: Math.round(max * 1000) / 1000 };
-  });
-}
-// ── ANGLE2_DISTINCT_V2 block end ──
 
 /** ตรวจความซ้ำข้ามเวอร์ชันด้วย Thai character 5-gram + หัว/ท้ายซ้ำตรง */
 export function assessVersionDiversity(versions) {
@@ -1470,64 +1225,6 @@ export function annotateDiversityWarning(versions, report, label = '2 เวอ�
     warning,
   };
 }
-
-// ── VIRAL_SCORE_ANNOTATE block start ──
-/** ★ เฟส 3 ข้อ 7 (2 ก.ย. 69 · VIRAL_SCORE_ANNOTATE=1 · ค่าเริ่มต้นปิด): แนบคะแนน "โอกาสปัง" ต่อฉบับ
- * pure function — คืน object ใหม่ทุกฉบับที่ได้คะแนน ไม่ mutate ของเดิม ไม่แตะ content/title/provenance/ลำดับ/จำนวน
- * scorer คืน null หรือโยน = ฉบับนั้นไม่มีคีย์ _viralScore (fail-safe ต่อฉบับ ไม่ล้มทั้งชุด)
- * metrics (จาก getModelMetrics ของ viralScore.js) ใช้ประกอบ modelVersion + เลข Spearman ใน log — ไม่มีก็แนบคะแนนได้
- * คืน { versions, scoredCount, logLine } — logLine พร้อมพ่น addLog 1 บรรทัด (Spearman 0.30 = คำเตือน ไม่ใช่คำตัดสิน) */
-export function annotateViralScores(versions, { scoreVersion, metrics } = {}) {
-  const list = Array.isArray(versions) ? versions : [];
-  const canScore = typeof scoreVersion === 'function';
-  const bandOfLabel = { 'สูง': 'high', 'กลาง': 'mid', 'ต่ำ': 'low' }; // BAND_LABELS ของ viralScore.js กลับด้าน (scoreVersion คืนเฉพาะ bandLabel ไทย)
-  const parts = [];
-  let attempted = 0; // ฉบับที่มีเนื้อให้คะแนนจริง (แยกจาก "โมเดลไม่พร้อม")
-  const annotated = list.map((version, index) => {
-    if (!canScore) return version;
-    if (typeof version?.content !== 'string' || !version.content.trim()) return version; // ★ ผู้ตรวจไขว้ 2 ก.ย. 69: เนื้อไม่ใช่สตริง/ว่าง = ไม่ให้คะแนน (ไม่ใช่ให้คะแนนสตริงว่างต่ำๆ)
-    attempted += 1;
-    let result = null;
-    try {
-      result = scoreVersion(version.content);
-    } catch {
-      result = null; // scorer โยน = ฉบับนี้ไม่มีคะแนน — ห้ามล้มท่อ
-    }
-    if (!result || typeof result !== 'object' || !Number.isFinite(Number(result.score))) return version;
-    const score = Math.round(Number(result.score));
-    const bandLabel = typeof result.bandLabel === 'string' ? result.bandLabel : '';
-    parts.push(`V${index + 1} ${score}/100${bandLabel ? ` ${bandLabel}` : ''}`);
-    return {
-      ...version,
-      _viralScore: {
-        score,
-        band: result.band ?? bandOfLabel[bandLabel] ?? null,
-        bandLabel,
-        predictedReactions: Number.isFinite(Number(result.predictedReactions)) ? Number(result.predictedReactions) : null,
-        topDrivers: Array.isArray(result.topDrivers) ? result.topDrivers : [],
-        warnings: Array.isArray(result.warnings) ? result.warnings : [],
-        modelVersion: metrics?.version ?? null,
-      },
-    };
-  });
-  const spearman = Number(metrics?.metrics?.valid?.spearman);
-  const note = Number.isFinite(spearman)
-    ? `ตัวทำนาย Spearman ${spearman.toFixed(2)} — คำเตือน ไม่ใช่คำตัดสิน`
-    : 'ตัวทำนายสถิติ — คำเตือน ไม่ใช่คำตัดสิน';
-  const logLine = parts.length > 0
-    ? `🔥 โอกาสปัง: ${parts.join(' · ')} (${note})`
-    : list.length === 0
-      ? '⚠️ โอกาสปัง: ไม่มีฉบับให้คะแนน'
-      : attempted === 0
-        ? '⚠️ โอกาสปัง: ไม่มีเนื้อฉบับให้คะแนน (content ว่าง/ไม่ใช่สตริง) — ส่งข่าวต่อโดยไม่มีคะแนน'
-        : '⚠️ โอกาสปัง: โมเดลไม่พร้อม (data/viral-score-model.json หายหรือเพี้ยน) — ส่งข่าวต่อโดยไม่มีคะแนน';
-  return { versions: annotated, scoredCount: parts.length, logLine };
-}
-// ── VIRAL_SCORE_ANNOTATE block end ──
-
-/** โหลดโมดูลคะแนนโอกาสปังแบบ dynamic — แยกเป็นชื่อ module-scope เพื่อให้เทส wiring ฉีดของปลอมแทนได้
- * (แค่ประกาศ ไม่โหลดอะไร — สวิตช์ปิดจึงไม่ import '@/lib/feedback/viralScore' เลยตามกติกาเทสสตับเดิม) */
-const loadViralScoreModule = () => import('@/lib/feedback/viralScore');
 
 /** ด่านเสี่ยงที่ตรวจได้แบบแน่นอนจากข้อความดิบ โดยไม่เปิดตัวผ่าข่าวเก่า */
 export function assessRawTextSafety(versions, sourceText) {

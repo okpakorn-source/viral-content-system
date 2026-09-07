@@ -48,7 +48,7 @@ function loadNormalizer(uncapped) {
   const out = ts.transpileModule(code, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const sandboxModule = { exports: {} };
   const localRequire = (spec) => {
-    if (spec === '@/lib/ai/openai') return { callAI() { throw new Error('Unexpected paid AI call'); } };
+    if (spec === '@/lib/services/clipAI/openai') return { callAI() { throw new Error('Unexpected paid AI call'); } };
     if (spec === '@/lib/ai/modelConfig') return { MODEL_FAST: 'test-disabled', MODEL_NEWS_ANALYSIS: 'test-disabled' };
     throw new Error('Unexpected normalizer dependency: ' + spec);
   };

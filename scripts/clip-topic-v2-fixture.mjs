@@ -33,7 +33,7 @@ export function parseArgs(argv) {
 async function normalizer() {
   // Only the pure normalizer is used; loading or calling the paid client is forbidden.
   const hook = registerHooks({ resolve(spec, context, next) {
-    if (spec === '@/lib/ai/openai') return { url: 'data:text/javascript,export function callAI(){throw new Error("FIXTURE_AI_FORBIDDEN")}', shortCircuit: true };
+    if (spec === '@/lib/services/clipAI/openai') return { url: 'data:text/javascript,export function callAI(){throw new Error("FIXTURE_AI_FORBIDDEN")}', shortCircuit: true };
     if (spec === '@/lib/ai/modelConfig') return { url: 'data:text/javascript,export const MODEL_FAST="fixture-disabled", MODEL_NEWS_ANALYSIS="fixture-disabled"', shortCircuit: true };
     return next(spec, context);
   } });

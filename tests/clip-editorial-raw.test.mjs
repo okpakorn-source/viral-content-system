@@ -8,7 +8,7 @@ const SERVICE = new URL('../src/lib/services/clipInsightService.js', import.meta
 const ROUTE_SOURCE = readFileSync(new URL('../src/app/api/clip-transcript/insight/route.js', import.meta.url), 'utf8');
 const PAGE_SOURCE = readFileSync(new URL('../src/app/clip-transcript/page.js', import.meta.url), 'utf8');
 const MOBILE_SOURCE = readFileSync(new URL('../src/app/m/page.js', import.meta.url), 'utf8');
-const GEMINI_SOURCE = readFileSync(new URL('../src/lib/ai/geminiClient.js', import.meta.url), 'utf8');
+const GEMINI_SOURCE = readFileSync(new URL('../src/lib/services/clipAI/geminiClient.js', import.meta.url), 'utf8');
 const SERVICE_SOURCE = readFileSync(new URL('../src/lib/services/clipInsightService.js', import.meta.url), 'utf8');
 // ★ 26 ส.ค. 69: รื้อหน้า /clip-transcript เป็นคอมโพเนนต์ — การเรนเดอร์ผลย้ายไป InsightCard.js
 const CARD_SOURCE = readFileSync(new URL('../src/app/clip-transcript/ui/InsightCard.js', import.meta.url), 'utf8');
@@ -92,13 +92,13 @@ const USAGE_LOGGER = ${JSON.stringify(MOCK_USAGE_LOGGER)};
 const SAFETY_FILTER = ${JSON.stringify(MOCK_SAFETY_FILTER)};
 const PIPELINE_DEADLINE = ${JSON.stringify(MOCK_PIPELINE_DEADLINE)};
 export async function resolve(specifier, context, nextResolve) {
-  if (specifier === '@/lib/ai/openai') return { url: 'mock:clip-openai', shortCircuit: true, format: 'module' };
-  if (specifier === '@/lib/ai/geminiClient') return { url: 'mock:clip-gemini', shortCircuit: true, format: 'module' };
+  if (specifier === '@/lib/services/clipAI/openai') return { url: 'mock:clip-openai', shortCircuit: true, format: 'module' };
+  if (specifier === '@/lib/services/clipAI/geminiClient') return { url: 'mock:clip-gemini', shortCircuit: true, format: 'module' };
   if (specifier === '@google/generative-ai') return { url: 'mock:google-generative-ai', shortCircuit: true, format: 'module' };
   if (specifier === '@google/generative-ai/server') return { url: 'mock:google-file-manager', shortCircuit: true, format: 'module' };
-  if (specifier === './usageLogger') return { url: 'mock:usage-logger', shortCircuit: true, format: 'module' };
+  if (specifier === '../../ai/usageLogger') return { url: 'mock:usage-logger', shortCircuit: true, format: 'module' };
   if (specifier === './safetyFilter') return { url: 'mock:safety-filter', shortCircuit: true, format: 'module' };
-  if (specifier === '../utils/pipelineDeadline.js') return { url: 'mock:pipeline-deadline', shortCircuit: true, format: 'module' };
+  if (specifier === '../../utils/pipelineDeadline.js') return { url: 'mock:pipeline-deadline', shortCircuit: true, format: 'module' };
   if (specifier.startsWith('@/')) {
     const mapped = new URL(specifier.slice(2) + (specifier.endsWith('.js') || specifier.endsWith('.mjs') ? '' : '.js'), ${JSON.stringify(SRC_ROOT)}).href;
     return nextResolve(mapped, context);
@@ -119,7 +119,7 @@ export async function load(url, context, nextLoad) {
 register('data:text/javascript,' + encodeURIComponent(hook));
 
 process.env.GEMINI_VIDEO_API_KEY = 'clip-fallback-contract-test';
-const GEMINI_CLIENT = await import(new URL('../src/lib/ai/geminiClient.js?clip-fallback-contract', import.meta.url));
+const GEMINI_CLIENT = await import(new URL('../src/lib/services/clipAI/geminiClient.js?clip-fallback-contract', import.meta.url));
 
 const PRIMARY_VIDEO_MODEL = 'gemini-3.7-flash';
 const FALLBACK_VIDEO_MODEL = 'gemini-3.6-flash';

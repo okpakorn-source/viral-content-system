@@ -49,7 +49,7 @@ register(moduleData(`
     if (spec === './brainRunner.js') return { url: ${JSON.stringify(brainModule)}, shortCircuit: true };
     if (spec === './composeTopics.js' && ctx.parentURL?.startsWith(${JSON.stringify(PIPE_URL.href)})) return { url: ${JSON.stringify(composeModule)}, shortCircuit: true };
     if (spec === '../../ai/usageLogger.js') return { url: 'data:text/javascript,export async function logApiUsage() {}', shortCircuit: true };
-    if (spec === '@/lib/ai/openai') return { url: 'data:text/javascript,export function callAI() { throw new Error("Unexpected paid AI call"); }', shortCircuit: true };
+    if (spec === '@/lib/services/clipAI/openai') return { url: 'data:text/javascript,export function callAI() { throw new Error("Unexpected paid AI call"); }', shortCircuit: true };
     if (spec.startsWith('@/')) return next(new URL(spec.slice(2) + (hasExt(spec) ? '' : '.js'), ${JSON.stringify(SRC)}).href, ctx);
     if ((spec.startsWith('./') || spec.startsWith('../')) && !hasExt(spec)) {
       try { return await next(spec + '.js', ctx); } catch { /* Default resolution. */ }

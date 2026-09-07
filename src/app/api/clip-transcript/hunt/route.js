@@ -2,7 +2,7 @@ export const maxDuration = 800; // insight (ถอดคลิป) + ค้น+�
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { createStore } from '@/lib/persistStore';
-import { runTopicHunt } from '@/lib/services/topicHuntService';
+import { runTopicHunt } from '@/lib/services/clipAI/topicHuntService';
 import { cleanClipUrl } from '../insight/route';
 
 /**

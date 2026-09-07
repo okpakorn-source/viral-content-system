@@ -5,7 +5,7 @@
  *     • YouTube → ให้ Gemini "ดูคลิปจริง" ทั้งภาพ+เสียง (callGeminiVideo)
  *     • TikTok/FB หรือ fallback → ใช้บทถอดเสียง + LLM อ่าน
  */
-import { callAI } from '@/lib/ai/openai';
+import { callAI } from '@/lib/services/clipAI/openai';
 import { MODEL_FAST, MODEL_NEWS_ANALYSIS } from '@/lib/ai/modelConfig';
 
 // ป้ายประเภทคลิป + คำแนะนำการใช้ (ให้คนหยิบไปใช้รู้ว่าข้อมูลมาจากคลิปแบบไหน)
@@ -364,7 +364,7 @@ export function normalizeInsight(p, engine) {
 export async function extractClipInsight({ url, platform, rawText = '', model = '' }) {
   // YouTube → ให้ Gemini ดูคลิปจริงจากลิงก์ตรง — ปล่อย error ขึ้นไปให้ route จัดการ fallback
   if (platform === 'youtube') {
-    const { callGeminiVideo } = await import('@/lib/ai/geminiClient');
+    const { callGeminiVideo } = await import('@/lib/services/clipAI/geminiClient');
     // ★ 21 มิ.ย.: 8000→16000 · ★ 25 มิ.ย.: 16000→24000 (เพิ่ม subStories) · ★ 8 ก.ค.: 24000→32000
     //   (พรอมต์ใหม่บังคับ rawData ละเอียดขึ้นมาก — เผื่อ output กัน JSON ถูกตัดท้าย = ต้นเหตุเคส rawData ว่างในคลัง)
     const r = await callGeminiVideo({
@@ -409,7 +409,7 @@ ${INSIGHT_SCHEMA}`;
  * @param {string} mimeType
  */
 export async function extractInsightFromVideoBuffer(videoBuffer, mimeType = 'video/mp4', model = '') {
-  const { callGeminiVideoFile } = await import('@/lib/ai/geminiClient');
+  const { callGeminiVideoFile } = await import('@/lib/services/clipAI/geminiClient');
   // ★ 8 ก.ค.: 24000→32000 — เท่าเส้นทางลิงก์ตรง (พรอมต์ละเอียดขึ้น กัน JSON ถูกตัดท้าย)
   // ★ 14 ส.ค. 69: model (optional) — ไม่ส่ง = VIDEO_MODEL ตามเดิมเป๊ะ (ใช้เทียบสองโมเดลบนคลิปเดียวกัน)
   const r = await callGeminiVideoFile({
@@ -489,7 +489,7 @@ function normalizeMultiTopic(p, engine) {
 
 /** ★ คลิปยาว (ไฟล์วิดีโอ TikTok/FB/Reels) → แยกทุกประเด็น */
 export async function extractMultiTopicFromVideoBuffer(videoBuffer, mimeType = 'video/mp4') {
-  const { callGeminiVideoFile } = await import('@/lib/ai/geminiClient');
+  const { callGeminiVideoFile } = await import('@/lib/services/clipAI/geminiClient');
   const r = await callGeminiVideoFile({
     prompt: VIDEO_MULTITOPIC_PROMPT,
     videoBuffer,
@@ -503,7 +503,7 @@ export async function extractMultiTopicFromVideoBuffer(videoBuffer, mimeType = '
 /** ★ คลิปยาว (YouTube ลิงก์ตรง / fallback บทถอดเสียง) → แยกทุกประเด็น */
 export async function extractMultiTopicInsight({ url, platform, rawText = '' }) {
   if (platform === 'youtube') {
-    const { callGeminiVideo } = await import('@/lib/ai/geminiClient');
+    const { callGeminiVideo } = await import('@/lib/services/clipAI/geminiClient');
     const r = await callGeminiVideo({
       prompt: VIDEO_MULTITOPIC_PROMPT,
       youtubeUrl: url,

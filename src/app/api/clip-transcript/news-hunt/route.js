@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { createStore } from '@/lib/persistStore';
 import { extractContent } from '@/lib/scraper/index.js';
-import { runNewsHunt } from '@/lib/services/newsHuntService';
+import { runNewsHunt } from '@/lib/services/clipAI/newsHuntService';
 
 /**
  * POST /api/clip-transcript/news-hunt (8 ก.ค. 69) — "วิจัยลิงก์ข่าว → หาข่าวเสริม"
