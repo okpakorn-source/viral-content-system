@@ -557,7 +557,7 @@ async function loadWorker(source = WORKER_SOURCE, { heartbeatMs = 60_000, worker
     '',
     'remove top-level worker loop for test',
   );
-  transformed += '\nexport { pullJob, processJob, report, postWorkerState, startHeartbeat, isTransient, reportStatusForFailure, reportStatusForProcessResult };\n';
+  transformed += '\nexport { pullJob, processJob, report, postWorkerState, startHeartbeat, isTransient, reportStatusForFailure, reportStatusForProcessResult, resolveProcessTimeoutMs, PROCESS_TIMEOUT_MS };\n';
   transformed += `// ${crypto.randomUUID()}\n`;
 
   const oldBase = process.env.CLIP_WORKER_BASE;
@@ -899,4 +899,17 @@ test('POST (รายงานผล/heartbeat) ต้องแตะชีพ�
   const body = await responseBody(res);
   assert.equal(body.success, true, 'heartbeat ต้องผ่าน');
   assert.ok(globalThis.__heartbeatTouches > 0, 'POST ต้องแตะชีพจรเครื่องทีม (ไม่งั้นระหว่างถอดงานจะขึ้นว่าเครื่องปิด)');
+});
+
+// ★ 8 ก.ย. 69 (Fable): เพดานรอเซิร์ฟเวอร์ตั้งผ่าน env (คลิปยาวเป็นชั่วโมง) — ค่าเพี้ยน/ต่ำเกินถอยกลับ 16 นาที
+test('worker process timeout comes from CLIP_WORKER_PROCESS_TIMEOUT_MS with a safe 16-minute fallback', async () => {
+  const worker = await loadWorker();
+  assert.equal(worker.resolveProcessTimeoutMs(undefined), 16 * 60 * 1000);
+  assert.equal(worker.resolveProcessTimeoutMs(''), 16 * 60 * 1000);
+  assert.equal(worker.resolveProcessTimeoutMs('abc'), 16 * 60 * 1000);
+  assert.equal(worker.resolveProcessTimeoutMs('5000'), 16 * 60 * 1000, 'below one minute is treated as misconfigured');
+  assert.equal(worker.resolveProcessTimeoutMs('10800000'), 10_800_000, 'three hours is accepted');
+  assert.equal(worker.resolveProcessTimeoutMs('9999999999999'), 2_000_000_000, 'capped below the 32-bit timer limit');
+  assert.ok(WORKER_SOURCE.includes('headersTimeout: PROCESS_TIMEOUT_MS + 60_000'), 'undici dispatcher waits longer than the watchdog so the watchdog reports first');
+  assert.ok(WORKER_SOURCE.includes('resolveProcessTimeoutMs(process.env.CLIP_WORKER_PROCESS_TIMEOUT_MS)'), 'watchdog reads the env');
 });

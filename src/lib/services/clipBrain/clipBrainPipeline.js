@@ -231,7 +231,8 @@ export async function runClipBrainPipeline(rawOpts) {
         const requestedTimeout = Number(envText('CLIP_TOPIC_TIMEOUT_MS'));
         const timeoutMs = Number.isSafeInteger(requestedTimeout) && requestedTimeout > 0 && requestedTimeout <= 2147483647
           ? requestedTimeout : 1200000;
-        const composed = await composeTopics({ evidencePack, runBrain, primary, fallback, timeoutMs });
+        // CLIP_TOPIC_FALLBACK_ON_TIMEOUT=1 = ให้ลองตัวสำรองแม้ตัวหลักหมดเวลา (ค่าเริ่มต้นข้าม ประหยัดเวลาคลิปยาว)
+        const composed = await composeTopics({ evidencePack, runBrain, primary, fallback, timeoutMs, skipFallbackOnTimeout: envText('CLIP_TOPIC_FALLBACK_ON_TIMEOUT') !== '1' });
         const attempts = Array.isArray(composed.attempts) ? structuredClone(composed.attempts) : [];
         const composeUSD = attempts.reduce((sum, a) => sum + (Number.isFinite(a.costUSD) && a.costUSD >= 0 ? a.costUSD : 0), 0);
         if (composed.ok) {

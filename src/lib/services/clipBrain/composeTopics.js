@@ -284,7 +284,7 @@ export async function composeTopics(options = {}) {
     attempts, errorType,
   });
   try {
-    const { evidencePack, primary = PRIMARY, fallback = FALLBACK, timeoutMs = 300000, maxRepair = 1, spec } = options ?? {};
+    const { evidencePack, primary = PRIMARY, fallback = FALLBACK, timeoutMs = 300000, maxRepair = 1, spec, skipFallbackOnTimeout = true } = options ?? {};
     if (!object(evidencePack) || !Array.isArray(evidencePack.evidence) || !evidencePack.evidence.length) return failure('COMPOSE_NO_EVIDENCE', 'evidence: ไม่มีหลักฐานสำหรับแต่งเรื่อง');
     const pack = clone(evidencePack);
     const ids = new Set();
@@ -355,6 +355,12 @@ export async function composeTopics(options = {}) {
 <REPAIR_INPUT_JSON>
 ${JSON.stringify({ doc: doc ?? candidate ?? null, validateErrors: validation.errors, reasons: gate?.reasons ?? [attempt.errorType] })}
 </REPAIR_INPUT_JSON>`;
+      }
+      // ★ 8 ก.ย. 69: ตัวหลักหมดเวลา = หลักฐานใหญ่/คลิปยาว ตัวสำรองบนโจทย์เดียวกันจะหมดเวลาซ้ำ (เคยเสียเปล่า 8+8 นาที) → ข้าม
+      //   ไม่ข้ามกรณีอื่น (AUTH/QUOTA/JSON พัง) ซึ่งสำรองช่วยได้จริง · ปิดด้วย skipFallbackOnTimeout=false
+      if (skipFallbackOnTimeout && provider === primary && lastErrorType === 'BRAIN_TIMEOUT' && object(fallback)) {
+        attempts.push({ brain: text(fallback.brain), model: text(fallback.model), effort: text(fallback.effort), role: 'compose', ok: false, elapsedMs: 0, skipped: true, errorType: 'COMPOSE_FALLBACK_SKIPPED_TIMEOUT' });
+        break;
       }
     }
     return failure(lastErrorType, `compose: ไม่ผ่านหลังลอง ${attempts.length} ครั้ง (${lastErrorType})`);

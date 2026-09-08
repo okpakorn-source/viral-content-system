@@ -362,3 +362,23 @@ test('unexpected provider result getters fail open with an explicit attempt erro
   assert.equal(result.attempts[0].errorType, 'COMPOSE_ERROR');
   assert.equal(result.doc, null);
 });
+
+// ★ 8 ก.ย. 69 (Fable): ตัวหลักหมดเวลาแล้วไม่เสียเวลาลองตัวสำรองซ้ำ (คลิปยาว 36 นาที เคยเสีย 8+8 นาทีเปล่า)
+test('primary BRAIN_TIMEOUT skips the fallback by default, records the skip, and can be re-enabled', async () => {
+  const mock = sequence([{ ok: false, errorType: 'BRAIN_TIMEOUT' }, answer()]);
+  const result = await composeTopics({ evidencePack: pack(), runBrain: mock.runner, timeoutMs: 1234 });
+  assert.equal(result.ok, false);
+  assert.equal(result.errorType, 'BRAIN_TIMEOUT');
+  assert.equal(mock.calls.length, 1, 'fallback brain was never called after a primary timeout');
+  assert.deepEqual(result.attempts.map((a) => [a.brain, a.role, a.errorType, a.skipped === true]), [
+    ['codex', 'compose', 'BRAIN_TIMEOUT', false], ['claude', 'compose', 'COMPOSE_FALLBACK_SKIPPED_TIMEOUT', true],
+  ]);
+  const legacy = sequence([{ ok: false, errorType: 'BRAIN_TIMEOUT' }, answer()]);
+  const kept = await composeTopics({ evidencePack: pack(), runBrain: legacy.runner, skipFallbackOnTimeout: false });
+  assert.equal(kept.ok, true, 'opt-out restores the old try-fallback behaviour');
+  assert.equal(legacy.calls.length, 2);
+  const other = sequence([{ ok: false, errorType: 'BRAIN_AUTH' }, answer()]);
+  const auth = await composeTopics({ evidencePack: pack(), runBrain: other.runner });
+  assert.equal(auth.ok, true, 'non-timeout failures still fall back');
+  assert.equal(other.calls.length, 2);
+});

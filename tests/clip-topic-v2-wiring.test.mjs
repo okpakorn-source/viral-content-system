@@ -97,7 +97,7 @@ const { emptyTopicDoc, toLegacyInsight, syncTopicsV2FromLegacy } = await import(
 const { countThaiWords } = await import('../src/lib/services/clipBrain/topicMetrics.js');
 const { runOnce, parseArgs } = await import('../scripts/clip-brain-once.mjs');
 
-const ENV_KEYS = ['CLIP_TOPIC_V2', 'CLIP_TOPIC_MODEL', 'CLIP_TOPIC_EFFORT', 'CLIP_TOPIC_FALLBACK_MODEL',
+const ENV_KEYS = ['CLIP_TOPIC_V2', 'CLIP_TOPIC_MODEL', 'CLIP_TOPIC_EFFORT', 'CLIP_TOPIC_FALLBACK_MODEL', 'CLIP_TOPIC_FALLBACK_ON_TIMEOUT',
   'CLIP_TOPIC_FALLBACK_EFFORT', 'CLIP_TOPIC_TIMEOUT_MS', 'GEMINI_VIDEO_API_KEY', 'GEMINI_API_KEY',
   'CLIP_SAFE_TEXT', 'CLIP_USAGE_LOG', 'CLIP_GEMINI_MAX_ATTEMPTS', 'CLIP_GEMINI_FALLBACK_MODELS'];
 let saved;
@@ -222,8 +222,9 @@ test('enabled success: truth and stage 3 evidence reach composer; normalized v2 
 });
 
 test('env overrides and fallback preserve provider routing, attempts and all known compose costs', async () => {
+  // ★ 8 ก.ย. 69: ค่าเริ่มต้นใหม่ = ตัวหลักหมดเวลาแล้ว "ข้าม" ตัวสำรอง (คลิปยาวเคยเสีย 8+8 นาที) — เปิดพฤติกรรมเดิมด้วย CLIP_TOPIC_FALLBACK_ON_TIMEOUT=1
   Object.assign(process.env, { CLIP_TOPIC_MODEL: 'gpt-6-astra-test', CLIP_TOPIC_EFFORT: 'high',
-    CLIP_TOPIC_FALLBACK_MODEL: 'claude-fable-5-test', CLIP_TOPIC_FALLBACK_EFFORT: 'high', CLIP_TOPIC_TIMEOUT_MS: '1500000' });
+    CLIP_TOPIC_FALLBACK_MODEL: 'claude-fable-5-test', CLIP_TOPIC_FALLBACK_EFFORT: 'high', CLIP_TOPIC_TIMEOUT_MS: '1500000', CLIP_TOPIC_FALLBACK_ON_TIMEOUT: '1' });
   const actual = await execute('1', { composeReplies: [
     { ok: false, errorType: 'BRAIN_TIMEOUT', costUSD: 0.2 }, { ok: true, json: doc(), costUSD: 0.3 },
   ] });
@@ -233,6 +234,15 @@ test('env overrides and fallback preserve provider routing, attempts and all kno
   ]);
   assert.equal(actual.result.brain.costs.composeUSD, 0.5);
   assert.equal(actual.result.brain.topicsV2.attempts.length, 2);
+  // ค่าเริ่มต้น (ไม่ตั้ง env): ตัวหลักหมดเวลา → ไม่เรียกตัวสำรอง · attempts มีตัวสำรองเป็นรายการ "ข้าม" · ค่าใช้จ่ายนับเฉพาะที่เรียกจริง
+  delete process.env.CLIP_TOPIC_FALLBACK_ON_TIMEOUT;
+  const skipped = await execute('1', { composeReplies: [
+    { ok: false, errorType: 'BRAIN_TIMEOUT', costUSD: 0.2 }, { ok: true, json: doc(), costUSD: 0.3 },
+  ] });
+  assert.deepEqual(skipped.calls.filter((c) => c.label.startsWith('clip-compose')).map((c) => c.brain), ['codex']);
+  assert.equal(skipped.result.brain.topicsV2.ok, false);
+  assert.deepEqual(skipped.result.brain.topicsV2.attempts.map((a) => [a.brain, a.errorType, a.skipped === true]), [['codex', 'BRAIN_TIMEOUT', false], ['claude', 'COMPOSE_FALLBACK_SKIPPED_TIMEOUT', true]]);
+  assert.equal(skipped.result.brain.costs.composeUSD, 0.2);
   for (const timeout of ['bad', '0', '-1', 'Infinity', '2147483648']) {
     process.env.CLIP_TOPIC_TIMEOUT_MS = timeout;
     assert.equal((await execute('1')).calls.find((c) => c.label.startsWith('clip-compose')).timeoutMs, 1200000);

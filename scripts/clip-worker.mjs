@@ -26,15 +26,22 @@ const WORKER_SECRET = process.env.CLIP_WORKER_SECRET || process.env.DISCORD_API_
 const HEARTBEAT_MS = Number(process.env.CLIP_WORKER_HEARTBEAT_MS) || 60_000;
 const REPORT_TIMEOUT_MS = 12_000;
 const REPORT_MAX_ATTEMPTS = 3;
-const PROCESS_TIMEOUT_MS = 16 * 60 * 1000;
+// ★ 8 ก.ย. 69 (เจ้าของ: คลิปยาวเป็นชั่วโมง ไม่เอาเพดาน): เพดานรอเซิร์ฟเวอร์ตั้งผ่าน env CLIP_WORKER_PROCESS_TIMEOUT_MS
+//   เดิมฝัง 16 นาที → คลิปยาวถูกตัดสายทั้งที่ :3900 ยังทำอยู่ (ขึ้น "fetch failed" แต่ใบงานถูกบันทึกทีหลัง)
+//   ต่ำกว่า 60 วิ/ไม่ใช่ตัวเลข = ใช้ 16 นาทีเดิม · เครื่องแอดมินตั้ง 3 ชั่วโมง (lease ต่ออายุเองทุก heartbeat)
+function resolveProcessTimeoutMs(raw) {
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 60_000 ? Math.min(n, 2_000_000_000) : 16 * 60 * 1000;
+}
+const PROCESS_TIMEOUT_MS = resolveProcessTimeoutMs(process.env.CLIP_WORKER_PROCESS_TIMEOUT_MS);
 
 // ★ 26 มิ.ย.: คลิปยาว/FB reel (โหลด+อัป Gemini+ดู) ใช้เวลา >5 นาทีได้ — แต่ fetch ของ Node (undici)
 //   ตัดที่ headersTimeout 5 นาทีโดยปริยาย → "fetch failed" ทั้งที่ insight ยังทำอยู่ → เข้าใจผิดว่าล้ม
-//   ใช้ Agent ตั้ง timeout ยาว 15 นาที (เท่า maxDuration 800 ของ route + เผื่อ)
+//   ใช้ Agent ตั้ง timeout ยาวกว่า watchdog PROCESS_TIMEOUT_MS 1 นาที (ให้ watchdog ตัดก่อนพร้อมข้อความชัด ไม่ใช่ fetch failed)
 let longDispatcher = null;
 try {
   const { Agent } = await import('undici');
-  longDispatcher = new Agent({ headersTimeout: 900_000, bodyTimeout: 900_000, connectTimeout: 30_000 });
+  longDispatcher = new Agent({ headersTimeout: PROCESS_TIMEOUT_MS + 60_000, bodyTimeout: PROCESS_TIMEOUT_MS + 60_000, connectTimeout: 30_000 });
 } catch (e) { console.log('[clip-worker] ⚠️ ตั้ง undici Agent ไม่ได้ (ใช้ timeout เริ่มต้น):', e.message); }
 
 const log = (...a) => console.log(`[clip-worker ${new Date().toLocaleTimeString('th-TH')}]`, ...a);
@@ -240,7 +247,7 @@ async function loop() {
     error.code = 'CLIP_WORKER_SECRET_MISSING';
     throw error;
   }
-  log(`เริ่มทำงาน — เช็กคิวที่ ${BASE}/api/clip-transcript/worker`);
+  log(`เริ่มทำงาน — เช็กคิวที่ ${BASE}/api/clip-transcript/worker · เพดานรอเซิร์ฟเวอร์ต่องาน ${Math.round(PROCESS_TIMEOUT_MS / 60_000)} นาที`);
   for (;;) {
     let job = null;
     try { job = await pullJob(); }
@@ -253,7 +260,7 @@ async function loop() {
     log(`▶️ ทำงาน [${job.platform}/${job.kind}] ครั้งที่ ${tries}: ${String(job.url).slice(0, 55)}`);
     const processController = new AbortController();
     const processTimeout = setTimeout(() => {
-      const error = new Error('processJob timeout 16 นาที — ไม่ยืนยันว่า server หยุด AI แล้ว จึงหยุดไว้ไม่ลองซ้ำ');
+      const error = new Error(`processJob timeout ${Math.round(PROCESS_TIMEOUT_MS / 60_000)} นาที — ไม่ยืนยันว่า server หยุด AI แล้ว จึงหยุดไว้ไม่ลองซ้ำ`);
       error.code = 'PROCESS_TIMEOUT';
       processController.abort(error);
     }, PROCESS_TIMEOUT_MS);
