@@ -8,7 +8,7 @@ const btn = (active) => ({ padding: '5px 11px', borderRadius: 8, fontSize: 12, c
   border: `1px solid ${active ? C.ok : C.line}`, background: 'transparent', color: active ? C.ok : C.text });
 
 const ISSUE_LABELS = {
-  'length-short': 'สั้นเกินกรอบ', 'length-long': 'ยาวเกินกรอบ', 'no-highlight': 'ยังไม่มีไฮไลท์',
+  'length-short': 'สั้นเกินกรอบ', 'length-long': 'ยาวเกินกรอบ', 'no-highlight': 'ยังไม่มีไฮไลท์', 'style-soft': 'สำนวนควรปรับ',
   bureaucratic: 'มีคำราชการ', 'long-sentence': 'ประโยคยาว', overlap: 'ซ้ำกับเรื่องอื่น',
   'quote-unverified': 'คำพูดยังไม่ยืนยัน', 'quote-short': 'คำพูดสั้นตรวจไม่ได้',
   'no-facts': 'ยังไม่มีข้อเท็จจริง', missing: 'ยังไม่มีเนื้อเรื่อง', 'main-story-stale': 'เรื่องหลักต้องทบทวน',
