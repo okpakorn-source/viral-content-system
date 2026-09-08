@@ -97,12 +97,12 @@ export async function assessReadiness(insight, { truth = '' } = {}) {
   const result = { findings: [], stories: [], mainStory: { issues: [] } };
   const doc = insight?.topicsV2;
   if (!doc || doc.schemaVersion !== 2) return result;
-  const { countThaiWords, lengthBand, bureaucraticRate, longSentenceCount, crossStoryOverlap } = await import('./topicMetrics.js');
+  const { countThaiWords, lengthBand, bureaucraticRate, longSentenceCount, crossStoryOverlap, wordRangeLabel } = await import('./topicMetrics.js');
   const list = (v) => Array.isArray(v) ? v : [];
   const text = (v) => typeof v === 'string' ? v : '';
   const fixes = {
-    'length-short': 'เติมรายละเอียดที่มีหลักฐานให้ครบ 100–170 คำ โดยไม่แต่งข้อมูลเพิ่ม',
-    'length-long': 'เรียบเรียงให้กระชับในช่วง 100–170 คำ โดยเก็บสาระสำคัญ',
+    'length-short': `เติมรายละเอียดที่มีหลักฐานให้ครบ${wordRangeLabel()} โดยไม่แต่งข้อมูลเพิ่ม`,
+    'length-long': `เรียบเรียงให้กระชับในช่วง${wordRangeLabel()} โดยเก็บสาระสำคัญ`,
     'no-highlight': 'เลือกประโยคไฮไลท์ที่ตรงกับเนื้อเรื่องและหลักฐาน',
     bureaucratic: 'ปรับคำราชการเป็นภาษาที่อ่านเข้าใจง่าย',
     'long-sentence': 'แบ่งประโยคยาวให้ติดตามได้ง่าย โดยคงความหมายเดิม',
@@ -121,7 +121,7 @@ export async function assessReadiness(insight, { truth = '' } = {}) {
   const proseIssues = (body, issues, where) => {
     const words = countThaiWords(body);
     const band = lengthBand(words);
-    if (band !== 'ok') add(issues, where, `length-${band}`, `มี ${words} คำ ควรอยู่ในช่วง 100–170 คำ`, words);
+    if (band !== 'ok') add(issues, where, `length-${band}`, `มี ${words} คำ ควรมี${wordRangeLabel()}`, words);
     const rate = bureaucraticRate(body);
     if (rate >= 0.8) add(issues, where, 'bureaucratic', `พบคำราชการ ${rate.toFixed(2)} ครั้งต่อ 1,000 ตัวอักษร`, rate);
   };

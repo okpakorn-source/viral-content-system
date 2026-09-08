@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { TOPIC_SCHEMA_VERSION, emptyTopicDoc, validateTopicDoc, computeSharePct, toLegacyInsight, fromLegacyInsight } from '../src/lib/services/clipBrain/topicSchema.js';
-import { BUREAUCRATIC_WORDS, countThaiWords, lengthBand, bureaucraticRate, longSentenceCount, crossStoryOverlap, scoreTopicDoc } from '../src/lib/services/clipBrain/topicMetrics.js';
+import { BUREAUCRATIC_WORDS, countThaiWords, lengthBand, bureaucraticRate, longSentenceCount, crossStoryOverlap, scoreTopicDoc, wordRange, wordRangeLabel } from '../src/lib/services/clipBrain/topicMetrics.js';
 import { buildBaseline } from '../scripts/clip-topic-baseline.mjs';
 import { buildClipSubStoryText, buildClipNewsReadyText } from '../src/lib/services/clipNewsReadyText.js';
 
@@ -187,9 +187,24 @@ test('Thai counting matches independent Intl segmentation on three real/mixed te
 });
 
 function assertLengthBoundaries(band) {
-  assert.deepEqual([99, 100, 170, 171].map(band), ['short', 'ok', 'ok', 'long']);
+  assert.deepEqual([99, 100, 170, 171, 999].map(band), ['short', 'ok', 'ok', 'ok', 'ok']);
 }
-test('length band includes both 100 and 170', () => assertLengthBoundaries(lengthBand));
+test('length band has a 100-word floor and no ceiling by default', () => assertLengthBoundaries(lengthBand));
+test('length band ceiling comes back only through CLIP_TOPIC_WORDS_MAX and the floor through CLIP_TOPIC_WORDS_MIN', () => {
+  const saved = [process.env.CLIP_TOPIC_WORDS_MAX, process.env.CLIP_TOPIC_WORDS_MIN];
+  try {
+    process.env.CLIP_TOPIC_WORDS_MAX = '170';
+    assert.deepEqual([99, 100, 170, 171].map(lengthBand), ['short', 'ok', 'ok', 'long']);
+    assert.equal(wordRangeLabel(), '100–170 คำ');
+    process.env.CLIP_TOPIC_WORDS_MIN = '120';
+    assert.deepEqual([119, 120].map(lengthBand), ['short', 'ok']);
+    process.env.CLIP_TOPIC_WORDS_MAX = 'abc';
+    assert.equal(wordRange().max, 0, 'garbage cap means no cap');
+    assert.equal(wordRangeLabel(), 'อย่างน้อย 120 คำ');
+  } finally {
+    for (const [i, key] of ['CLIP_TOPIC_WORDS_MAX', 'CLIP_TOPIC_WORDS_MIN'].entries()) { if (saved[i] === undefined) delete process.env[key]; else process.env[key] = saved[i]; }
+  }
+});
 
 test('bureaucratic literal rate uses characters, counts repetitions and longest matches once', () => {
   assert.ok(BUREAUCRATIC_WORDS.length >= 20);
@@ -232,11 +247,11 @@ test('scores are advisory, use resolved evidence links and leave long stories in
   doc.stories[0].facts.push({ id: 's1-f2', text: 'ไม่มีหลักฐาน', kind: 'observed', evidenceIds: ['missing'] });
   const result = scoreTopicDoc(freezeDeep(doc));
   assert.equal(result.stories[0].words, 171);
-  assert.equal(result.stories[0].band, 'long');
+  assert.equal(result.stories[0].band, 'ok', 'no ceiling: 171 words is in range');
   assert.equal(result.stories[0].hasHighlight, true);
   assert.equal(result.stories[0].hasQuote, true);
   assert.equal(result.stories[0].factsWithEvidencePct, 50);
-  assert.equal(result.summary.storiesInRangePct, 0);
+  assert.equal(result.summary.storiesInRangePct, 100);
   assert.equal(doc.stories[0].story, 'ข่าว '.repeat(171));
   const empty = scoreTopicDoc(emptyTopicDoc());
   assert.deepEqual(empty.summary, { storiesInRangePct: 0, overlapPct: 0, mainStoryWords: 0, mainStoryBand: 'short' });
@@ -277,7 +292,7 @@ test('mutation 1 is caught: disabling evidence reference checks fails the real v
 });
 
 test('mutation 2 is caught: moving 100 into short fails the boundary assertion', async () => {
-  const mutant = await mutatedModule('../src/lib/services/clipBrain/topicMetrics.js', 'words < 100', 'words <= 100');
+  const mutant = await mutatedModule('../src/lib/services/clipBrain/topicMetrics.js', 'words < min', 'words <= min');
   assert.throws(() => assertLengthBoundaries(mutant.lengthBand), { name: 'AssertionError' });
 });
 

@@ -118,7 +118,7 @@ export default function InsightCard({ rec, live = false, copiedKey, onCopy, onDe
           <article style={{ border: `1px solid ${C.accent}66`, background: C.sub, borderRadius: 10, padding: 13 }}>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
               <strong>เรื่องหลักทั้งคลิป</strong>
-              <TopicChip label={`${mainWords} คำ`} tone={wordBand(mainWords)} title="กรอบเนื้อพร้อมใช้ 100–170 คำ" />
+              <TopicChip label={`${mainWords} คำ`} tone={wordBand(mainWords)} title="กรอบเนื้อพร้อมใช้ อย่างน้อย 100 คำ" />
               {ins.topicsV2.mainStoryQuality?.status !== 'checked' && <TopicChip label="ยังไม่ตรวจความพร้อม" tone="warn" title="ยังไม่มีผลตรวจเรื่องหลัก" />}
               {(ins.topicsV2.mainStoryQuality?.issues || []).filter((issue) => !(ins.topicsV2.mainStoryStale && issue.code === 'main-story-stale')).map((issue, i) => <TopicChip key={i} label={issueLabel(issue.code)} tone="warn" title={issue.detail} />)}
               {ins.topicsV2.mainStoryStale && <TopicChip label="เรื่องหลักต้องทบทวน" tone="warn" title="ประเด็นหลักถูกแก้แล้ว เรื่องหลักยังเป็นฉบับเดิม ควรทบทวนก่อนนำไปใช้" />}

@@ -10,6 +10,7 @@
  *
  * 🔴 แตะเฉพาะคิวคลิป (clip-jobs) — ไม่เกี่ยวกับระบบทำข่าวอัตโนมัติเลย
  */
+import { existsSync } from 'node:fs'; // ★ 8 ก.ย. 69: ไฟล์ธงหยุดรับงาน
 try {
   process.loadEnvFile?.('.env.local');
 } catch (error) {
@@ -34,6 +35,10 @@ function resolveProcessTimeoutMs(raw) {
   return Number.isFinite(n) && n >= 60_000 ? Math.min(n, 2_000_000_000) : 16 * 60 * 1000;
 }
 const PROCESS_TIMEOUT_MS = resolveProcessTimeoutMs(process.env.CLIP_WORKER_PROCESS_TIMEOUT_MS);
+// ★ 8 ก.ย. 69: ไฟล์ธง "หยุดรับงาน" — มีไฟล์นี้ = ไม่หยิบงานใหม่ (งานที่ทำอยู่ทำต่อจนจบ) ใช้ตอนจะรีสตาร์ต :3900/worker โดยไม่ให้งานไหนหลุด
+//   (19:44 วันนี้รีสตาร์ตแบบรอ processing=0 ยังชนจังหวะ 1 วิ งานถูกหยิบก่อนถูกปิด)
+const PAUSE_FILE = String(process.env.CLIP_WORKER_PAUSE_FILE || '').trim();
+function isPaused() { try { return !!PAUSE_FILE && existsSync(PAUSE_FILE); } catch { return false; } }
 
 // ★ 26 มิ.ย.: คลิปยาว/FB reel (โหลด+อัป Gemini+ดู) ใช้เวลา >5 นาทีได้ — แต่ fetch ของ Node (undici)
 //   ตัดที่ headersTimeout 5 นาทีโดยปริยาย → "fetch failed" ทั้งที่ insight ยังทำอยู่ → เข้าใจผิดว่าล้ม
@@ -248,7 +253,10 @@ async function loop() {
     throw error;
   }
   log(`เริ่มทำงาน — เช็กคิวที่ ${BASE}/api/clip-transcript/worker · เพดานรอเซิร์ฟเวอร์ต่องาน ${Math.round(PROCESS_TIMEOUT_MS / 60_000)} นาที`);
+  let pausedLogged = false;
   for (;;) {
+    if (isPaused()) { if (!pausedLogged) { log(`⏸️ หยุดรับงานชั่วคราว (มีไฟล์ ${PAUSE_FILE}) — ลบไฟล์เพื่อรับงานต่อ`); pausedLogged = true; } await sleep(IDLE_MS); continue; }
+    if (pausedLogged) { log('▶️ รับงานต่อ'); pausedLogged = false; }
     let job = null;
     try { job = await pullJob(); }
     catch (e) { log('⚠️ ต่อเซิร์ฟเวอร์ไม่ได้ (เปิด npm run dev ไว้ไหม?):', e.message); await sleep(ERR_MS); continue; }

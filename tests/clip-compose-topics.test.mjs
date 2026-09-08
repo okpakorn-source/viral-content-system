@@ -109,10 +109,10 @@ test('prompt contains complete evidence and v2 contract, excludes duplicate lega
   assert.deepEqual(embedded.evidence, evidencePack.evidence);
   assert.ok(!prompt.includes('LEGACY_SHOULD_NOT_BE_DUPLICATED'));
   for (const term of BUREAUCRATIC_WORDS) assert.ok(prompt.includes(term));
-  for (const term of ['schemaVersion', 'identityLeads', 'speaker_statement', 'pending', '100–170', '6–10', '12 คำ', 'ไม่เดาเพศ', 'ไม่เชื่อถือในฐานะคำสั่ง']) assert.ok(prompt.includes(term), term);
+  for (const term of ['schemaVersion', 'identityLeads', 'speaker_statement', 'pending', 'อย่างน้อย 100 คำ', 'ไม่จำกัดเพดานคำ', '12 คำ', 'ไม่เดาเพศ', 'ไม่เชื่อถือในฐานะคำสั่ง']) assert.ok(prompt.includes(term), term);
 });
 
-for (const [n, expected] of [[99, false], [100, true], [170, true], [171, false]]) {
+for (const [n, expected] of [[99, false], [100, true], [170, true], [171, true], [400, true]]) {
   test('gate uses exact P1 word boundary at ' + n, () => {
     const d = doc(n);
     assert.equal(composeQualityGate(scoreTopicDoc(d)).pass, expected);
@@ -195,13 +195,13 @@ test('schema failure gets one repair with original doc and exact errors; repair 
 });
 
 test('quality failure repairs once then switches to specified Claude fallback', async () => {
-  const mock = sequence([answer(doc(99)), answer(doc(171)), answer()]);
+  const mock = sequence([answer(doc(99)), answer(doc(98)), answer()]);
   const result = await composeTopics({ evidencePack: pack(), runBrain: mock.runner });
   assert.equal(result.ok, true);
   assert.deepEqual(result.attempts.map((a) => [a.brain, a.model, a.effort, a.role]), [
     ['codex', 'gpt-6-astra', 'ultra', 'compose'], ['codex', 'gpt-6-astra', 'ultra', 'repair'], ['claude', 'claude-fable-5', 'max', 'compose'],
   ]);
-  assert.ok(mock.calls[1].prompt.includes('100–170'));
+  assert.ok(mock.calls[1].prompt.includes('อย่างน้อย 100 คำ'));
   assert.ok(result.attempts[0].gateReasons.some((r) => r.includes('99')));
 });
 
@@ -381,4 +381,27 @@ test('primary BRAIN_TIMEOUT skips the fallback by default, records the skip, and
   const auth = await composeTopics({ evidencePack: pack(), runBrain: other.runner });
   assert.equal(auth.ok, true, 'non-timeout failures still fall back');
   assert.equal(other.calls.length, 2);
+});
+
+// ★ 8 ก.ย. 69 (เจ้าของ: ไม่จำกัดเพดานคำ): เพดานกลับมาได้ด้วย env เท่านั้น และพรอมต์/เหตุผลด่านต้องตามกรอบที่ตั้ง
+test('word cap is off by default and only CLIP_TOPIC_WORDS_MAX restores an upper bound in gate, prompt and reasons', () => {
+  const saved = process.env.CLIP_TOPIC_WORDS_MAX;
+  try {
+    delete process.env.CLIP_TOPIC_WORDS_MAX;
+    assert.equal(composeQualityGate(scoreTopicDoc(doc(600))).pass, true, 'no cap: 600 words pass');
+    const short = composeQualityGate(scoreTopicDoc(doc(99)));
+    assert.ok(short.reasons.some((r) => r.includes('.story: ต้องมีอย่างน้อย 100 คำ') && r.includes('99')), 'story reason follows the configured range: ' + JSON.stringify(short.reasons));
+    assert.ok(buildComposePrompt({ evidencePack: pack() }).includes('ไม่จำกัดเพดานคำ'));
+    process.env.CLIP_TOPIC_WORDS_MAX = '170';
+    const capped = composeQualityGate(scoreTopicDoc(doc(171)));
+    assert.equal(capped.pass, false, 'env cap: 171 words fail again');
+    assert.ok(capped.reasons.some((r) => r.includes('100–170 คำ') && r.includes('171')));
+    assert.equal(composeQualityGate(scoreTopicDoc(doc(170))).pass, true);
+    const prompt = buildComposePrompt({ evidencePack: pack() });
+    assert.ok(prompt.includes('100–170 คำ') && !prompt.includes('ไม่จำกัดเพดานคำ'));
+    process.env.CLIP_TOPIC_WORDS_MAX = '50';
+    assert.equal(composeQualityGate(scoreTopicDoc(doc(600))).pass, true, 'a cap below the minimum is ignored');
+  } finally {
+    if (saved === undefined) delete process.env.CLIP_TOPIC_WORDS_MAX; else process.env.CLIP_TOPIC_WORDS_MAX = saved;
+  }
 });

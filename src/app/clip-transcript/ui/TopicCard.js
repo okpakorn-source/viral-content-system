@@ -15,7 +15,8 @@ const ISSUE_LABELS = {
 };
 
 export function issueLabel(code) { return ISSUE_LABELS[code] || 'ข้อสังเกตเพิ่มเติม'; }
-export function wordBand(n) { return Number.isFinite(n) && n >= 100 && n <= 170 ? 'ok' : 'warn'; }
+// ★ 8 ก.ย. 69: ปลดเพดาน 170 (เจ้าของ) — เตือนเฉพาะสั้นกว่า 100 คำ
+export function wordBand(n) { return Number.isFinite(n) && n >= 100 ? 'ok' : 'warn'; }
 
 const OVERLAP_LABELS = { duplicate: 'ซ้ำกับ', shared_context: 'บริบทร่วมกับ', follow_up: 'ต่อเนื่องจาก' };
 
@@ -24,7 +25,7 @@ export function topicChips(story, siblings = []) {
   const facts = (Array.isArray(story?.facts) ? story.facts : []).filter((f) => typeof f?.text === 'string' && f.text.trim());
   const words = countThaiWords(story?.story);
   const verified = quotes.filter((q) => q?.verification === 'verified').length;
-  const chips = [{ label: `${words} คำ`, tone: wordBand(words), title: 'กรอบเนื้อพร้อมใช้ 100–170 คำ' }];
+  const chips = [{ label: `${words} คำ`, tone: wordBand(words), title: 'กรอบเนื้อพร้อมใช้ อย่างน้อย 100 คำ' }];
   if (story?.sharePct != null) chips.push({ label: `กินเวลา ${Number(story.sharePct.toFixed(1))}%`, tone: 'info', title: 'สัดส่วนเวลาในคลิปของเรื่องนี้' });
   chips.push({ label: `ข้อเท็จจริง ${facts.length}`, tone: 'info', title: 'จำนวนข้อเท็จจริงของเรื่องนี้' },
     { label: quotes.length ? `คำพูดยืนยัน ${verified}/${quotes.length}` : 'ไม่มีคำพูด', tone: !quotes.length ? 'info' : verified === quotes.length ? 'ok' : 'warn', title: 'ยืนยันข้อความตรงกับต้นทาง ไม่ใช่การยืนยันผู้พูดหรือข้อกล่าวอ้าง' });

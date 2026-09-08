@@ -557,7 +557,7 @@ async function loadWorker(source = WORKER_SOURCE, { heartbeatMs = 60_000, worker
     '',
     'remove top-level worker loop for test',
   );
-  transformed += '\nexport { pullJob, processJob, report, postWorkerState, startHeartbeat, isTransient, reportStatusForFailure, reportStatusForProcessResult, resolveProcessTimeoutMs, PROCESS_TIMEOUT_MS };\n';
+  transformed += '\nexport { pullJob, processJob, report, postWorkerState, startHeartbeat, isTransient, reportStatusForFailure, reportStatusForProcessResult, resolveProcessTimeoutMs, PROCESS_TIMEOUT_MS, isPaused };\n';
   transformed += `// ${crypto.randomUUID()}\n`;
 
   const oldBase = process.env.CLIP_WORKER_BASE;
@@ -912,4 +912,31 @@ test('worker process timeout comes from CLIP_WORKER_PROCESS_TIMEOUT_MS with a sa
   assert.equal(worker.resolveProcessTimeoutMs('9999999999999'), 2_000_000_000, 'capped below the 32-bit timer limit');
   assert.ok(WORKER_SOURCE.includes('headersTimeout: PROCESS_TIMEOUT_MS + 60_000'), 'undici dispatcher waits longer than the watchdog so the watchdog reports first');
   assert.ok(WORKER_SOURCE.includes('resolveProcessTimeoutMs(process.env.CLIP_WORKER_PROCESS_TIMEOUT_MS)'), 'watchdog reads the env');
+});
+
+// ★ 8 ก.ย. 69 (Fable): ไฟล์ธงหยุดรับงาน — ใช้ก่อนรีสตาร์ตให้งานที่ทำอยู่จบก่อน ไม่หยิบงานใหม่
+test('worker pause flag: file present = paused, absent/unset = running', async () => {
+  const { mkdtempSync, writeFileSync: write, rmSync: rm } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'clip-worker-pause-'));
+  const flag = join(dir, 'pause.flag');
+  const saved = process.env.CLIP_WORKER_PAUSE_FILE;
+  try {
+    process.env.CLIP_WORKER_PAUSE_FILE = flag;
+    const worker = await loadWorker();
+    assert.equal(worker.isPaused(), false, 'no flag file yet');
+    write(flag, '');
+    assert.equal(worker.isPaused(), true, 'flag file present');
+    rm(flag);
+    assert.equal(worker.isPaused(), false, 'flag removed');
+    delete process.env.CLIP_WORKER_PAUSE_FILE;
+    const unset = await loadWorker();
+    write(flag, '');
+    assert.equal(unset.isPaused(), false, 'unset env never pauses even if some file exists');
+    assert.ok(WORKER_SOURCE.includes('if (isPaused())') && WORKER_SOURCE.indexOf('if (isPaused())') < WORKER_SOURCE.indexOf('job = await pullJob()'), 'pause check runs before pulling a job');
+  } finally {
+    if (saved === undefined) delete process.env.CLIP_WORKER_PAUSE_FILE; else process.env.CLIP_WORKER_PAUSE_FILE = saved;
+    rm(dir, { recursive: true, force: true });
+  }
 });

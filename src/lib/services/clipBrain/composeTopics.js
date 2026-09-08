@@ -5,7 +5,7 @@
  * the fixed P1 quality thresholds cannot be relaxed through spec.
  */
 import { emptyTopicDoc, fromLegacyInsight, validateTopicDoc, computeSharePct } from './topicSchema.js';
-import { BUREAUCRATIC_WORDS, bureaucraticRate, scoreTopicDoc } from './topicMetrics.js';
+import { BUREAUCRATIC_WORDS, bureaucraticRate, scoreTopicDoc, wordRange, wordRangeLabel } from './topicMetrics.js';
 
 const list = (v) => Array.isArray(v) ? v : [];
 const object = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -141,10 +141,10 @@ export function buildEvidencePack(record) {
 
 export function buildComposePrompt({ evidencePack, spec = {} } = {}) {
   const example = {
-    ...emptyTopicDoc(), mainTopicId: 's1', mainStory: '<เขียนเรื่องหลัก 100–170 คำ>',
+    ...emptyTopicDoc(), mainTopicId: 's1', mainStory: `<เขียนเรื่องหลัก ${wordRangeLabel()}>`,
     stories: [{
       id: 's1', topic: '<ชื่อประเด็นไม่เกิน 12 คำ>', highlight: '<หนึ่งประโยคที่บอกแก่นเรื่อง>',
-      story: '<เขียน 6–10 ประโยค รวม 100–170 คำ>', timeRanges: [], sharePct: null,
+      story: `<เขียนอย่างน้อย 6 ประโยค รวม${wordRangeLabel()}>`, timeRanges: [], sharePct: null,
       facts: [{ id: 's1-f1', text: '<ข้อเท็จจริงที่มีหลักฐาน>', kind: 'speaker_statement', evidenceIds: ['e1'] }],
       quotes: [{ text: '<คำพูดตรงตามหลักฐาน ถ้าไม่มีให้ quotes เป็น []>', speaker: '', evidenceIds: ['e1'], verification: 'pending' }],
       standalone: true, overlaps: [], quality: { status: 'not_checked', issues: [] },
@@ -159,12 +159,13 @@ export function buildComposePrompt({ evidencePack, spec = {} } = {}) {
 เหตุการณ์เดียวกันให้รวมเป็นเรื่องเดียว รายละเอียดเป็นบริบท ไม่แยกเป็นข่าวซ้ำ
 เก็บประเด็นอิสระที่หลักฐานรองรับให้ครบ ไม่จำกัดจำนวนเรื่องด้วยโควตาตายตัว
 2. ทุกเรื่อง topic ไม่เกิน 12 คำ; highlight หนึ่งประโยค บอกแก่นเรื่องที่จำได้ ไม่เปิดด้วย "ให้สัมภาษณ์" หรือ "เปิดเผย"
-story 6–10 ประโยคสั้น รวม 100–170 คำภาษาไทยตาม Intl.Segmenter('th', {granularity:'word'}) และ isWordLike
+story ประโยคสั้นอย่างน้อย 6 ประโยค รวม${wordRangeLabel()}ภาษาไทยตาม Intl.Segmenter('th', {granularity:'word'}) และ isWordLike
+${wordRange().max ? '' : 'ไม่จำกัดเพดานคำ: เล่าให้ครบทุกข้อเท็จจริงที่มีหลักฐาน ยาวได้ตามเนื้อหา แต่ห้ามเติมน้ำ ห้ามซ้ำความ ห้ามสรุปซ้ำ'}
 ขึ้นบรรทัดใหม่เมื่อจบแต่ละประโยค ใช้ภาษาเล่าเรื่องธรรมชาติ ใครทำอะไร เกิดอะไรขึ้น เพราะอะไรและผลเป็นอย่างไร
 อย่าเอาจำนวนประโยคมาแทนจำนวนคำ ห้ามตัดข้อความด้วยโค้ดหรือเติมน้ำเพื่อให้ครบคำ
 หากหลักฐานไม่พอ ห้ามแต่งข้อเท็จจริงเพิ่ม ยอมให้เรื่องไม่ผ่านเกณฑ์และคงประเด็นไว้ตรวจต่อ
 หลีกเลี่ยงภาษาราชการทั้งหมดนี้: ${BUREAUCRATIC_WORDS.join(' / ')}
-3. mainStory 6–10 ประโยค รวม 100–170 คำ เล่าเส้นเรื่องหลักเชื่อมเหตุและผล ไม่ใช่รายการสารบัญ
+3. mainStory อย่างน้อย 6 ประโยค รวม${wordRangeLabel()} เล่าเส้นเรื่องหลักเชื่อมเหตุและผล ไม่ใช่รายการสารบัญ
 mainTopicId ต้องเป็น id ของเรื่องหลัก เลือกเรื่องที่เป็นหัวใจคลิปหรือมีน้ำหนักหลักฐานมากที่สุด ไม่เลือกตามลำดับเดิมอัตโนมัติ
 4. ทุกเรื่องต้องมี facts อย่างน้อย 1 ข้อ แต่ละข้อมี id ไม่ซ้ำทั้งเอกสาร และ evidenceIds ที่มีจริงใน pack
 fact.kind ใช้ speaker_statement (ผู้พูดกล่าวอ้าง), observed (สิ่งที่บันทึกว่าเห็น), on_screen (ข้อความหน้าจอ), derived (ข้อสรุปจากหลักฐาน)
@@ -211,13 +212,13 @@ export function composeQualityGate(metrics, spec = {}) {
   if (!stories.length) reasons.push('stories: ต้องมีเรื่องที่มีหลักฐานอย่างน้อย 1 เรื่อง');
   stories.forEach((s, i) => {
     const at = `stories[${i}](${s?.id ?? '?'})`;
-    if (s?.band !== 'ok') reasons.push(`${at}.story: ต้องมี 100–170 คำ (ได้ ${s?.words ?? '?'})`);
+    if (s?.band !== 'ok') reasons.push(`${at}.story: ต้องมี${wordRangeLabel()} (ได้ ${s?.words ?? '?'})`);
     if (!s?.hasHighlight) reasons.push(`${at}.highlight: ต้องมีข้อความ`);
     if (!Number.isFinite(s?.bureaucratic) || s.bureaucratic >= 0.8) reasons.push(`${at}.bureaucratic: ต้องต่ำกว่า 0.8/1000 อักขระ`);
     if (s?.factCount === 0) reasons.push(`${at}.facts: ต้องมีอย่างน้อย 1 ข้อ`);
     if (s?.factsWithEvidencePct !== 100) reasons.push(`${at}.factsWithEvidencePct: ต้องเท่ากับ 100 (ได้ ${s?.factsWithEvidencePct ?? '?'})`);
   });
-  if (metrics?.summary?.mainStoryBand !== 'ok') reasons.push(`mainStory: ต้องมี 100–170 คำ (ได้ ${metrics?.summary?.mainStoryWords ?? '?'})`);
+  if (metrics?.summary?.mainStoryBand !== 'ok') reasons.push(`mainStory: ต้องมี${wordRangeLabel()} (ได้ ${metrics?.summary?.mainStoryWords ?? '?'})`);
   if (metrics?.summary?.overlapPct !== 0) reasons.push(`overlapPct: ต้องเท่ากับ 0 (ได้ ${metrics?.summary?.overlapPct ?? '?'})`);
   const mainRate = metrics?.summary?.mainStoryBureaucratic;
   if (mainRate !== undefined && (!Number.isFinite(mainRate) || mainRate >= 0.8)) reasons.push('mainStory.bureaucratic: ต้องต่ำกว่า 0.8/1000 อักขระ');

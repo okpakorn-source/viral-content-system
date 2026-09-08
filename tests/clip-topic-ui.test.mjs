@@ -163,11 +163,11 @@ test('v2 legacy adapter uses storyId plus highlight/quality; plain legacy remain
   assert.doesNotMatch(copy.buildClipSubStoryText({ ...old, highlight: 'v2' }), /คำพูดเดิม/);
 });
 
-test('word chips honor all inclusive boundaries 99/100/170/171 using Thai segmentation', () => {
-  for (const [n, tone] of [[99, 'warn'], [100, 'ok'], [170, 'ok'], [171, 'warn']]) {
+test('word chips warn only below the 100-word floor (no ceiling) using Thai segmentation', () => {
+  for (const [n, tone] of [[99, 'warn'], [100, 'ok'], [170, 'ok'], [171, 'ok']]) {
     assert.equal(wordBand(n), tone);
     assert.equal(metrics.countThaiWords(body(n)), n);
-    assert.deepEqual(topicChips(story({ story: body(n) }))[0], { label: `${n} คำ`, tone, title: 'กรอบเนื้อพร้อมใช้ 100–170 คำ' });
+    assert.deepEqual(topicChips(story({ story: body(n) }))[0], { label: `${n} คำ`, tone, title: 'กรอบเนื้อพร้อมใช้ อย่างน้อย 100 คำ' });
   }
 });
 test('every issue code has a human label and detail; relationship/count chips preserve zero', () => {

@@ -202,8 +202,8 @@ test('readiness no-v2 and wrong-version inputs are pure no-ops without importing
   }
 });
 
-test('readiness word boundaries 99/100/170/171 use real Thai segmentation for stories and mainStory', async () => {
-  for (const [n, expected] of [[99, 'length-short'], [100, null], [170, null], [171, 'length-long']]) {
+test('readiness word boundaries 99/100/170/171 use real Thai segmentation for stories and mainStory (no ceiling by default)', async () => {
+  for (const [n, expected] of [[99, 'length-short'], [100, null], [170, null], [171, null]]) {
     const d = doc();
     d.stories[0].story = paragraphs(n);
     d.mainStory = paragraphs(n, 1);

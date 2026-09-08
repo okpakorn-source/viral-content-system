@@ -13,8 +13,21 @@ export function countThaiWords(text) {
   return words;
 }
 
+// ★ 8 ก.ย. 69 (เจ้าของ: "เกินได้ ไม่ต้องจำกัดกรอบ"): เพดานบน 170 ปลดออก เหลือขั้นต่ำ 100 คำ
+//   ปรับได้ด้วย env CLIP_TOPIC_WORDS_MIN / CLIP_TOPIC_WORDS_MAX (0 หรือไม่ตั้ง = ไม่จำกัดเพดาน) — ทุกจุดที่พูดถึงกรอบคำต้องอ่านจากที่นี่
+const envInt = (key, def) => { const raw = String(process.env[key] ?? '').trim(); if (!raw) return def; const n = Number(raw); return Number.isInteger(n) && n >= 0 ? n : def; };
+export function wordRange() {
+  const min = Math.max(1, envInt('CLIP_TOPIC_WORDS_MIN', 100));
+  const max = envInt('CLIP_TOPIC_WORDS_MAX', 0);
+  return { min, max: max > min ? max : 0 };
+}
+export function wordRangeLabel() {
+  const { min, max } = wordRange();
+  return max ? `${min}–${max} คำ` : `อย่างน้อย ${min} คำ`;
+}
 export function lengthBand(words) {
-  return words < 100 ? 'short' : words <= 170 ? 'ok' : 'long';
+  const { min, max } = wordRange();
+  return words < min ? 'short' : (max && words > max) ? 'long' : 'ok';
 }
 
 export const BUREAUCRATIC_WORDS = Object.freeze([
