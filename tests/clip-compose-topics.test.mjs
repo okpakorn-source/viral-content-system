@@ -405,3 +405,32 @@ test('word cap is off by default and only CLIP_TOPIC_WORDS_MAX restores an upper
     if (saved === undefined) delete process.env.CLIP_TOPIC_WORDS_MAX; else process.env.CLIP_TOPIC_WORDS_MAX = saved;
   }
 });
+
+// ★ 9 ก.ย. 69 (Fable): ด่านสำนวน "ใจความล้วน" (G5) + กติกาพรอมต์ข้อ 8
+test('style gate rejects attribution, dramatic, meta, long sentences and filler; CLIP_TOPIC_STYLE_GATE=0 disables it; prompt carries the contract', () => {
+  const saved = process.env.CLIP_TOPIC_STYLE_GATE;
+  try {
+    delete process.env.CLIP_TOPIC_STYLE_GATE;
+    const bad = doc();
+    bad.stories[0].story = 'ลุงทูบอกว่าขายข้าว 10 บาท\nลูกค้าถึงกับน้ำตาคลอ\nคลิปเริ่มจากหน้าร้าน\n' + bad.stories[0].story;
+    bad.mainStory = 'ทั้งนี้ลุงทูพยายามขายต่อ ดังกล่าวคือความตั้งใจ\n' + bad.mainStory;
+    const gate = composeQualityGate(scoreTopicDoc(bad));
+    assert.equal(gate.pass, false);
+    const text = gate.reasons.join(' | ');
+    for (const term of ['stories[0](s1).style: อ้างที่มา', 'บอกว่า', 'คำเปรย', 'ถึงกับ', 'เล่ากล้อง', 'คลิปเริ่มจาก']) assert.ok(text.includes(term), 'missing ' + term + ' in ' + text);
+    assert.equal(text.includes('คำเฟ้อ'), false, 'filler is soft: not a gate reason');
+    assert.equal(composeQualityGate(scoreTopicDoc(doc())).pass, true, 'clean fixture still passes');
+    const long = doc();
+    long.stories[0].story = Array.from({ length: 30 }, (_, i) => ['คน', 'รถ', 'บ้าน', 'น้ำ', 'งาน'][i % 5]).join(' ') + '\n' + long.stories[0].story;
+    assert.equal(composeQualityGate(scoreTopicDoc(long)).pass, true, 'long sentences are soft: never fail the gate (53-minute clip lesson)');
+    assert.equal(composeQualityGate(scoreTopicDoc(long)).reasons.some((r) => r.includes('ประโยคยาว')), false);
+    process.env.CLIP_TOPIC_STYLE_GATE = '0';
+    assert.equal(composeQualityGate(scoreTopicDoc(bad)).reasons.some((r) => r.includes('.style:')), false, 'env switch removes every style reason');
+    delete process.env.CLIP_TOPIC_STYLE_GATE;
+    const prompt = buildComposePrompt({ evidencePack: pack() });
+    for (const term of ['ใจความล้วน', 'ไม่อ้างที่มาในเนื้อเรื่อง', 'ลบสิ่งที่ไม่มีหลักฐาน', 'ลบประโยคเร้าอารมณ์', 'ห้ามเล่ากล้อง', 'ห้ามซ้ำ', 'ไม่เกิน 25 คำ', 'เล่าว่า / บอกว่า', 'ถึงกับ / ทันที', 'ห้ามลบชื่อคน', 'ห้ามอ้างที่มาแฝง', 'ห้ามประโยคสรุป ประเมิน ตีความ อุปมา', 'ห้ามขยายหรือย่อจำนวน', 'เลี่ยงประโยคกรรม']) assert.ok(prompt.includes(term), 'prompt missing ' + term);
+    assert.ok(!prompt.includes('อ้างที่มาเฉพาะคำกล่าวอ้างของบุคคล'), 'old attribution rule removed');
+  } finally {
+    if (saved === undefined) delete process.env.CLIP_TOPIC_STYLE_GATE; else process.env.CLIP_TOPIC_STYLE_GATE = saved;
+  }
+});

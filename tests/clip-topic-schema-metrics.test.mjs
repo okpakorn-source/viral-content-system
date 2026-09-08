@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { TOPIC_SCHEMA_VERSION, emptyTopicDoc, validateTopicDoc, computeSharePct, toLegacyInsight, fromLegacyInsight } from '../src/lib/services/clipBrain/topicSchema.js';
-import { BUREAUCRATIC_WORDS, countThaiWords, lengthBand, bureaucraticRate, longSentenceCount, crossStoryOverlap, scoreTopicDoc, wordRange, wordRangeLabel } from '../src/lib/services/clipBrain/topicMetrics.js';
+import { BUREAUCRATIC_WORDS, countThaiWords, lengthBand, bureaucraticRate, longSentenceCount, crossStoryOverlap, scoreTopicDoc, wordRange, wordRangeLabel, styleReport, styleIssues } from '../src/lib/services/clipBrain/topicMetrics.js';
 import { buildBaseline } from '../scripts/clip-topic-baseline.mjs';
 import { buildClipSubStoryText, buildClipNewsReadyText } from '../src/lib/services/clipNewsReadyText.js';
 
@@ -254,7 +254,9 @@ test('scores are advisory, use resolved evidence links and leave long stories in
   assert.equal(result.summary.storiesInRangePct, 100);
   assert.equal(doc.stories[0].story, 'ข่าว '.repeat(171));
   const empty = scoreTopicDoc(emptyTopicDoc());
-  assert.deepEqual(empty.summary, { storiesInRangePct: 0, overlapPct: 0, mainStoryWords: 0, mainStoryBand: 'short' });
+  const { mainStoryStyle, ...rest } = empty.summary;
+  assert.deepEqual(rest, { storiesInRangePct: 0, overlapPct: 0, mainStoryWords: 0, mainStoryBand: 'short' });
+  assert.deepEqual([mainStoryStyle.words, mainStoryStyle.attribution, mainStoryStyle.longSentences], [0, 0, 0], 'empty main story has an empty style report');
 });
 
 test('baseline separates brain records, includes zero-story records, and never compares different clips', () => {
@@ -299,4 +301,36 @@ test('mutation 2 is caught: moving 100 into short fails the boundary assertion',
 test('mutation 3 is caught: suppressing overlap percentage fails duplicate detection', async () => {
   const mutant = await mutatedModule('../src/lib/services/clipBrain/topicMetrics.js', 'pct: pct(repeated, total)', 'pct: 0');
   assert.throws(() => assertOverlapDetected(mutant.crossStoryOverlap), { name: 'AssertionError' });
+});
+
+// ★ 9 ก.ย. 69 (Fable): ตัววัดสำนวน "ใจความล้วน"
+test('styleReport counts attribution, dramatic, filler and meta terms with longest-match, plus long sentences', () => {
+  const text = 'แม่เพ็ญเล่าว่าขายผักตั้งแต่ตีสี่\nลูกค้าถึงกับน้ำตาคลอเมื่อได้ยิน\nคลิปเริ่มจากภาพตลาด ทั้งนี้ราคาผักกลายเป็นข่าว\n' + Array.from({ length: 26 }, (_, i) => ['คน', 'รถ', 'บ้าน', 'น้ำ', 'งาน'][i % 5]).join(' ');
+  const r = styleReport(text);
+  assert.equal(r.attribution, 1, 'เล่าว่า');
+  assert.deepEqual(r.matches.dramatic, ['ถึงกับ', 'น้ำตาคลอ']);
+  assert.deepEqual(r.matches.filler, ['ทั้งนี้', 'กลายเป็น']);
+  assert.deepEqual(r.matches.meta, ['คลิปเริ่มจาก']);
+  assert.equal(r.longSentences, 1, 'the 26-word line is over the 25-word cap');
+  assert.ok(r.fillerPer100 > 1);
+  const clean = styleReport('แม่เพ็ญขายผักตั้งแต่ตีสี่\nลูกค้าเงียบไปครู่หนึ่ง');
+  assert.deepEqual([clean.attribution, clean.dramatic, clean.filler, clean.meta, clean.longSentences], [0, 0, 0, 0, 0]);
+  assert.deepEqual(styleIssues(clean), []);
+  const issues = styleIssues(r);
+  assert.equal(issues.length, 5, 'one issue per category: ' + JSON.stringify(issues));
+  assert.ok(issues[0].includes('เล่าว่า') && issues[1].includes('ถึงกับ') && issues[2].includes('คลิปเริ่มจาก') && issues[3].includes('25') && issues[4].includes('ทั้งนี้'));
+  assert.deepEqual(styleIssues(r, { level: 'hard' }).length, 3, 'hard = attribution/dramatic/meta only');
+  assert.deepEqual(styleIssues(r, { level: 'soft' }).map((x) => x.slice(0, 12)), ['ประโยคยาวเกิน ', 'คำเฟ้อ 2 ครั้ง'].map((x) => x.slice(0, 12)));
+  assert.equal(styleReport('').words, 0);
+  assert.deepEqual(styleIssues(styleReport('')), []);
+});
+
+test('scoreTopicDoc carries style reports for every story and the main story', () => {
+  const doc = fixture();
+  doc.stories[0].story = 'เขาบอกว่าเหนื่อย\n' + doc.stories[0].story;
+  doc.mainStory = 'คลิปปิดท้ายด้วยรอยยิ้ม\n' + (doc.mainStory || '');
+  const r = scoreTopicDoc(doc);
+  assert.equal(r.stories[0].style.attribution, 1);
+  assert.equal(r.summary.mainStoryStyle.meta, 1);
+  assert.ok(Array.isArray(r.stories[0].style.matches.attribution));
 });

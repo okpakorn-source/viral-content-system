@@ -97,7 +97,7 @@ export async function assessReadiness(insight, { truth = '' } = {}) {
   const result = { findings: [], stories: [], mainStory: { issues: [] } };
   const doc = insight?.topicsV2;
   if (!doc || doc.schemaVersion !== 2) return result;
-  const { countThaiWords, lengthBand, bureaucraticRate, longSentenceCount, crossStoryOverlap, wordRangeLabel } = await import('./topicMetrics.js');
+  const { countThaiWords, lengthBand, bureaucraticRate, longSentenceCount, crossStoryOverlap, wordRangeLabel, styleReport, styleIssues } = await import('./topicMetrics.js');
   const list = (v) => Array.isArray(v) ? v : [];
   const text = (v) => typeof v === 'string' ? v : '';
   const fixes = {
@@ -112,6 +112,8 @@ export async function assessReadiness(insight, { truth = '' } = {}) {
     'no-facts': 'เพิ่มข้อเท็จจริงพร้อมหลักฐานของประเด็นนี้',
     missing: 'เขียนเรื่องเล่าหลักจากประเด็นและหลักฐานที่มี',
     'main-story-stale': 'ทบทวนเรื่องเล่าหลักให้สอดคล้องกับประเด็นที่แก้แล้ว',
+    // ★ 9 ก.ย. 69: สำนวนระดับอ่อน (ไม่ทิ้งฉบับ) — ประโยคยาว/คำเฟ้อ
+    'style-soft': 'ปรับสำนวน: แบ่งประโยคยาว ตัดคำเฟ้อ (ไม่กระทบข้อเท็จจริง)',
   };
   const add = (issues, where, code, detail, value) => {
     issues.push({ code, detail, ...(value === undefined ? {} : { value }) });
@@ -124,6 +126,7 @@ export async function assessReadiness(insight, { truth = '' } = {}) {
     if (band !== 'ok') add(issues, where, `length-${band}`, `มี ${words} คำ ควรมี${wordRangeLabel()}`, words);
     const rate = bureaucraticRate(body);
     if (rate >= 0.8) add(issues, where, 'bureaucratic', `พบคำราชการ ${rate.toFixed(2)} ครั้งต่อ 1,000 ตัวอักษร`, rate);
+    for (const soft of styleIssues(styleReport(body), { level: 'soft' })) add(issues, where, 'style-soft', soft);
   };
   const stories = list(doc.stories);
   const overlaps = crossStoryOverlap(stories).pairs;

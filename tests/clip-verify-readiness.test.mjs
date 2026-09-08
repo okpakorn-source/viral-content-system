@@ -99,12 +99,13 @@ const { countThaiWords } = await import('../src/lib/services/clipBrain/topicMetr
 
 const ENV_KEYS = ['CLIP_TOPIC_V2', 'CLIP_TOPIC_MODEL', 'CLIP_TOPIC_EFFORT', 'CLIP_TOPIC_FALLBACK_MODEL',
   'CLIP_TOPIC_FALLBACK_EFFORT', 'CLIP_TOPIC_TIMEOUT_MS', 'GEMINI_VIDEO_API_KEY', 'GEMINI_API_KEY',
-  'CLIP_SAFE_TEXT', 'CLIP_USAGE_LOG', 'CLIP_GEMINI_MAX_ATTEMPTS', 'CLIP_GEMINI_FALLBACK_MODELS'];
+  'CLIP_SAFE_TEXT', 'CLIP_USAGE_LOG', 'CLIP_GEMINI_MAX_ATTEMPTS', 'CLIP_GEMINI_FALLBACK_MODELS', 'CLIP_TOPIC_STYLE_GATE'];
 let saved;
 function setup() {
   saved = { env: Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]])), fetch: globalThis.fetch,
     Date: globalThis.Date, log: console.log, warn: console.warn };
   for (const key of ENV_KEYS) delete process.env[key];
+  process.env.CLIP_TOPIC_STYLE_GATE = '0'; // ★ 9 ก.ย. 69: fixture จริงมีคำอ้างที่มา — ด่านสำนวนมีเทสของตัวเอง
   Object.assign(process.env, { GEMINI_VIDEO_API_KEY: 'offline-test-key', CLIP_SAFE_TEXT: '0',
     CLIP_USAGE_LOG: '0', CLIP_GEMINI_MAX_ATTEMPTS: '1', CLIP_GEMINI_FALLBACK_MODELS: '' });
   const fixed = 1788652800000;
@@ -343,8 +344,9 @@ test('readiness pipeline diagnostics stay out of repair and status; quality surv
   assert.equal(brain.check.lowCount, 1);
   assert.ok(brain.check.readiness.findings.length > 0);
   assert.ok(brain.check.readiness.findings.every((f) => f.side === 'ความพร้อม' && f.severity === 'ข้อสังเกต'));
-  assert.deepEqual(brain.check.readiness.counts, { stories: 1, withIssues: 1,
-    byCode: { 'long-sentence': 1, 'quote-short': 1 } });
+  { const { 'style-soft': soft, ...byCode } = brain.check.readiness.counts.byCode; // ★ 9 ก.ย. 69: สำนวนระดับอ่อนเป็นข้อสังเกตเพิ่ม ไม่กระทบ code เดิม
+    assert.deepEqual({ ...brain.check.readiness.counts, byCode }, { stories: 1, withIssues: 1, byCode: { 'long-sentence': 1, 'quote-short': 1 } });
+    assert.ok(soft >= 1, 'fixture prose carries soft style observations'); }
   assert.equal(insight.topicsV2.stories[0].quotes[0].verification, 'unverified');
   assert.equal(insight.topicsV2.mainStoryQuality.status, 'checked');
   assert.deepEqual(insight.subStories[0].quality, insight.topicsV2.stories[0].quality);
@@ -414,11 +416,16 @@ test('readiness binds legacy quality by storyId across different orders and pres
     quality: { status: 'not_checked', issues: ['sentinel'] } });
   const { result } = await execute('0', { extracted });
   assert.equal(result.insight.subStories[0].storyId, 'second');
-  assert.deepEqual(codes(result.insight.subStories[0].quality.issues), ['no-highlight']);
+  const noSoft = (issues) => issues.filter((i) => i.code !== 'style-soft'); // ★ 9 ก.ย. 69: สำนวนระดับอ่อนเป็นข้อสังเกตเพิ่ม ไม่กระทบการผูก quality ตาม storyId
+  assert.deepEqual(codes(noSoft(result.insight.subStories[0].quality.issues)), ['no-highlight']);
   assert.equal(result.insight.subStories[1].storyId, 's1');
-  assert.deepEqual(result.insight.subStories[1].quality, { status: 'checked', issues: [] });
+  assert.equal(result.insight.subStories[1].quality.status, 'checked');
+  assert.deepEqual(noSoft(result.insight.subStories[1].quality.issues), []);
   assert.deepEqual(result.insight.subStories[2].quality, { status: 'not_checked', issues: ['sentinel'] });
-  assert.deepEqual(result.brain.check.readiness.counts, { stories: 2, withIssues: 1, byCode: { 'no-highlight': 1 } });
+  { const { 'style-soft': soft, ...byCode } = result.brain.check.readiness.counts.byCode; // ★ 9 ก.ย. 69: ตัด style-soft ออกก่อนเทียบ code เดิม
+    assert.deepEqual(byCode, { 'no-highlight': 1 });
+    assert.equal(result.brain.check.readiness.counts.stories, 2);
+    assert.ok(result.brain.check.readiness.counts.withIssues >= 1); void soft; }
   for (const normalize of [normalizeInsight, normalizeCapped]) {
     const normalized = normalize(result.insight, 'clip-brain');
     assert.deepEqual(normalized.topicsV2, result.insight.topicsV2);
@@ -521,3 +528,13 @@ for (const [mutation, pattern] of [
     assert.match(child.stdout + child.stderr, /ERR_ASSERTION|AssertionError/);
   });
 }
+
+// ★ 9 ก.ย. 69 (Fable): สำนวนระดับอ่อน (ประโยคยาว/คำเฟ้อ) เป็นข้อสังเกตความพร้อม ไม่ใช่เหตุตกด่าน
+test('readiness reports soft style issues (long sentence, filler) as observations with a fix hint', async () => {
+  const d = doc();
+  d.stories[0].story = Array.from({ length: 30 }, (_, i) => ['คน', 'รถ', 'บ้าน', 'น้ำ', 'งาน'][i % 5]).join(' ') + '\nทั้งนี้ ดังกล่าว พยายาม กลายเป็น เป็นการ\n' + d.stories[0].story;
+  const r = await assess(d);
+  const soft = r.findings.filter((f) => f.detail && (f.detail.includes('ประโยคยาวเกิน') || f.detail.includes('คำเฟ้อ')));
+  assert.ok(soft.length >= 2, 'both soft issues reported: ' + JSON.stringify(r.findings.map((f) => f.detail)));
+  assert.ok(soft.every((f) => f.side === 'ความพร้อม' && f.severity === 'ข้อสังเกต' && f.fix && f.fix.includes('ปรับสำนวน')));
+});

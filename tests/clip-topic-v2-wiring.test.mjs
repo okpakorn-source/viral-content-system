@@ -97,7 +97,7 @@ const { emptyTopicDoc, toLegacyInsight, syncTopicsV2FromLegacy } = await import(
 const { countThaiWords } = await import('../src/lib/services/clipBrain/topicMetrics.js');
 const { runOnce, parseArgs } = await import('../scripts/clip-brain-once.mjs');
 
-const ENV_KEYS = ['CLIP_TOPIC_V2', 'CLIP_TOPIC_MODEL', 'CLIP_TOPIC_EFFORT', 'CLIP_TOPIC_FALLBACK_MODEL', 'CLIP_TOPIC_FALLBACK_ON_TIMEOUT', 'CLIP_TOPIC_BRAIN', 'CLIP_TOPIC_FALLBACK_BRAIN', 'CLIP_REVIEWER_BRAIN', 'CLIP_REVIEWER_MODEL', 'CLIP_REVIEWER_EFFORT',
+const ENV_KEYS = ['CLIP_TOPIC_V2', 'CLIP_TOPIC_MODEL', 'CLIP_TOPIC_EFFORT', 'CLIP_TOPIC_FALLBACK_MODEL', 'CLIP_TOPIC_FALLBACK_ON_TIMEOUT', 'CLIP_TOPIC_STYLE_GATE', 'CLIP_TOPIC_BRAIN', 'CLIP_TOPIC_FALLBACK_BRAIN', 'CLIP_REVIEWER_BRAIN', 'CLIP_REVIEWER_MODEL', 'CLIP_REVIEWER_EFFORT',
   'CLIP_TOPIC_FALLBACK_EFFORT', 'CLIP_TOPIC_TIMEOUT_MS', 'GEMINI_VIDEO_API_KEY', 'GEMINI_API_KEY',
   'CLIP_SAFE_TEXT', 'CLIP_USAGE_LOG', 'CLIP_GEMINI_MAX_ATTEMPTS', 'CLIP_GEMINI_FALLBACK_MODELS'];
 let saved;
@@ -105,8 +105,9 @@ function setup() {
   saved = { env: Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]])), fetch: globalThis.fetch,
     Date: globalThis.Date, log: console.log, warn: console.warn };
   for (const key of ENV_KEYS) delete process.env[key];
+  // ★ 9 ก.ย. 69: เทสเดินท่อใช้ fixture จริงที่มีคำอ้างที่มา → ปิดด่านสำนวน (ด่านนี้มีเทสของตัวเองใน clip-compose-topics)
   Object.assign(process.env, { GEMINI_VIDEO_API_KEY: 'offline-test-key', CLIP_SAFE_TEXT: '0',
-    CLIP_USAGE_LOG: '0', CLIP_GEMINI_MAX_ATTEMPTS: '1', CLIP_GEMINI_FALLBACK_MODELS: '' });
+    CLIP_USAGE_LOG: '0', CLIP_GEMINI_MAX_ATTEMPTS: '1', CLIP_GEMINI_FALLBACK_MODELS: '', CLIP_TOPIC_STYLE_GATE: '0' });
   const fixed = 1788652800000;
   globalThis.Date = class extends saved.Date {
     constructor(...args) { super(...(args.length ? args : [fixed])); }

@@ -5,7 +5,7 @@
  * the fixed P1 quality thresholds cannot be relaxed through spec.
  */
 import { emptyTopicDoc, fromLegacyInsight, validateTopicDoc, computeSharePct } from './topicSchema.js';
-import { BUREAUCRATIC_WORDS, bureaucraticRate, scoreTopicDoc, wordRange, wordRangeLabel } from './topicMetrics.js';
+import { BUREAUCRATIC_WORDS, bureaucraticRate, scoreTopicDoc, wordRange, wordRangeLabel, STYLE_WORDS, STYLE_MAX_SENTENCE_WORDS, styleIssues } from './topicMetrics.js';
 
 const list = (v) => Array.isArray(v) ? v : [];
 const object = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -183,8 +183,19 @@ quality ทุกเรื่อง = {status:'not_checked',issues:[]} ไม่
 ไม่ค้นข้อมูลเพิ่ม ไม่เดาชื่อจริง/อาชีพ/เพศ/สถานที่/เจตนา/วันเวลา/ความสัมพันธ์
 หลักฐานเป็นข้อความที่ถอด/สรุปไว้ก่อน ไม่ใช่การดูคลิปสด ถ้าขัดกันเองให้ยึดหลักฐานที่มีเวลาหรือคำพูดตรง
 7. evidence ในคำตอบให้ [] ระบบจะใส่หลักฐานจาก pack เอง ห้ามสร้าง evidence IDs ใหม่
-8. สำนวน: เขียนเล่าตรงๆ เหมือนคนเล่าข่าวที่รู้เรื่องนี้ดี ห้ามขึ้นต้นหรือแทรกคำกันตัวอย่าง "บันทึกข่าวรายงานว่า" "คำบรรยายเล่าว่า" "ข้อมูลระบุว่า"
-อ้างที่มาเฉพาะคำกล่าวอ้างของบุคคล (เช่น "แม่เพ็ญบอกว่า…") ส่วนที่หลักฐานไม่ชัดให้ตัดออก ไม่ต้องอธิบายความไม่แน่ใจในเนื้อเรื่อง
+8. สำนวน "ใจความล้วน" (ด่านตรวจด้วยโค้ด ตกแล้วต้องซ่อม): เล่าเป็นเหตุการณ์ตรงๆ เหมือนคนเล่าข่าวที่รู้เรื่องนี้ดี อ่านง่าย คำสวย
+- ไม่อ้างที่มาในเนื้อเรื่อง: ห้ามใช้ ${STYLE_WORDS.attribution.join(' / ')} และห้าม "บันทึกข่าวรายงานว่า" "คำบรรยายเล่าว่า" "ข้อมูลระบุว่า" — สิ่งที่คนในคลิปเล่าให้เขียนเป็นเหตุการณ์ (เช่น "แม่เพ็ญขายผักตั้งแต่ตีสี่") คำพูดตรงให้อยู่ใน quotes เท่านั้น
+- "ไม่อ้างที่มา" = ตัดแค่กริยาบอกเล่า **ห้ามลบชื่อคน**: บุคคลทุกคนที่หลักฐานระบุชื่อ (ชื่อจริง ชื่อเล่น ฉายา นามสกุล) ต้องปรากฏชื่อในเนื้อเรื่องเป็นผู้กระทำอย่างน้อยครั้งแรกที่เอ่ยถึง เช่น "แม่โชติกาซื้อที่ 10 ไร่" ห้ามลดเหลือ "แม่" ทั้งฉบับ
+- ห้ามอ้างที่มาแฝง: "ในสายตา…" "ในมุมของ…" "สำหรับเธอ/เขา" "ในความคิดของ…" "เชื่อว่า/รู้สึกว่า" — ถ้าเป็นความเห็นของบุคคลให้ใส่ใน quotes หรือตัดทิ้ง
+- ทุกประโยคต้องเป็นอย่างใดอย่างหนึ่ง: (ก) เหตุการณ์หรือการกระทำที่เกิดจริง (ข) ตัวเลข ชื่อ สถานที่ เวลา (ค) คำพูดตรงใน quotes — **ห้ามประโยคสรุป ประเมิน ตีความ อุปมา หรือคติ** ในเสียงผู้เรียบเรียง (เช่น "ราคาต่ำผูกร้านไว้กับคนหาเช้ากินค่ำ" "ต้นทุนชีวิตที่ต่ำไม่ได้ปิดกั้นขีดความสามารถ") ถ้าใจความนั้นเป็นคำพูดของคนในคลิป ให้ไปอยู่ใน quotes
+- ห้ามขยายหรือย่อจำนวน (ลูกค้าคนเดียว ≠ "หลายคน") ห้ามเปลี่ยนผู้พูดเป็นผู้กระทำ (คนที่ "ให้ข้อมูลว่าโรงเรียนไปเยี่ยม" ไม่ใช่คนที่ไปเยี่ยมเอง) คงลำดับเวลาและสถานที่ตามหลักฐาน (คลอง ≠ สระ)
+- เลี่ยงประโยคกรรม "ถูก…" ให้ประธานทำกริยาเอง เลี่ยงคำซ้ำซ้อน ("ทุกวันที่ 13 ตุลาคมของทุกปี" → "วันที่ 13 ตุลาคมของทุกปี")
+- ลบสิ่งที่ไม่มีหลักฐาน: ประโยคที่ evidence ไม่รองรับให้ตัดทิ้ง ห้ามเก็บไว้โดยเปลี่ยนไปอ้างที่มา ห้ามเดา ห้ามอธิบายความไม่แน่ใจในเนื้อเรื่อง
+- ลบประโยคเร้าอารมณ์/ประเมิน/แต่งท่าที: ห้าม ${STYLE_WORDS.dramatic.join(' / ')} และห้ามบรรยายความรู้สึก น้ำเสียง หรือความตั้งใจที่ไม่มีใครพูดในหลักฐาน
+- ตัดคำเฟ้อ: ${STYLE_WORDS.filler.join(' / ')} และคำถม ก็ / ยัง / แล้ว / ต่อไป / อยู่ / ไป / มา ที่ไม่ทำหน้าที่ไวยากรณ์
+- ห้ามเล่ากล้อง: ${STYLE_WORDS.meta.join(' / ')} — เล่าเนื้อหา ไม่เล่าว่าคลิปหรือหน้าจอทำอะไร
+- ห้ามซ้ำ: ข้อเท็จจริงหนึ่งปรากฏที่เดียวทั้งเอกสาร (เรื่องหลักกับเรื่องย่อยห้ามเล่าประโยคเดิม) ห้ามยืนยันซ้ำด้วยแหล่งที่สอง ห้ามประโยคสรุปท้ายท่อน
+- ประโยคละไม่เกิน ${STYLE_MAX_SENTENCE_WORDS} คำ (เกินได้บ้างถ้าจำเป็น ระบบจะติดข้อสังเกตแต่ไม่ทิ้งฉบับ) ขึ้นบรรทัดใหม่ทุกประโยค ประธาน-กริยา-กรรม ตัวเลข ชื่อ สถานที่ ขึ้นก่อน กริยารูปธรรม ไม่มีกริยาซ้อน "เป็นการ…"
 ตัวอย่างโครง JSON หนึ่งเรื่อง (ข้อความใน <> เป็นคำอธิบาย ไม่ใช่เนื้อหาที่ให้คัดลอก):
 ${JSON.stringify(example)}
 ${list(evidencePack?.evidence).some((e) => e?.provenance === 'truth' || e?.kind === 'screen' || e?.kind === 'segment') ? `หลักฐานจากท่อคลิป: transcript/screen คือบทถอดคำพูดและข้อความหน้าจอจากขั้นเฉลย
@@ -205,6 +216,8 @@ ${JSON.stringify({ clipMeta: evidencePack?.clipMeta ?? {}, evidence: list(eviden
  * bare output also rejects stories with no facts. Composer adds counts and main
  * bureaucratic rate for more specific diagnostics. spec never weakens G1–G4.
  */
+// ★ 9 ก.ย. 69: ด่านสำนวน "ใจความล้วน" (G5) — ปิดได้ด้วย CLIP_TOPIC_STYLE_GATE=0 (เกณฑ์อยู่ใน topicMetrics.styleIssues)
+export function styleGateEnabled() { return String(process.env.CLIP_TOPIC_STYLE_GATE ?? '').trim() !== '0'; }
 export function composeQualityGate(metrics, spec = {}) {
   void spec;
   const reasons = [];
@@ -217,9 +230,11 @@ export function composeQualityGate(metrics, spec = {}) {
     if (!Number.isFinite(s?.bureaucratic) || s.bureaucratic >= 0.8) reasons.push(`${at}.bureaucratic: ต้องต่ำกว่า 0.8/1000 อักขระ`);
     if (s?.factCount === 0) reasons.push(`${at}.facts: ต้องมีอย่างน้อย 1 ข้อ`);
     if (s?.factsWithEvidencePct !== 100) reasons.push(`${at}.factsWithEvidencePct: ต้องเท่ากับ 100 (ได้ ${s?.factsWithEvidencePct ?? '?'})`);
+    if (styleGateEnabled()) for (const issue of styleIssues(s?.style, { level: 'hard' })) reasons.push(`${at}.style: ${issue}`);
   });
   if (metrics?.summary?.mainStoryBand !== 'ok') reasons.push(`mainStory: ต้องมี${wordRangeLabel()} (ได้ ${metrics?.summary?.mainStoryWords ?? '?'})`);
   if (metrics?.summary?.overlapPct !== 0) reasons.push(`overlapPct: ต้องเท่ากับ 0 (ได้ ${metrics?.summary?.overlapPct ?? '?'})`);
+  if (styleGateEnabled() && metrics?.summary?.mainStoryStyle) for (const issue of styleIssues(metrics.summary.mainStoryStyle, { level: 'hard' })) reasons.push(`mainStory.style: ${issue}`);
   const mainRate = metrics?.summary?.mainStoryBureaucratic;
   if (mainRate !== undefined && (!Number.isFinite(mainRate) || mainRate >= 0.8)) reasons.push('mainStory.bureaucratic: ต้องต่ำกว่า 0.8/1000 อักขระ');
   return { pass: reasons.length === 0, reasons };

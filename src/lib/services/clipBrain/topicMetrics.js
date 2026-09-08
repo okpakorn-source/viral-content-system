@@ -64,6 +64,60 @@ export function longSentenceCount(text, maxWords = 60) {
   return sentences(text).filter((sentence) => countThaiWords(sentence) > maxWords).length;
 }
 
+/** ★ 9 ก.ย. 69 (เจ้าของ: "ใจความล้วน ไม่อ้างที่มา ไม่มีคำเฟ้อ/คำเปรย ลบประโยคเร้าอารมณ์"): พจนานุกรมสำนวนที่ห้ามในเนื้อเรื่อง
+ * นับแบบตัวอักษรตรงตัว ไม่ซ้อนกัน คำยาวชนะ (เหมือน bureaucraticRate) — เป็นตัววัดเชิงสไตล์ที่ทำซ้ำได้ ไม่ใช่การเข้าใจภาษา
+ * attribution = คำอ้างที่มาในเนื้อเรื่อง · dramatic = คำเปรย/แต่งท่าที/เร้าอารมณ์ · filler = คำเฟ้อที่ตัดได้เสมอ · meta = เล่ากล้อง/เล่าคลิปแทนเล่าเนื้อ
+ * (คำถม ก็/ยัง/แล้ว/อยู่ ไม่อยู่ในด่าน เพราะมักทำหน้าที่ไวยากรณ์ — คุมผ่านพรอมต์แทน)
+ */
+export const STYLE_WORDS = Object.freeze({
+  attribution: Object.freeze(['เล่าว่า', 'บอกว่า', 'ยืนยันว่า', 'ระบุว่า', 'เผยว่า', 'กล่าวว่า', 'ย้ำว่า', 'รับว่า', 'ยอมรับว่า', 'มองว่า', 'อธิบายว่า', 'ตอบว่า', 'ชี้ว่า', 'เสริมว่า', 'ออกตัวว่า', 'นิยามตัวเองว่า', 'คิดว่า', 'ถือว่า', 'บอกตรงๆ ว่า', 'เล่าให้ฟังว่า']),
+  dramatic: Object.freeze(['ถึงกับ', 'ทันที', 'ตรงๆ', 'ชัดเจน', 'เหนียวแน่น', 'น้ำตาคลอ', 'สะเทือนใจ', 'ซาบซึ้ง', 'สุดซึ้ง', 'ใจสลาย', 'อบอุ่นหัวใจ', 'สุดยอด', 'อย่างมาก', 'อย่างยิ่ง', 'เหลือเชื่อ', 'ไม่น่าเชื่อ', 'น่าทึ่ง', 'สุดๆ', 'ท่วมท้น', 'ปลื้มปริ่ม', 'น่าประทับใจ', 'อย่างน่าอัศจรรย์']),
+  filler: Object.freeze(['ทั้งนี้', 'ดังกล่าว', 'พยายาม', 'เอาไว้ด้วย', 'สักหน่อย', 'สักผืน', 'สักแปลง', 'กลายเป็น', 'เป็นการ', 'อยู่เป็นประจำ', 'ต่อไปเรื่อยๆ', 'เรื่อยๆ', 'ไปหมด', 'เท่านั้นเอง', 'นั่นเอง', 'ไม่น้อย', 'แต่ละครั้ง']),
+  meta: Object.freeze(['คลิปเริ่มจาก', 'ในคลิป', 'ปิดท้ายด้วย', 'คลิปปิดท้าย', 'ข้อความบนหน้าจอ', 'บนหน้าจอ', 'ช่วงท้ายคลิป', 'ต้นคลิป', 'หน้ากล้อง', 'กำกับไว้ตรงกัน']),
+});
+export const STYLE_MAX_SENTENCE_WORDS = 25;
+export const STYLE_FILLER_PER_100 = 1;
+
+function countTerms(body, terms) {
+  const words = [...new Set(terms)].sort((a, b) => b.length - a.length);
+  if (!body || !words.length) return [];
+  const pattern = new RegExp(words.map(escapeRegex).join('|'), 'gu');
+  return Array.from(body.matchAll(pattern)).map((m) => m[0]);
+}
+
+/** รายงานสำนวนของข้อความหนึ่งท่อน: จำนวนและคำที่เจอต่อหมวด + ประโยคยาว + คำเฟ้อต่อ 100 คำ */
+export function styleReport(text) {
+  const body = asText(text);
+  const words = countThaiWords(body);
+  const found = Object.fromEntries(Object.entries(STYLE_WORDS).map(([k, terms]) => [k, countTerms(body, terms)]));
+  const longSentences = longSentenceCount(body, STYLE_MAX_SENTENCE_WORDS);
+  return {
+    words,
+    attribution: found.attribution.length, dramatic: found.dramatic.length, filler: found.filler.length, meta: found.meta.length,
+    fillerPer100: words ? found.filler.length / words * 100 : 0,
+    longSentences,
+    matches: found,
+  };
+}
+
+/** ข้อบกพร่องสำนวน 2 ระดับ (ว่าง = ผ่าน)
+ *   hard = ผิดกติกาใจความล้วนโดยตรง → ตกด่าน ต้องซ่อม: อ้างที่มา 0 · คำเปรย/เร้าอารมณ์ 0 · เล่ากล้อง 0
+ *   soft = ความสวยของสำนวน → เป็น "ข้อสังเกตความพร้อม" ให้คนเห็น ไม่ทิ้งทั้งฉบับ: ประโยค > 25 คำ · คำเฟ้อ > 1 ต่อ 100 คำ
+ *   (★ 9 ก.ย. 69 บทเรียนคลิป 53 นาที: ฉบับดีทั้ง 10 เรื่องถูกทิ้งเพราะประโยคยาว 8 ประโยค เสีย 38 นาที)
+ */
+export function styleIssues(report, { level = 'all' } = {}) {
+  const r = report || styleReport('');
+  const hard = [];
+  const soft = [];
+  const show = (arr) => [...new Set(arr)].slice(0, 4).join(' / ');
+  if (r.attribution > 0) hard.push(`อ้างที่มาในเนื้อเรื่อง ${r.attribution} ครั้ง (${show(r.matches.attribution)}) — เล่าเป็นเหตุการณ์ตรงๆ หรือย้ายไป quotes`);
+  if (r.dramatic > 0) hard.push(`คำเปรย/เร้าอารมณ์ ${r.dramatic} ครั้ง (${show(r.matches.dramatic)}) — ตัดออกทั้งวลี`);
+  if (r.meta > 0) hard.push(`เล่ากล้อง/เล่าคลิป ${r.meta} ครั้ง (${show(r.matches.meta)}) — เล่าเนื้อหาแทน`);
+  if (r.longSentences > 0) soft.push(`ประโยคยาวเกิน ${STYLE_MAX_SENTENCE_WORDS} คำ ${r.longSentences} ประโยค — แบ่งประโยค`);
+  if (r.fillerPer100 > STYLE_FILLER_PER_100) soft.push(`คำเฟ้อ ${r.filler} ครั้ง (${show(r.matches.filler)}) เกิน ${STYLE_FILLER_PER_100} ต่อ 100 คำ`);
+  return level === 'hard' ? hard : level === 'soft' ? soft : [...hard, ...soft];
+}
+
 /** Compare the first 40 Unicode characters after NFKC/lowercase and removal of
  * whitespace/punctuation. Ignore shorter units. This flags candidate duplicates,
  * including equal prefixes with different endings; it is not a semantic verdict.
@@ -107,6 +161,7 @@ export function scoreTopicDoc(doc) {
       band: lengthBand(words),
       bureaucratic: bureaucraticRate(s?.story),
       longSentences: longSentenceCount(s?.story),
+      style: styleReport(s?.story),
       hasHighlight: !!asText(s?.highlight).trim(),
       hasQuote: list(s?.quotes).some((q) => !!asText(q?.text).trim()),
       factsWithEvidencePct: pct(linked, facts.length),
@@ -120,6 +175,7 @@ export function scoreTopicDoc(doc) {
       overlapPct: crossStoryOverlap(doc?.stories).pct,
       mainStoryWords,
       mainStoryBand: lengthBand(mainStoryWords),
+      mainStoryStyle: styleReport(doc?.mainStory),
     },
   };
 }
