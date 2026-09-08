@@ -133,6 +133,7 @@ test('sync pipeline receives unmodified input and expected mode; cost settlement
   assert.deepEqual(result.body.cost, { usd: 0.4, estimated: false });
   assert.ok(Math.abs(f.get('routine_meter', GUARD).days['2026-09-08'].usd - 0.4) < 1e-9);
   assert.equal(f.get('routine_lease', result.body.workflowId), undefined);
+  f.setTime(f.time() + 20 * 60_000);
   assert.equal((await f.dispatch('news', { idempotencyKey: 'sync-1' })).body.workflowId, result.body.workflowId);
   assert.equal(f.plans.length, 1);
 });
@@ -160,10 +161,136 @@ test('uncertain async write retains its receipt and idempotency key recovers a c
   f.storage.enqueue = async (...args) => { await original(...args); throw failure(); };
   const first = await f.dispatch('jobs', { idempotencyKey: 'uncertain' });
   assert.equal(first.status, 503);
+  f.setTime(f.time() + 20 * 60_000);
   const recovered = await f.dispatch('jobs', { idempotencyKey: 'uncertain' });
   assert.equal(recovered.status, 202);
   assert.equal(recovered.body.jobId, f.submissions[0].id);
   assert.equal(f.submissions.length, 1);
+  const job = f.get('job_queue', recovered.body.jobId);
+  f.set('job_queue', job.id, { ...job, status: 'completed', result: rawSuccess() });
+  assert.equal((await f.dispatch('job', {}, { params: { jobId: job.id } })).body.status, 'done');
+  f.rows.delete(`job_queue:${job.id}`);
+  assert.deepEqual(await f.dispatch('jobs', { idempotencyKey: 'uncertain' }), recovered, 'saved result retains the 202 job receipt even after queue cleanup');
+  assert.equal(f.submissions.length, 1);
+});
+
+test('M2: uncommitted enqueue claim expires at 20 minutes and concurrent retries admit only one replacement', async () => {
+  const f = setup();
+  const enqueue = f.storage.enqueue;
+  f.storage.enqueue = async () => { throw failure(); };
+  const body = { idempotencyKey: 'uncommitted-enqueue' };
+  assert.equal((await f.dispatch('jobs', body)).status, 503);
+  const record = [...f.rows.values()].find(row => row.kind === 'job');
+  assert.ok(record.jobId);
+  assert.equal(record.reply, undefined);
+  assert.equal(await f.storage.getJob(record.jobId), null);
+  assert.equal(f.submissions.length, 0);
+  f.storage.enqueue = enqueue;
+  f.setTime(f.time() + 20 * 60_000 - 1);
+  assert.equal((await f.dispatch('jobs', body)).body.errorType, 'ROUTINE_IN_PROGRESS');
+  assert.equal(f.submissions.length, 0);
+  f.setTime(f.time() + 1);
+  const getJob = f.storage.getJob;
+  f.storage.getJob = async () => { throw failure(); };
+  assert.equal((await f.dispatch('jobs', body)).status, 503);
+  assert.equal(f.submissions.length, 0, 'failed queue reads must not mean no backing job');
+  f.storage.getJob = getJob;
+  const replies = await Promise.all([f.dispatch('jobs', body), f.dispatch('jobs', body)]);
+  const accepted = replies.find(reply => reply.status === 202);
+  assert.ok(accepted, 'M2_UNCOMMITTED: expired claim must allow a new admission');
+  assert.notEqual(accepted.body.jobId, record.jobId);
+  assert.notEqual(accepted.body.workflowId, record.workflowId);
+  assert.equal(f.submissions.length, 1, 'replacement claim must be atomic');
+  assert.deepEqual(await f.dispatch('jobs', body), accepted);
+  assert.equal(f.get('routine_meter', GUARD).days['2026-09-08'].jobs, 2);
+});
+
+for (const mode of ['news', 'jobs']) {
+  test(`M2: ${mode} pre-admission rejection with failed claim deletion recovers after 20 minutes`, async () => {
+    let rejecting = true;
+    const f = setup({ hook(method, store) {
+      if (rejecting && (method === 'activeQueue' || (method === 'remove' && store === 'routine_idem'))) throw failure();
+    } });
+    const body = { idempotencyKey: `rejected-${mode}` };
+    assert.equal((await f.dispatch(mode, body)).status, 503);
+    assert.ok(f.calls.some(([method, store]) => method === 'remove' && store === 'routine_idem'));
+    assert.ok([...f.rows.keys()].some(id => id.startsWith('routine_idem:')));
+    assert.equal([...f.rows.values()].some(row => row.kind === 'job'), false);
+    rejecting = false;
+    f.setTime(f.time() + 20 * 60_000 - 1);
+    assert.equal((await f.dispatch(mode, body)).body.errorType, 'ROUTINE_IN_PROGRESS');
+    f.setTime(f.time() + 1);
+    const accepted = await f.dispatch(mode, body);
+    assert.equal(accepted.status, mode === 'news' ? 200 : 202, 'M2_REJECTED: expired claim must allow a new admission');
+    assert.deepEqual(await f.dispatch(mode, body), accepted);
+    assert.equal(f.plans.length, 2, 'one rejected plan and one admitted plan');
+    assert.equal(f.get('routine_meter', GUARD).days['2026-09-08'].jobs, 1);
+  });
+}
+
+function assertNoInternalKeys(value) {
+  if (!value || typeof value !== 'object') return;
+  for (const [key, child] of Object.entries(value)) {
+    assert.equal(key.startsWith('_'), false, `L2_INTERNAL_KEY: ${key}`);
+    assertNoInternalKeys(child);
+  }
+}
+
+test('L2: sync and queued responses compact pipeline debug data while preserving writer provenance and input', async () => {
+  const raw = rawSuccess();
+  const version = raw.data.versions[0];
+  Object.defineProperty(version, 'usedModel', { value: '  gpt-5.6-sol  ', enumerable: false });
+  Object.assign(version, { _blackbox: ['trace'], _rawModelDraft: 'draft', _correctionDebug: { detail: 'internal' }, promptName: 'writer', publicMeta: { score: 1, _trace: 'hidden' } });
+  raw.data.analysisResult = { versions: raw.data.versions, _debug: 'hidden' };
+  raw.data._debug = 'hidden';
+  const before = JSON.stringify(raw);
+  const f = setup({ execute: async () => raw });
+  const body = { idempotencyKey: 'compact-sync' };
+  const sync = await f.dispatch('news', body);
+  assert.equal(sync.status, 200);
+  assertNoInternalKeys(sync);
+  assert.equal(sync.body.versions[0].usedModel, 'gpt-5.6-sol');
+  for (const output of [sync.body.pipeline.versions[0], sync.body.pipeline.analysisResult.versions[0]]) {
+    assert.equal(output.usedModel, 'gpt-5.6-sol');
+    assert.equal(output.content, version.content);
+    assert.equal(output.promptName, 'writer');
+    assert.deepEqual(output.publicMeta, { score: 1 });
+  }
+  assert.equal(JSON.stringify(raw), before, 'compaction must not mutate legacy pipeline data');
+  assert.equal(version.usedModel, '  gpt-5.6-sol  ');
+  assert.deepEqual(await f.dispatch('news', body), sync);
+  const queued = await f.dispatch('jobs');
+  const job = f.get('job_queue', queued.body.jobId);
+  f.set('job_queue', job.id, { ...job, status: 'completed', result: raw });
+  const status = await f.dispatch('job', {}, { params: { jobId: job.id } });
+  assert.equal(status.body.status, 'done');
+  assertNoInternalKeys(status);
+  assertNoInternalKeys(await f.dispatch('results'));
+});
+
+test('L2: replies and results persisted before compaction are also stripped on replay and polling', async () => {
+  const f = setup();
+  const body = { idempotencyKey: 'old-result' };
+  const first = await f.dispatch('news', body);
+  assert.equal(first.status, 200);
+  const [idemKey, idem] = [...f.rows].find(([id]) => id.startsWith('routine_idem:'));
+  idem.reply.body.pipeline._blackbox = ['old trace'];
+  f.rows.set(idemKey, idem);
+  assertNoInternalKeys(await f.dispatch('news', body));
+  delete idem.reply;
+  f.rows.set(idemKey, idem);
+  const [recordKey, record] = [...f.rows].find(([, row]) => row.workflowId === first.body.workflowId && row.kind === 'job');
+  record.reply.body.pipeline._rawModelDraft = 'old draft';
+  record.result.pipeline._blackbox = ['old trace'];
+  record.result.versions[0]._debug = 'old debug';
+  record.jobId = 'purged-job';
+  f.rows.set(recordKey, record);
+  assertNoInternalKeys(await f.dispatch('news', body));
+  const params = { jobId: record.jobId };
+  assertNoInternalKeys(await f.dispatch('job', {}, { params }));
+  f.set('job_queue', record.jobId, { id: record.jobId, payload: { workflowId: record.workflowId }, status: 'completed' });
+  assertNoInternalKeys(await f.dispatch('job', {}, { params }));
+  assertNoInternalKeys(await f.dispatch('results'));
 });
 
 test('health is read-only; persistence failures stop admission before enqueue or pipeline execution', async () => {

@@ -7,6 +7,7 @@ const NAME = /^[a-z0-9-]{1,40}$/;
 const WORKFLOW = /^routine_([a-z0-9-]{1,40})_[a-f0-9-]{36}$/;
 const DAY_MS = 86_400_000;
 const LEASE_MS = 900_000;
+const PENDING_CLAIM_MS = 20 * 60_000; // Longer than the 700s pipeline deadline and 15m lease.
 const GUARD = 'routine_guard_v1';
 const hash = value => createHash('sha256').update(value).digest('hex');
 export const thaiDay = ms => new Date(ms + 7 * 3_600_000).toISOString().slice(0, 10);
@@ -80,6 +81,18 @@ export function actualCost(raw) {
   return undefined;
 }
 
+function compactResponse(value) {
+  if (Array.isArray(value)) return value.map(compactResponse);
+  if (!value || typeof value !== 'object') return value;
+  const result = Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !key.startsWith('_'))
+    .map(([key, child]) => [key, compactResponse(child)]));
+  // Mirror auto/process compactDelegatedVersions without importing the route's
+  // news dependencies. Preserve even non-enumerable writer provenance.
+  if (typeof value.usedModel === 'string') result.usedModel = value.usedModel.trim();
+  return result;
+}
+
 export function normalizeResult(raw, workflowId, ms, estimate) {
   if (!raw?.success) fail(502, 'ROUTINE_PIPELINE_FAILED', 'ท่อข่าวไม่สำเร็จ');
   const data = raw.data || raw;
@@ -87,7 +100,7 @@ export function normalizeResult(raw, workflowId, ms, estimate) {
   if (!Array.isArray(versions) || !versions.length) fail(502, 'ROUTINE_RESULT_UNAVAILABLE', 'ท่อข่าวยังไม่มีฉบับที่อ่านได้');
   const usd = actualCost(raw);
   const caseId = data.generationLog?.caseId || raw.caseId || data.caseId;
-  return {
+  return compactResponse({
     success: true, workflowId, ...(caseId ? { caseId } : {}),
     versions: versions.map((version, index) => ({
       index,
@@ -101,7 +114,7 @@ export function normalizeResult(raw, workflowId, ms, estimate) {
     cost: { usd: usd ?? estimate, estimated: usd === undefined },
     timing: { ms: Math.max(0, ms) },
     pipeline: data,
-  };
+  });
 }
 
 export function createCore({ storage, pipeline, now = Date.now, uuid = randomUUID }) {
@@ -187,15 +200,22 @@ export function createCore({ storage, pipeline, now = Date.now, uuid = randomUUI
   };
 
   const replay = async idem => {
-    if (idem.reply) return idem.reply;
+    if (idem.reply) return compactResponse(idem.reply);
     if (idem.workflowId) {
       const record = await getRecord(idem.workflowId);
-      if (record?.reply) return record.reply;
+      if (record?.reply) return compactResponse(record.reply);
+      if (record?.result) {
+        if (record.mode === 'jobs' && record.jobId) return { status: 202, body: { success: true, jobId: record.jobId, workflowId: idem.workflowId } };
+        return { status: 200, body: compactResponse(record.result) };
+      }
       if (record?.jobId) {
         const job = await storage.getJob(record.jobId);
         if (job?.payload?.workflowId === idem.workflowId) return { status: 202, body: { success: true, jobId: record.jobId, workflowId: idem.workflowId } };
       }
     }
+    // Missing work can be a request still admitting/enqueuing. Reclaim only
+    // after the pending deadline; committed replies/jobs above retain 24h replay.
+    if (Number.isFinite(idem.createdAt) && now() - idem.createdAt >= PENDING_CLAIM_MS) return null;
     fail(409, 'ROUTINE_IN_PROGRESS', 'คำขอเดิมกำลังทำงานหรือรอตรวจสอบ ใช้คีย์เดิมอ่านอีกครั้ง ห้ามสร้างคีย์ใหม่เพื่อ retry');
   };
   const claim = async (body, mode, workflowId) => {
@@ -206,11 +226,14 @@ export function createCore({ storage, pipeline, now = Date.now, uuid = randomUUI
       const previous = await storage.get('routine_idem', id);
       if (previous && previous.expiresAt > now()) {
         if (previous.fingerprint !== fingerprint) fail(409, 'ROUTINE_IDEMPOTENCY_CONFLICT', 'คีย์เดิมถูกใช้กับคำขอที่ต่างกัน');
-        return { replay: await replay(previous) };
+        const reply = await replay(previous);
+        if (reply) return { replay: reply };
       }
-      if (previous) await storage.remove('routine_idem', id, previous.revision);
       const value = revision({ fingerprint, workflowId, createdAt: now(), expiresAt: now() + DAY_MS });
-      if (await storage.insert('routine_idem', id, value)) return { id, value };
+      const saved = previous
+        ? await storage.cas('routine_idem', id, previous.revision, value)
+        : await storage.insert('routine_idem', id, value);
+      if (saved) return { id, value };
     }
     fail(409, 'ROUTINE_IN_PROGRESS', 'คีย์คำขอนี้กำลังถูกใช้งาน');
   };
@@ -248,7 +271,7 @@ export function createCore({ storage, pipeline, now = Date.now, uuid = randomUUI
         reply = { status: 200, body: { ...record.result, maintenancePending: true } };
       } else reply = errorReply(error);
       // An uncertain enqueue may already be committed. Keep receipt pending so
-      // the SAME idempotency key can recover its predetermined jobId, never re-enqueue.
+      // the SAME key recovers its jobId; missing work can retry after 20 minutes.
       if (record && !record.result && !enqueuing) {
         // Read first: a timed-out write can already have committed the result.
         const saved = await getRecord(workflowId);
@@ -279,7 +302,7 @@ export function createCore({ storage, pipeline, now = Date.now, uuid = randomUUI
     if (!job) {
       const records = await storage.list('routine_meter');
       const saved = records.find(record => record.kind === 'job' && record.jobId === jobId && WORKFLOW.test(record.workflowId || ''));
-      if (saved?.result) return { status: 200, body: { success: true, status: 'done', result: saved.result } };
+      if (saved?.result) return { status: 200, body: { success: true, status: 'done', result: compactResponse(saved.result) } };
       fail(404, 'ROUTINE_NOT_FOUND', 'ไม่พบงาน routine หรือคิวถูกล้างก่อนบันทึกผล');
     }
     const workflowId = job?.payload?.workflowId;
@@ -294,7 +317,7 @@ export function createCore({ storage, pipeline, now = Date.now, uuid = randomUUI
         if (log) raw = { success: true, data: { versions: log.versions, generationLog: { caseId }, pipelineInfo: log.pipeline_info } };
       }
       const ms = Math.max(0, Date.parse(job.completedAt || job.createdAt) - Date.parse(job.startedAt || job.createdAt));
-      const result = record.result || normalizeResult(raw, workflowId, ms, record.cost?.usd ?? caps.estimate);
+      const result = record.result ? compactResponse(record.result) : normalizeResult(raw, workflowId, ms, record.cost?.usd ?? caps.estimate);
       await storeRecord({ ...record, result, caseId: result.caseId, cost: result.cost });
       await settle(workflowId, result.cost);
       return { status: 200, body: { success: true, status: 'done', result } };
@@ -334,7 +357,7 @@ export function createCore({ storage, pipeline, now = Date.now, uuid = randomUUI
             catch (error) { if (!(error instanceof RoutineError) || error.status !== 404) throw error; }
           }
           if (!result) continue;
-          items.push({ ...(result.caseId ? { caseId: result.caseId } : {}), workflowId: record.workflowId, routine: record.routine, createdAt: record.createdAt, versions: result.versions });
+          items.push({ ...(result.caseId ? { caseId: result.caseId } : {}), workflowId: record.workflowId, routine: record.routine, createdAt: record.createdAt, versions: compactResponse(result.versions) });
           if (items.length === limit) break;
         }
         return { status: 200, body: { success: true, items } };

@@ -8,6 +8,7 @@ API ชุดนี้เป็น facade แยกใต้ `/api/routine` ส�
 - เมื่อปิดสวิตช์ ทุก endpoint ในเอกสารตอบ `404 ROUTINE_API_DISABLED` ก่อนโหลด dependency ของท่อข่าว/ฐานข้อมูล เมื่อเปิดแต่คีย์ไม่ได้ตั้งหรือคีย์ไม่ตรง ตอบ `401 ROUTINE_UNAUTHORIZED`
 - เปรียบเทียบคีย์โดยใช้ `timingSafeEqual`; อย่าใส่คีย์ใน URL, source control, แชท, screenshot หรือ log
 - งานข่าวเดินผ่านท่อเดิม ผลลัพธ์เป็นฉบับข่าวใน `versions[]`; facade ไม่สร้างหรือสังเคราะห์พิกเซลภาพ และไม่สั่งเผยแพร่ Facebook
+- `/news` (รอผล) **ไม่เข้าคลังข่าว (archive)** — ผลอยู่ใน `generation_logs` และ response เท่านั้น; `/jobs` (คิว) เข้าคลังข่าวตามปกติผ่าน worker ให้ Codex เลือกโหมดตามความต้องการเรื่อง archive
 - รักษา `TEXT_ONLY_MODE` ของระบบเดิม: ค่าเริ่มต้นรับข้อความล้วน URL จะใช้ได้เมื่อผู้ดูแลตั้ง `TEXT_ONLY_MODE=0` อยู่แล้ว เส้นทาง sync รองรับเฉพาะแขนง Enhanced ที่มี service เดิมให้เรียกโดยตรง หาก input ต้องใช้แขนงอื่นตอบ `400 ROUTINE_UNSUPPORTED_INPUT`; ใช้ queue ได้ตามความสามารถและข้อจำกัดของ worker เดิม
 - ใช้ workflow ID รูปแบบ `routine_<routine>_<uuid>` เพื่อระบุแหล่งงาน routine โดย `<routine>` เป็นชื่อที่ส่งมา เช่น `morning-news`
 - เวลาจากการวิจัยเดิม: ประมาณ 3 นาทีและประมาณ US$0.8 ต่อข่าวหนึ่งงาน เป็นผลวัดก่อนหน้า ไม่ใช่ SLA ราคาเหมาจ่าย หรือผลทดสอบ deployment นี้
@@ -54,12 +55,15 @@ Preview ที่มี Deployment Protection อาจปฏิเสธ reques
 - idempotency เป็น optional แต่ client ที่ใช้งานจริงควรส่งทุกครั้ง ผ่าน header `idempotency-key` (รองรับ header `idempotencyKey` ด้วย) หรือ `idempotencyKey` ใน body ความยาว 1–200 ตัวและต้องไม่เป็น whitespace ล้วน ถ้าส่งทั้ง header และ body ค่าต้องตรงกัน ใช้ key คงที่ต่อ **ข่าวต้นฉบับและงานหนึ่งครั้ง** ห้ามสร้าง key ใหม่ทุก retry
 - เก็บ idempotency 24 ชั่วโมง เมื่อ key เดิมกับ payload เดิมเสร็จแล้ว จะคืน reply เดิม (รวม error ที่บันทึกไว้) เมื่อยังทำงานอยู่ตอบ `409 ROUTINE_IN_PROGRESS` เมื่อ key เดิมกับ input/routine/contentLength/endpoint mode ต่างกันตอบ `409 ROUTINE_IDEMPOTENCY_CONFLICT` อย่าใช้ key เดียวกันข้าม `/news` กับ `/jobs`
 - การปฏิเสธก่อนรับงานจะปล่อย claim เพื่อให้ retry ด้วย key เดิมได้ ส่วน error หลังรับงานถูกเก็บเป็น reply ของ key นั้น การเพิ่มคิวที่ยังยืนยันไม่ได้อาจบันทึกไปแล้ว: ใช้ key เดิมเพื่อกู้ `jobId` เดิม ไม่ enqueue ซ้ำ
+- ข้อยกเว้นอายุ claim: ถ้ายังไม่มี reply/result และอ่าน storage สำเร็จแล้วไม่พบงานคิวรองรับ จะตอบ `409 ROUTINE_IN_PROGRESS` เฉพาะช่วง **20 นาทีจากเวลาสร้าง claim** (นานกว่า pipeline deadline 700 วินาทีและ lease 15 นาที) หลังจากนั้น key เดิมและ payload เดิมแย่ง claim ใหม่ด้วย revision CAS แล้วรับงานใหม่ได้ ครอบคลุม enqueue ล้มเหลวโดยไม่ได้ commit และการปฏิเสธก่อนรับงานที่ลบ claim ไม่สำเร็จ หากอ่าน storage ไม่ได้ยังตอบ 503; หากพบ reply/result หรือ job เดิมยัง replay ของเดิมภายใน 24 ชั่วโมง การรับงานใหม่ยังผ่านเพดานเดิมและไม่คืนโควตาของงานที่เคยรับแล้ว
 - เมื่อ HTTP client timeout งานบน server อาจยังทำต่อ ห้ามถือว่าไม่ได้รับงานแล้วเริ่มข่าวใหม่ด้วย key ใหม่ ให้ใช้ key เดิมภายใน 24 ชั่วโมงหรืออ่านสถานะ/ผลก่อน
 - เลือกใช้ sync หรือ queue สำหรับข่าวหนึ่งชิ้น การส่งทั้งสอง endpoint เป็นสองงานที่อาจมีค่าใช้จ่ายแยกกัน
 
 ## ผลลัพธ์และการคุมค่าใช้จ่าย
 
 ผลข่าวสำเร็จจาก `/news` หรือ `GET /jobs/{jobId}` เมื่อ `done` มี `workflowId`, `versions[]`, `cost`, `timing` และ `pipeline` โดย `caseId` เป็นข้อมูลเสริมเมื่อท่อเดิมส่ง ID กลับมา ไม่ควรอนุมาน `caseId` จาก `workflowId` ส่วน `/results` คืนรายการย่อใน `items[]` ซึ่งไม่มี `success`, `cost`, `timing` หรือ `pipeline` ต่อรายการ
+
+`pipeline` คืนข้อมูลท่อที่ตัดคีย์ขึ้นต้น `_` ออกทุกระดับ รวม `_blackbox`, `_rawModelDraft` และ debug ใน `analysisResult.versions[]`/`versions[]`; คงเนื้อข่าวและหลักฐาน `usedModel` แม้เป็น non-enumerable โดย trim ชื่อโมเดลแบบเดียวกับ `compactDelegatedVersions` ใช้กับผลใหม่และผลเก่าที่อ่านมา replay/poll ด้วย จึงไม่ใช่ legacyData ดิบทั้งก้อน และยังอาจมีข้อความต้นฉบับ/เนื้อข่าวที่ไม่ควร log ทั้ง response
 
 ```json
 {
@@ -546,6 +550,9 @@ components:
         idempotencyKey (or header idempotencyKey). Must not be all whitespace.
         Header and body must match if both supplied. Retained 24h, including
         admitted failures. Pre-admission rejection releases the key claim.
+        A claim without a reply/result or backing queue job can be replaced
+        atomically after 20 minutes from claim creation. Failed storage reads
+        return 503; existing replies/results/jobs still replay within 24h.
         Changed input, options or endpoint mode returns 409.
   requestBodies:
     NewsInput:
@@ -609,6 +616,16 @@ components:
       properties:
         ms: { type: number, minimum: 0 }
       additionalProperties: true
+    PublicJsonValue:
+      description: JSON value with keys starting with underscore removed recursively
+      anyOf:
+        - type: ['null', boolean, number, string]
+        - type: array
+          items: { $ref: '#/components/schemas/PublicJsonValue' }
+        - type: object
+          propertyNames:
+            not: { pattern: '^_' }
+          additionalProperties: { $ref: '#/components/schemas/PublicJsonValue' }
     NewsResult:
       type: object
       required: [success, workflowId, versions, cost, timing, pipeline]
@@ -626,8 +643,14 @@ components:
         timing: { $ref: '#/components/schemas/Timing' }
         pipeline:
           type: object
-          description: Original pipeline data; may contain source text and generated content
-          additionalProperties: true
+          description: >-
+            Compacted pipeline data, including nested versions. All keys starting
+            with underscore are removed; usedModel writer provenance is retained
+            and trimmed even when non-enumerable. May still contain source text
+            and generated content. Applies to fresh and replayed results.
+          propertyNames:
+            not: { pattern: '^_' }
+          additionalProperties: { $ref: '#/components/schemas/PublicJsonValue' }
         maintenancePending:
           type: boolean
           description: Result succeeded; lease or meter maintenance still needs reconciliation
@@ -758,12 +781,38 @@ components:
 
 ## หลักฐานการตรวจในเครื่อง 8 กันยายน 2569
 
-ฐาน `a313281c23c0fb5b129376ea545518152fa4219d`, กิ่ง `feat/routine-api`, Node `v24.15.0`, Next.js `16.2.6` ใช้ node_modules junction ที่ผู้บัญชาการจัดไว้ ไม่ได้ install/ci, push, deploy หรือทดสอบ AI/ฐานข้อมูลจริง
+ฐาน `a313281c23c0fb5b129376ea545518152fa4219d`, กิ่ง `feat/routine-api`, Node `v24.15.0`, Next.js `16.2.6` ผู้บัญชาการจัด node_modules เป็นสำเนาจริงแล้ว ผล build ของผู้บัญชาการและ Fable เป็น exit 0 ทั้งคู่ ตัวเลข 57 เทสและ mutation 6 ตัวด้านล่างเป็นหลักฐานรอบแรกก่อนแก้ findings; รอบแก้เริ่มจาก `3912ce67` บนกิ่ง preview ที่ผู้บัญชาการ push แล้ว ผู้แก้ไม่ได้ install/ci, push, deploy หรือทดสอบ AI/ฐานข้อมูลจริง
+
+**ผลรอบแก้ findings จาก `3912ce67`:** เทสเพิ่ม 5 ตัวครอบคลุม M2 และ L2 พร้อมปรับ assertion เดิมให้ตรวจค่า JSON หลัง compact แทน object identity; mutation ถอดการแก้จาก source จริงทีละข้อและคืนไฟล์ด้วย SHA256 ตรงกันก่อนทดสอบชุดรวม
+
+```text
+$ node --test tests/routine-*.test.mjs
+ℹ tests 62
+ℹ pass 62
+ℹ fail 0
+exit 0
+
+M2 mutation: ถอดเงื่อนไขหมดอายุ pending claim 20 นาที
+# tests 3 / # pass 0 / # fail 3 / exit 1
+ERR_ASSERTION: M2_UNCOMMITTED; M2_REJECTED (409 !== 200, 409 !== 202)
+L2 mutation: เปลี่ยน compactResponse ให้คืนข้อมูลเดิม
+# tests 2 / # pass 0 / # fail 2 / exit 1
+ERR_ASSERTION: L2_INTERNAL_KEY: _blackbox
+
+$ npx next build
+▲ Next.js 16.2.6 (Turbopack)
+Turbopack build encountered 14 warnings:
+✓ Compiled successfully in 5.2s
+✓ Generating static pages using 23 workers (134/134) in 476ms
+exit 0
+```
+
+รอบ build นี้รันคำสั่งเดิมด้วยสิทธิ์อ่าน path dependency ที่ sandbox จำกัด โดยไม่แก้ config หรือ dependency; scoped ESLint ผ่าน exit 0 และ validator ผ่าน 67/68 exit 0 ตามข้อยกเว้นเดิม ผล 57 เทสที่เหลือด้านล่างเป็นบันทึกรอบแรก
 
 - เทสรวม: **57/57 ผ่าน**, exit 0; off-parity ทดสอบ route จริงทั้ง 7 route × 7 methods พร้อม import sentinel และตรวจซ้ำใน process ใหม่
 - Mutation: baseline 6/6 ผ่าน exit 0; mutation 6/6 ถูกตรวจจับด้วย `ERR_ASSERTION` ที่ตรงเป้าหมาย exit 1 (แต่ละตัวอีก 5 contracts ผ่าน) ไม่ถือ syntax/import error ว่าฆ่า mutation ได้
 - Validator: exit 0, ผ่าน 67/68 (99%); ข้อเดียวที่ไม่ผ่านคือ OPENAI_API_KEY ไม่ตั้ง ตามข้อยกเว้นภาคผนวกรอบ 2
-- **Build ยังไม่ผ่าน** ทั้งคำสั่งที่ร้องขอและการตรวจทางเลือก ไม่อ้างว่า ready to deploy
+- **Build ผ่าน** `npx next build` exit 0 ทั้งของผู้บัญชาการและ Fable; มี route `/api/routine` ครบ 7 route
 - Scoped ESLint ผ่าน exit 0 ไม่มี warning/error; smoke syntax exit 0
 - OpenAPI YAML parse 6 paths และ JSON Schema ตรวจผ่าน; smoke syntax/help และ localhost mock ผ่าน รวมตรวจ POST ไม่ retry และไม่พิมพ์ secret
 - การอ่าน storage ใช้ keyset pagination จนได้หน้าว่าง จำกัด 10,000 แถวและ 100 หน้า; ข้อมูลไม่ครบ/รูปแบบผิดปฏิเสธ 503
@@ -778,35 +827,11 @@ components:
 | ถอดตัวกรอง workflow prefix | 200 !== 404 | 1 | KILLED |
 | ถอด idempotency | 2 !== 1 | 1 | KILLED |
 
-ผล build ที่เป็นอุปสรรค (ข้อความดิบส่วนที่ระบุสาเหตุ):
+หลักฐาน build ปัจจุบันจากรายงาน Fable และผล validator (ข้อ OPENAI_API_KEY เป็นข้อยกเว้น environment ที่ผู้บัญชาการยอมรับ):
 
 ```text
 $ npx next build
-▲ Next.js 16.2.6 (Turbopack)
-Error [TurbopackInternalError]: Symlink [project]/node_modules is invalid, it points out of the filesystem root
-exit 1
-
-$ npx next build --webpack
-▲ Next.js 16.2.6 (webpack)
-⚠ Compiled with warnings in 10.1s
-./src/lib/services/playwrightFrameCapture.js
-Critical dependency: the request of a dependency is an expression
-
-Failed to compile.
-./src/lib/quickTestJobs.js:12:1
-Module not found: Can't resolve 'fs'
-Import trace for requested module:
-./src/instrumentation-node.js
-./src/instrumentation.js
-
-./src/lib/quickTestJobs.js:13:1
-Module not found: Can't resolve 'path'
-Import trace for requested module:
-./src/instrumentation-node.js
-./src/instrumentation.js
-
-> Build failed because of webpack errors
-exit 1
+exit 0 · route /api/routine ครบ 7 ใน .next
 
 $ node scripts/validate-workflow.mjs
 Total checks: 68
@@ -818,7 +843,7 @@ Score: 99%
 exit 0
 ```
 
-ข้อความ “Proceeding with deploy” เป็น output เดิมของ validator เท่านั้น งานนี้ไม่ได้ deploy สาเหตุ webpack อยู่ใน import chain ของไฟล์เดิมที่ไม่ได้แก้ การแก้ bundler root/config หรือ instrumentation เป็นงานนอกขอบเขต จึงหยุดแก้ตรงนั้น ทางดำเนินต่อคือให้ผู้บัญชาการใช้สนาม build ที่จัด dependency อยู่ใน root ได้ หรือพิจารณาปัญหา build ของฐานเดิมแยกต่างหาก โดยคง facade และไฟล์ข่าวในกิ่งนี้ไว้ตามข้อกำหนด
+ข้อความ “Proceeding with deploy” เป็น output เดิมของ validator เท่านั้น งานแก้ findings นี้ไม่ได้ deploy
 
 ข้อจำกัดที่ต้องตรวจบน Preview: ยังไม่ยืนยัน DB schema/RLS/PostgREST ที่ deploy จริง ไม่ได้รัน worker/ข่าวจริง; queue ที่ถูกล้างก่อน facade poll เก็บ snapshot อาจอ่านผลไม่ได้; service เดิมไม่มี workflowId ใน generation_logs จึงเก็บความสัมพันธ์ caseId ใน routine_meter; การปิดสวิตช์หยุดรับงานใหม่แต่ไม่ยกเลิกงานที่รับไปแล้วหรือ worker เดิม; ส่วน select ยังคง 501 ตามคำตัดสิน และ sync รับเฉพาะแขนงที่มี service ให้เรียกตรงตามสัญญาเดิม
 

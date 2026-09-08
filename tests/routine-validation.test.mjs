@@ -65,6 +65,6 @@ test('response uses original per-version provenance without inventing missing ca
   assert.equal(result.versions[0].promptSource, 'library');
   assert.ok(!Object.hasOwn(result, 'caseId'));
   assert.deepEqual(result.cost, { usd: 1, estimated: true });
-  assert.equal(result.pipeline, raw.data);
+  assert.deepEqual(result.pipeline, raw.data); // Public values survive compaction; object identity is not part of JSON.
   assert.throws(() => normalizeResult({ success: true, data: { versions: [] } }, 'workflow', 0, 1), { errorType: 'ROUTINE_RESULT_UNAVAILABLE' });
 });
