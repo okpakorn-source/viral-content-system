@@ -224,10 +224,14 @@ export async function runClipBrainPipeline(rawOpts) {
           clipMeta: { url, title: caption, platform: isYT ? 'youtube' : 'file' },
         });
         const envText = (key) => String(process.env[key] || '').trim();
-        const primary = { brain: 'codex', model: envText('CLIP_TOPIC_MODEL') || 'gpt-6-astra',
-          effort: envText('CLIP_TOPIC_EFFORT') || 'ultra' };
-        const fallback = { brain: 'claude', model: envText('CLIP_TOPIC_FALLBACK_MODEL') || 'claude-fable-5',
-          effort: envText('CLIP_TOPIC_FALLBACK_EFFORT') || 'max' };
+        // ★ 8 ก.ย. 69 (เจ้าของ: ให้ Claude Opus 5 high เป็นสมองหลัก): เลือกค่ายผ่าน env CLIP_TOPIC_BRAIN / CLIP_TOPIC_FALLBACK_BRAIN
+        //   ค่าเริ่มต้นของรุ่น/ระดับขึ้นกับค่ายที่เลือก (codex = gpt-6-astra ultra · claude = claude-opus-5 high · สำรอง claude = claude-fable-5 max · สำรอง codex = gpt-6-astra xhigh)
+        const primaryBrain = envText('CLIP_TOPIC_BRAIN') === 'claude' ? 'claude' : 'codex';
+        const fallbackBrain = envText('CLIP_TOPIC_FALLBACK_BRAIN') === 'codex' ? 'codex' : 'claude';
+        const primary = { brain: primaryBrain, model: envText('CLIP_TOPIC_MODEL') || (primaryBrain === 'claude' ? 'claude-opus-5' : 'gpt-6-astra'),
+          effort: envText('CLIP_TOPIC_EFFORT') || (primaryBrain === 'claude' ? 'high' : 'ultra') };
+        const fallback = { brain: fallbackBrain, model: envText('CLIP_TOPIC_FALLBACK_MODEL') || (fallbackBrain === 'codex' ? 'gpt-6-astra' : 'claude-fable-5'),
+          effort: envText('CLIP_TOPIC_FALLBACK_EFFORT') || (fallbackBrain === 'codex' ? 'xhigh' : 'max') };
         const requestedTimeout = Number(envText('CLIP_TOPIC_TIMEOUT_MS'));
         const timeoutMs = Number.isSafeInteger(requestedTimeout) && requestedTimeout > 0 && requestedTimeout <= 2147483647
           ? requestedTimeout : 1200000;
@@ -265,8 +269,12 @@ export async function runClipBrainPipeline(rawOpts) {
     log(`ชั้นโค้ด: ${codeCheck.verdict} · เจอ ${codeCheck.findings.length} จุด`);
 
     let aiCheck = null;
+    // ★ 8 ก.ย. 69: ผู้ตรวจเลือกค่ายผ่าน env CLIP_REVIEWER_BRAIN (codex|claude) + CLIP_REVIEWER_MODEL/EFFORT (ไม่ตั้ง = codex auto เหมือนเดิม)
+    const reviewerBrain = String(process.env.CLIP_REVIEWER_BRAIN || '').trim() === 'claude' ? 'claude' : 'codex';
+    const reviewerModel = String(process.env.CLIP_REVIEWER_MODEL || '').trim();
+    const reviewerEffort = String(process.env.CLIP_REVIEWER_EFFORT || '').trim();
     const cr = await runBrain({
-      brain: 'codex', label: 'ผู้ตรวจ', timeoutMs: 300000,
+      brain: reviewerBrain, ...(reviewerModel ? { model: reviewerModel } : {}), ...(reviewerEffort ? { effort: reviewerEffort } : {}), label: 'ผู้ตรวจ', timeoutMs: 300000,
       prompt: buildReviewPrompt({ insight, truth: truthText, caption, codeFindings: codeCheck.findings }),
     });
     if (cr.ok && cr.json) {

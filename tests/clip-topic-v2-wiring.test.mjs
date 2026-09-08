@@ -97,7 +97,7 @@ const { emptyTopicDoc, toLegacyInsight, syncTopicsV2FromLegacy } = await import(
 const { countThaiWords } = await import('../src/lib/services/clipBrain/topicMetrics.js');
 const { runOnce, parseArgs } = await import('../scripts/clip-brain-once.mjs');
 
-const ENV_KEYS = ['CLIP_TOPIC_V2', 'CLIP_TOPIC_MODEL', 'CLIP_TOPIC_EFFORT', 'CLIP_TOPIC_FALLBACK_MODEL', 'CLIP_TOPIC_FALLBACK_ON_TIMEOUT',
+const ENV_KEYS = ['CLIP_TOPIC_V2', 'CLIP_TOPIC_MODEL', 'CLIP_TOPIC_EFFORT', 'CLIP_TOPIC_FALLBACK_MODEL', 'CLIP_TOPIC_FALLBACK_ON_TIMEOUT', 'CLIP_TOPIC_BRAIN', 'CLIP_TOPIC_FALLBACK_BRAIN', 'CLIP_REVIEWER_BRAIN', 'CLIP_REVIEWER_MODEL', 'CLIP_REVIEWER_EFFORT',
   'CLIP_TOPIC_FALLBACK_EFFORT', 'CLIP_TOPIC_TIMEOUT_MS', 'GEMINI_VIDEO_API_KEY', 'GEMINI_API_KEY',
   'CLIP_SAFE_TEXT', 'CLIP_USAGE_LOG', 'CLIP_GEMINI_MAX_ATTEMPTS', 'CLIP_GEMINI_FALLBACK_MODELS'];
 let saved;
@@ -460,3 +460,23 @@ for (const [mutation, pattern] of [['flag', '^enabled success'], ['normalize', '
     assert.match(child.stdout + child.stderr, /ERR_ASSERTION|AssertionError/);
   });
 }
+
+// ★ 8 ก.ย. 69 (เจ้าของ: Claude Opus 5 high เป็นสมองหลัก): เลือกค่ายของตัวเรียบเรียง/ตัวสำรอง/ผู้ตรวจผ่าน env — ไม่ตั้ง = พฤติกรรมเดิม (codex)
+test('brain selection env switches composer, fallback and reviewer providers with per-brain defaults', async () => {
+  const legacy = await execute('1');
+  assert.equal(legacy.calls.find((c) => c.label === 'clip-compose-compose').brain, 'codex');
+  assert.equal(legacy.calls.find((c) => c.label === 'ผู้ตรวจ').brain, 'codex');
+  assert.equal(legacy.calls.find((c) => c.label === 'ผู้ตรวจ').model, undefined, 'reviewer keeps codex auto when unset');
+  Object.assign(process.env, { CLIP_TOPIC_BRAIN: 'claude', CLIP_TOPIC_FALLBACK_BRAIN: 'codex', CLIP_REVIEWER_BRAIN: 'claude', CLIP_REVIEWER_MODEL: 'claude-opus-5', CLIP_REVIEWER_EFFORT: 'high' });
+  const swapped = await execute('1', { composeReplies: [{ ok: false, errorType: 'BRAIN_QUOTA' }, { ok: true, json: doc(), costUSD: 0.1 }] });
+  const compose = swapped.calls.filter((c) => c.label.startsWith('clip-compose'));
+  assert.deepEqual(compose.map((c) => [c.brain, c.model, c.effort]), [['claude', 'claude-opus-5', 'high'], ['codex', 'gpt-6-astra', 'xhigh']], 'claude primary with opus-5/high defaults, codex fallback with astra/xhigh defaults');
+  const reviewer = swapped.calls.find((c) => c.label === 'ผู้ตรวจ');
+  assert.deepEqual([reviewer.brain, reviewer.model, reviewer.effort], ['claude', 'claude-opus-5', 'high']);
+  assert.equal(swapped.result.brain.topicsV2.ok, true);
+  process.env.CLIP_TOPIC_MODEL = 'claude-fable-5'; process.env.CLIP_TOPIC_EFFORT = 'max';
+  const overridden = await execute('1');
+  assert.deepEqual([overridden.calls.find((c) => c.label === 'clip-compose-compose').brain, overridden.calls.find((c) => c.label === 'clip-compose-compose').model, overridden.calls.find((c) => c.label === 'clip-compose-compose').effort], ['claude', 'claude-fable-5', 'max'], 'explicit model/effort env still wins');
+  process.env.CLIP_TOPIC_BRAIN = 'gemini';
+  assert.equal((await execute('1')).calls.find((c) => c.label === 'clip-compose-compose').brain, 'codex', 'unknown brain value falls back to codex');
+});
