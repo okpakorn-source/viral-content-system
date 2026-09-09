@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { TOPIC_SCHEMA_VERSION, emptyTopicDoc, validateTopicDoc, computeSharePct, toLegacyInsight, fromLegacyInsight } from '../src/lib/services/clipBrain/topicSchema.js';
-import { BUREAUCRATIC_WORDS, countThaiWords, lengthBand, bureaucraticRate, longSentenceCount, crossStoryOverlap, scoreTopicDoc, wordRange, wordRangeLabel, styleReport, styleIssues } from '../src/lib/services/clipBrain/topicMetrics.js';
+import { BUREAUCRATIC_WORDS, countThaiWords, lengthBand, bureaucraticRate, longSentenceCount, crossStoryOverlap, scoreTopicDoc, wordRange, wordRangeLabel, styleReport, styleIssues, STYLE_PAIR_PRONOUN_MAX } from '../src/lib/services/clipBrain/topicMetrics.js';
 import { buildBaseline } from '../scripts/clip-topic-baseline.mjs';
 import { buildClipSubStoryText, buildClipNewsReadyText } from '../src/lib/services/clipNewsReadyText.js';
 
@@ -360,6 +360,50 @@ test('styleReport flags outsider words and role-label openings as soft observati
   assert.ok(styleIssues(old, { level: 'hard' }).some((x) => x.includes('อ้างที่มาในเนื้อเรื่อง') && x.includes('ระบุว่า')));
   assert.deepEqual(styleIssues(old, { level: 'soft' }), []);
   assert.equal(styleReport('').roleLabelOpening, null);
+});
+
+// ★ 9 ก.ย. 69 (เจ้าของ เคสออย-บีม 7+5 ครั้ง/เอกสาร): ด่านสำนวนระดับ soft "คำแทนคู่ซ้ำเกิน 2 ต่อท่อน"
+test('styleReport counts pair pronouns and flags only more than the max, as a soft observation', () => {
+  assert.equal(STYLE_PAIR_PRONOUN_MAX, 2, 'เพดานต่อท่อน = 2 (เกินจึงติด)');
+
+  const r = styleReport('ทั้งคู่ไปตลาด\nทั้งคู่ซื้อผัก\nทั้งคู่กลับบ้าน');
+  assert.equal(r.pair, 3);
+  assert.deepEqual(r.matches.pair, ['ทั้งคู่', 'ทั้งคู่', 'ทั้งคู่']);
+  const soft = styleIssues(r, { level: 'soft' });
+  assert.equal(soft.filter((x) => x.startsWith('คำแทนคู่ 3 ครั้ง')).length, 1, JSON.stringify(soft));
+  assert.ok(soft.some((x) => x.includes('(ทั้งคู่)') && x.includes('เกิน 2 ต่อท่อน')), JSON.stringify(soft));
+  assert.deepEqual(styleIssues(r, { level: 'hard' }), [], 'คำแทนคู่เป็นข้อสังเกต ห้ามตกด่านแข็ง');
+
+  // ขอบเขต: เท่ากับเพดานพอดี ยังไม่ติด (ผสม 2 คำก็นับรวมท่อนเดียวกัน)
+  const edge = styleReport('ทั้งคู่ไปตลาด แล้วสองคนกลับบ้าน');
+  assert.equal(edge.pair, 2);
+  assert.deepEqual(edge.matches.pair, ['ทั้งคู่', 'สองคน']);
+  assert.deepEqual(styleIssues(edge, { level: 'soft' }).filter((x) => x.startsWith('คำแทนคู่')), [], 'เท่ากับ 2 ยังไม่ติด');
+
+  // ผสม: ทั้งคู่ 1 + สองคน 2 = 3 → ติด และรายชื่อคำที่เจอถูกยุบซ้ำก่อนแสดง
+  const mixed = styleReport('ทั้งคู่เดินเข้าบ้าน\nสองคนช่วยกันเก็บของ\nสองคนนั่งพักหน้าบ้าน');
+  assert.equal(mixed.pair, 3);
+  assert.deepEqual(mixed.matches.pair, ['ทั้งคู่', 'สองคน', 'สองคน']);
+  assert.ok(styleIssues(mixed, { level: 'soft' }).some((x) => x.startsWith('คำแทนคู่ 3 ครั้ง') && x.includes('(ทั้งคู่ / สองคน)')),
+    JSON.stringify(styleIssues(mixed, { level: 'soft' })));
+
+  // นับตัวอักษรตรงตัวเหมือนหมวดอื่น: "ทั้งสองคน" = สำนวนแข็งแบบเดียวกัน จึงนับ
+  assert.deepEqual(styleReport('ทั้งสองคนเดินไปด้วยกัน').matches.pair, ['สองคน']);
+
+  // เนกาทีฟ: เรียกชื่อคน = ไม่มีคำแทนคู่เลย และไม่มีข้อสังเกตใดๆ
+  const clean = styleReport('ออยกับบีม กวี เดินไปตลาด\nออยเลือกผัก บีม กวี จ่ายเงิน');
+  assert.equal(clean.pair, 0);
+  assert.deepEqual(clean.matches.pair, []);
+  assert.deepEqual(styleIssues(clean), []);
+  assert.equal(styleReport('').pair, 0);
+
+  // กันถอยหลัง: หมวดเดิมไม่ขยับเพราะหมวดใหม่
+  assert.deepEqual([r.attribution, r.dramatic, r.filler, r.meta, r.outsider, r.longSentences], [0, 0, 0, 0, 0, 0]);
+  const old = styleReport('ทั้งคู่ระบุว่าเหนื่อย ทั้งคู่ถึงกับน้ำตาคลอ ทั้งคู่เดินกลับ');
+  assert.equal(old.pair, 3);
+  assert.equal(old.attribution, 1);
+  assert.equal(old.dramatic, 2);
+  assert.deepEqual(styleIssues(old, { level: 'hard' }).length, 2, 'ด่านแข็งยังเป็นของหมวดเดิมล้วน');
 });
 
 test('scoreTopicDoc carries style reports for every story and the main story', () => {

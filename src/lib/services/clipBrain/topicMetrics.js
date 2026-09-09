@@ -79,9 +79,12 @@ export const STYLE_WORDS = Object.freeze({
   meta: Object.freeze(['คลิปเริ่มจาก', 'ปิดท้ายด้วย', 'คลิปปิดท้าย', 'ข้อความบนหน้าจอ', 'บนหน้าจอ', 'ช่วงท้ายคลิป', 'ต้นคลิป', 'หน้ากล้อง', 'กำกับไว้ตรงกัน', 'ตลอดทั้งคลิป']),
   // ★ 9 ก.ย. 69 (เคสออย-บีม): outsider = "คำมองจากนอก" — ผู้เล่ายืนนอกเรื่องแล้วชี้ตัวละครแบบนักข่าวรายงานถึงเขา แทนที่จะเรียกชื่อ (soft เท่านั้น)
   outsider: Object.freeze(['ฝ่ายชาย', 'ฝ่ายหญิง']),
+  // คำแทนคู่ — ใช้พร่ำเฟือแล้วสำนวนแข็ง (เคสออย-บีม 9 ก.ย.: 7+5 ครั้ง/เอกสาร)
+  pair: Object.freeze(['ทั้งคู่', 'สองคน']),
 });
 export const STYLE_MAX_SENTENCE_WORDS = 25;
 export const STYLE_FILLER_PER_100 = 1;
+export const STYLE_PAIR_PRONOUN_MAX = 2;
 
 function countTerms(body, terms) {
   const words = [...new Set(terms)].sort((a, b) => b.length - a.length);
@@ -115,6 +118,7 @@ export function styleReport(text) {
     words,
     attribution: found.attribution.length, dramatic: found.dramatic.length, filler: found.filler.length, meta: found.meta.length,
     outsider: found.outsider.length,
+    pair: found.pair.length,
     fillerPer100: words ? found.filler.length / words * 100 : 0,
     longSentences,
     roleLabelOpening: roleLabelOpening(body),
@@ -125,7 +129,7 @@ export function styleReport(text) {
 /** ข้อบกพร่องสำนวน 2 ระดับ (ว่าง = ผ่าน)
  *   hard = ผิดกติกาใจความล้วนโดยตรง → ตกด่าน ต้องซ่อม: อ้างที่มา 0 · คำเปรย/เร้าอารมณ์ 0 · เล่ากล้อง 0
  *   soft = ความสวยของสำนวน → เป็น "ข้อสังเกตความพร้อม" ให้คนเห็น ไม่ทิ้งทั้งฉบับ: ประโยค > 25 คำ · คำเฟ้อ > 1 ต่อ 100 คำ
- *          · คำมองจากนอก (ฝ่ายชาย/ฝ่ายหญิง) · เปิดเรื่องด้วยป้ายบทบาทซ้อนชื่อ (★ 9 ก.ย. 69 เคสออย-บีม)
+ *          · คำมองจากนอก (ฝ่ายชาย/ฝ่ายหญิง) · เปิดเรื่องด้วยป้ายบทบาทซ้อนชื่อ · คำแทนคู่เกิน 2 ต่อท่อน (★ 9 ก.ย. 69 เคสออย-บีม)
  *   (★ 9 ก.ย. 69 บทเรียนคลิป 53 นาที: ฉบับดีทั้ง 10 เรื่องถูกทิ้งเพราะประโยคยาว 8 ประโยค เสีย 38 นาที)
  */
 export function styleIssues(report, { level = 'all' } = {}) {
@@ -139,6 +143,7 @@ export function styleIssues(report, { level = 'all' } = {}) {
   if (r.longSentences > 0) soft.push(`ประโยคยาวเกิน ${STYLE_MAX_SENTENCE_WORDS} คำ ${r.longSentences} ประโยค — แบ่งประโยค`);
   if (r.fillerPer100 > STYLE_FILLER_PER_100) soft.push(`คำเฟ้อ ${r.filler} ครั้ง (${show(r.matches.filler)}) เกิน ${STYLE_FILLER_PER_100} ต่อ 100 คำ`);
   if (r.outsider > 0) soft.push(`คำมองจากนอก ${r.outsider} ครั้ง (${show(r.matches.outsider)}) — ใช้ชื่อคน หรือ "ทั้งคู่/สองคน" แทน`);
+  if (r.pair > STYLE_PAIR_PRONOUN_MAX) soft.push(`คำแทนคู่ ${r.pair} ครั้ง (${show(r.matches.pair)}) เกิน ${STYLE_PAIR_PRONOUN_MAX} ต่อท่อน — ใช้ชื่อคน หรือละประธานเมื่อประโยคก่อนหน้าประธานเดียวกัน`);
   if (r.roleLabelOpening) soft.push(`เปิดเรื่องด้วยป้ายบทบาทซ้อนชื่อ ("${r.roleLabelOpening}") — เปิดด้วยผู้กระทำ+เหตุการณ์ เช่น "ออยกับบีม กวี คบหาดูใจกันมา 13 ปี"`);
   return level === 'hard' ? hard : level === 'soft' ? soft : [...hard, ...soft];
 }
