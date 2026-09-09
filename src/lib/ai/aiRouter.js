@@ -90,6 +90,12 @@ function getStrategy(task) {
   switch (task) {
     case 'extract':
       // Extraction: ใช้ Gemini Flash (ถูก + เร็ว) -> fallback gpt4o
+      // ★ 9 ก.ย. 69 (เจ้าของสั่ง): EXTRACT_PRIMARY=claude (เทียบตรงตัวเท่านั้น) → นำ chain ด้วย claude-opus-4-8
+      //   ไม่ตั้ง/ค่าอื่น = chain เดิมทุกไบต์ · เปิดแล้ว gemini→gpt4o ยังเป็นตัวสำรองตามลำดับเดิม
+      if (process.env.EXTRACT_PRIMARY === 'claude' && isClaudeAvailable()) {
+        console.log(`[SmartAI] extract primary = ${process.env.EXTRACT_CLAUDE_MODEL || 'claude-opus-4-8'} (EXTRACT_PRIMARY=claude)`);
+        chain.push('claude-extract');
+      }
       if (isGeminiAvailable()) chain.push('gemini');
       chain.push('gpt4o');
       defaultTemp = 0.2;
@@ -174,6 +180,18 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
         }),
         WRITER_ATTEMPT_TIMEOUT_MS.sol, 'writer_sol', signal
       );
+    // ★ 9 ก.ย. 69 (เจ้าของสั่ง): สายสกัดข้อเท็จจริงเมื่อ EXTRACT_PRIMARY=claude — นำหน้า gemini
+    //   ห้ามส่ง textNewsLengthPolicy (สิทธิ์พื้น 146/no-cap เป็นของนักเขียน TEXT เท่านั้น)
+    //   callClaude โยน error เองเมื่อ refusal/เนื้อว่าง/JSON พัง → ตกไป gemini ตามกลไก chain เดิม
+    //   ผลว่างแบบไม่ throw (เช่น JSON null) → บังคับโยนที่นี่ กันคืนค่าว่างเป็น "สำเร็จ" แล้วตัดโอกาสตัวสำรอง
+    case 'claude-extract': {
+      const out = await callClaude({
+        prompt, systemPrompt, temperature, maxTokens, signal,
+        model: process.env.EXTRACT_CLAUDE_MODEL || 'claude-opus-4-8',
+      });
+      if (!out || typeof out !== 'object') throw new Error('claude-extract ได้ผลว่าง — ส่งต่อตัวสำรอง');
+      return out;
+    }
     case 'gemini':
       // callGemini มี timeout 15s ในตัว — ไม่ต้องส่ง signal
       return callGemini({ prompt, temperature, maxTokens, signal });

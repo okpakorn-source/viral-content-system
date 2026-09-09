@@ -37,3 +37,8 @@
 - ไฟล์ไลก์จริง: `data/viral-likes-real.json` (สร้างโดย `scripts/match-real-likes.mjs` จาก CSV เพจ · ครอบ 130/202 ใบ) — ไม่มีไฟล์ = ระบบข้ามเงียบๆ ไม่พัง
   · ใบที่ไม่มีไลก์จริงได้ "ค่ากลางของโผ" + ทั้งโผบีบสเกลด้วย sqrt → **ทุกใบยังมีสิทธิ์ถูกหยิบจริง** (กันครูหดตามบทเรียน 14 ส.ค.)
 - ข้อสอบ: `node tests/viral-fewshot-rotation.test.mjs` (32 ข้อ — 24-26 สวิตช์/แพ็ค v2 · 29-32 ตัวถ่วงไลก์จริง)
+
+## สวิตช์ 9 ก.ย. 69 — ขั้นสกัดข้อเท็จจริง (extract)
+| สวิตช์ | ทำอะไร | ค่าปัจจุบัน |
+|---|---|---|
+| `EXTRACT_PRIMARY=claude` | ขั้น 1 (สกัดข้อเท็จจริง) นำ chain ด้วย Claude — โมเดลเลือกได้ผ่าน `EXTRACT_CLAUDE_MODEL` (ไม่ตั้ง = claude-opus-4-8) · gemini→gpt ยังเป็นตัวสำรองตามลำดับเดิม · จุดในโค้ด: `src/lib/ai/aiRouter.js` (case 'extract' + case 'claude-extract') · เช็คบน production: pipeline_logs ขั้น extract ต้องขึ้น claude-opus-4-8 · ข้อสอบ: `node --test tests/extract-claude-switch.test.mjs` | ไม่ตั้ง = **gemini-3.6-flash → gpt-5.6-sol เดิมทุกไบต์** (เจ้าของสั่งเพิ่มสวิตช์ 9 ก.ย. 69) |
