@@ -24,6 +24,53 @@
 
 import { callAI } from '@/lib/ai/openai';
 import { MODEL_FAST } from '@/lib/ai/modelConfig';
+import { callClaude, isClaudeAvailable } from '@/lib/ai/claudeClient';
+
+// ★ 9 ก.ย. 69 (เจ้าของสั่ง "เปลี่ยนจาก luna เป็น opus 4.8" — เฉพาะหน้า /news-filter ไม่แตะระบบข่าว):
+//   3 ขั้น AI ของหน้านี้ (สกัดแก่น extractFactCore / จำแนกประโยค filterNewsWithAI / แยกประเด็น splitTopics) → claude-opus-4-8
+//   Claude ไม่มีคีย์ / ล่ม / เกินเวลา / ตอบไม่เป็น JSON → ถอยเส้นเดิม gpt-5.6-luna ทุกไบต์ (luna ล้มอีก → ผู้เรียกถอย regex ตามเดิม)
+//   ถอยกลับทั้งหมดโดยไม่แก้โค้ด: env NEWS_FILTER_MODEL=gpt-5.6-luna · ระดับความคิด: env NEWS_FILTER_EFFORT=low|medium|high (ค่าเริ่มต้น medium)
+const NEWS_FILTER_MODEL = process.env.NEWS_FILTER_MODEL || 'claude-opus-4-8';
+const NEWS_FILTER_TIMEOUT_MS = 100_000; // เพดานต่อการเรียก Claude — เกินแล้วยกเลิก HTTP จริงและถอย luna (route maxDuration = 180)
+const NEWS_FILTER_CLAUDE_MIN_TOKENS = 6000; // max_tokens ฝั่ง Claude = เนื้อออกล้วน (ไม่รวมคิด) — ภาษาไทยกินโทเคนมาก เพดาน 3000 ของ luna ตัดกลางคันได้ · จ่ายตามที่เขียนจริง
+// system prompt สั้น — ไม่ส่ง = callClaude ยัด DNA เขียนข่าว ~9KB ที่ไม่เกี่ยวกับงานสกัด (จ่ายฟรี + บิดงาน)
+const NEWS_FILTER_SYSTEM = 'คุณเป็นบรรณาธิการข่าวที่เก่งเรื่องสกัดข้อเท็จจริง ตอบเป็น JSON ตามที่สั่งเท่านั้น';
+
+/**
+ * เรียก AI ของหน้า news-filter — คืน { result, model } · result = object ที่ parse แล้ว (ทั้งสองเส้น)
+ * ลำดับ: claude-opus-4-8 → (ล้ม/หมดเวลา) → gpt-5.6-luna เส้นเดิม · โยน error ต่อเฉพาะเมื่อ luna ก็ล้ม
+ */
+async function callNewsFilterAI({ prompt, temperature, maxTokens, label = 'news-filter' }) {
+  const wantClaude = /^claude-/.test(NEWS_FILTER_MODEL);
+  if (wantClaude && isClaudeAvailable()) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(new Error(`หมดเวลา ${NEWS_FILTER_TIMEOUT_MS / 1000}s`)), NEWS_FILTER_TIMEOUT_MS);
+    try {
+      const result = await callClaude({
+        prompt,
+        systemPrompt: NEWS_FILTER_SYSTEM,
+        model: NEWS_FILTER_MODEL,
+        temperature, // opus-4.7+ ไม่รับ sampling — callClaude ตัดทิ้งและใช้ effort แทนให้เอง
+        maxTokens: Math.max(maxTokens, NEWS_FILTER_CLAUDE_MIN_TOKENS),
+        effort: process.env.NEWS_FILTER_EFFORT || 'medium',
+        signal: ctl.signal,
+        maxRetries: 1,
+      });
+      if (result && typeof result === 'object') return { result, model: NEWS_FILTER_MODEL };
+      console.warn(`[NewsFilter] ${label}: ${NEWS_FILTER_MODEL} ตอบไม่เป็น JSON object → ถอย ${MODEL_FAST}`);
+    } catch (e) {
+      console.warn(`[NewsFilter] ${label}: ${NEWS_FILTER_MODEL} ล้ม (${String(e?.message || e).slice(0, 80)}) → ถอย ${MODEL_FAST}`);
+    } finally {
+      clearTimeout(timer);
+    }
+  } else if (wantClaude) {
+    console.warn(`[NewsFilter] ${label}: ไม่มี ANTHROPIC_API_KEY → ใช้ ${MODEL_FAST}`);
+  }
+  // เส้นเดิม (luna) ทุกไบต์ — หรือ NEWS_FILTER_MODEL เป็นชื่อรุ่นฝั่ง OpenAI ที่ตั้งผ่าน env
+  const model = wantClaude ? MODEL_FAST : NEWS_FILTER_MODEL;
+  const result = await callAI({ prompt, model, temperature, maxTokens });
+  return { result, model };
+}
 
 // =============================================
 // PATTERN DEFINITIONS — คำ/วลีสำหรับจำแนกประโยค
@@ -520,13 +567,12 @@ ${numberedSentences}
 }`;
 
   try {
-    // เรียก AI classification — ใช้ gpt-4o-mini (เร็ว + ถูก)
-    // TODO: เปลี่ยนเป็น callClaude ถ้าต้องการใช้ Claude
-    const aiResult = await callAI({
+    // ★ 9 ก.ย. 69: claude-opus-4-8 นำ → ถอย luna (ดู callNewsFilterAI) — ของเดิม: callAI({ model: MODEL_FAST })
+    const { result: aiResult, model: modelUsed } = await callNewsFilterAI({
       prompt: aiPrompt,
-      model: MODEL_FAST,
       temperature: 0.2,
       maxTokens: 4000,
+      label: 'classify',
     });
 
     // แปลงผลจาก AI กลับมาเป็น format เดียวกับ rule-based
@@ -618,6 +664,7 @@ ${numberedSentences}
       },
       sentenceAnalysis: sentences,
       removedPatterns,
+      engine: `ai-classify/${modelUsed}`, // ★ 9 ก.ย. 69: ติดชื่อโมเดลจริง (โชว์ในคลังเคส)
     };
 
   } catch (error) {
@@ -696,12 +743,13 @@ ${text.slice(0, 8000)}
 ตอบ JSON: {"factCore": "ข้อเท็จจริงดิบที่เขียนใหม่แล้ว (เป็นย่อหน้าอ่านลื่น ไม่ใช่ bullet)", "removed": ["สิ่งที่ตัดทิ้ง 3-5 ตัวอย่าง"]}`;
 
   try {
-    const aiResult = await callAI({ prompt, model: MODEL_FAST, temperature: 0.2, maxTokens: 3000 });
+    // ★ 9 ก.ย. 69: claude-opus-4-8 นำ → ถอย luna (ดู callNewsFilterAI) — ของเดิม: callAI({ model: MODEL_FAST, maxTokens: 3000 })
+    const { result: aiResult, model: modelUsed } = await callNewsFilterAI({ prompt, temperature: 0.2, maxTokens: 3000, label: 'fact-core' });
     const parsed = typeof aiResult === 'object' ? aiResult : JSON.parse(String(aiResult).match(/\{[\s\S]*\}/)?.[0] || '{}');
     const cleanText = String(parsed.factCore || '').trim();
     if (cleanText.length < 20) {
       console.warn('[NewsFilter] สกัดข้อเท็จจริงได้สั้นผิดปกติ → fallback rule-based');
-      return filterNews(text, options);
+      return { ...filterNews(text, options), engine: 'rule-based/fallback' }; // ★ 9 ก.ย. 69: ป้ายให้รู้ว่าถอย (เดิมโดนป้าย fact-core ทั้งที่ใช้ regex)
     }
     const originalWordCount = countThaiWords(text);
     const cleanWordCount = countThaiWords(cleanText);
@@ -712,11 +760,11 @@ ${text.slice(0, 8000)}
       stats: { originalWordCount, cleanWordCount, removedPercent, sentenceCount: 0, removedCount: removedPatterns.length, trimmedCount: 0 },
       sentenceAnalysis: [], // โหมดสกัดแก่นไม่วิเคราะห์ทีละประโยค
       removedPatterns,
-      engine: 'fact-core',
+      engine: `fact-core/${modelUsed}`, // ★ 9 ก.ย. 69: ติดชื่อโมเดลจริง (โชว์ในคลังเคส · เดิม 'fact-core')
     };
   } catch (error) {
     console.error('[NewsFilter] extractFactCore failed → fallback rule-based:', error.message);
-    return filterNews(text, options);
+    return { ...filterNews(text, options), engine: 'rule-based/fallback' };
   }
 }
 
@@ -771,7 +819,8 @@ ${text.slice(0, 8000)}
 }`;
 
   try {
-    const aiResult = await callAI({ prompt, model: MODEL_FAST, temperature: 0.2, maxTokens: 4000 });
+    // ★ 9 ก.ย. 69: claude-opus-4-8 นำ → ถอย luna (ดู callNewsFilterAI) — ของเดิม: callAI({ model: MODEL_FAST, maxTokens: 4000 })
+    const { result: aiResult, model: modelUsed } = await callNewsFilterAI({ prompt, temperature: 0.2, maxTokens: 4000, label: 'split' });
     const parsed = typeof aiResult === 'object' ? aiResult : JSON.parse(String(aiResult).match(/\{[\s\S]*\}/)?.[0] || '{}');
     let topics = Array.isArray(parsed.topics) ? parsed.topics : [];
     topics = topics
@@ -792,7 +841,7 @@ ${text.slice(0, 8000)}
       isSingleTopic: parsed.isSingleTopic === true || topics.length <= 1,
       overview: String(parsed.overview || '').slice(0, 500),
       topics,
-      engine: 'topic-split',
+      engine: `topic-split/${modelUsed}`, // ★ 9 ก.ย. 69: ติดชื่อโมเดลจริง (เดิม 'topic-split')
     };
   } catch (error) {
     console.error('[NewsFilter] splitTopics failed:', error.message);
