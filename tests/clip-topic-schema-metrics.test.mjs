@@ -309,10 +309,10 @@ test('styleReport counts attribution, dramatic, filler and meta terms with longe
   const r = styleReport(text);
   assert.equal(r.attribution, 1, 'เล่าว่า');
   assert.deepEqual(r.matches.dramatic, ['ถึงกับ', 'น้ำตาคลอ']);
-  assert.deepEqual(r.matches.filler, ['ทั้งนี้', 'กลายเป็น']);
+  assert.deepEqual(r.matches.filler, ['ทั้งนี้']);
   assert.deepEqual(r.matches.meta, ['คลิปเริ่มจาก']);
   assert.equal(r.longSentences, 1, 'the 26-word line is over the 25-word cap');
-  assert.ok(r.fillerPer100 > 1);
+  assert.ok(r.fillerPer100 > 1, 'one filler in a short text still exceeds 1 per 100 words');
   const clean = styleReport('แม่เพ็ญขายผักตั้งแต่ตีสี่\nลูกค้าเงียบไปครู่หนึ่ง');
   assert.deepEqual([clean.attribution, clean.dramatic, clean.filler, clean.meta, clean.longSentences], [0, 0, 0, 0, 0]);
   assert.deepEqual(styleIssues(clean), []);
@@ -320,7 +320,11 @@ test('styleReport counts attribution, dramatic, filler and meta terms with longe
   assert.equal(issues.length, 5, 'one issue per category: ' + JSON.stringify(issues));
   assert.ok(issues[0].includes('เล่าว่า') && issues[1].includes('ถึงกับ') && issues[2].includes('คลิปเริ่มจาก') && issues[3].includes('25') && issues[4].includes('ทั้งนี้'));
   assert.deepEqual(styleIssues(r, { level: 'hard' }).length, 3, 'hard = attribution/dramatic/meta only');
-  assert.deepEqual(styleIssues(r, { level: 'soft' }).map((x) => x.slice(0, 12)), ['ประโยคยาวเกิน ', 'คำเฟ้อ 2 ครั้ง'].map((x) => x.slice(0, 12)));
+  assert.deepEqual(styleIssues(r, { level: 'soft' }).map((x) => x.slice(0, 12)), ['ประโยคยาวเกิน ', 'คำเฟ้อ 1 ครั้ง'].map((x) => x.slice(0, 12)));
+  // วงตรวจ 9 ก.ย.: คำกำกวมไม่อยู่ในด่านแข็ง
+  const neutral = styleReport('ชายในคลิปเสียชีวิตทันที กล้องเห็นทะเบียนชัดเจน เขาพยายามติดต่อญาติ');
+  assert.deepEqual([neutral.attribution, neutral.dramatic, neutral.meta, neutral.filler], [0, 0, 0, 0], 'พยายาม is not filler: removing it changes meaning');
+  assert.deepEqual(styleIssues(neutral, { level: 'hard' }), []);
   assert.equal(styleReport('').words, 0);
   assert.deepEqual(styleIssues(styleReport('')), []);
 });

@@ -171,7 +171,7 @@ test('word chips warn only below the 100-word floor (no ceiling) using Thai segm
   }
 });
 test('every issue code has a human label and detail; relationship/count chips preserve zero', () => {
-  const codes = ['length-short', 'length-long', 'no-highlight', 'bureaucratic', 'long-sentence', 'overlap', 'quote-unverified', 'quote-short', 'no-facts', 'missing', 'main-story-stale'];
+  const codes = ['style-soft', 'length-short', 'length-long', 'no-highlight', 'bureaucratic', 'long-sentence', 'overlap', 'quote-unverified', 'quote-short', 'no-facts', 'missing', 'main-story-stale'];
   for (const code of codes) { assert.ok(issueLabel(code).length); assert.notEqual(issueLabel(code), code); assert.notEqual(issueLabel(code), 'ข้อสังเกตเพิ่มเติม'); }
   const chips = topicChips(story({ sharePct: 0, standalone: false, overlaps: [{ storyId: 's9', kind: 'shared_context' }], quality: { status: 'checked', issues: codes.map((code) => ({ code, detail: `รายละเอียด ${code}` })) } }));
   for (const code of codes.filter((c) => c !== 'quote-unverified')) {
