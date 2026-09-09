@@ -329,6 +329,39 @@ test('styleReport counts attribution, dramatic, filler and meta terms with longe
   assert.deepEqual(styleIssues(styleReport('')), []);
 });
 
+// ★ 9 ก.ย. 69 (เจ้าของ เคสออย-บีม): ด่านสำนวนระดับ soft "คำมองจากนอก + เปิดเรื่องป้ายบทบาทซ้อนชื่อ"
+test('styleReport flags outsider words and role-label openings as soft observations only', () => {
+  const r = styleReport('ออย ภรรยาของ บีม กวี คบหาดูใจกับฝ่ายชายนานถึง 13 ปีก่อนตัดสินใจแต่งงาน');
+  assert.equal(r.outsider, 1, 'ฝ่ายชาย');
+  assert.deepEqual(r.matches.outsider, ['ฝ่ายชาย']);
+  assert.equal(typeof r.roleLabelOpening, 'string', JSON.stringify(r.roleLabelOpening));
+  assert.ok(r.roleLabelOpening.includes('ภรรยาของ'), r.roleLabelOpening);
+  const soft = styleIssues(r, { level: 'soft' });
+  assert.equal(soft.filter((x) => x.startsWith('คำมองจากนอก')).length, 1, JSON.stringify(soft));
+  assert.ok(soft.some((x) => x.includes('ป้ายบทบาทซ้อนชื่อ') && x.includes(r.roleLabelOpening)), JSON.stringify(soft));
+  assert.deepEqual(styleIssues(r, { level: 'hard' }), [], 'ทั้งสองข้อเป็นข้อสังเกต ห้ามตกด่านแข็ง');
+  // ช่องว่างรอบ "ของ" มีหรือไม่มีก็ได้
+  assert.ok(styleReport('ออย ภรรยาของบีม กวี เล่าเรื่องเก่า').roleLabelOpening?.includes('ภรรยาของ'));
+
+  // เนกาทีฟ: เปิดด้วยผู้กระทำ + เรียกชื่อคน = ไม่มีข้อสังเกต
+  const clean = styleReport('ออยกับบีม กวี คบหาดูใจกันมา 13 ปีก่อนแต่งงาน');
+  assert.equal(clean.outsider, 0);
+  assert.equal(clean.roleLabelOpening, null);
+  assert.deepEqual(styleIssues(clean, { level: 'soft' }), []);
+  // ป้ายบทบาทที่ไม่ได้อยู่ประโยคแรก = ไม่จับ (ด่านนี้ดูเฉพาะประโยคเปิด)
+  assert.equal(styleReport('ออยเล่าเรื่องความรักในรายการ\nออยเป็นภรรยาของบีมมา 13 ปี').roleLabelOpening, null);
+  // ขึ้นต้นด้วยคำบทบาทเลย ไม่มีชื่อนำหน้า = ภาษาธรรมชาติ
+  assert.equal(styleReport('แม่ของน้องมะลิพาลูกไปหาหมอ').roleLabelOpening, null);
+  assert.equal(styleReport('เธอเดินไปหาฝ่ายชาย ส่วนฝ่ายหญิงยืนรอ').outsider, 2, 'นับทั้งฝ่ายชายและฝ่ายหญิง');
+
+  // กันถอยหลัง: หมวดเดิมต้องไม่เปลี่ยน
+  const old = styleReport('ตำรวจระบุว่าเขาไม่อยู่บ้าน');
+  assert.equal(old.attribution, 1);
+  assert.ok(styleIssues(old, { level: 'hard' }).some((x) => x.includes('อ้างที่มาในเนื้อเรื่อง') && x.includes('ระบุว่า')));
+  assert.deepEqual(styleIssues(old, { level: 'soft' }), []);
+  assert.equal(styleReport('').roleLabelOpening, null);
+});
+
 test('scoreTopicDoc carries style reports for every story and the main story', () => {
   const doc = fixture();
   doc.stories[0].story = 'เขาบอกว่าเหนื่อย\n' + doc.stories[0].story;

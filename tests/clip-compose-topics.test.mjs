@@ -433,8 +433,10 @@ test('style gate rejects attribution, dramatic, meta, long sentences and filler;
     assert.equal(composeQualityGate(scoreTopicDoc(bad)).reasons.some((r) => r.includes('.style:')), false, 'env switch removes every style reason');
     delete process.env.CLIP_TOPIC_STYLE_GATE;
     const prompt = buildComposePrompt({ evidencePack: pack() });
-    for (const term of ['ใจความล้วน', 'ไม่อ้างที่มาในเนื้อเรื่อง', 'ลบสิ่งที่ไม่มีหลักฐาน', 'ลบประโยคเร้าอารมณ์', 'ห้ามเล่ากล้อง', 'ห้ามซ้ำ', 'ไม่เกิน 25 คำ', 'เล่าว่า / บอกว่า', 'ถึงกับ / เหนียวแน่น', 'ห้ามลบชื่อคน', 'ห้ามอ้างที่มาแฝง', 'ห้ามประโยคสรุป ประเมิน ตีความ อุปมา', 'ห้ามขยายหรือย่อจำนวน', 'เลี่ยงประโยคกรรม', 'identityLeads ตามข้อ 6', 'kind=speaker_statement', 'ห้ามคัดลอกประโยคเดิมคำต่อคำ']) assert.ok(prompt.includes(term), 'prompt missing ' + term);
-    for (const banned of ['ตรงๆ หรือย้าย', 'เหตุการณ์ตรงๆ']) assert.ok(!prompt.includes(banned), 'prompt must not echo a banned substring: ' + banned);
+    for (const term of ['ใจความล้วน', 'ไม่อ้างที่มาในเนื้อเรื่อง', 'ลบสิ่งที่ไม่มีหลักฐาน', 'ลบประโยคเร้าอารมณ์', 'ห้ามเล่ากล้อง', 'ห้ามซ้ำ', 'ไม่เกิน 25 คำ', 'เล่าว่า / บอกว่า', 'ถึงกับ / เหนียวแน่น', 'ห้ามลบชื่อคน', 'ห้ามอ้างที่มาแฝง', 'ห้ามประโยคสรุป ประเมิน ตีความ อุปมา', 'ห้ามขยายหรือย่อจำนวน', 'เลี่ยงประโยคกรรม', 'identityLeads ตามข้อ 6', 'kind=speaker_statement', 'ห้ามคัดลอกประโยคเดิมคำต่อคำ',
+      // ★ 9 ก.ย. 69 มุมคนเล่า (เจ้าของชี้เคสออย-บีม): เล่าแบบคนใน ไม่ใช่นักข่าวรายงานถึงเขา
+      'เล่าให้เพื่อนฟัง', 'มุมคนเล่า', 'ห้ามเปิดด้วยป้ายบทบาทซ้อนชื่อ', 'ออยกับบีม กวี คบหาดูใจกันมา 13 ปีก่อนแต่งงาน', 'ฝ่ายชาย / ฝ่ายหญิง', 'ประโยคเหตุการณ์ ไม่ใช่ประโยคนิยาม']) assert.ok(prompt.includes(term), 'prompt missing ' + term);
+    for (const banned of ['ตรงๆ หรือย้าย', 'เหตุการณ์ตรงๆ', 'เหมือนคนเล่าข่าว']) assert.ok(!prompt.includes(banned), 'prompt must not echo a banned substring: ' + banned);
     assert.ok(!prompt.includes('อ้างที่มาเฉพาะคำกล่าวอ้างของบุคคล'), 'old attribution rule removed');
   } finally {
     if (saved === undefined) delete process.env.CLIP_TOPIC_STYLE_GATE; else process.env.CLIP_TOPIC_STYLE_GATE = saved;

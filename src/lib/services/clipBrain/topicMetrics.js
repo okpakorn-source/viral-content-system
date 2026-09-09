@@ -77,6 +77,8 @@ export const STYLE_WORDS = Object.freeze({
   filler: Object.freeze(['ทั้งนี้', 'ดังกล่าว', 'เอาไว้ด้วย', 'สักหน่อย', 'สักผืน', 'สักแปลง', 'เป็นการ', 'อยู่เป็นประจำ', 'ต่อไปเรื่อยๆ', 'เรื่อยๆ', 'เท่านั้นเอง', 'นั่นเอง', 'ไม่น้อย', 'แต่ละครั้ง', 'อย่างมาก', 'อย่างยิ่ง']),
   // ★ วงตรวจ 9 ก.ย.: ตัด "ในคลิป" ออก (ชนคำแทนคนไร้ชื่อของระบบ "ชายในคลิป/บุคคลในคลิป")
   meta: Object.freeze(['คลิปเริ่มจาก', 'ปิดท้ายด้วย', 'คลิปปิดท้าย', 'ข้อความบนหน้าจอ', 'บนหน้าจอ', 'ช่วงท้ายคลิป', 'ต้นคลิป', 'หน้ากล้อง', 'กำกับไว้ตรงกัน', 'ตลอดทั้งคลิป']),
+  // ★ 9 ก.ย. 69 (เคสออย-บีม): outsider = "คำมองจากนอก" — ผู้เล่ายืนนอกเรื่องแล้วชี้ตัวละครแบบนักข่าวรายงานถึงเขา แทนที่จะเรียกชื่อ (soft เท่านั้น)
+  outsider: Object.freeze(['ฝ่ายชาย', 'ฝ่ายหญิง']),
 });
 export const STYLE_MAX_SENTENCE_WORDS = 25;
 export const STYLE_FILLER_PER_100 = 1;
@@ -88,7 +90,22 @@ function countTerms(body, terms) {
   return Array.from(body.matchAll(pattern)).map((m) => m[0]);
 }
 
-/** รายงานสำนวนของข้อความหนึ่งท่อน: จำนวนและคำที่เจอต่อหมวด + ประโยคยาว + คำเฟ้อต่อ 100 คำ */
+/** ★ 9 ก.ย. 69 (เคสออย-บีม "ออย ภรรยาของ บีม กวี คบหาดูใจ..."): เปิดเรื่องด้วยป้ายบทบาทซ้อนชื่อ = สำเนียงนักข่าวแนะนำตัวละคร
+ * ดูเฉพาะประโยคแรก (ตัดที่ \n แรก) เข้ารูป "<ชื่อ 1-2 คำ> <คำบทบาท>ของ<ชื่อ>" · ช่องว่างรอบ "ของ" มีหรือไม่มีก็ได้
+ * เรียงคำบทบาทยาว→สั้นกันจับผิด (อดีตภรรยา ต้องชนะ ภรรยา) · ต้องมีชื่อนำหน้าเสมอ ประโยคที่ขึ้นต้นด้วยคำบทบาทเลย
+ * ("แม่ของน้องมะลิพาลูกไปหาหมอ") คือภาษาธรรมชาติ ไม่จับ — เป็นข้อสังเกต soft ไม่ใช่ด่านแข็ง
+ */
+const ROLE_LABELS = Object.freeze(['อดีตภรรยา', 'อดีตสามี', 'แฟนสาว', 'แฟนหนุ่ม', 'ภรรยา', 'สามี', 'แฟน', 'ลูกสาว', 'ลูกชาย', 'มารดา', 'บิดา', 'แม่', 'พ่อ']);
+const NAME_TOKEN = '[\\p{Script=Thai}A-Za-z]+';
+const ROLE_LABEL_OPENING = new RegExp(`^[ \\t]*(?:${NAME_TOKEN}[ \\t]+){1,2}(?:${ROLE_LABELS.map(escapeRegex).join('|')})[ \\t]*ของ[ \\t]*${NAME_TOKEN}`, 'u');
+
+function roleLabelOpening(text) {
+  const [firstSentence = ''] = asText(text).split('\n');
+  const match = firstSentence.match(ROLE_LABEL_OPENING);
+  return match ? match[0].trim() : null;
+}
+
+/** รายงานสำนวนของข้อความหนึ่งท่อน: จำนวนและคำที่เจอต่อหมวด + ประโยคยาว + คำเฟ้อต่อ 100 คำ + ป้ายบทบาทในประโยคเปิด */
 export function styleReport(text) {
   const body = asText(text);
   const words = countThaiWords(body);
@@ -97,8 +114,10 @@ export function styleReport(text) {
   return {
     words,
     attribution: found.attribution.length, dramatic: found.dramatic.length, filler: found.filler.length, meta: found.meta.length,
+    outsider: found.outsider.length,
     fillerPer100: words ? found.filler.length / words * 100 : 0,
     longSentences,
+    roleLabelOpening: roleLabelOpening(body),
     matches: found,
   };
 }
@@ -106,6 +125,7 @@ export function styleReport(text) {
 /** ข้อบกพร่องสำนวน 2 ระดับ (ว่าง = ผ่าน)
  *   hard = ผิดกติกาใจความล้วนโดยตรง → ตกด่าน ต้องซ่อม: อ้างที่มา 0 · คำเปรย/เร้าอารมณ์ 0 · เล่ากล้อง 0
  *   soft = ความสวยของสำนวน → เป็น "ข้อสังเกตความพร้อม" ให้คนเห็น ไม่ทิ้งทั้งฉบับ: ประโยค > 25 คำ · คำเฟ้อ > 1 ต่อ 100 คำ
+ *          · คำมองจากนอก (ฝ่ายชาย/ฝ่ายหญิง) · เปิดเรื่องด้วยป้ายบทบาทซ้อนชื่อ (★ 9 ก.ย. 69 เคสออย-บีม)
  *   (★ 9 ก.ย. 69 บทเรียนคลิป 53 นาที: ฉบับดีทั้ง 10 เรื่องถูกทิ้งเพราะประโยคยาว 8 ประโยค เสีย 38 นาที)
  */
 export function styleIssues(report, { level = 'all' } = {}) {
@@ -118,6 +138,8 @@ export function styleIssues(report, { level = 'all' } = {}) {
   if (r.meta > 0) hard.push(`เล่ากล้อง/เล่าคลิป ${r.meta} ครั้ง (${show(r.matches.meta)}) — เล่าเนื้อหาแทน`);
   if (r.longSentences > 0) soft.push(`ประโยคยาวเกิน ${STYLE_MAX_SENTENCE_WORDS} คำ ${r.longSentences} ประโยค — แบ่งประโยค`);
   if (r.fillerPer100 > STYLE_FILLER_PER_100) soft.push(`คำเฟ้อ ${r.filler} ครั้ง (${show(r.matches.filler)}) เกิน ${STYLE_FILLER_PER_100} ต่อ 100 คำ`);
+  if (r.outsider > 0) soft.push(`คำมองจากนอก ${r.outsider} ครั้ง (${show(r.matches.outsider)}) — ใช้ชื่อคน หรือ "ทั้งคู่/สองคน" แทน`);
+  if (r.roleLabelOpening) soft.push(`เปิดเรื่องด้วยป้ายบทบาทซ้อนชื่อ ("${r.roleLabelOpening}") — เปิดด้วยผู้กระทำ+เหตุการณ์ เช่น "ออยกับบีม กวี คบหาดูใจกันมา 13 ปี"`);
   return level === 'hard' ? hard : level === 'soft' ? soft : [...hard, ...soft];
 }
 
