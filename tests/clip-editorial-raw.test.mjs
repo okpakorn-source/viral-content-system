@@ -213,7 +213,7 @@ test('video และ transcript ใช้กฎเนื้อดิบพร�
 test('ผล normalize ติด prompt revision เพื่อแยกจากงานเก่าในคลัง', async () => {
   const mod = await import(`${SERVICE}?editorial=revision`);
   const out = await mod.extractClipInsight({ platform: 'transcript', rawText: TRANSCRIPT });
-  assert.equal(out.promptRev, 'clip-editorial-direct-lead-v7-0822');
+  assert.equal(out.promptRev, 'clip-editorial-voice-v8-0909');
 });
 
 test('directLead เปิดด้วยเนื้อจริงและตรงกับต้น rawData ผ่านโดยไม่แก้ข้อความหรือเพิ่ม inference', async () => {
@@ -566,4 +566,22 @@ test('ทุกปุ่มส่งต่อหลักใช้ projection �
   assert.equal((MOBILE_SOURCE.match(/คัดลอกก้อนรวมเดิม/g) || []).length, 2);
   assert.ok((MOBILE_SOURCE.match(/buildClipSubStoryText\(/g) || []).length >= 4, 'คัดลอก/ส่งประเด็นบนมือถือทั้งหมดต้องใช้ helper เดียวกัน');
   assert.doesNotMatch(MOBILE_SOURCE, /if \(ins\.multiTopic && ins\.topics\?\.length\)/, 'ห้ามฟื้นตัวต่อข้อความแบบเก่าบนมือถือ');
+});
+
+// ★ 9 ก.ย. 69 เสียงคนเล่าในเนื้อดิบ (เจ้าของชี้เคสมิค-เบนซ์: "ระบุว่า/ตน/ดังกล่าว" โผล่ในก้อนรวม + ชื่อซ้ำ + ทุกย่อหน้าขึ้นต้นใหม่)
+// ก้อนรวม (rawData) คือของที่เจ้าของใช้เขียนข่าวจริง — สัญญาเสียงคนเล่าต้องอยู่ในพรอมต์ต้นทางตัวนี้ ไม่ใช่แค่ขั้นเรียบเรียง v2
+test('พรอมต์เนื้อดิบตรึงสัญญาเสียงคนเล่า — ก้อนรวมต้องลื่นเหมือนคนเล่า ไม่ใช่นักข่าวรายงาน', () => {
+  for (const term of [
+    'เสียงคนเล่า', 'ห้ามกริยารายงานกลางเรื่อง', 'ระบุว่า / ยังระบุอีกว่า / เผยว่า',
+    'ห้ามสรรพนามทางการ: ตน / ตนเอง', 'ฝ่ายชาย / ฝ่ายหญิง',
+    'ชื่อคนอย่าซ้ำทุกประโยค', 'ละประธาน',
+    'ห้ามคำเปลืองแบบเอกสาร', 'ดังกล่าว / ทั้งนี้',
+    'เล่าต่อเนื่องเป็นเรื่องเดียวจนจบ', 'ห้ามเปิดย่อหน้าเหมือนเริ่มข่าวใหม่',
+    'หลังมีลูกคนแรก มิครู้สึกเหมือนเป็นแค่คนออกไปหาเงินเข้าบ้าน',
+  ]) assert.ok(SERVICE_SOURCE.includes(term), 'พรอมต์เนื้อดิบขาดกติกา: ' + term);
+  // บล็อกต้องอยู่ใน EDITORIAL_RAW_RULES (ใช้ร่วมทุกเส้นทาง) ไม่ใช่หลุดไปอยู่นอก template
+  const block = SERVICE_SOURCE.indexOf('★★ เสียงคนเล่า');
+  const rulesStart = SERVICE_SOURCE.indexOf('const EDITORIAL_RAW_RULES');
+  const rulesEnd = SERVICE_SOURCE.indexOf('const SUBSTORY_DEEP');
+  assert.ok(block > rulesStart && block < rulesEnd, 'บล็อกเสียงคนเล่าต้องอยู่ใน EDITORIAL_RAW_RULES');
 });
