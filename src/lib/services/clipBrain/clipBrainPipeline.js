@@ -19,6 +19,7 @@ import { callClipGeminiVideo } from './clipGeminiVideo.js';
 import { llmCost } from '../../costRates.js';
 import { buildPlanPrompt, validatePlan, fallbackPlan } from './segmentPlan.js';
 import { runBrain } from './brainRunner.js';
+import { shouldSkipReviewer } from './reviewerGate.js';
 import {
   TRUTH_PROMPT, checkAgainstTruth, buildReviewPrompt, buildRepairPrompt,
   applyRepairPatch, VERIFY_REV,
@@ -269,6 +270,16 @@ export async function runClipBrainPipeline(rawOpts) {
     log(`ชั้นโค้ด: ${codeCheck.verdict} · เจอ ${codeCheck.findings.length} จุด`);
 
     let aiCheck = null;
+    // ★ 9 ก.ย. 69 มาตรการ B (เจ้าของเคาะ): งานที่ผ่านด่าน v2 แบบ hard 0 และชั้นโค้ดไม่มีจุด "สูง" → ข้ามผู้ตรวจ AI
+    //   (ข้ามโดยตั้งใจ ไม่ใช่ผู้ตรวจล้ม จึงไม่ลง degradations — ดูเหตุผลเต็มใน reviewerGate.js)
+    const reviewerSkipped = shouldSkipReviewer({
+      v2Ok: brain.topicsV2?.ok === true,
+      codeHighCount: codeCheck.findings.filter((f) => f?.severity === 'สูง').length,
+      forceReview: String(process.env.CLIP_REVIEWER_ALWAYS || '').trim() === '1',
+    });
+    if (reviewerSkipped) {
+      log('ชั้นสมอง: ข้าม — ด่าน v2 ผ่าน hard 0 + ชั้นโค้ดไม่มีจุดสูง (มาตรการ B · บังคับตรวจ = CLIP_REVIEWER_ALWAYS=1)');
+    } else {
     // ★ 8 ก.ย. 69: ผู้ตรวจเลือกค่ายผ่าน env CLIP_REVIEWER_BRAIN (codex|claude) + CLIP_REVIEWER_MODEL/EFFORT (ไม่ตั้ง = codex auto เหมือนเดิม)
     const reviewerBrain = String(process.env.CLIP_REVIEWER_BRAIN || '').trim() === 'claude' ? 'claude' : 'codex';
     const reviewerModel = String(process.env.CLIP_REVIEWER_MODEL || '').trim();
@@ -284,6 +295,7 @@ export async function runClipBrainPipeline(rawOpts) {
     } else {
       brain.degradations.push({ type: 'reviewer-unavailable', why: cr.errorType });
       log(`⚠ ผู้ตรวจล้ม (${cr.errorType}) — ข้ามชั้นสมอง ติดธงไว้`);
+    }
     }
 
     // ── ⑥ ซ่อมเฉพาะจุด ───────────────────────────────────────────────
@@ -327,7 +339,7 @@ export async function runClipBrainPipeline(rawOpts) {
       brain.topicsV2.syncedAfterRepair = synced.changed;
     }
 
-    brain.check = { code: codeCheck, ai: aiCheck, repair };
+    brain.check = { code: codeCheck, ai: aiCheck, repair, ...(reviewerSkipped ? { reviewerSkipped: 'v2-hard0-code-clean' } : {}) };
     if (insight.topicsV2?.schemaVersion === 2) {
       try {
         const { assessReadiness, quoteCoverage } = await import('./clipVerify.js');

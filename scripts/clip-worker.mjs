@@ -11,6 +11,8 @@
  * 🔴 แตะเฉพาะคิวคลิป (clip-jobs) — ไม่เกี่ยวกับระบบทำข่าวอัตโนมัติเลย
  */
 import { existsSync } from 'node:fs'; // ★ 8 ก.ย. 69: ไฟล์ธงหยุดรับงาน
+// ★ 9 ก.ย. 69 มาตรการ F: ตัวจัดคิวรับงานขนาน (แยกไฟล์เพื่อให้ข้อสอบกัดได้)
+import { runWorkerLoop, clampConcurrency } from './lib/clip-worker-scheduler.mjs';
 try {
   process.loadEnvFile?.('.env.local');
 } catch (error) {
@@ -39,6 +41,11 @@ const PROCESS_TIMEOUT_MS = resolveProcessTimeoutMs(process.env.CLIP_WORKER_PROCE
 //   (19:44 วันนี้รีสตาร์ตแบบรอ processing=0 ยังชนจังหวะ 1 วิ งานถูกหยิบก่อนถูกปิด)
 const PAUSE_FILE = String(process.env.CLIP_WORKER_PAUSE_FILE || '').trim();
 function isPaused() { try { return !!PAUSE_FILE && existsSync(PAUSE_FILE); } catch { return false; } }
+// ★ 9 ก.ย. 69 มาตรการ F (เจ้าของเคาะ "วันนึงต้องทำหลายงาน"): รับงานพร้อมกันได้ CLIP_WORKER_CONCURRENCY ช่อง
+//   ไม่ตั้ง/ค่าเพี้ยน = 1 (พฤติกรรมเดิมทีละงาน) · เพดาน 4 กัน CPU/RAM/โควตา CLI พัง — เครื่องแอดมินตั้ง 2
+//   หมายเหตุ: สมอง CLI มีเพดานของตัวเองที่ CLIP_BRAIN_MAX_CONCURRENT (ค่าเริ่มต้น 2) — งานหนึ่งใช้ทีละ 1 ช่อง
+//   ถ้าตั้งช่องขนานเกิน 2 ต้องขยับเพดานสมองตาม ไม่งั้นงานเกินจะโดน BRAIN_BUSY ถอยลงท่อเดิม (คุณภาพตกเงียบ)
+const CONCURRENCY = clampConcurrency(process.env.CLIP_WORKER_CONCURRENCY);
 
 // ★ 26 มิ.ย.: คลิปยาว/FB reel (โหลด+อัป Gemini+ดู) ใช้เวลา >5 นาทีได้ — แต่ fetch ของ Node (undici)
 //   ตัดที่ headersTimeout 5 นาทีโดยปริยาย → "fetch failed" ทั้งที่ insight ยังทำอยู่ → เข้าใจผิดว่าล้ม
@@ -246,82 +253,84 @@ function startHeartbeat(job, processController) {
   };
 }
 
+// ★ 9 ก.ย. 69 มาตรการ F: แยก "ชีวิตหนึ่งงาน" ออกจากลูป — เนื้อในยกมาจากลูปเดิมทั้งดุ้น (continue → return)
+//   สัญญาเดิมครบ: watchdog timeout ต่องาน · heartbeat ต่ออายุ lease · CLAIM_LOST ไม่ส่งผลทับ · ห้าม retry ซ้อน
+async function runJob(job) {
+  const tag = job.id.slice(0, 8);
+  const tries = (job.attempts || 0) + 1;
+  log(`▶️ ทำงาน [${job.platform}/${job.kind}] ครั้งที่ ${tries}: ${String(job.url).slice(0, 55)}`);
+  const processController = new AbortController();
+  const processTimeout = setTimeout(() => {
+    const error = new Error(`processJob timeout ${Math.round(PROCESS_TIMEOUT_MS / 60_000)} นาที — ไม่ยืนยันว่า server หยุด AI แล้ว จึงหยุดไว้ไม่ลองซ้ำ`);
+    error.code = 'PROCESS_TIMEOUT';
+    processController.abort(error);
+  }, PROCESS_TIMEOUT_MS);
+  const heartbeat = startHeartbeat(job, processController);
+  let finalStatus = '';
+  let finalPayload = null;
+  let finalLog = '';
+  try {
+    const res = await processJob(job, { signal: processController.signal });
+    const resultStatus = reportStatusForProcessResult(res);
+    if (resultStatus === 'done') {
+      finalStatus = 'done';
+      finalPayload = res.result;
+      finalLog = `✅ เสร็จ: ${tag}`;
+    } else if (resultStatus === 'retry') {
+      finalStatus = 'retry';
+      finalPayload = res.error;
+      finalLog = `⏳ สะดุดชั่วคราว → เข้าคิวรอลองใหม่เองใน ~3 นาที (${tag}): ${res.error?.slice(0, 70)}`;
+    } else {
+      finalStatus = 'error';
+      finalPayload = res.error;
+      finalLog = `❌ ถอดไม่ได้จริง (กดใหม่ไม่ช่วย) ${tag}: ${res.error?.slice(0, 70)}`;
+    }
+  } catch (e) {
+    if (e.code !== 'CLAIM_LOST') {
+      // fetch/timeout ไม่ยืนยันว่าฝั่งเซิร์ฟเวอร์หยุด AI แล้ว จึงห้าม retry อัตโนมัติซ้อนรอบเดิม
+      finalStatus = 'error';
+      finalPayload = `${e.message} · ระบบหยุดไว้เพื่อกันเสียค่า API ซ้ำ กรุณาตรวจแล้วส่งใหม่ด้วยตนเอง`;
+      finalLog = `❌ การเชื่อมต่อไม่ยืนยันผล จึงไม่ลองซ้ำอัตโนมัติ (${tag}): ${e.message?.slice(0, 70)}`;
+    }
+  } finally {
+    clearTimeout(processTimeout);
+    await heartbeat.stop();
+  }
+
+  if (heartbeat.ownershipError?.code === 'CLAIM_LOST') {
+    log(`🛑 หยุด ${tag}: งานถูก worker อื่นรับช่วงแล้ว จึงไม่ส่งผลเก่าทับ`);
+    return;
+  }
+  if (!finalStatus) return;
+
+  try {
+    await report(job.id, finalStatus, finalPayload, job.claimToken);
+    log(finalLog);
+  } catch (error) {
+    if (error.code === 'CLAIM_LOST') {
+      log(`🛑 ไม่ส่งผล ${tag}: lease เปลี่ยนเจ้าของแล้ว`);
+    } else {
+      // ห้ามเปลี่ยนงานที่ทำสำเร็จเป็น retry เพียงเพราะรายงานสะดุด มิฉะนั้นจะเสียค่า AI ซ้ำทันที
+      log(`⚠️ รายงานผล ${tag} ไม่สำเร็จหลังลอง ${REPORT_MAX_ATTEMPTS} ครั้ง: ${error.message} — เมื่อ lease หมดระบบจะหยุดงานนี้ ไม่ถอดใหม่อัตโนมัติ`);
+    }
+  }
+}
+
 async function loop() {
   if (!WORKER_SECRET) {
     const error = new Error('ยังไม่ได้ตั้ง CLIP_WORKER_SECRET หรือ DISCORD_API_SECRET — ไม่เริ่มดึงคิว');
     error.code = 'CLIP_WORKER_SECRET_MISSING';
     throw error;
   }
-  log(`เริ่มทำงาน — เช็กคิวที่ ${BASE}/api/clip-transcript/worker · เพดานรอเซิร์ฟเวอร์ต่องาน ${Math.round(PROCESS_TIMEOUT_MS / 60_000)} นาที`);
-  let pausedLogged = false;
-  for (;;) {
-    if (isPaused()) { if (!pausedLogged) { log(`⏸️ หยุดรับงานชั่วคราว (มีไฟล์ ${PAUSE_FILE}) — ลบไฟล์เพื่อรับงานต่อ`); pausedLogged = true; } await sleep(IDLE_MS); continue; }
-    if (pausedLogged) { log('▶️ รับงานต่อ'); pausedLogged = false; }
-    let job = null;
-    try { job = await pullJob(); }
-    catch (e) { log('⚠️ ต่อเซิร์ฟเวอร์ไม่ได้ (เปิด npm run dev ไว้ไหม?):', e.message); await sleep(ERR_MS); continue; }
-
-    if (!job) { await sleep(IDLE_MS); continue; }
-
-    const tag = job.id.slice(0, 8);
-    const tries = (job.attempts || 0) + 1;
-    log(`▶️ ทำงาน [${job.platform}/${job.kind}] ครั้งที่ ${tries}: ${String(job.url).slice(0, 55)}`);
-    const processController = new AbortController();
-    const processTimeout = setTimeout(() => {
-      const error = new Error(`processJob timeout ${Math.round(PROCESS_TIMEOUT_MS / 60_000)} นาที — ไม่ยืนยันว่า server หยุด AI แล้ว จึงหยุดไว้ไม่ลองซ้ำ`);
-      error.code = 'PROCESS_TIMEOUT';
-      processController.abort(error);
-    }, PROCESS_TIMEOUT_MS);
-    const heartbeat = startHeartbeat(job, processController);
-    let finalStatus = '';
-    let finalPayload = null;
-    let finalLog = '';
-    try {
-      const res = await processJob(job, { signal: processController.signal });
-      const resultStatus = reportStatusForProcessResult(res);
-      if (resultStatus === 'done') {
-        finalStatus = 'done';
-        finalPayload = res.result;
-        finalLog = `✅ เสร็จ: ${tag}`;
-      } else if (resultStatus === 'retry') {
-        finalStatus = 'retry';
-        finalPayload = res.error;
-        finalLog = `⏳ สะดุดชั่วคราว → เข้าคิวรอลองใหม่เองใน ~3 นาที (${tag}): ${res.error?.slice(0, 70)}`;
-      } else {
-        finalStatus = 'error';
-        finalPayload = res.error;
-        finalLog = `❌ ถอดไม่ได้จริง (กดใหม่ไม่ช่วย) ${tag}: ${res.error?.slice(0, 70)}`;
-      }
-    } catch (e) {
-      if (e.code !== 'CLAIM_LOST') {
-        // fetch/timeout ไม่ยืนยันว่าฝั่งเซิร์ฟเวอร์หยุด AI แล้ว จึงห้าม retry อัตโนมัติซ้อนรอบเดิม
-        finalStatus = 'error';
-        finalPayload = `${e.message} · ระบบหยุดไว้เพื่อกันเสียค่า API ซ้ำ กรุณาตรวจแล้วส่งใหม่ด้วยตนเอง`;
-        finalLog = `❌ การเชื่อมต่อไม่ยืนยันผล จึงไม่ลองซ้ำอัตโนมัติ (${tag}): ${e.message?.slice(0, 70)}`;
-      }
-    } finally {
-      clearTimeout(processTimeout);
-      await heartbeat.stop();
-    }
-
-    if (heartbeat.ownershipError?.code === 'CLAIM_LOST') {
-      log(`🛑 หยุด ${tag}: งานถูก worker อื่นรับช่วงแล้ว จึงไม่ส่งผลเก่าทับ`);
-      continue;
-    }
-    if (!finalStatus) continue;
-
-    try {
-      await report(job.id, finalStatus, finalPayload, job.claimToken);
-      log(finalLog);
-    } catch (error) {
-      if (error.code === 'CLAIM_LOST') {
-        log(`🛑 ไม่ส่งผล ${tag}: lease เปลี่ยนเจ้าของแล้ว`);
-      } else {
-        // ห้ามเปลี่ยนงานที่ทำสำเร็จเป็น retry เพียงเพราะรายงานสะดุด มิฉะนั้นจะเสียค่า AI ซ้ำทันที
-        log(`⚠️ รายงานผล ${tag} ไม่สำเร็จหลังลอง ${REPORT_MAX_ATTEMPTS} ครั้ง: ${error.message} — เมื่อ lease หมดระบบจะหยุดงานนี้ ไม่ถอดใหม่อัตโนมัติ`);
-      }
-    }
-  }
+  log(`เริ่มทำงาน — เช็กคิวที่ ${BASE}/api/clip-transcript/worker · เพดานรอเซิร์ฟเวอร์ต่องาน ${Math.round(PROCESS_TIMEOUT_MS / 60_000)} นาที · ช่องขนาน ${CONCURRENCY}`);
+  await runWorkerLoop({
+    concurrency: CONCURRENCY, pullJob, runJob, isPaused, idleMs: IDLE_MS, errMs: ERR_MS, sleep,
+    log: (kind, e) => (kind === 'pull-error'
+      ? log('⚠️ ต่อเซิร์ฟเวอร์ไม่ได้ (เปิด npm run dev ไว้ไหม?):', e.message)
+      : log('⚠️ งานหลุดมือ (runJob ต้องจับ error เองหมด — นี่คือบั๊ก):', e?.message || e)),
+    onPause: () => log(`⏸️ หยุดรับงานชั่วคราว (มีไฟล์ ${PAUSE_FILE}) — ลบไฟล์เพื่อรับงานต่อ`),
+    onResume: () => log('▶️ รับงานต่อ'),
+  });
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

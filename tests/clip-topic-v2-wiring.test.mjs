@@ -99,7 +99,7 @@ const { runOnce, parseArgs } = await import('../scripts/clip-brain-once.mjs');
 
 const ENV_KEYS = ['CLIP_TOPIC_V2', 'CLIP_TOPIC_MODEL', 'CLIP_TOPIC_EFFORT', 'CLIP_TOPIC_FALLBACK_MODEL', 'CLIP_TOPIC_FALLBACK_ON_TIMEOUT', 'CLIP_TOPIC_STYLE_GATE', 'CLIP_TOPIC_BRAIN', 'CLIP_TOPIC_FALLBACK_BRAIN', 'CLIP_REVIEWER_BRAIN', 'CLIP_REVIEWER_MODEL', 'CLIP_REVIEWER_EFFORT',
   'CLIP_TOPIC_FALLBACK_EFFORT', 'CLIP_TOPIC_TIMEOUT_MS', 'GEMINI_VIDEO_API_KEY', 'GEMINI_API_KEY',
-  'CLIP_SAFE_TEXT', 'CLIP_USAGE_LOG', 'CLIP_GEMINI_MAX_ATTEMPTS', 'CLIP_GEMINI_FALLBACK_MODELS'];
+  'CLIP_SAFE_TEXT', 'CLIP_USAGE_LOG', 'CLIP_GEMINI_MAX_ATTEMPTS', 'CLIP_GEMINI_FALLBACK_MODELS', 'CLIP_REVIEWER_ALWAYS'];
 let saved;
 function setup() {
   saved = { env: Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]])), fetch: globalThis.fetch,
@@ -107,7 +107,9 @@ function setup() {
   for (const key of ENV_KEYS) delete process.env[key];
   // ★ 9 ก.ย. 69: เทสเดินท่อใช้ fixture จริงที่มีคำอ้างที่มา → ปิดด่านสำนวน (ด่านนี้มีเทสของตัวเองใน clip-compose-topics)
   Object.assign(process.env, { GEMINI_VIDEO_API_KEY: 'offline-test-key', CLIP_SAFE_TEXT: '0',
-    CLIP_USAGE_LOG: '0', CLIP_GEMINI_MAX_ATTEMPTS: '1', CLIP_GEMINI_FALLBACK_MODELS: '', CLIP_TOPIC_STYLE_GATE: '0' });
+    CLIP_USAGE_LOG: '0', CLIP_GEMINI_MAX_ATTEMPTS: '1', CLIP_GEMINI_FALLBACK_MODELS: '', CLIP_TOPIC_STYLE_GATE: '0',
+    // ★ 9 ก.ย. 69 มาตรการ B: fixture ชุดนี้สะอาด (v2 hard 0) — เทสกลไก reviewer/repair จึงต้องบังคับตรวจ · พฤติกรรมข้ามมีเทสของตัวเองด้านล่าง
+    CLIP_REVIEWER_ALWAYS: '1' });
   const fixed = 1788652800000;
   globalThis.Date = class extends saved.Date {
     constructor(...args) { super(...(args.length ? args : [fixed])); }
@@ -480,4 +482,32 @@ test('brain selection env switches composer, fallback and reviewer providers wit
   assert.deepEqual([overridden.calls.find((c) => c.label === 'clip-compose-compose').brain, overridden.calls.find((c) => c.label === 'clip-compose-compose').model, overridden.calls.find((c) => c.label === 'clip-compose-compose').effort], ['claude', 'claude-fable-5', 'max'], 'explicit model/effort env still wins');
   process.env.CLIP_TOPIC_BRAIN = 'gemini';
   assert.equal((await execute('1')).calls.find((c) => c.label === 'clip-compose-compose').brain, 'codex', 'unknown brain value falls back to codex');
+});
+
+// ★ 9 ก.ย. 69 มาตรการ B (เจ้าของเคาะ "เอาไวและลื่น"): งานสะอาดสองชั้นข้ามผู้ตรวจ AI
+test('มาตรการ B: v2 ผ่าน hard 0 + ชั้นโค้ดสะอาด → ข้ามผู้ตรวจ (default) · CLIP_REVIEWER_ALWAYS=1 บังคับตรวจคืน', async () => {
+  delete process.env.CLIP_REVIEWER_ALWAYS;
+  const skipped = await execute('1');
+  assert.equal(skipped.result.brain.topicsV2.ok, true, 'fixture ต้องผ่านด่าน v2 จริง');
+  assert.equal(skipped.calls.find((c) => c.label === 'ผู้ตรวจ'), undefined, 'งานสะอาดต้องไม่จ่ายค่าผู้ตรวจ');
+  assert.equal(skipped.result.brain.check.reviewerSkipped, 'v2-hard0-code-clean', 'ใบเสร็จต้องบอกว่าข้ามเพราะสะอาด');
+  assert.equal(skipped.result.brain.check.ai, null, 'ชั้นสมองต้องว่างเมื่อข้าม');
+  assert.ok(!skipped.result.brain.degradations.some((d) => d.type === 'reviewer-unavailable'),
+    'ข้ามโดยตั้งใจห้ามนับเป็นผู้ตรวจล้ม');
+  // บังคับตรวจกลับพฤติกรรมเดิมได้ด้วย env ตัวเดียว
+  process.env.CLIP_REVIEWER_ALWAYS = '1';
+  const forced = await execute('1');
+  assert.ok(forced.calls.find((c) => c.label === 'ผู้ตรวจ'), 'บังคับตรวจแล้วผู้ตรวจต้องวิ่ง');
+  assert.equal(forced.result.brain.check.reviewerSkipped, undefined, 'บังคับตรวจต้องไม่มีธงข้าม');
+});
+
+test('มาตรการ B: v2 ไม่ผ่าน → ผู้ตรวจยังวิ่งตามเดิม (ห้ามข้ามงานไม่สะอาด)', async () => {
+  delete process.env.CLIP_REVIEWER_ALWAYS;
+  // compose ล้มทุก attempt → topicsV2.ok = false → เส้นทางเดิมต้องมีผู้ตรวจ
+  const failed = await execute('1', { composeReplies: [
+    { ok: false, errorType: 'BRAIN_TIMEOUT', costUSD: 0.1 },
+  ] });
+  assert.equal(failed.result.brain.topicsV2.ok, false);
+  assert.ok(failed.calls.find((c) => c.label === 'ผู้ตรวจ'), 'v2 ไม่ผ่านต้องตรวจเสมอ');
+  assert.equal(failed.result.brain.check.reviewerSkipped, undefined);
 });

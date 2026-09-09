@@ -551,6 +551,14 @@ async function loadWorker(source = WORKER_SOURCE, { heartbeatMs = 60_000, worker
   const dispatcherEnd = source.indexOf('const log =', dispatcherStart);
   assert.ok(dispatcherStart >= 0 && dispatcherEnd > dispatcherStart, 'หา undici bootstrap ของ worker ไม่พบ');
   let transformed = `${source.slice(0, dispatcherStart)}let longDispatcher = null;\n\n${source.slice(dispatcherEnd)}`;
+  // ★ 9 ก.ย. 69 มาตรการ F: harness นี้โหลดผ่าน data:URL ซึ่ง resolve import ญาติไม่ได้ (กับดักเดิม 1 ก.ย.)
+  //   → ตัด import scheduler แล้วฉีด stub แทน (ข้อสอบชุดนี้ไม่แตะลูป — ตรรกะขนานมีข้อสอบของตัวเองที่ clip-worker-scheduler.test.mjs)
+  transformed = replaceOnce(
+    transformed,
+    "import { runWorkerLoop, clampConcurrency } from './lib/clip-worker-scheduler.mjs';",
+    'const runWorkerLoop = async () => {}; const clampConcurrency = () => 1;',
+    'ตัด import scheduler สำหรับ data:URL',
+  );
   transformed = replaceOnce(
     transformed,
     "loop().catch((e) => { console.error('clip-worker crashed:', e); process.exit(1); });",
@@ -934,7 +942,11 @@ test('worker pause flag: file present = paused, absent/unset = running', async (
     const unset = await loadWorker();
     write(flag, '');
     assert.equal(unset.isPaused(), false, 'unset env never pauses even if some file exists');
-    assert.ok(WORKER_SOURCE.includes('if (isPaused())') && WORKER_SOURCE.indexOf('if (isPaused())') < WORKER_SOURCE.indexOf('job = await pullJob()'), 'pause check runs before pulling a job');
+    // ★ 9 ก.ย. 69 มาตรการ F: ลูปย้ายไป scheduler — สัญญา "เช็คธงก่อนหยิบงาน" ต้องตามไปเช็คที่นั่น
+    //   (พฤติกรรมเต็มมีข้อสอบของตัวเองที่ clip-worker-scheduler.test.mjs — นี่กันแค่การเดินสายหลุด)
+    const schedulerSource = readFileSync(new URL('../scripts/lib/clip-worker-scheduler.mjs', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+    assert.ok(WORKER_SOURCE.includes('runWorkerLoop({') && /\bisPaused\b/.test(WORKER_SOURCE.slice(WORKER_SOURCE.indexOf('runWorkerLoop({'))), 'worker ต้องส่ง isPaused เข้า scheduler');
+    assert.ok(schedulerSource.includes('if (isPaused())') && schedulerSource.indexOf('if (isPaused())') < schedulerSource.indexOf('await pullJob()'), 'pause check runs before pulling a job');
   } finally {
     if (saved === undefined) delete process.env.CLIP_WORKER_PAUSE_FILE; else process.env.CLIP_WORKER_PAUSE_FILE = saved;
     rm(dir, { recursive: true, force: true });
