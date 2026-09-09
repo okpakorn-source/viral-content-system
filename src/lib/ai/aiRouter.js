@@ -23,6 +23,39 @@ const WRITER_ATTEMPT_TIMEOUT_MS = Object.freeze({
   sol: 90_000,
 });
 
+// ★ 9 ก.ย. 69 รอบแก้ 1 (finding M1 ผู้ตรวจอิสระ — เจ้าของอนุมัติ NEWS-LOCK-APPROVED): systemPrompt เฉพาะขั้นสกัด
+//   ไม่ส่ง systemPrompt = claudeClient แนบ system สายเขียนเต็มชุด (กฎโครงสร้าง/ปิดทรงพลัง + HUMAN WRITING DNA
+//   + FACEBOOK SAFETY wordlist) → เสี่ยง euphemize ข่าวอาชญากรรม/อุบัติเหตุตั้งแต่ขั้นสกัด + โทเคนเข้า ~5,000/นัด
+//   ก้อนนี้ = บทบาทผู้สกัด + กฎเหล็ก 1-4 ยกข้อความตรงจาก claudeClient.js (ไม่เขียนกฎใหม่ ไม่ใส่กฎสายเขียน/wordlist)
+//   หมายเหตุ: กฎ 1-4 ของ claudeClient ไม่มีข้อ "ห้ามเดาเพศ" ตรงตัว — ยกข้อความมาตามจริง ไม่แต่งกฎเพิ่ม
+//   (กฎห้ามทึกทักเพศจากชื่อของระบบอยู่ในพรอมต์สายเขียน promptStoreText.js · ขั้นสกัดคุมด้วยกฎ 2 "ห้ามเดา ห้ามแก้" อยู่แล้ว)
+const EXTRACT_CLAUDE_SYSTEM_PROMPT = `คุณเป็น AI ผู้สกัดข้อเท็จจริงจากเนื้อข่าว
+ตอบเป็น JSON เท่านั้น ใช้ key names ตามที่ระบุใน prompt
+
+=== กฎเหล็ก DNA ระบบ (IRON RULES — บังคับทุกคำสั่ง ทุกโหมด ห้ามฝ่าฝืน) ===
+
+[กฎที่ 1: ห้ามทำนอก Flow]
+- ทำเฉพาะสิ่งที่คำสั่งสั่งเท่านั้น ห้ามคิดเอง ห้ามเพิ่มขั้นตอน ห้ามข้ามขั้นตอน
+- ถ้าคำสั่งบอกให้ "สกัดข่าว" → ทำแค่สกัดข่าว ห้ามวิเคราะห์เพิ่ม
+- ถ้าคำสั่งบอกให้ "แตกประเด็น" → ทำแค่แตกประเด็น ห้ามเขียนเนื้อหา
+
+[กฎที่ 2: ห้ามแต่งเรื่อง]
+- ใช้ข้อมูลจากเนื้อข่าวที่ให้มาเท่านั้น ห้ามเพิ่มข้อมูลจากความรู้ของตัวเอง
+- ชื่อคน สถานที่ ตัวเลข วันที่ → ต้องตรงกับข่าวต้นฉบับ 100% ห้ามเดา ห้ามแก้
+- ถ้าข่าวไม่ได้ระบุข้อมูลบางอย่าง → ห้ามสร้างขึ้นมาเอง ให้ข้ามไป
+- สถานะบุคคล "ยังมีชีวิต/เสียชีวิตแล้ว" ต้องตรงต้นฉบับ 100% และต้องบอกให้ชัดในเนื้อหา — ถ้าต้นฉบับบอกว่าใครเสียชีวิตแล้ว ห้ามเล่าฉากอดีตของคนนั้นแบบละคำบอกการจากไป จนคนอ่านเข้าใจว่ายังมีชีวิตอยู่ (นี่คือการบิดเบือนร้ายแรงที่สุด ห้ามเกิดเด็ดขาด แม้พร้อมท์จะสั่งโทนอบอุ่น/ห้ามเศร้าก็ตาม — ความจริงมาก่อนโทนเสมอ)
+
+[กฎที่ 3: ติดขัดต้องแจ้ง ห้ามแก้เอง]
+- ถ้าข้อมูลไม่เพียงพอ → ใส่ "_error": "ข้อมูลไม่เพียงพอ: [รายละเอียด]" ใน JSON
+- ถ้าเนื้อข่าวไม่ชัด → ใส่ "_warning": "เนื้อข่าวคลุมเครือ: [จุดที่ไม่ชัด]"
+- ห้ามเดาหรือสร้างข้อมูลขึ้นมาเพื่อ "แก้ปัญหา" ให้แจ้งปัญหาแทน
+
+[กฎที่ 4: JSON เท่านั้น]
+- ตอบเป็น JSON เท่านั้น ใช้ key names ตามที่ระบุใน prompt
+- ถ้า prompt มีเนื้อข่าวอยู่ระหว่าง === เนื้อข่าว === ให้ใช้ข้อมูลจากส่วนนั้นเท่านั้น
+
+=== จบกฎเหล็ก DNA ===`;
+
 function runWriterAttempt(factory, timeoutMs, step, parentSignal) {
   // บังคับให้ withTimeoutSignal ยกเลิก HTTP จริงแม้ caller เก่าไม่ได้ส่ง signal มา
   const abortableParent = parentSignal
@@ -184,9 +217,17 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
     //   ห้ามส่ง textNewsLengthPolicy (สิทธิ์พื้น 146/no-cap เป็นของนักเขียน TEXT เท่านั้น)
     //   callClaude โยน error เองเมื่อ refusal/เนื้อว่าง/JSON พัง → ตกไป gemini ตามกลไก chain เดิม
     //   ผลว่างแบบไม่ throw (เช่น JSON null) → บังคับโยนที่นี่ กันคืนค่าว่างเป็น "สำเร็จ" แล้วตัดโอกาสตัวสำรอง
+    //   รอบแก้ 1 (9 ก.ย. 69 · finding M1/M2/L1 ผู้ตรวจอิสระ — เจ้าของอนุมัติ):
+    //   - systemPrompt: กฎสกัดล้วน EXTRACT_CLAUDE_SYSTEM_PROMPT — caller ที่ส่ง systemPrompt เองมายังชนะได้ตามเดิม
+    //     (สาย extract จริงไม่เคยส่ง → เดิม undefined = ได้ system สายเขียนของ claudeClient ทั้งก้อน)
+    //   - effort: EXTRACT_CLAUDE_EFFORT (ไม่ตั้ง = medium) — per-call ชนะ env ใน callClaude → ไม่ผูก CLAUDE_WRITE_EFFORT สายเขียน
+    //   - maxRetries 0: กัน SDK retry ซ้อนกินงบ stage 120s (เพดานรวมมี withTimeoutSignal ชั้นนอกแล้ว) · signal ส่งต่อเดิม
     case 'claude-extract': {
       const out = await callClaude({
-        prompt, systemPrompt, temperature, maxTokens, signal,
+        prompt, temperature, maxTokens, signal,
+        systemPrompt: systemPrompt || EXTRACT_CLAUDE_SYSTEM_PROMPT,
+        effort: process.env.EXTRACT_CLAUDE_EFFORT || 'medium',
+        maxRetries: 0,
         model: process.env.EXTRACT_CLAUDE_MODEL || 'claude-opus-4-8',
       });
       if (!out || typeof out !== 'object') throw new Error('claude-extract ได้ผลว่าง — ส่งต่อตัวสำรอง');

@@ -8,6 +8,9 @@
 //   EXTRACT_SWITCH_TEST_MUTATION=order-swap          สลับลำดับ claude-extract ไปท้าย gemini
 //   EXTRACT_SWITCH_TEST_MUTATION=leak-length-policy  ส่ง textNewsLengthPolicy เข้า callClaude
 //   EXTRACT_SWITCH_TEST_MUTATION=hardcoded-model     ล็อกโมเดลตายตัว ไม่อ่าน EXTRACT_CLAUDE_MODEL
+// รอบแก้ 1 (9 ก.ย. 69 · finding M1/M2/L1 ผู้ตรวจอิสระ) เพิ่ม 2 โหมด:
+//   EXTRACT_SWITCH_TEST_MUTATION=no-extract-system   ถอด systemPrompt เฉพาะขั้นสกัด (กลับไปได้ system สายเขียน)
+//   EXTRACT_SWITCH_TEST_MUTATION=no-extract-effort   ถอด effort รายนัด (กลับไปผูก CLAUDE_WRITE_EFFORT)
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync, writeFileSync, rmSync } from 'node:fs';
@@ -73,9 +76,19 @@ if (MUTATION === 'no-env-guard') {
     'mutation order-swap');
 } else if (MUTATION === 'leak-length-policy') {
   routerSource = mustReplace(routerSource,
-    'prompt, systemPrompt, temperature, maxTokens, signal,\n        model: process.env.EXTRACT_CLAUDE_MODEL',
-    'prompt, systemPrompt, temperature, maxTokens, signal, textNewsLengthPolicy,\n        model: process.env.EXTRACT_CLAUDE_MODEL',
+    'prompt, temperature, maxTokens, signal,\n        systemPrompt: systemPrompt || EXTRACT_CLAUDE_SYSTEM_PROMPT,',
+    'prompt, temperature, maxTokens, signal, textNewsLengthPolicy,\n        systemPrompt: systemPrompt || EXTRACT_CLAUDE_SYSTEM_PROMPT,',
     'mutation leak-length-policy');
+} else if (MUTATION === 'no-extract-system') {
+  // รอบแก้ 1 (M1): ถอด systemPrompt เฉพาะขั้นสกัด — กลับไปส่งค่าจาก caller (undefined = system สายเขียน)
+  routerSource = mustReplace(routerSource,
+    'systemPrompt: systemPrompt || EXTRACT_CLAUDE_SYSTEM_PROMPT,',
+    'systemPrompt,', 'mutation no-extract-system');
+} else if (MUTATION === 'no-extract-effort') {
+  // รอบแก้ 1 (M2): ถอด effort รายนัด — กลับไปผูก CLAUDE_WRITE_EFFORT ของสายเขียน
+  routerSource = mustReplace(routerSource,
+    "effort: process.env.EXTRACT_CLAUDE_EFFORT || 'medium',\n        ",
+    '', 'mutation no-extract-effort');
 } else if (MUTATION === 'hardcoded-model') {
   routerSource = mustReplace(routerSource,
     "model: process.env.EXTRACT_CLAUDE_MODEL || 'claude-opus-4-8',",
@@ -98,6 +111,8 @@ const reset = ({ claude = [], gemini = [], gpt = [], claudeAvailable = true, gem
   globalThis.__X_GEMINI_AVAILABLE__ = geminiAvailable;
   delete process.env.EXTRACT_PRIMARY;
   delete process.env.EXTRACT_CLAUDE_MODEL;
+  delete process.env.EXTRACT_CLAUDE_EFFORT;
+  delete process.env.CLAUDE_WRITE_EFFORT;
 };
 
 const runExtract = async (opts = {}) => {
@@ -208,4 +223,47 @@ test('6 เปิดสวิตช์แต่ isClaudeAvailable=false → chai
   const { chain } = await runExtract();
   assert.deepEqual(chain, ['gemini', 'gpt4o']);
   assert.equal(calls().some((c) => c.fn === 'claude'), false);
+});
+
+// ═══ 7) รอบแก้ 1 (M1+L1) — systemPrompt เฉพาะขั้นสกัด: กฎสกัดล้วน ไม่มีกฎสายเขียน/wordlist + maxRetries 0 + ส่งต่อ signal เดิม ═══
+test('7 claude-extract ส่ง systemPrompt กฎสกัด (ห้ามแต่งเรื่อง+JSON) ไม่มี FACEBOOK SAFETY / HUMAN WRITING DNA / hook · maxRetries=0 · signal เดิม', async () => {
+  reset();
+  process.env.EXTRACT_PRIMARY = 'claude';
+  const ac = new AbortController();
+  await runExtract({ signal: ac.signal });
+  const c = calls()[0];
+  assert.equal(c.fn, 'claude');
+  assert.equal(typeof c.systemPrompt, 'string', 'ต้องส่ง systemPrompt เฉพาะขั้นสกัดเสมอ (ไม่ส่ง = ได้ system สายเขียนของ claudeClient)');
+  // ต้องมี: บทบาทผู้สกัด + กฎยกตรงจาก claudeClient (ห้ามแต่งเรื่อง / JSON เท่านั้น)
+  assert.ok(c.systemPrompt.includes('ผู้สกัดข้อเท็จจริง'), 'บทบาทผู้สกัดข้อเท็จจริง');
+  assert.ok(c.systemPrompt.includes('[กฎที่ 2: ห้ามแต่งเรื่อง]'), 'กฎห้ามแต่งเรื่องต้องอยู่ครบ');
+  assert.ok(c.systemPrompt.includes('ต้องตรงกับข่าวต้นฉบับ 100%'), 'กฎยึดต้นฉบับต้องอยู่ครบ');
+  assert.ok(c.systemPrompt.includes('[กฎที่ 4: JSON เท่านั้น]'), 'กฎ JSON ต้องอยู่ครบ');
+  assert.ok(c.systemPrompt.includes('ตอบเป็น JSON เท่านั้น'), 'คำสั่ง JSON ต้องอยู่ครบ');
+  // ห้ามมี: กฎสายเขียน + wordlist (ต้นเหตุ euphemize ขั้นสกัด + โทเคนเข้า ~5,000/นัด)
+  assert.equal(c.systemPrompt.includes('FACEBOOK SAFETY'), false, 'ห้ามมี FACEBOOK SAFETY wordlist ในขั้นสกัด');
+  assert.equal(c.systemPrompt.includes('ห้ามใช้คำเสี่ยง'), false, 'ห้ามมีรายการคำเสี่ยง/คำแทนในขั้นสกัด');
+  assert.equal(c.systemPrompt.includes('HUMAN WRITING DNA'), false, 'ห้ามมีกฎนักเขียนในขั้นสกัด');
+  assert.equal(c.systemPrompt.includes('hook'), false, 'ห้ามมีกฎโครงสร้าง hook (กฎที่ 5 สายเขียน)');
+  assert.equal(c.systemPrompt.includes('กฎที่ 5'), false, 'กฎที่ 5-6 เป็นของสายเขียนเท่านั้น');
+  // L1: ล็อก SDK retry + เคารพ signal จากชั้นนอก (withTimeoutSignal)
+  assert.equal(c.maxRetries, 0, 'maxRetries ต้องเป็น 0 กัน SDK retry ซ้อนกินงบ stage');
+  assert.equal(c.signal, ac.signal, 'ต้องส่งต่อ signal เดิมไม่เปลี่ยน');
+});
+
+// ═══ 8) รอบแก้ 1 (M2) — effort ขั้นสกัดแยกขาดจาก CLAUDE_WRITE_EFFORT สายเขียน ═══
+test('8.1 ไม่ตั้ง EXTRACT_CLAUDE_EFFORT → effort=medium แม้ CLAUDE_WRITE_EFFORT=high (ไม่ผูกสายเขียน)', async () => {
+  reset();
+  process.env.EXTRACT_PRIMARY = 'claude';
+  process.env.CLAUDE_WRITE_EFFORT = 'high'; // จูนสายเขียน — ขั้นสกัดต้องไม่เปลี่ยนตามเงียบๆ
+  await runExtract();
+  assert.equal(calls()[0].effort, 'medium', 'ต้องส่ง effort รายนัด = medium (per-call ชนะ env ใน callClaude)');
+});
+
+test('8.2 EXTRACT_CLAUDE_EFFORT=high → ส่ง effort=high', async () => {
+  reset();
+  process.env.EXTRACT_PRIMARY = 'claude';
+  process.env.EXTRACT_CLAUDE_EFFORT = 'high';
+  await runExtract();
+  assert.equal(calls()[0].effort, 'high');
 });
