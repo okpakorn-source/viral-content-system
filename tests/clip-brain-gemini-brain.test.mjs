@@ -177,3 +177,76 @@ test('checkBrain(gemini): พร้อมเมื่อมีกุญแจ �
   await withGemini([], async () => assert.deepEqual(await checkBrain('gemini'), { available: true, version: 'api' }));
   await withGemini([], async () => assert.equal((await checkBrain('gemini')).available, false), { GEMINI_API_KEY: '' });
 });
+
+// ★ วงตรวจไขว้ 14 ก.ย. 69 (P12b): 5 จุดที่ยืนยันแล้ว
+test('P12b: HeadersTimeout ของ undici ที่ fetch ห่อเป็น "fetch failed" = BRAIN_TIMEOUT ไม่ยิงซ้ำ · มี dispatcher ที่ปลดเพดาน', async () => {
+  const wrapped = new TypeError('fetch failed'); wrapped.cause = Object.assign(new Error('Headers Timeout Error'), { name: 'HeadersTimeoutError', code: 'UND_ERR_HEADERS_TIMEOUT' });
+  await withGemini([wrapped], async (requests) => {
+    const r = await runBrain({ brain: 'gemini', prompt: 'p', timeoutMs: 30000 });
+    assert.deepEqual([r.ok, r.errorType, requests.length], [false, 'BRAIN_TIMEOUT', 1]);
+    const d = requests[0].init.dispatcher;
+    assert.ok(d && typeof d === 'object', 'ต้องส่ง dispatcher ของ undici (ปิด headersTimeout/bodyTimeout) ไปกับ fetch');
+  });
+  const bodyT = new TypeError('terminated'); bodyT.cause = Object.assign(new Error('Body Timeout Error'), { name: 'BodyTimeoutError', code: 'UND_ERR_BODY_TIMEOUT' });
+  await withGemini([bodyT], async () => assert.equal((await runBrain({ brain: 'gemini', prompt: 'p', timeoutMs: 30000 })).errorType, 'BRAIN_TIMEOUT'));
+});
+
+test('P12b: หมดเวลาระหว่างอ่าน body ของ 200 = BRAIN_TIMEOUT · body พังธรรมดา ยิงซ้ำแล้วสำเร็จ · body พังสองครั้ง = BRAIN_API_ERROR (ไม่ใช่ตอบว่าง)', async () => {
+  const jsonThrows = (err) => ({ status: 200, body: null, jsonError: err });
+  const savedFetch = globalThis.fetch;
+  // สตับเฉพาะเคสนี้: json() โยน
+  await withGemini([{ status: 200, body: {} }], async (requests) => {
+    const inner = globalThis.fetch;
+    globalThis.fetch = async (url, init) => { const res = await inner(url, init); return { ...res, json: async () => { const e = new Error('The operation was aborted due to timeout'); e.name = 'TimeoutError'; throw e; } }; };
+    const r = await runBrain({ brain: 'gemini', prompt: 'p', timeoutMs: 30000 });
+    assert.deepEqual([r.ok, r.errorType, requests.length], [false, 'BRAIN_TIMEOUT', 1]);
+  });
+  await withGemini([{ status: 200, body: {} }, { status: 200, body: okBody('{"z":1}') }], async () => {
+    const inner = globalThis.fetch; let n = 0;
+    globalThis.fetch = async (url, init) => { const res = await inner(url, init); n++; return n === 1 ? { ...res, json: async () => { throw new Error('socket hang up'); } } : res; };
+    const r = await runBrain({ brain: 'gemini', prompt: 'p', timeoutMs: 30000 });
+    assert.deepEqual([r.ok, r.retries, r.json], [true, 1, { z: 1 }]);
+  });
+  await withGemini([{ status: 200, body: {} }, { status: 200, body: {} }], async () => {
+    const inner = globalThis.fetch;
+    globalThis.fetch = async (url, init) => { const res = await inner(url, init); return { ...res, json: async () => { throw new Error('socket hang up'); } }; };
+    const r = await runBrain({ brain: 'gemini', prompt: 'p', timeoutMs: 30000 });
+    assert.deepEqual([r.ok, r.errorType, r.retries], [false, 'BRAIN_API_ERROR', 1]);
+    assert.notEqual(r.errorType, 'BRAIN_EMPTY_ANSWER');
+  });
+  globalThis.fetch = savedFetch; void jsonThrows;
+});
+
+test('P12b: finishReason ที่ไม่ใช่ STOP ห้ามหลุดเป็นสำเร็จ — RECITATION/BLOCKLIST/SPII = BLOCKED · OTHER/MALFORMED = API_ERROR · ไม่มี finishReason = ผ่าน', async () => {
+  for (const f of ['RECITATION', 'BLOCKLIST', 'SPII']) await withGemini([{ status: 200, body: okBody('{"a":1}', { cand: { finishReason: f } }) }], async () => assert.equal((await runBrain({ brain: 'gemini', prompt: 'p' })).errorType, 'BRAIN_BLOCKED', f));
+  for (const f of ['OTHER', 'MALFORMED_FUNCTION_CALL', 'UNEXPECTED_TOOL_CALL']) await withGemini([{ status: 200, body: okBody('{"half":', { cand: { finishReason: f } }) }], async () => {
+    const r = await runBrain({ brain: 'gemini', prompt: 'p' });
+    assert.deepEqual([r.ok, r.errorType, r.finishReason], [false, 'BRAIN_API_ERROR', f]);
+  });
+  await withGemini([{ status: 200, body: { candidates: [{ content: { parts: [{ text: '{"ok":1}' }] } }], usageMetadata: {} } }], async () => assert.equal((await runBrain({ brain: 'gemini', prompt: 'p' })).ok, true, 'ไม่มี finishReason ยังผ่าน'));
+});
+
+test('P12b: กุญแจไม่รั่วในข้อความ error ใดๆ (fetch โยนข้อความที่มีกุญแจ · Gemini ตอบ error ที่สะท้อนกุญแจ)', async () => {
+  await withGemini([new TypeError('invalid header value: test-key'), new TypeError('invalid header value: test-key')], async () => {
+    const r = await runBrain({ brain: 'gemini', prompt: 'p', timeoutMs: 30000 });
+    assert.equal(r.ok, false);
+    assert.ok(!JSON.stringify(r).includes('test-key'), 'ห้ามมีกุญแจในผลลัพธ์: ' + JSON.stringify(r).slice(0, 200));
+    assert.ok(r.error.includes('***'));
+  });
+  await withGemini([{ status: 400, body: { error: { message: 'API key test-key is malformed' } } }], async () => {
+    const r = await runBrain({ brain: 'gemini', prompt: 'p' });
+    assert.ok(!JSON.stringify(r).includes('test-key'));
+  });
+});
+
+test('P12b: timeoutMs ที่ไม่ใช่จำนวนเต็ม/ใหญ่เกิน ถูกบังคับเข้ากรอบ — ไม่โยน ไม่กลายเป็น API_ERROR', async () => {
+  await withGemini([{ waitAbort: true, status: 200, body: {} }], async (requests) => {
+    const r = await runBrain({ brain: 'gemini', prompt: 'p', timeoutMs: 1.9 });
+    assert.deepEqual([r.errorType, requests.length], ['BRAIN_TIMEOUT', 1], 'ปัดลงเป็น 1 ms แล้วหมดเวลา ไม่ใช่ RangeError');
+  });
+  await withGemini([{ status: 200, body: okBody('{"a":1}') }], async (requests) => {
+    const r = await runBrain({ brain: 'gemini', prompt: 'p', timeoutMs: 1e12 });
+    assert.equal(r.ok, true, JSON.stringify(r).slice(0, 200));
+    assert.ok(requests[0].init.signal instanceof AbortSignal);
+  });
+});

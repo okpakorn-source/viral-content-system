@@ -372,7 +372,28 @@ const BRAINS = {
 
 // ═══════════ ★ P12: สมอง gemini — API ตรง ═══════════
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-const GEMINI_DEFAULT_RATE = Object.freeze({ in: 0.3, out: 2.5 }); // USD ต่อ 1M token (ประมาณการ — ตั้ง env ให้ตรงบิลจริงได้)
+const GEMINI_DEFAULT_RATE = Object.freeze({ in: 0.3, out: 2.5 });
+// ★ วงตรวจ 14 ก.ย.: fetch ของ Node (undici) มี headersTimeout/bodyTimeout 300 วิในตัว — งาน compose ยาวกว่านั้นจะถูกตีเป็น "เน็ตพัง" แล้วยิงซ้ำ
+//   จึงใช้ Agent ของ undici ที่ปิดเพดานทั้งสอง (เพดานจริงคือ AbortSignal ตาม timeoutMs) · โหลดครั้งเดียว · ถ้า import ไม่ได้ (สภาพแวดล้อมแปลก) ก็ยิงแบบไม่มี dispatcher
+let geminiDispatcherPromise = null;
+function geminiDispatcher() {
+  if (!geminiDispatcherPromise) {
+    geminiDispatcherPromise = import('undici').then((m) => new m.Agent({ headersTimeout: 0, bodyTimeout: 0, connectTimeout: 30000 })).catch(() => undefined);
+  }
+  return geminiDispatcherPromise;
+}
+/** ข้อผิดพลาดที่แปลว่า "หมดเวลา/ถูกยกเลิก" — รวม cause ที่ fetch ห่อไว้ (TypeError: fetch failed → cause = HeadersTimeoutError ฯลฯ) */
+function isTimeoutError(e) {
+  for (const x of [e, e?.cause]) {
+    if (!x) continue;
+    const name = String(x.name || ''), code = String(x.code || ''), msg = String(x.message || '');
+    if (name === 'TimeoutError' || name === 'AbortError' || /TimeoutError$/.test(name)) return true;
+    if (/^UND_ERR_(HEADERS_TIMEOUT|BODY_TIMEOUT|ABORTED|CONNECT_TIMEOUT)$/.test(code)) return true;
+    if (/aborted|timed? ?out/i.test(msg)) return true;
+  }
+  return false;
+}
+const errText = (e) => { const c = e?.cause; return String(e?.message || e) + (c && c.message ? ` (${c.message})` : ''); }; // USD ต่อ 1M token (ประมาณการ — ตั้ง env ให้ตรงบิลจริงได้)
 let geminiInflight = 0;
 const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
 function envFloat(name, def) {
@@ -396,9 +417,13 @@ async function runGeminiBrain({ opts, base, fail, t0 }) {
   if (!key) return fail('BRAIN_AUTH', 'ไม่มี GEMINI_API_KEY — ตั้งค่าใน .env ก่อนใช้สมอง gemini');
   let model;
   try { model = safeModel(opts.model || process.env.CLIP_GEMINI_MODEL, 'gemini-3.8-flash'); } catch (e) { return fail('BRAIN_BAD_MODEL', e.message); }
+  const dispatcher = await geminiDispatcher(); // โหลดก่อนเช็คเพดาน — ห้ามมี await ระหว่างเช็คเพดานกับนับคิว (ไม่งั้นสองคำขอหลุดพร้อมกัน)
   const cap = envInt('CLIP_GEMINI_MAX_CONCURRENT', 4);
   if (geminiInflight >= cap) return fail('BRAIN_BUSY', `สมอง gemini ไม่ว่าง (${geminiInflight}/${cap})`);
-  const timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : envInt('CLIP_BRAIN_TIMEOUT_MS', DEF_TIMEOUT_MS);
+  const rawTimeout = Number(opts.timeoutMs);
+  const timeoutMs = Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.min(Math.max(1, Math.floor(rawTimeout)), 2147483647) : envInt('CLIP_BRAIN_TIMEOUT_MS', DEF_TIMEOUT_MS);
+  // (4) ทุกข้อความที่มาจากภายนอก (error ของ fetch/undici/Gemini) ต้องไม่มีกุญแจปน — undici เคยสะท้อนค่า header ทั้งก้อนในข้อความ error
+  const scrub = (s) => { const t = String(s == null ? '' : s); return t.split(key).join('***'); };
   const generationConfig = { temperature: envFloat('CLIP_GEMINI_TEMPERATURE', 0.2), maxOutputTokens: envInt('CLIP_GEMINI_MAX_OUTPUT_TOKENS', 65536) };
   if (opts.expectJson !== false) generationConfig.responseMimeType = 'application/json';
   if (base.effortApplied) generationConfig.thinkingConfig = { thinkingLevel: base.effortApplied };
@@ -411,19 +436,25 @@ async function runGeminiBrain({ opts, base, fail, t0 }) {
     for (let attempt = 1; ; attempt++) {
       const left = deadline - Date.now();
       if (left <= 0) return timeoutFail(attempt - 1);
-      let res, data = null, status = 0;
+      let res, data = null, status = 0, bodyErr = null;
       try {
-        res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key }, body, signal: AbortSignal.timeout(left) });
+        res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key }, body,
+          signal: AbortSignal.timeout(Math.max(1, Math.floor(left))), ...(dispatcher ? { dispatcher } : {}) });
         status = Number(res.status) || 0;
-        try { data = await res.json(); } catch { data = null; }
+        try { data = await res.json(); } catch (e) { data = null; bodyErr = e; }
       } catch (e) {
-        const name = String(e?.name || ''), msg = String(e?.message || e);
-        if (name === 'TimeoutError' || name === 'AbortError' || /aborted|timed? ?out/i.test(msg)) return timeoutFail(attempt - 1);
+        if (isTimeoutError(e)) return timeoutFail(attempt - 1);
         if (attempt < 2 && deadline - Date.now() > 3000) { await sleepMs(2000); continue; }
-        return fail('BRAIN_API_ERROR', `เครือข่าย: ${head(msg, 200)}`, { model, retries: attempt - 1 });
+        return fail('BRAIN_API_ERROR', `เครือข่าย: ${scrub(head(errText(e), 200))}`, { model, retries: attempt - 1 });
+      }
+      // (2) หมดเวลา/สายหลุดระหว่างอ่าน body ของคำตอบ 2xx — ห้ามกลืนเป็น "ตอบว่าง"
+      if (res.ok && bodyErr) {
+        if (isTimeoutError(bodyErr)) return timeoutFail(attempt - 1);
+        if (attempt < 2 && deadline - Date.now() > 3000) { await sleepMs(2000); continue; }
+        return fail('BRAIN_API_ERROR', `อ่านคำตอบไม่ได้: ${scrub(head(errText(bodyErr), 200))}`, { model, httpStatus: status, retries: attempt - 1 });
       }
       if (!res.ok) {
-        const msg = head(data?.error?.message || `HTTP ${status}`, 300);
+        const msg = scrub(head(data?.error?.message || `HTTP ${status}`, 300));
         if (status === 401 || status === 403 || /api key/i.test(msg)) return fail('BRAIN_AUTH', `Gemini ปฏิเสธกุญแจ (${status}): ${msg}`, { model, httpStatus: status, retries: attempt - 1 });
         const retryable = status === 429 || status >= 500;
         if (retryable && attempt < 2 && deadline - Date.now() > 3000) { await sleepMs(2000); continue; }
@@ -438,8 +469,10 @@ async function runGeminiBrain({ opts, base, fail, t0 }) {
       const meta = { model, httpStatus: status, retries: attempt - 1, finishReason: finish,
         usage: { input: inTok, output: outTok, thoughts: thoughtTok }, tokensUsed: inTok + outTok + thoughtTok, costUSD: geminiCost(model, inTok, outTok + thoughtTok) };
       const blocked = data?.promptFeedback?.blockReason;
-      if (finish === 'SAFETY' || finish === 'PROHIBITED_CONTENT' || blocked) return fail('BRAIN_BLOCKED', `Gemini บล็อกด้วยนโยบาย (${finish || blocked})`, meta);
+      if (/^(SAFETY|PROHIBITED_CONTENT|RECITATION|BLOCKLIST|SPII)$/.test(finish) || blocked) return fail('BRAIN_BLOCKED', `Gemini บล็อกด้วยนโยบาย (${finish || blocked})`, meta);
       if (finish === 'MAX_TOKENS') return fail('BRAIN_TRUNCATED', `คำตอบถูกตัดเพราะชนเพดาน maxOutputTokens=${generationConfig.maxOutputTokens}`, { ...meta, rawSample: tail(text, 300) });
+      // ★ วงตรวจ 14 ก.ย.: OTHER / MALFORMED_FUNCTION_CALL / ค่าใหม่ใดๆ = คำตอบไม่จบ ห้ามส่ง JSON ครึ่งเดียวไปเป็นเอกสาร
+      if (finish && finish !== 'STOP') return fail('BRAIN_API_ERROR', `Gemini หยุดก่อนจบ (${finish})`, { ...meta, rawSample: tail(text, 300) });
       if (!text.trim()) return fail('BRAIN_EMPTY_ANSWER', 'Gemini ตอบว่างเปล่า', meta);
       let json = null;
       if (opts.expectJson !== false) {

@@ -557,8 +557,14 @@ test('P12: gemini ทุกขั้น (แผนผ่า/เรียบเ�
   assert.deepEqual([repair3.brain, repair3.model, repair3.effort], ['gemini', 'gemini-3.7-flash', 'medium']);
   const reviewer3 = g.calls.find((c) => c.label === 'ผู้ตรวจ');
   assert.deepEqual([reviewer3.brain, reviewer3.model, reviewer3.effort], ['gemini', 'gemini-3.8-flash', 'low']);
-  // เพดานเวลาที่เป็นขยะ → ค่าเดิม
-  Object.assign(process.env, { CLIP_REPAIR_TIMEOUT_MS: 'abc', CLIP_REVIEWER_TIMEOUT_MS: '-5', CLIP_PLAN_TIMEOUT_MS: '0' });
+  // แผนผ่า: env รุ่น/ระดับของขั้นชนะค่าเริ่มต้น (วงตรวจ 14 ก.ย.: ช่องโหว่เทสที่มิวแทนต์สลับคีย์รอด)
+  Object.assign(process.env, { CLIP_PLAN_BRAIN: 'gemini', CLIP_PLAN_MODEL: 'gemini-3.7-flash', CLIP_PLAN_EFFORT: 'medium' });
+  const pm = await execute('1', { long: true });
+  const plan3 = pm.calls.find((c) => c.label === 'วางแผนผ่า');
+  assert.deepEqual([plan3.brain, plan3.model, plan3.effort], ['gemini', 'gemini-3.7-flash', 'medium']);
+  delete process.env.CLIP_PLAN_MODEL; delete process.env.CLIP_PLAN_EFFORT;
+  // เพดานเวลาที่เป็นขยะ → ค่าเดิม (รวมเกินกรอบ 32 บิต)
+  Object.assign(process.env, { CLIP_REPAIR_TIMEOUT_MS: 'abc', CLIP_REVIEWER_TIMEOUT_MS: '-5', CLIP_PLAN_TIMEOUT_MS: '2147483648' });
   const z = await execute('1', { long: true, findings: [{ severity: 'สูง', kind: 'ของงอก', fix: 'ตัด', where: 'overview' }], repairReply: { ok: true, json: { patch: {}, changed: [], unfixed: [] } } });
   assert.deepEqual([z.calls.find((c) => c.label === 'ตัวซ่อม').timeoutMs, z.calls.find((c) => c.label === 'ผู้ตรวจ').timeoutMs, z.calls.find((c) => c.label === 'วางแผนผ่า').timeoutMs], [600000, 300000, 240000]);
 });
