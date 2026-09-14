@@ -307,7 +307,8 @@ test('main-story bureaucratic language fails independently of story prose', asyn
 
 test('offline parser makes real runs explicit, validates flags, and dry-run never invokes runner or changes source', async () => {
   assert.throws(() => parseArgs([]), /--out/);
-  for (const args of [['--wat'], ['--limit', '0'], ['--limit', '1.5'], ['--brain', 'gemini'], ['--model', '-danger'], ['--effort', 'max --tool'], ['--ids', ','], ['--dry-run', '--dry-run']]) assert.throws(() => parseArgs([...args, '--dry-run']));
+  assert.equal(parseArgs(['--dry-run', '--brain', 'gemini']).brain, 'gemini', 'P12: gemini เป็นค่ายที่รับได้');
+  for (const args of [['--wat'], ['--limit', '0'], ['--limit', '1.5'], ['--brain', 'bogus'], ['--model', '-danger'], ['--effort', 'max --tool'], ['--ids', ','], ['--dry-run', '--dry-run']]) assert.throws(() => parseArgs([...args, '--dry-run']));
   const temp = await mkdtemp(path.join(os.tmpdir(), 'clip-compose-offline-test-'));
   try {
     const input = path.join(temp, 'input.json');

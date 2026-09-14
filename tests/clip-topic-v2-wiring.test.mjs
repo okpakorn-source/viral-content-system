@@ -99,7 +99,9 @@ const { runOnce, parseArgs } = await import('../scripts/clip-brain-once.mjs');
 
 const ENV_KEYS = ['CLIP_TOPIC_V2', 'CLIP_TOPIC_MODEL', 'CLIP_TOPIC_EFFORT', 'CLIP_TOPIC_FALLBACK_MODEL', 'CLIP_TOPIC_FALLBACK_ON_TIMEOUT', 'CLIP_TOPIC_STYLE_GATE', 'CLIP_TOPIC_BRAIN', 'CLIP_TOPIC_FALLBACK_BRAIN', 'CLIP_REVIEWER_BRAIN', 'CLIP_REVIEWER_MODEL', 'CLIP_REVIEWER_EFFORT',
   'CLIP_TOPIC_FALLBACK_EFFORT', 'CLIP_TOPIC_TIMEOUT_MS', 'GEMINI_VIDEO_API_KEY', 'GEMINI_API_KEY',
-  'CLIP_SAFE_TEXT', 'CLIP_USAGE_LOG', 'CLIP_GEMINI_MAX_ATTEMPTS', 'CLIP_GEMINI_FALLBACK_MODELS', 'CLIP_REVIEWER_ALWAYS'];
+  'CLIP_SAFE_TEXT', 'CLIP_USAGE_LOG', 'CLIP_GEMINI_MAX_ATTEMPTS', 'CLIP_GEMINI_FALLBACK_MODELS', 'CLIP_REVIEWER_ALWAYS',
+  // ★ P12
+  'CLIP_PLAN_BRAIN', 'CLIP_PLAN_MODEL', 'CLIP_PLAN_EFFORT', 'CLIP_PLAN_TIMEOUT_MS', 'CLIP_REPAIR_BRAIN', 'CLIP_REPAIR_MODEL', 'CLIP_REPAIR_EFFORT', 'CLIP_REPAIR_TIMEOUT_MS', 'CLIP_REVIEWER_TIMEOUT_MS'];
 let saved;
 function setup() {
   saved = { env: Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]])), fetch: globalThis.fetch,
@@ -480,7 +482,7 @@ test('brain selection env switches composer, fallback and reviewer providers wit
   process.env.CLIP_TOPIC_MODEL = 'claude-fable-5'; process.env.CLIP_TOPIC_EFFORT = 'max';
   const overridden = await execute('1');
   assert.deepEqual([overridden.calls.find((c) => c.label === 'clip-compose-compose').brain, overridden.calls.find((c) => c.label === 'clip-compose-compose').model, overridden.calls.find((c) => c.label === 'clip-compose-compose').effort], ['claude', 'claude-fable-5', 'max'], 'explicit model/effort env still wins');
-  process.env.CLIP_TOPIC_BRAIN = 'gemini';
+  process.env.CLIP_TOPIC_BRAIN = 'bogus'; // ★ P12: 'gemini' เป็นค่ายจริงแล้ว — ค่าที่ไม่รู้จักยังถอยไป codex
   assert.equal((await execute('1')).calls.find((c) => c.label === 'clip-compose-compose').brain, 'codex', 'unknown brain value falls back to codex');
 });
 
@@ -510,4 +512,53 @@ test('มาตรการ B: v2 ไม่ผ่าน → ผู้ตรว�
   assert.equal(failed.result.brain.topicsV2.ok, false);
   assert.ok(failed.calls.find((c) => c.label === 'ผู้ตรวจ'), 'v2 ไม่ผ่านต้องตรวจเสมอ');
   assert.equal(failed.result.brain.check.reviewerSkipped, undefined);
+});
+
+// ★ 14 ก.ย. 69 P12 (เจ้าของ: "ใช้ gemini 3.8 flash ถอดเลย ให้เร็วมากๆ"): ทุกขั้นเลือกค่าย gemini ได้ + ตัวสำรอง none + เพดานเวลาแยกขั้น
+test('P12: gemini ทุกขั้น (แผนผ่า/เรียบเรียง/ผู้ตรวจ/ซ่อม) · none = ไม่มีตัวสำรอง · เพดานเวลาต่อขั้น · ค่าเดิมของ claude/codex ไม่เปลี่ยน', async () => {
+  Object.assign(process.env, { CLIP_TOPIC_BRAIN: 'gemini', CLIP_TOPIC_FALLBACK_BRAIN: 'none', CLIP_PLAN_BRAIN: 'gemini', CLIP_REVIEWER_BRAIN: 'gemini',
+    CLIP_REPAIR_BRAIN: 'gemini', CLIP_REPAIR_TIMEOUT_MS: '240000', CLIP_REVIEWER_TIMEOUT_MS: '180000', CLIP_PLAN_TIMEOUT_MS: '90000' });
+  const bad = doc(); bad.stories[0].story = words(20); // ตกด่านจำนวนคำทั้งสองรอบ → ไม่มีตัวสำรอง → จบที่ 2 attempts
+  const r = await execute('1', { long: true, findings: [{ severity: 'สูง', kind: 'ของงอก', fix: 'ตัด', where: 'overview' }],
+    repairReply: { ok: true, json: { patch: {}, changed: [], unfixed: [] } },
+    composeReplies: [{ ok: true, json: bad, costUSD: 0.01 }, { ok: true, json: bad, costUSD: 0.01 }] });
+  const plan = r.calls.find((c) => c.label === 'วางแผนผ่า');
+  assert.deepEqual([plan.brain, plan.model, plan.effort, plan.timeoutMs], ['gemini', 'gemini-3.8-flash', 'low', 90000], 'แผนผ่าบน gemini ระดับ low');
+  const compose = r.calls.filter((c) => c.label.startsWith('clip-compose'));
+  assert.deepEqual(compose.map((c) => [c.brain, c.model, c.effort, c.label]),
+    [['gemini', 'gemini-3.8-flash', 'high', 'clip-compose-compose'], ['gemini', 'gemini-3.8-flash', 'high', 'clip-compose-repair']], 'compose+repair บน gemini แล้วจบ ไม่มีตัวสำรอง');
+  assert.equal(r.result.brain.topicsV2.ok, false);
+  assert.equal(r.result.brain.topicsV2.attempts.length, 2, 'none = ไม่มี attempt ของตัวสำรอง');
+  const reviewer = r.calls.find((c) => c.label === 'ผู้ตรวจ');
+  assert.deepEqual([reviewer.brain, reviewer.model, reviewer.effort, reviewer.timeoutMs], ['gemini', 'gemini-3.8-flash', 'high', 180000]);
+  const repair = r.calls.find((c) => c.label === 'ตัวซ่อม');
+  assert.deepEqual([repair.brain, repair.model, repair.effort, repair.timeoutMs], ['gemini', 'gemini-3.8-flash', 'high', 240000]);
+  // ไม่ตั้ง env ของขั้น → ค่าเดิมเป๊ะ: แผนผ่า/ซ่อม = claude ไม่ระบุรุ่น เพดาน 240s/600s · ตัวสำรองเริ่มต้น claude fable max · ผู้ตรวจ codex
+  for (const k of ['CLIP_PLAN_BRAIN', 'CLIP_REPAIR_BRAIN', 'CLIP_TOPIC_FALLBACK_BRAIN', 'CLIP_REPAIR_TIMEOUT_MS', 'CLIP_REVIEWER_TIMEOUT_MS', 'CLIP_PLAN_TIMEOUT_MS', 'CLIP_REVIEWER_BRAIN']) delete process.env[k];
+  const d = await execute('1', { long: true, findings: [{ severity: 'สูง', kind: 'ของงอก', fix: 'ตัด', where: 'overview' }],
+    repairReply: { ok: true, json: { patch: {}, changed: [], unfixed: [] } },
+    composeReplies: [{ ok: false, errorType: 'BRAIN_QUOTA' }, { ok: true, json: doc(), costUSD: 0.1 }] });
+  const plan2 = d.calls.find((c) => c.label === 'วางแผนผ่า');
+  assert.deepEqual([plan2.brain, plan2.model, plan2.effort, plan2.timeoutMs], ['claude', undefined, undefined, 240000]);
+  assert.deepEqual(d.calls.filter((c) => c.label.startsWith('clip-compose')).map((c) => [c.brain, c.model, c.effort]),
+    [['gemini', 'gemini-3.8-flash', 'high'], ['claude', 'claude-fable-5', 'max']], 'gemini หลัก + claude สำรองค่าเดิม');
+  const reviewer2 = d.calls.find((c) => c.label === 'ผู้ตรวจ');
+  assert.deepEqual([reviewer2.brain, reviewer2.model, reviewer2.timeoutMs], ['codex', undefined, 300000]);
+  const repair2 = d.calls.find((c) => c.label === 'ตัวซ่อม');
+  assert.deepEqual([repair2.brain, repair2.model, repair2.timeoutMs], ['claude', undefined, 600000]);
+  // ตัวสำรอง gemini ค่าเริ่มต้น 3.7 flash · env รุ่น/ระดับของขั้นชนะค่าเริ่มต้น
+  Object.assign(process.env, { CLIP_TOPIC_FALLBACK_BRAIN: 'gemini', CLIP_REPAIR_BRAIN: 'gemini', CLIP_REPAIR_MODEL: 'gemini-3.7-flash', CLIP_REPAIR_EFFORT: 'medium', CLIP_REVIEWER_BRAIN: 'gemini', CLIP_REVIEWER_EFFORT: 'low' });
+  const g = await execute('1', { findings: [{ severity: 'สูง', kind: 'ของงอก', fix: 'ตัด', where: 'overview' }],
+    repairReply: { ok: true, json: { patch: {}, changed: [], unfixed: [] } },
+    composeReplies: [{ ok: false, errorType: 'BRAIN_QUOTA' }, { ok: true, json: doc(), costUSD: 0.1 }] });
+  assert.deepEqual(g.calls.filter((c) => c.label.startsWith('clip-compose')).map((c) => [c.brain, c.model, c.effort]),
+    [['gemini', 'gemini-3.8-flash', 'high'], ['gemini', 'gemini-3.7-flash', 'high']]);
+  const repair3 = g.calls.find((c) => c.label === 'ตัวซ่อม');
+  assert.deepEqual([repair3.brain, repair3.model, repair3.effort], ['gemini', 'gemini-3.7-flash', 'medium']);
+  const reviewer3 = g.calls.find((c) => c.label === 'ผู้ตรวจ');
+  assert.deepEqual([reviewer3.brain, reviewer3.model, reviewer3.effort], ['gemini', 'gemini-3.8-flash', 'low']);
+  // เพดานเวลาที่เป็นขยะ → ค่าเดิม
+  Object.assign(process.env, { CLIP_REPAIR_TIMEOUT_MS: 'abc', CLIP_REVIEWER_TIMEOUT_MS: '-5', CLIP_PLAN_TIMEOUT_MS: '0' });
+  const z = await execute('1', { long: true, findings: [{ severity: 'สูง', kind: 'ของงอก', fix: 'ตัด', where: 'overview' }], repairReply: { ok: true, json: { patch: {}, changed: [], unfixed: [] } } });
+  assert.deepEqual([z.calls.find((c) => c.label === 'ตัวซ่อม').timeoutMs, z.calls.find((c) => c.label === 'ผู้ตรวจ').timeoutMs, z.calls.find((c) => c.label === 'วางแผนผ่า').timeoutMs], [600000, 300000, 240000]);
 });

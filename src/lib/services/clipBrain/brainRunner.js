@@ -23,6 +23,14 @@
  *   CLIP_BRAIN_WRITER_MODEL (ค่าเริ่มต้น 'sonnet') — รุ่นของสมองเขียนฝั่ง claude
  *   CLIP_BRAIN_LEAN        — '0' = ปิดโหมดผอม (โหลดกฎ/เครื่องมือของโปรเจกต์ตามปกติ)
  *   CLIP_BRAIN_TIMEOUT_MS / CLIP_BRAIN_MAX_CONCURRENT / CLIP_BRAIN_WORKDIR
+ *
+ * ★ 14 ก.ย. 69 P12 — สมองค่ายที่สาม brain:'gemini' (เจ้าของ: "ใช้ gemini 3.8 flash ถอดเลย ให้เร็วมากๆ"):
+ *   เรียก Gemini API ตรง (fetch → generateContent) ไม่มีโปรเซสลูก ไม่มีบัญชี CLI ไม่มีล็อกอิน
+ *   สัญญาเดิมครบ: ไม่โยน error · มีเพดานเวลา (AbortSignal) · จำกัดพร้อมกัน (CLIP_GEMINI_MAX_CONCURRENT ค่าเริ่มต้น 4 — แยกจากโควตา CLI)
+ *   · ผลรูปทรงเดียวกับ claude/codex ({ok,text,json,costUSD,tokensUsed,elapsedMs,errorType}) · ยิงซ้ำได้ 1 ครั้งเฉพาะ 429/5xx/เน็ตสะดุด
+ *   effort → thinkingLevel: low→low · medium→medium · high/xhigh/ultra/max→high (พิสูจน์กับ gemini-3.8-flash 14 ก.ย. 69)
+ *   env: GEMINI_API_KEY (หรือ CLIP_GEMINI_API_KEY) · CLIP_GEMINI_MODEL (ค่าเริ่มต้น gemini-3.8-flash) · CLIP_GEMINI_TEMPERATURE (0.2)
+ *        CLIP_GEMINI_MAX_OUTPUT_TOKENS (65536) · CLIP_GEMINI_RATE_IN / CLIP_GEMINI_RATE_OUT (USD ต่อ 1M token — ไม่ตั้ง = ประมาณ 0.3/2.5)
  *   CLIP_BRAIN_PASS_ENV    — รายชื่อ env เพิ่มเติมที่ยอมส่งต่อให้ลูก คั่นด้วยจุลภาค (เช่น HTTPS_PROXY)
  *                            ชื่อที่มีคำว่า KEY/SECRET/TOKEN/PASSWORD/COOKIE/CREDENTIAL/AUTH/
  *                            ชื่อผู้ให้บริการ ถูกปฏิเสธเสมอ · ตัวนี้ "ไม่" ถูกส่งต่อให้ลูก
@@ -295,12 +303,15 @@ const CLAUDE_SYSTEM = 'You are a careful Thai news editor. Follow the user instr
 // P2: only fixed allowlisted effort values reach argv. Claude CLI help on
 // 2026-09-06 supports low|medium|high|xhigh|max; claude-auto.ps1 -Effort
 // forwards the same --effort flag. No new wrapper launch path is needed.
+// ★ P12: ระดับความคิดของ Gemini — ชื่อค่าที่ API รับจริง (thinkingLevel) มี low/medium/high
+const GEMINI_LEVEL = Object.freeze({ low: 'low', medium: 'medium', high: 'high', xhigh: 'high', ultra: 'high', max: 'high' });
 const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'ultra', 'max']);
 function effortOptions(opts, brain) {
   let value;
   try { value = opts.effort; } catch { return { effortIgnored: true }; }
   if (value === undefined || value === null) return {};
   if (typeof value !== 'string' || !EFFORTS.has(value) || (brain === 'claude' && value === 'ultra')) return { effortIgnored: true };
+  if (brain === 'gemini') return { effortIgnored: false, effortApplied: GEMINI_LEVEL[value] };
   return { effortIgnored: false, effortApplied: brain === 'codex' && value === 'max' ? 'ultra' : value };
 }
 
@@ -358,6 +369,92 @@ const BRAINS = {
     },
   },
 };
+
+// ═══════════ ★ P12: สมอง gemini — API ตรง ═══════════
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+const GEMINI_DEFAULT_RATE = Object.freeze({ in: 0.3, out: 2.5 }); // USD ต่อ 1M token (ประมาณการ — ตั้ง env ให้ตรงบิลจริงได้)
+let geminiInflight = 0;
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+function envFloat(name, def) {
+  const v = parseFloat(process.env[name] || '');
+  return Number.isFinite(v) ? v : def;
+}
+/** ราคาโดยประมาณ (USD): env CLIP_GEMINI_RATE_IN/OUT ต่อ 1M token ชนะ ไม่ตั้ง = อัตราเริ่มต้นค่าย gemini (0.3/2.5 เท่ากับ costRates PROVIDER_DEFAULT — ไม่ import ข้ามโฟลเดอร์ เพราะเทส CB-03 ก๊อปไฟล์นี้ไปรันในโฟลเดอร์ชั่วคราว) */
+function geminiCost(model, inTok, outTok) {
+  const rIn = parseFloat(process.env.CLIP_GEMINI_RATE_IN || ''), rOut = parseFloat(process.env.CLIP_GEMINI_RATE_OUT || '');
+  if (Number.isFinite(rIn) && rIn >= 0 && Number.isFinite(rOut) && rOut >= 0) return Math.max(0, (inTok / 1e6) * rIn + (outTok / 1e6) * rOut);
+  return Math.max(0, (inTok / 1e6) * GEMINI_DEFAULT_RATE.in + (outTok / 1e6) * GEMINI_DEFAULT_RATE.out);
+}
+/**
+ * เรียก Gemini generateContent หนึ่งครั้ง (ยิงซ้ำได้ 1 ครั้งเฉพาะ 429/5xx/เน็ตสะดุด ถ้าเวลายังเหลือ)
+ * คืนรูปทรงเดียวกับสมอง CLI — ไม่โยน error (ผู้เรียก `fail` เป็นตัวสร้างผลล้มเหลวของ runBrain)
+ */
+async function runGeminiBrain({ opts, base, fail, t0 }) {
+  const prompt = String(opts.prompt || '');
+  if (!prompt.trim()) return fail('BRAIN_EMPTY_PROMPT', 'พรอมต์ว่าง');
+  const key = String(process.env.CLIP_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '').trim();
+  if (!key) return fail('BRAIN_AUTH', 'ไม่มี GEMINI_API_KEY — ตั้งค่าใน .env ก่อนใช้สมอง gemini');
+  let model;
+  try { model = safeModel(opts.model || process.env.CLIP_GEMINI_MODEL, 'gemini-3.8-flash'); } catch (e) { return fail('BRAIN_BAD_MODEL', e.message); }
+  const cap = envInt('CLIP_GEMINI_MAX_CONCURRENT', 4);
+  if (geminiInflight >= cap) return fail('BRAIN_BUSY', `สมอง gemini ไม่ว่าง (${geminiInflight}/${cap})`);
+  const timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : envInt('CLIP_BRAIN_TIMEOUT_MS', DEF_TIMEOUT_MS);
+  const generationConfig = { temperature: envFloat('CLIP_GEMINI_TEMPERATURE', 0.2), maxOutputTokens: envInt('CLIP_GEMINI_MAX_OUTPUT_TOKENS', 65536) };
+  if (opts.expectJson !== false) generationConfig.responseMimeType = 'application/json';
+  if (base.effortApplied) generationConfig.thinkingConfig = { thinkingLevel: base.effortApplied };
+  const body = JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig });
+  const url = `${GEMINI_API_BASE}/${encodeURIComponent(model)}:generateContent`;
+  const deadline = t0 + timeoutMs;
+  const timeoutFail = (retries) => fail('BRAIN_TIMEOUT', `เกินเพดานเวลา ${timeoutMs}ms`, { model, retries });
+  geminiInflight++;
+  try {
+    for (let attempt = 1; ; attempt++) {
+      const left = deadline - Date.now();
+      if (left <= 0) return timeoutFail(attempt - 1);
+      let res, data = null, status = 0;
+      try {
+        res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key }, body, signal: AbortSignal.timeout(left) });
+        status = Number(res.status) || 0;
+        try { data = await res.json(); } catch { data = null; }
+      } catch (e) {
+        const name = String(e?.name || ''), msg = String(e?.message || e);
+        if (name === 'TimeoutError' || name === 'AbortError' || /aborted|timed? ?out/i.test(msg)) return timeoutFail(attempt - 1);
+        if (attempt < 2 && deadline - Date.now() > 3000) { await sleepMs(2000); continue; }
+        return fail('BRAIN_API_ERROR', `เครือข่าย: ${head(msg, 200)}`, { model, retries: attempt - 1 });
+      }
+      if (!res.ok) {
+        const msg = head(data?.error?.message || `HTTP ${status}`, 300);
+        if (status === 401 || status === 403 || /api key/i.test(msg)) return fail('BRAIN_AUTH', `Gemini ปฏิเสธกุญแจ (${status}): ${msg}`, { model, httpStatus: status, retries: attempt - 1 });
+        const retryable = status === 429 || status >= 500;
+        if (retryable && attempt < 2 && deadline - Date.now() > 3000) { await sleepMs(2000); continue; }
+        if (status === 429) return fail('BRAIN_QUOTA', `Gemini โควตาเต็ม (429): ${msg}`, { model, httpStatus: status, retries: attempt - 1 });
+        return fail('BRAIN_API_ERROR', `Gemini ปฏิเสธคำขอ (${status}): ${msg}`, { model, httpStatus: status, retries: attempt - 1 });
+      }
+      const cand = Array.isArray(data?.candidates) ? data.candidates[0] : null;
+      const finish = String(cand?.finishReason || '');
+      const text = (Array.isArray(cand?.content?.parts) ? cand.content.parts : []).map((p) => (typeof p?.text === 'string' ? p.text : '')).join('');
+      const usage = (data && typeof data.usageMetadata === 'object' && data.usageMetadata) || {};
+      const inTok = Number(usage.promptTokenCount) || 0, outTok = Number(usage.candidatesTokenCount) || 0, thoughtTok = Number(usage.thoughtsTokenCount) || 0;
+      const meta = { model, httpStatus: status, retries: attempt - 1, finishReason: finish,
+        usage: { input: inTok, output: outTok, thoughts: thoughtTok }, tokensUsed: inTok + outTok + thoughtTok, costUSD: geminiCost(model, inTok, outTok + thoughtTok) };
+      const blocked = data?.promptFeedback?.blockReason;
+      if (finish === 'SAFETY' || finish === 'PROHIBITED_CONTENT' || blocked) return fail('BRAIN_BLOCKED', `Gemini บล็อกด้วยนโยบาย (${finish || blocked})`, meta);
+      if (finish === 'MAX_TOKENS') return fail('BRAIN_TRUNCATED', `คำตอบถูกตัดเพราะชนเพดาน maxOutputTokens=${generationConfig.maxOutputTokens}`, { ...meta, rawSample: tail(text, 300) });
+      if (!text.trim()) return fail('BRAIN_EMPTY_ANSWER', 'Gemini ตอบว่างเปล่า', meta);
+      let json = null;
+      if (opts.expectJson !== false) {
+        json = extractJson(text);
+        if (!json) return fail('BRAIN_BAD_JSON', 'ไม่พบ JSON ในคำตอบสมอง', { ...meta, text: head(text, 2000) });
+      }
+      const out = { ok: true, ...base, account: 'api', accountsTried: [], text, json, elapsedMs: Date.now() - t0, truncated: false, ...meta };
+      try {
+        const costStr = out.costUSD != null ? ` $${Number(out.costUSD).toFixed(4)}` : '';
+        console.log(`[ClipBrain] ✓ ${base.label} (gemini:${model}) ${out.elapsedMs}ms${costStr} ${out.tokensUsed}tok${out.retries ? ` retry×${out.retries}` : ''}`);
+      } catch {}
+      return out;
+    }
+  } finally { geminiInflight--; }
+}
 
 let inflight = 0;
 
@@ -543,6 +640,7 @@ export async function runBrain(rawOpts) {
     return r;
   };
   try {
+    if (kind === 'gemini') return await runGeminiBrain({ opts, base, fail, t0 }); // ★ P12: API ตรง ไม่ผ่านโปรเซสลูก
     const spec = BRAINS[kind];
     if (!spec) return fail('BRAIN_BAD_KIND', `ไม่รู้จักสมอง: ${kind || '(ว่าง)'}`);
     const prompt = String(opts.prompt || '');
@@ -656,6 +754,10 @@ export async function runBrain(rawOpts) {
 
 /** เช็คว่าสมองตัวนี้พร้อมใช้บนเครื่องนี้ไหม (ใช้ในหน้า health / ก่อนเปิดโหมดสมอง) */
 export async function checkBrain(brain) {
+  if (brain === 'gemini') { // ★ P12: ไม่มี CLI ให้เช็คเวอร์ชัน — พร้อมเมื่อมีกุญแจ
+    const key = String(process.env.CLIP_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '').trim();
+    return key ? { available: true, version: 'api' } : { available: false, reason: 'ไม่มี GEMINI_API_KEY' };
+  }
   const spec = BRAINS[brain];
   if (!spec) return { available: false, reason: `ไม่รู้จักสมอง: ${brain}` };
   const bin = process.env[spec.binEnv] || spec.defBin;

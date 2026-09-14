@@ -30,6 +30,20 @@ import { VIDEO_INSIGHT_PROMPT, normalizeInsight } from '../clipInsightService.js
 export const PIPELINE_REV = 'clip-brain-pipeline-v1-0827';
 
 const SEGMENT_MIN_SEC = 480;      // สั้นกว่านี้ไม่ต้องผ่าท่อน (ถอดรอบเดียวพอ)
+// ★ 14 ก.ย. 69 P12 (เจ้าของ: "ใช้ gemini 3.8 flash ถอดเลย ให้เร็วมากๆ"): ทุกขั้นที่ใช้สมองเลือกค่ายผ่าน env ได้ 3 ค่าย
+//   CLIP_PLAN_BRAIN (ค่าเริ่มต้น claude) · CLIP_TOPIC_BRAIN (codex) · CLIP_TOPIC_FALLBACK_BRAIN (claude · 'none' = ไม่มีตัวสำรอง)
+//   CLIP_REVIEWER_BRAIN (codex) · CLIP_REPAIR_BRAIN (claude) + *_MODEL / *_EFFORT / *_TIMEOUT_MS ต่อขั้น
+//   gemini ไม่ตั้งรุ่น = gemini-3.8-flash · ระดับ high (แผนผ่า = low เพราะโจทย์ง่าย) · ค่าเดิมของ claude/codex ไม่เปลี่ยนแม้แต่ตัวเดียว
+const BRAIN_KINDS = new Set(['claude', 'codex', 'gemini']);
+const envStr = (key) => String(process.env[key] || '').trim();
+const brainKind = (key, def) => { const v = envStr(key); return BRAIN_KINDS.has(v) ? v : def; };
+const envMs = (key, def) => { const n = Number(envStr(key)); return Number.isSafeInteger(n) && n > 0 && n <= 2147483647 ? n : def; };
+const BRAIN_DEFAULTS = Object.freeze({ codex: { model: 'gpt-6-astra', effort: 'ultra' }, claude: { model: 'claude-opus-5', effort: 'high' }, gemini: { model: 'gemini-3.8-flash', effort: 'high' } });
+const FALLBACK_DEFAULTS = Object.freeze({ codex: { model: 'gpt-6-astra', effort: 'xhigh' }, claude: { model: 'claude-fable-5', effort: 'max' }, gemini: { model: 'gemini-3.7-flash', effort: 'high' } });
+/** ตัวเลือกสมองของขั้นเดี่ยว: env ชนะ · gemini ต้องมีรุ่น/ระดับเสมอ · claude/codex ไม่ตั้ง = ปล่อยว่างเหมือนเดิม */
+const brainOpts = (kind, modelKey, effortKey, geminiEffort = BRAIN_DEFAULTS.gemini.effort) => ({ brain: kind,
+  ...(envStr(modelKey) ? { model: envStr(modelKey) } : (kind === 'gemini' ? { model: BRAIN_DEFAULTS.gemini.model } : {})),
+  ...(envStr(effortKey) ? { effort: envStr(effortKey) } : (kind === 'gemini' ? { effort: geminiEffort } : {})) });
 const REPAIR_CAP = 12;            // ซ่อมได้สูงสุดกี่จุดต่อรอบ (บทเรียน: ส่งเยอะเกิน = ตัวซ่อมหมดเวลา)
 const TRUTH_MIN_CHARS = 200;      // เฉลยสั้นกว่านี้ = ตรวจชั้นสมองไม่มีประโยชน์
 
@@ -140,7 +154,7 @@ export async function runClipBrainPipeline(rawOpts) {
     if (durSec >= SEGMENT_MIN_SEC) {
       step('สมองวางแผนผ่า');
       const br = await runBrain({
-        brain: 'claude', label: 'วางแผนผ่า', timeoutMs: 240000,
+        ...brainOpts(brainKind('CLIP_PLAN_BRAIN', 'claude'), 'CLIP_PLAN_MODEL', 'CLIP_PLAN_EFFORT', 'low'), label: 'วางแผนผ่า', timeoutMs: envMs('CLIP_PLAN_TIMEOUT_MS', 240000),
         prompt: buildPlanPrompt({ durationSec: durSec, timeline: map.timeline || [], headline: map.headline || '', caption }),
       });
       if (br.ok) {
@@ -227,12 +241,13 @@ export async function runClipBrainPipeline(rawOpts) {
         const envText = (key) => String(process.env[key] || '').trim();
         // ★ 8 ก.ย. 69 (เจ้าของ: ให้ Claude Opus 5 high เป็นสมองหลัก): เลือกค่ายผ่าน env CLIP_TOPIC_BRAIN / CLIP_TOPIC_FALLBACK_BRAIN
         //   ค่าเริ่มต้นของรุ่น/ระดับขึ้นกับค่ายที่เลือก (codex = gpt-6-astra ultra · claude = claude-opus-5 high · สำรอง claude = claude-fable-5 max · สำรอง codex = gpt-6-astra xhigh)
-        const primaryBrain = envText('CLIP_TOPIC_BRAIN') === 'claude' ? 'claude' : 'codex';
-        const fallbackBrain = envText('CLIP_TOPIC_FALLBACK_BRAIN') === 'codex' ? 'codex' : 'claude';
-        const primary = { brain: primaryBrain, model: envText('CLIP_TOPIC_MODEL') || (primaryBrain === 'claude' ? 'claude-opus-5' : 'gpt-6-astra'),
-          effort: envText('CLIP_TOPIC_EFFORT') || (primaryBrain === 'claude' ? 'high' : 'ultra') };
-        const fallback = { brain: fallbackBrain, model: envText('CLIP_TOPIC_FALLBACK_MODEL') || (fallbackBrain === 'codex' ? 'gpt-6-astra' : 'claude-fable-5'),
-          effort: envText('CLIP_TOPIC_FALLBACK_EFFORT') || (fallbackBrain === 'codex' ? 'xhigh' : 'max') };
+        // ★ P12: 3 ค่าย + 'none' = ไม่มีตัวสำรอง (ตกด่านแล้วจบที่ compose+repair ของตัวหลัก)
+        const primaryBrain = brainKind('CLIP_TOPIC_BRAIN', 'codex');
+        const fallbackBrain = envText('CLIP_TOPIC_FALLBACK_BRAIN') === 'none' ? null : brainKind('CLIP_TOPIC_FALLBACK_BRAIN', 'claude');
+        const primary = { brain: primaryBrain, model: envText('CLIP_TOPIC_MODEL') || BRAIN_DEFAULTS[primaryBrain].model,
+          effort: envText('CLIP_TOPIC_EFFORT') || BRAIN_DEFAULTS[primaryBrain].effort };
+        const fallback = fallbackBrain ? { brain: fallbackBrain, model: envText('CLIP_TOPIC_FALLBACK_MODEL') || FALLBACK_DEFAULTS[fallbackBrain].model,
+          effort: envText('CLIP_TOPIC_FALLBACK_EFFORT') || FALLBACK_DEFAULTS[fallbackBrain].effort } : null;
         const requestedTimeout = Number(envText('CLIP_TOPIC_TIMEOUT_MS'));
         const timeoutMs = Number.isSafeInteger(requestedTimeout) && requestedTimeout > 0 && requestedTimeout <= 2147483647
           ? requestedTimeout : 1200000;
@@ -281,11 +296,8 @@ export async function runClipBrainPipeline(rawOpts) {
       log('ชั้นสมอง: ข้าม — ด่าน v2 ผ่าน hard 0 + ชั้นโค้ดไม่มีจุดสูง (มาตรการ B · บังคับตรวจ = CLIP_REVIEWER_ALWAYS=1)');
     } else {
     // ★ 8 ก.ย. 69: ผู้ตรวจเลือกค่ายผ่าน env CLIP_REVIEWER_BRAIN (codex|claude) + CLIP_REVIEWER_MODEL/EFFORT (ไม่ตั้ง = codex auto เหมือนเดิม)
-    const reviewerBrain = String(process.env.CLIP_REVIEWER_BRAIN || '').trim() === 'claude' ? 'claude' : 'codex';
-    const reviewerModel = String(process.env.CLIP_REVIEWER_MODEL || '').trim();
-    const reviewerEffort = String(process.env.CLIP_REVIEWER_EFFORT || '').trim();
-    const cr = await runBrain({
-      brain: reviewerBrain, ...(reviewerModel ? { model: reviewerModel } : {}), ...(reviewerEffort ? { effort: reviewerEffort } : {}), label: 'ผู้ตรวจ', timeoutMs: 300000,
+    const cr = await runBrain({ // ★ P12: ค่าย/รุ่น/ระดับ/เพดานเวลาผ่าน env (gemini ได้)
+      ...brainOpts(brainKind('CLIP_REVIEWER_BRAIN', 'codex'), 'CLIP_REVIEWER_MODEL', 'CLIP_REVIEWER_EFFORT'), label: 'ผู้ตรวจ', timeoutMs: envMs('CLIP_REVIEWER_TIMEOUT_MS', 300000),
       prompt: buildReviewPrompt({ insight, truth: truthText, caption, codeFindings: codeCheck.findings }),
     });
     if (cr.ok && cr.json) {
@@ -308,8 +320,8 @@ export async function runClipBrainPipeline(rawOpts) {
       const toFix = high.slice(0, REPAIR_CAP);
       repair = { changed: [], unverifiedAi: aiHigh };
       if (high.length > REPAIR_CAP) brain.degradations.push({ type: 'repair-capped', got: REPAIR_CAP, want: high.length });
-      const rr = await runBrain({
-        brain: 'claude', label: 'ตัวซ่อม', timeoutMs: 600000,
+      const rr = await runBrain({ // ★ P12: ตัวซ่อมเลือกค่ายได้ + เพดานเวลาตั้งได้ (เดิมตายตัว 10 นาที = จุดเสียเวลาที่พิสูจน์ 14 ก.ย.)
+        ...brainOpts(brainKind('CLIP_REPAIR_BRAIN', 'claude'), 'CLIP_REPAIR_MODEL', 'CLIP_REPAIR_EFFORT'), label: 'ตัวซ่อม', timeoutMs: envMs('CLIP_REPAIR_TIMEOUT_MS', 600000),
         prompt: buildRepairPrompt({ insight, truth: truthText, findings: toFix }),
       });
       if (rr.ok && rr.json?.patch) {

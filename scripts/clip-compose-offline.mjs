@@ -11,6 +11,7 @@ import { scoreTopicDoc, bureaucraticRate } from '../src/lib/services/clipBrain/t
 const DEFAULT_INPUT = 'C:/tmp/news-pipeline-runtime-r133/data/clip-insights.json';
 const PRIMARY = { brain: 'codex', model: 'gpt-6-astra', effort: 'ultra' };
 const FALLBACK = { brain: 'claude', model: 'claude-fable-5', effort: 'max' };
+const GEMINI = { brain: 'gemini', model: 'gemini-3.8-flash', effort: 'high' }; // ★ P12
 const chars = (s) => Array.from(s || '').length;
 const pct = (n, d) => d ? n / d * 100 : 0;
 const mean = (values) => values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
@@ -46,7 +47,7 @@ export function parseArgs(argv) {
     if (!/^[1-9]\d*$/.test(options.limit) || !Number.isSafeInteger(Number(options.limit))) throw inputError('--limit must be a positive safe integer');
     options.limit = Number(options.limit);
   }
-  if (options.brain && !['codex', 'claude'].includes(options.brain)) throw inputError('--brain must be codex or claude');
+  if (options.brain && !['codex', 'claude', 'gemini'].includes(options.brain)) throw inputError('--brain must be codex, claude or gemini');
   if (options.model && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(options.model)) throw inputError('Invalid --model');
   if (options.effort && !['low', 'medium', 'high', 'xhigh', 'ultra', 'max'].includes(options.effort)) throw inputError('Invalid --effort');
   if (options.timeoutMs !== undefined) {
@@ -108,7 +109,7 @@ export async function runOffline(argv, { runBrain } = {}) {
     const handle = await open(output, 'wx');
     await handle.close();
   }
-  const primary = { ...(options.brain === 'claude' ? FALLBACK : PRIMARY), ...(options.brain ? { brain: options.brain } : {}), ...(options.model ? { model: options.model } : {}), ...(options.effort ? { effort: options.effort } : {}) };
+  const primary = { ...(options.brain === 'claude' ? FALLBACK : options.brain === 'gemini' ? GEMINI : PRIMARY), ...(options.brain ? { brain: options.brain } : {}), ...(options.model ? { model: options.model } : {}), ...(options.effort ? { effort: options.effort } : {}) };
   const fallback = options.noFallback ? null : (primary.brain === 'claude' ? PRIMARY : FALLBACK);
   const beforeDocs = selected.map((r) => fromLegacyInsight(r.insight));
   const report = {
