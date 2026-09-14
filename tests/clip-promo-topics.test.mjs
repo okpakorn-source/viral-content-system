@@ -115,3 +115,47 @@ test('checkAgainstTruth: external และ internal ไม่ถูกนับ
     assert.equal(r.stats.promoSkipped, 0);
   });
 });
+
+// ★ P13c (วงตรวจ 14 ก.ย.): ตัวสร้างหลักฐานออฟไลน์ · จำกัดขนาด promoSkipped · ผู้ตรวจ AI/ตัวซ่อมมีข้อยกเว้นโปรโมต
+const { buildEvidencePack } = await import('../src/lib/services/clipBrain/composeTopics.js');
+const { buildReviewPrompt, buildRepairPrompt } = await import('../src/lib/services/clipBrain/clipVerify.js');
+const { capPromoSkipped, PROMO_SKIPPED_MAX } = await import('../src/lib/services/clipBrain/promoTopics.js');
+
+test('P13c: buildEvidencePack (ออฟไลน์/เบนช์มาร์ก) กรอง external เหมือนท่อจริง และจด clipMeta.promoSkipped · โครง clipMeta เดิมครบ', () => {
+  const record = { id: 'r1', title: 'ข่าว', url: 'u', platform: 'youtube', category: 'c', clipDurationSec: 1652,
+    insight: { rawData: 'คนในชุมชนช่วยกันซ่อมบ้าน', subStories: [], quotes: [], speakers: [], keyPoints: [], timeline: TIMELINE } };
+  withEnv({}, () => {
+    const pack = buildEvidencePack(record);
+    const tl = pack.evidence.filter((e) => e.kind === 'timeline');
+    assert.equal(tl.length, 2, 'internal + เนื้อหาคงอยู่');
+    assert.ok(!tl.some((e) => e.text.includes('ตัวอย่างไฮไลท์')), 'external หาย');
+    assert.deepEqual(pack.clipMeta.promoSkipped, [{ time: '27:07–27:32', topic: 'ตัวอย่างไฮไลท์ช่วงต่อไปของรายการ' }]);
+    assert.deepEqual(Object.keys(pack.clipMeta).sort(), ['category', 'clipDurationSec', 'id', 'platform', 'promoSkipped', 'title', 'url']);
+    assert.ok(buildComposePrompt({ evidencePack: pack }).includes('ห้ามเขียนถึง): 27:07–27:32 ตัวอย่างไฮไลท์ช่วงต่อไปของรายการ'));
+  });
+  withEnv({ CLIP_PROMO_TOPIC_FILTER: '0' }, () => {
+    const pack = buildEvidencePack(record);
+    assert.equal(pack.evidence.filter((e) => e.kind === 'timeline').length, 3); assert.deepEqual(pack.clipMeta.promoSkipped, []);
+  });
+});
+
+test('P13c: promoSkipped ถูกจำกัดขนาดทั้งสองตัวสร้าง (≤12 แถว · เวลา ≤24 · หัวข้อ ≤80 ตัวอักษร)', () => {
+  const rows = Array.from({ length: 20 }, (_, i) => ({ time: `${String(i).padStart(2, '0')}:00–${String(i).padStart(2, '0')}:30 ยาวๆๆๆๆๆๆๆๆๆๆๆๆๆๆๆๆ`, topic: 'ตัวอย่างช่วงต่อไป ' + 'ก'.repeat(150) + i }));
+  withEnv({}, () => {
+    const a = buildEvidencePackFromPipeline({ truth: TRUTH, segmentResults: [], plannedSegments: [], map: { timeline: rows }, durSec: 1652 });
+    const b = buildEvidencePack({ id: 'r', insight: { rawData: 'x', timeline: rows } });
+    for (const pack of [a, b]) {
+      assert.equal(pack.clipMeta.promoSkipped.length, PROMO_SKIPPED_MAX);
+      assert.ok(pack.clipMeta.promoSkipped.every((p) => p.time.length <= 24 && p.topic.length <= 80), JSON.stringify(pack.clipMeta.promoSkipped[0]));
+      assert.equal(pack.evidence.filter((e) => e.kind === 'timeline').length, 0, 'ทุกแถวเป็น external → ไม่มี timeline ในหลักฐาน');
+    }
+    assert.deepEqual(capPromoSkipped(null), []); assert.deepEqual(capPromoSkipped([{ time: 5, topic: null }]), [{ time: '5', topic: '' }]);
+  });
+});
+
+test('P13c: ผู้ตรวจ AI และตัวซ่อม มีข้อยกเว้นช่วงโปรโมต (ไม่รายงานว่าหาย · ไม่ซ่อมเติมกลับ)', () => {
+  const review = buildReviewPrompt({ insight: { headline: 'h', subStories: [] }, truth: 'เฉลย', caption: '' });
+  assert.ok(review.includes('ช่วงโปรโมตของรายการ') && review.includes('ห้ามรายงานว่า "ของหาย"'), 'ผู้ตรวจต้องมีข้อยกเว้น');
+  const repair = buildRepairPrompt({ insight: { headline: 'h', subStories: [] }, truth: 'เฉลย', findings: [{ kind: 'ของหาย', where: 'x', detail: 'd', fix: 'f' }] });
+  assert.ok(repair.includes('ห้ามเพิ่มเนื้อหาจากช่วงโปรโมตของรายการ'), 'ตัวซ่อมต้องมีข้อยกเว้น');
+});

@@ -5,6 +5,7 @@
  * the fixed P1 quality thresholds cannot be relaxed through spec.
  */
 import { emptyTopicDoc, fromLegacyInsight, validateTopicDoc, computeSharePct } from './topicSchema.js';
+import { isPromoTopic, promoTopicText, capPromoSkipped } from './promoTopics.js'; // ★ P13c: ตัวสร้างหลักฐานออฟไลน์ต้องกรองเหมือนท่อจริง
 import { BUREAUCRATIC_WORDS, bureaucraticRate, scoreTopicDoc, wordRange, wordRangeLabel, STYLE_WORDS, STYLE_MAX_SENTENCE_WORDS, styleIssues } from './topicMetrics.js';
 
 const list = (v) => Array.isArray(v) ? v : [];
@@ -105,9 +106,14 @@ export function buildEvidencePack(record) {
     }
     evidence.push(item);
   };
+  const promoSkipped = [];
   const addEntries = (owner, inherited = {}) => {
     for (const [field, kind] of [['quotes', 'quote'], ['timeline', 'timeline'], ['speakers', 'speaker'], ['keyPoints', 'keypoint']]) {
       for (const entry of list(owner?.[field])) {
+        if (kind === 'timeline' && isPromoTopic(entry)) { // ★ P13c: โปรโมตนอกคลิปไม่เข้าหลักฐาน (เหมือน topicEvidence)
+          promoSkipped.push({ time: text(object(entry) ? (entry.time ?? entry.timeRange ?? '') : ''), topic: promoTopicText(entry) });
+          continue;
+        }
         add(kind, entry, {
           ...inherited,
           ...(object(entry) ? {
@@ -133,6 +139,7 @@ export function buildEvidencePack(record) {
       id: row.id ?? null, title: text(row.title), url: text(row.url),
       platform: text(row.platform), category: text(row.category),
       clipDurationSec: duration ?? null,
+      promoSkipped: capPromoSkipped(promoSkipped),
     },
     evidence,
     legacyDoc: fromLegacyInsight(insight),

@@ -81,4 +81,11 @@ export function isPromoTopic(topicOrRow) { return promoTopicClass(topicOrRow) ==
 /** จริงเมื่อไม่ใช่เนื้อหา (โปรโมตหรือโครงรายการล้วน) — ใช้กับด่าน "ของหาย-ประเด็น" */
 export function isNonContentTopic(topicOrRow) { return promoTopicClass(topicOrRow) !== null; }
 
+/** จำกัดขนาดรายการที่ตัด (อยู่ใน clipMeta ซึ่งไม่ผ่านตัวตัดงบหลักฐาน — วงตรวจ 14 ก.ย.): สูงสุด 12 แถว · เวลา ≤ 24 · หัวข้อ ≤ 80 ตัวอักษร */
+export const PROMO_SKIPPED_MAX = 12;
+export function capPromoSkipped(items) {
+  return (Array.isArray(items) ? items : []).slice(0, PROMO_SKIPPED_MAX)
+    .map((p) => ({ time: String(p?.time ?? '').trim().slice(0, 24), topic: String(p?.topic ?? '').trim().slice(0, 80) }));
+}
+
 export const PROMO_TOPIC_PATTERNS = Object.freeze({ teaser: TEASER_PATTERNS, ad: AD_PATTERNS, structure: STRUCTURE_PATTERNS });

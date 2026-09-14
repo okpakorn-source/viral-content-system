@@ -87,7 +87,7 @@ function missingRanges(planned, results) {
   return merged;
 }
 
-import { isPromoTopic, promoTopicText } from './promoTopics.js';
+import { isPromoTopic, promoTopicText, capPromoSkipped } from './promoTopics.js';
 
 export function buildEvidencePackFromPipeline({ truth, segmentResults, plannedSegments, map, durSec, clipMeta } = {}) {
   if (typeof truth === 'string') {
@@ -140,7 +140,7 @@ export function buildEvidencePackFromPipeline({ truth, segmentResults, plannedSe
     clipMeta: { ...(object(clipMeta) ? structuredClone(clipMeta) : {}),
       clipDurationSec: Number.isFinite(durSec) && durSec > 0 ? durSec : null,
       missingRanges: missingRanges(plannedSegments, results),
-      promoSkipped },
+      promoSkipped: capPromoSkipped(promoSkipped) },
     evidence,
   };
   if (JSON.stringify(pack).length > MAX_PACK_CHARS) {
