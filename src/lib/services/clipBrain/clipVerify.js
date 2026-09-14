@@ -12,6 +12,7 @@
  *   ชั้นสมอง — ให้ Codex (คนละค่ายกับคนเขียน) อ่านเทียบเรื่องที่ต้องใช้วิจารณญาณ
  */
 import { detectFilterCorruption } from './clipSafeText.js';
+import { isPromoTopic } from './promoTopics.js'; // ★ P13
 
 export const VERIFY_REV = 'clip-verify-v1-0826';
 
@@ -227,8 +228,10 @@ export function checkAgainstTruth(insight, truth, { caption = '', plannedSegment
   const planned = Array.isArray(plannedSegments) ? plannedSegments.map((s) => [s.startSec, s.endSec]) : null;
   const overlaps = (r, list) => !!list && list.some(([a, b]) => Math.min(b, r[1]) - Math.max(a, r[0]) > 5);
 
+  let promoSkipped = 0;
   for (const tl of (insight?.timeline || [])) {
     const topic = String(tl?.topic || '');
+    if (isPromoTopic(topic)) { promoSkipped++; continue; }              // ★ P13: โปรโมตของรายการ ไม่ใช่เนื้อข่าว ไม่นับว่าหาย
     const keys = topic.split(/[\s/,·]+/).filter((w) => w.length >= 4 && /[ก-๙]/.test(w));
     if (!keys.length) continue;
     if (keys.some((k) => body.includes(norm(k)))) continue;      // เขียนถึงแล้ว
@@ -280,7 +283,7 @@ export function checkAgainstTruth(insight, truth, { caption = '', plannedSegment
     rev: VERIFY_REV,
     verdict: high ? 'ต้องตรวจ' : (findings.length ? 'มีข้อสังเกต' : 'สะอาด'),
     findings: findings.map((f) => ({ ...f, side: 'ความจริง' })),
-    stats: { truthChars: String(truth || '').length, coverage, quotesChecked: allQuotes.length, timelineChecked: (insight?.timeline || []).length },
+    stats: { truthChars: String(truth || '').length, coverage, quotesChecked: allQuotes.length, timelineChecked: (insight?.timeline || []).length, promoSkipped },
   };
 }
 

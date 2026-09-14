@@ -87,6 +87,8 @@ function missingRanges(planned, results) {
   return merged;
 }
 
+import { isPromoTopic, promoTopicText } from './promoTopics.js';
+
 export function buildEvidencePackFromPipeline({ truth, segmentResults, plannedSegments, map, durSec, clipMeta } = {}) {
   if (typeof truth === 'string') {
     try { truth = JSON.parse(truth); } catch { truth = { transcription: truth }; }
@@ -124,11 +126,21 @@ export function buildEvidencePackFromPipeline({ truth, segmentResults, plannedSe
       add('quote', quote, { ...meta, speaker: text(quote?.speaker).trim() || null });
     }
   }
-  for (const row of list(map?.timeline)) add('timeline', row, { timeRange: timeRange(row?.timeRange ?? row?.time) });
+  // ★ P13 (เจ้าของ 14 ก.ย.): หัวข้อโปรโมตของรายการ (ตัวอย่างช่วงต่อไป/ไฮไลท์เปิด-ปิดรายการ/โฆษณา) ไม่ใช่เนื้อข่าว
+  //   ตัดออกจากหลักฐานที่ส่งให้แต่งเรื่อง และจดไว้ใน clipMeta.promoSkipped ให้พรอมต์บอกผู้แต่ง
+  const promoSkipped = [];
+  for (const row of list(map?.timeline)) {
+    if (isPromoTopic(row)) {
+      promoSkipped.push({ time: text(row?.time ?? row?.timeRange ?? '').trim(), topic: promoTopicText(row).trim() });
+      continue;
+    }
+    add('timeline', row, { timeRange: timeRange(row?.timeRange ?? row?.time) });
+  }
   const pack = {
     clipMeta: { ...(object(clipMeta) ? structuredClone(clipMeta) : {}),
       clipDurationSec: Number.isFinite(durSec) && durSec > 0 ? durSec : null,
-      missingRanges: missingRanges(plannedSegments, results) },
+      missingRanges: missingRanges(plannedSegments, results),
+      promoSkipped },
     evidence,
   };
   if (JSON.stringify(pack).length > MAX_PACK_CHARS) {

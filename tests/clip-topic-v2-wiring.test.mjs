@@ -166,9 +166,9 @@ async function execute(flag, options = {}) {
     composeCrash: !!options.composeCrash,
     composeReplies: options.composeReplies || [{ ok: true, json: doc(), costUSD: 0.15 }] });
   const durationSec = options.long ? 900 : 60;
-  const map = { headline: 'MAP_ONLY_FAKE_NAME', timeline: [], clipDurationSec: durationSec };
+  const map = { headline: 'MAP_ONLY_FAKE_NAME', timeline: options.timeline || [], clipDurationSec: durationSec }; // ★ P13: เทสหัวข้อโปรโมต
   state.responses = [map, ...(options.long
-    ? [BASE, options.missing ? { mockHttpFailure: true } : BASE, BASE] : [BASE]), options.truth ?? TRUTH];
+    ? [BASE, options.missing ? { mockHttpFailure: true } : BASE, BASE] : [options.base || BASE]), options.truth ?? TRUTH]; // ★ P13: base ปรับได้ (timeline ในผลถอด)
   const result = await runClipBrainPipeline({ url: 'https://www.youtube.com/watch?v=offline-test',
     isYouTube: true, durationSec, model: 'gemini-3.7-flash', usageLogger: () => {} });
   assert.equal(result.ok, true, result.error);
@@ -567,4 +567,18 @@ test('P12: gemini ทุกขั้น (แผนผ่า/เรียบเ�
   Object.assign(process.env, { CLIP_REPAIR_TIMEOUT_MS: 'abc', CLIP_REVIEWER_TIMEOUT_MS: '-5', CLIP_PLAN_TIMEOUT_MS: '2147483648' });
   const z = await execute('1', { long: true, findings: [{ severity: 'สูง', kind: 'ของงอก', fix: 'ตัด', where: 'overview' }], repairReply: { ok: true, json: { patch: {}, changed: [], unfixed: [] } } });
   assert.deepEqual([z.calls.find((c) => c.label === 'ตัวซ่อม').timeoutMs, z.calls.find((c) => c.label === 'ผู้ตรวจ').timeoutMs, z.calls.find((c) => c.label === 'วางแผนผ่า').timeoutMs], [600000, 300000, 240000]);
+});
+
+// ★ P13 (14 ก.ย. 69 เจ้าของสั่ง): หัวข้อโปรโมตของรายการไม่เข้าหลักฐานแต่งเรื่อง และไม่นับว่าหาย — เดินท่อจริง
+test('P13: แผนที่ประเด็นมีแถวโปรโมต → ไม่อยู่ในหลักฐานที่ส่งให้ผู้แต่ง · พรอมต์บอกช่วงที่ตัด · ชั้นโค้ดไม่ฟ้องว่าหาย (แถวเนื้อหายังฟ้อง)', async () => {
+  const timeline = [{ time: '00:00–00:20', topic: 'เปิดรายการและแนะนำไฮไลท์ประจำสัปดาห์' }, { time: '00:40–00:59', topic: 'เหตุการณ์คนล้มที่สนาม' }, { time: '00:50–01:00', topic: 'ตัวอย่างไฮไลท์ช่วงต่อไปของรายการ' }];
+  const r = await execute('1', { timeline, base: { ...BASE, timeline } }); // timeline ที่ชั้นโค้ดตรวจมาจากผลถอด (insight) · แถวเนื้อหาอยู่นอกช่วงที่เรื่องครอบ (0–30 วิ) จึงต้องฟ้องว่าหาย
+  const pack = r.packs[0];
+  assert.deepEqual(pack.evidence.filter((e) => e.kind === 'timeline').map((e) => e.text.includes('คนล้มที่สนาม')), [true], 'เหลือแถวเนื้อหาแถวเดียว');
+  assert.deepEqual(pack.clipMeta.promoSkipped.map((p) => p.topic), ['เปิดรายการและแนะนำไฮไลท์ประจำสัปดาห์', 'ตัวอย่างไฮไลท์ช่วงต่อไปของรายการ']);
+  const prompt = r.calls.find((c) => c.label === 'clip-compose-compose').prompt;
+  assert.ok(prompt.includes('ห้ามเขียนถึง): 00:00–00:20 เปิดรายการและแนะนำไฮไลท์ประจำสัปดาห์ · 00:50–01:00 ตัวอย่างไฮไลท์ช่วงต่อไปของรายการ'), 'พรอมต์ต้องระบุช่วงที่ตัด');
+  const missing = r.result.brain.check.code.findings.filter((f) => f.kind === 'ของหาย-ประเด็น').map((f) => f.where);
+  assert.deepEqual(missing, ['00:40–00:59 เหตุการณ์คนล้มที่สนาม'], 'โปรโมตไม่ฟ้อง แต่เนื้อหาที่ไม่ได้เขียนยังฟ้อง: ' + JSON.stringify(missing));
+  assert.equal(r.result.brain.check.code.stats.promoSkipped, 2);
 });
