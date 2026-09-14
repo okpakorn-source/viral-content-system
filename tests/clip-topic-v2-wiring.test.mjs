@@ -574,10 +574,11 @@ test('P13: แผนที่ประเด็นมีแถวโปรโม
   const timeline = [{ time: '00:00–00:20', topic: 'เปิดรายการและแนะนำไฮไลท์ประจำสัปดาห์' }, { time: '00:40–00:59', topic: 'เหตุการณ์คนล้มที่สนาม' }, { time: '00:50–01:00', topic: 'ตัวอย่างไฮไลท์ช่วงต่อไปของรายการ' }];
   const r = await execute('1', { timeline, base: { ...BASE, timeline } }); // timeline ที่ชั้นโค้ดตรวจมาจากผลถอด (insight) · แถวเนื้อหาอยู่นอกช่วงที่เรื่องครอบ (0–30 วิ) จึงต้องฟ้องว่าหาย
   const pack = r.packs[0];
-  assert.deepEqual(pack.evidence.filter((e) => e.kind === 'timeline').map((e) => e.text.includes('คนล้มที่สนาม')), [true], 'เหลือแถวเนื้อหาแถวเดียว');
-  assert.deepEqual(pack.clipMeta.promoSkipped.map((p) => p.topic), ['เปิดรายการและแนะนำไฮไลท์ประจำสัปดาห์', 'ตัวอย่างไฮไลท์ช่วงต่อไปของรายการ']);
+  assert.deepEqual(pack.evidence.filter((e) => e.kind === 'timeline').map((e) => e.text.includes('คนล้มที่สนาม')), [false, true], 'แถวเปิดรายการ (internal) + แถวเนื้อหาคงอยู่ · แถวตัวอย่างช่วงต่อไป (external) หาย');
+  assert.deepEqual(pack.clipMeta.promoSkipped.map((p) => p.topic), ['ตัวอย่างไฮไลท์ช่วงต่อไปของรายการ'], 'จดเฉพาะ external');
   const prompt = r.calls.find((c) => c.label === 'clip-compose-compose').prompt;
-  assert.ok(prompt.includes('ห้ามเขียนถึง): 00:00–00:20 เปิดรายการและแนะนำไฮไลท์ประจำสัปดาห์ · 00:50–01:00 ตัวอย่างไฮไลท์ช่วงต่อไปของรายการ'), 'พรอมต์ต้องระบุช่วงที่ตัด');
+  assert.ok(prompt.includes('ห้ามเขียนถึง): 00:50–01:00 ตัวอย่างไฮไลท์ช่วงต่อไปของรายการ'), 'พรอมต์ต้องระบุเฉพาะช่วง external ที่ตัด');
+  assert.ok(!prompt.includes('ห้ามเขียนถึง): 00:00–00:20'), 'แถวเปิดรายการต้องไม่ถูกห้ามเขียน');
   const missing = r.result.brain.check.code.findings.filter((f) => f.kind === 'ของหาย-ประเด็น').map((f) => f.where);
   assert.deepEqual(missing, ['00:40–00:59 เหตุการณ์คนล้มที่สนาม'], 'โปรโมตไม่ฟ้อง แต่เนื้อหาที่ไม่ได้เขียนยังฟ้อง: ' + JSON.stringify(missing));
   assert.equal(r.result.brain.check.code.stats.promoSkipped, 2);
