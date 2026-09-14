@@ -13,15 +13,20 @@
  */
 
 // โปรโมตเนื้อหาอื่น — ตัดสินได้จากวลี ไม่ต้องดูส่วนที่เหลือ (ส่วนที่เหลือคือเนื้อของตอนหน้า ไม่ใช่ของคลิปนี้)
+// แข็ง: วลีที่เป็นตัวอย่าง/ช่วงถัดไปของรายการโดยตรง — ตัดสินจากตำแหน่ง (นำหน้า = โปรโมต)
 const TEASER_PATTERNS = Object.freeze([
   /ตัวอย่าง(?:\s*(?:ช่วง|รายการ|ไฮไล[ทต]์?|ตอน|เนื้อหา|อีพี)){1,3}\s*(?:ต่อไป|ถัดไป|หน้า)/u,
-  /ช่วง(?:ต่อไป|ถัดไป)ของรายการ|ตอนต่อไป|ตอนหน้า|สัปดาห์หน้า|คราวหน้า|อีพีหน้า|ep\.?\s*หน้า/u,
+  /ช่วง(?:ต่อไป|ถัดไป)ของรายการ/u,
+]);
+// อ่อน (วงตรวจ 14 ก.ย.): คำที่ข่าวธรรมดาใช้ได้ ("จะขึ้นราคาสัปดาห์หน้า") — เป็นโปรโมตเฉพาะเมื่อทั้งแถวมีแต่โครง
+const TEASER_WEAK_PATTERNS = Object.freeze([
+  /ตอนต่อไป|ตอนหน้า|สัปดาห์หน้า|คราวหน้า|อีพีหน้า|ep\.?\s*หน้า/u,
   /(?:พบกัน|เจอกัน)(?:ใหม่)?(?:ใน)?(?:ตอน|สัปดาห์|ครั้ง|คราว)หน้า/u,
 ]);
 // โฆษณา / คำชวนติดตาม — ถือเป็นโปรโมตเมื่อ "ล้วนๆ" (ส่วนที่เหลือหลังตัดวลีเหล่านี้สั้น)
 const AD_PATTERNS = Object.freeze([
   /ช่วง\s*(?:เบรก|คั่น)?\s*(?:โฆษณา|โปรโม[ตท]|สปอนเซอร์)/u, /^(?:เบรก)?โฆษณา/u, /ผู้สนับสนุนรายการ|สปอนเซอร์/u,
-  /ติดตามชม|ฝากช่องทาง(?:ติดตาม)?|กดติดตาม|กดไลก์|กดแชร์|กดกระดิ่ง|ห้ามพลาด|อย่าลืม(?:กด)?ติดตาม/u,
+  /ติดตามชม|ฝากช่องทาง(?:ติดตาม)?|ช่องทาง(?:การ)?ติดตาม|กดติดตาม|กดไลก์|กดแชร์|กดกระดิ่ง|ห้ามพลาด|อย่าลืม(?:กด)?ติดตาม/u,
 ]);
 // โครงรายการ — ไม่มีเนื้อในตัวเอง
 const STRUCTURE_PATTERNS = Object.freeze([
@@ -32,7 +37,8 @@ const STRUCTURE_PATTERNS = Object.freeze([
 // คำเชื่อม/คำโครงที่ไม่นับเป็นเนื้อ เวลาวัดว่า "ที่เหลือ" มีเนื้อหาไหม
 const FILLER_RE = /และ|พร้อม(?:กับ)?|ก่อน|หลังจาก|ประจำ|สัปดาห์|ตอน|ช่วง|รายการ|ของ|กล่าว|พูดคุย|คุยกัน|ต่างๆ|ต่าง ๆ|เนื้อหา|กับ|ใน|ที่|นี้|วันนี้|อีพี|ทาง/gu;
 
-const normalize = (v) => String(v == null ? '' : v).toLowerCase().replace(/\s+/g, ' ').trim();
+// ★ วงตรวจ: ตัดอักขระความกว้างศูนย์ (U+200B–D, FEFF) ก่อน — ไม่งั้น "ตัวอย่าง\u200Bช่วงต่อไป" หลุด
+const normalize = (v) => String(v == null ? '' : v).replace(/[\u200B-\u200D\uFEFF]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 const thaiChars = (s) => (String(s).match(/[ก-๙]/gu) || []).length;
 const filterOff = () => String(process.env.CLIP_PROMO_TOPIC_FILTER ?? '').trim() === '0';
 
@@ -50,7 +56,7 @@ export function promoTopicText(row) {
 /** เนื้อที่เหลือหลังตัดวลีโปรโมต/โครงรายการ/คำเชื่อม/อักษรละติน-ตัวเลข (ชื่อรายการภาษาอังกฤษ ชื่อสินค้า) */
 function residueOf(s) {
   let r = s;
-  for (const re of [...TEASER_PATTERNS, ...AD_PATTERNS, ...STRUCTURE_PATTERNS]) r = r.replace(new RegExp(re.source, 'gu'), ' ');
+  for (const re of [...TEASER_PATTERNS, ...TEASER_WEAK_PATTERNS, ...AD_PATTERNS, ...STRUCTURE_PATTERNS]) r = r.replace(new RegExp(re.source, 'gu'), ' ');
   r = r.replace(/[a-z0-9]+/giu, ' ').replace(FILLER_RE, ' ').replace(/[^ก-๙]+/gu, ' ');
   return r.replace(/\s+/g, ' ').trim();
 }
@@ -66,6 +72,7 @@ export function promoTopicClass(topicOrRow) {
   // ตัวอย่างช่วงต่อไป: เป็นโปรโมตเมื่อวลีนำหน้า (ส่วนที่เหลือคือเนื้อของตอนหน้า) หรือทั้งแถวมีแต่โครง — ถ้าเนื้อหาของคลิปนี้นำแล้วลงท้ายด้วยตัวอย่าง ถือเป็นเนื้อหา
   const teaserAt = TEASER_PATTERNS.map((re) => s.search(re)).filter((i) => i >= 0);
   if (teaserAt.length) return Math.min(...teaserAt) <= 2 || thaiChars(residueOf(s)) < 6 ? 'external' : null;
+  if (TEASER_WEAK_PATTERNS.some((re) => re.test(s))) return thaiChars(residueOf(s)) < 6 ? 'external' : null;
   const extra = String(process.env.CLIP_PROMO_TOPIC_EXTRA || '').split('|').map(normalize).filter(Boolean);
   if (extra.some((word) => s.includes(word))) return 'external';
   const isAd = AD_PATTERNS.some((re) => re.test(s));
@@ -88,4 +95,4 @@ export function capPromoSkipped(items) {
     .map((p) => ({ time: String(p?.time ?? '').trim().slice(0, 24), topic: String(p?.topic ?? '').trim().slice(0, 80) }));
 }
 
-export const PROMO_TOPIC_PATTERNS = Object.freeze({ teaser: TEASER_PATTERNS, ad: AD_PATTERNS, structure: STRUCTURE_PATTERNS });
+export const PROMO_TOPIC_PATTERNS = Object.freeze({ teaser: TEASER_PATTERNS, teaserWeak: TEASER_WEAK_PATTERNS, ad: AD_PATTERNS, structure: STRUCTURE_PATTERNS });
