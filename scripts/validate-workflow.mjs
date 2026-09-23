@@ -15,6 +15,12 @@
  * 4. Prompt templates ครบ
  * 5. DB schema พร้อม
  * 6. ทุก step ของ workflow เชื่อมต่อกัน
+ * 7. ★ 23 ก.ย. 69 (แคมเปญแก้บั๊ก ข้อ 1 · เจ้าของอนุมัติ) — CFG-04/DEBT-07: สาย TEXT ที่ข่าวจริงวิ่ง
+ *    (Discord → /api/queue/add → queue worker → /api/auto/process → autoFlowServiceText → summarizeServiceText
+ *    → promptStoreText/aiRouter → correction/correctionPipeline → publishablePostText) — ไฟล์มีอยู่ + export จริง
+ *    + import/เรียกใช้จริง · เดิมตรวจแต่ไฟล์สาย URL ที่ปิดแล้ว · กลุ่มนี้นับใน Total (เกณฑ์ 95% เดิมไม่แตะ)
+ *    ★ 24 ก.ย. 69 (L4): ทุกข้อ TEXT ตรวจบนซอร์สที่ตัดคอมเมนต์แล้ว — ข้อความ/import/การเรียกที่อยู่แค่ในคอมเมนต์ไม่นับ
+ *    ข้อสอบ: tests/validate-workflow-text.test.mjs (ทุบ export/import ในสำเนาชั่วคราวแล้วต้องขึ้น ❌ · รวมแบบซ่อนในคอมเมนต์)
  */
 
 import { readFileSync, existsSync } from 'fs';
@@ -216,6 +222,172 @@ check('Schema: breakdownData field', schemaContent.includes('breakdownData'), '�
 check('Schema: analysisResult field', schemaContent.includes('analysisResult'), 'ไม่มี analysisResult field');
 check('Schema: metadata field', schemaContent.includes('metadata'), 'ไม่มี metadata field (MasterAgent)');
 check('Schema: PromptTemplate model', schemaContent.includes('model PromptTemplate'), 'ไม่มี PromptTemplate model');
+
+// ============================================
+// TEXT PIPELINE — สายข่าวจริง (★ 23 ก.ย. 69 แคมเปญแก้บั๊ก ข้อ 1 · เจ้าของอนุมัติ · CFG-04/DEBT-07)
+// ============================================
+// ชื่อ export/import ด้านล่างอ่านจากไฟล์จริง ณ 23 ก.ย. 69 (route เรียก processAutoFlowText · service เรียก
+// performSummarize/runCorrectionPipeline/buildPublishableAnalysisResult) — ตรวจด้วย regex ของประโยค export/import
+// + การเรียกใช้จริง (ไม่ใช่ includes ชื่อลอยๆ ที่เจอในคอมเมนต์ก็ผ่าน)
+// ★ 24 ก.ย. 69 รอบแก้ผู้ตรวจ (L4): ทุกข้อในกลุ่มนี้ตรวจบน "ซอร์สที่ตัดคอมเมนต์แล้ว" — เดิม 'queue worker → /api/auto/process'
+//   และ 'กฎเหล็ก FACEBOOK SAFETY' ใช้ includes บนไฟล์ดิบ (คอมเมนต์ก็ผ่าน) · import ที่ถูกคอมเมนต์ทิ้งก็ผ่าน ·
+//   claudeClient → sanitizeOutput ตรวจแค่ import · ตอนนี้: export/import/คำในพรอมต์ ตรวจบน code (ตัดคอมเมนต์ สตริงคงไว้)
+//   และ "การเรียก" ตรวจบน bare (ตัดคอมเมนต์ + เนื้อในสตริง/template/regex) — ชื่อที่อยู่แค่ในคอมเมนต์หรือในสตริงไม่นับว่าเรียก
+//   ตัวแยก (splitJsSource) ทวนกับ acorn 24 ก.ย. 69: ตรงกันทั้ง code และชุดการเรียก ทุกไฟล์ .js/.mjs ของ src/ scripts/
+//   tests/ discord-bot/ ที่ acorn parse ได้ (697 ไฟล์) · ข้อสอบ: tests/validate-workflow-text.test.mjs ข้อ 4 (ทุบแบบซ่อนในคอมเมนต์)
+console.log('\n📰 [TEXT] TEXT Pipeline (Discord → queue → /api/auto/process → autoFlowServiceText → …)...');
+
+const REGEX_AFTER_WORDS = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void', 'throw', 'case', 'do', 'else', 'yield', 'await']);
+const IDENT_CHAR = /[\w$\u0080-￿]/;
+/**
+ * ซอร์ส JS → { code, bare } ในรอบเดียว · code = ตัดคอมเมนต์ // และ /* *\/ (สตริงคงไว้ · ขึ้นบรรทัดใหม่ของคอมเมนต์คงไว้
+ * ^export จึงยังอยู่ต้นบรรทัด) · bare = code ที่ลบเนื้อในสตริง '…' "…" / ข้อความใน template `…${expr}…` (expr คงไว้) / regex
+ * แยก regex กับเครื่องหมายหารแบบ tokenizer ทั่วไป (หลังค่า = หาร · หลังตัวดำเนินการ/keyword = regex)
+ */
+function splitJsSource(src) {
+  let code = '';
+  let bare = '';
+  const n = src.length;
+  let i = 0;
+  if (src.startsWith('#!')) { while (i < n && src[i] !== '\n' && src[i] !== '\r') i += 1; }
+  const templateBraces = []; // ระดับวงเล็บปีกกาตอนเปิด ${ ของ template แต่ละชั้น
+  let braces = 0;
+  let valueEnd = false; // โทเคนก่อนหน้าเป็น "ค่า" (ชื่อ/ตัวเลข/สตริง/ปิดวงเล็บ) → '/' ถัดไปคือหาร
+  let word = '';
+  const both = (text) => { code += text; bare += text; };
+  const readTemplateText = () => {
+    while (i < n) {
+      const ch = src[i];
+      if (ch === '\\') { code += src.slice(i, i + 2); i += 2; continue; }
+      if (ch === '`') { both(ch); i += 1; valueEnd = true; return; }
+      if (ch === '$' && src[i + 1] === '{') { both('${'); i += 2; templateBraces.push(braces); braces += 1; valueEnd = false; return; }
+      code += ch; i += 1;
+    }
+  };
+  while (i < n) {
+    const ch = src[i];
+    const next = src[i + 1];
+    if (ch === '/' && next === '/') {
+      while (i < n && src[i] !== '\n' && src[i] !== '\r') i += 1;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = src.indexOf('*/', i + 2);
+      const stop = end === -1 ? n : end + 2;
+      both(` ${src.slice(i, stop).replace(/[^\r\n]/g, '')}`);
+      i = stop;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      let j = i + 1;
+      while (j < n && src[j] !== ch && src[j] !== '\n') j += src[j] === '\\' ? 2 : 1;
+      code += src.slice(i, j + 1);
+      bare += ch + ch;
+      i = j + 1; valueEnd = true; word = '';
+      continue;
+    }
+    if (ch === '`') { both(ch); i += 1; word = ''; readTemplateText(); continue; }
+    if (ch === '{') { braces += 1; both(ch); i += 1; valueEnd = false; word = ''; continue; }
+    if (ch === '}') {
+      braces -= 1; both(ch); i += 1; word = '';
+      if (templateBraces.length && templateBraces[templateBraces.length - 1] === braces) { templateBraces.pop(); readTemplateText(); continue; }
+      valueEnd = true;
+      continue;
+    }
+    if (ch === '/' && (!valueEnd || REGEX_AFTER_WORDS.has(word))) {
+      let j = i + 1;
+      let inClass = false;
+      while (j < n && src[j] !== '\n') {
+        const c = src[j];
+        if (c === '\\') { j += 2; continue; }
+        if (c === '[') inClass = true;
+        else if (c === ']') inClass = false;
+        else if (c === '/' && !inClass) break;
+        j += 1;
+      }
+      j += 1;
+      while (j < n && /[a-z]/i.test(src[j])) j += 1;
+      code += src.slice(i, j);
+      bare += '/ /';
+      i = j; valueEnd = true; word = '';
+      continue;
+    }
+    if (IDENT_CHAR.test(ch)) {
+      let j = i + 1;
+      while (j < n && IDENT_CHAR.test(src[j])) j += 1;
+      word = src.slice(i, j);
+      both(word); i = j; valueEnd = true;
+      continue;
+    }
+    both(ch); i += 1;
+    if (!/\s/.test(ch)) { word = ''; valueEnd = ch === ')' || ch === ']'; }
+  }
+  return { code, bare };
+}
+
+const textViews = new Map();
+function textView(relativePath) {
+  if (!textViews.has(relativePath)) {
+    textViews.set(relativePath, fileExists(relativePath)
+      ? splitJsSource(readFileSync(resolve(ROOT, relativePath), 'utf-8'))
+      : { code: '', bare: '' });
+  }
+  return textViews.get(relativePath);
+}
+const textSource = (relativePath) => textView(relativePath).code; // ตัดคอมเมนต์แล้ว (สตริงคงไว้)
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function textExports(relativePath, name) {
+  const n = escapeRe(name);
+  return new RegExp(
+    `^export\\s+(?:async\\s+)?function\\s*\\*?\\s*${n}\\b|^export\\s+(?:const|let|var|class)\\s+${n}\\b|^export\\s*\\{[^}]*\\b${n}\\b[^}]*\\}`,
+    'm',
+  ).test(textSource(relativePath));
+}
+function textImports(relativePath, name, fromSpec) {
+  return new RegExp(`import\\s*\\{[^}]*\\b${escapeRe(name)}\\b[^}]*\\}\\s*from\\s*['"]${escapeRe(fromSpec)}(?:\\.js)?['"]`)
+    .test(textSource(relativePath));
+}
+// การเรียกจริง = ชื่อ( ในโค้ดที่ลบคอมเมนต์และเนื้อในสตริงแล้ว (`import { x }` ไม่มี '(' จึงไม่นับเป็นการเรียก)
+const textCalls = (relativePath, name) => new RegExp(`(?<![\\w$])${escapeRe(name)}\\s*\\(`).test(textView(relativePath).bare);
+const textWired = (relativePath, name, fromSpec) => textImports(relativePath, name, fromSpec) && textCalls(relativePath, name);
+
+const TEXT_FILES = {
+  queueAdd: 'src/app/api/queue/add/route.js',
+  queueService: 'src/lib/services/queueService.js',
+  queueWorker: 'src/app/api/queue/worker/route.js',
+  processRoute: 'src/app/api/auto/process/route.js',
+  autoFlow: 'src/lib/services/autoFlowServiceText.js',
+  summarize: 'src/lib/services/summarizeServiceText.js',
+  promptStore: 'src/lib/ai/promptStoreText.js',
+  safetyFilter: 'src/lib/ai/safetyFilter.js',
+  correction: 'src/lib/correction/correctionPipeline.js',
+  publishable: 'src/lib/utils/publishablePostText.js',
+};
+Object.values(TEXT_FILES).forEach((f) => check(`TEXT: ${f}`, fileExists(f), 'ไฟล์สาย TEXT หายไป!'));
+
+check('TEXT: queueService export enqueueJob', textExports(TEXT_FILES.queueService, 'enqueueJob'), 'ไม่มี export enqueueJob');
+check('TEXT: autoFlowServiceText export processAutoFlowText', textExports(TEXT_FILES.autoFlow, 'processAutoFlowText'), 'ไม่มี export processAutoFlowText');
+check('TEXT: summarizeServiceText export performSummarize', textExports(TEXT_FILES.summarize, 'performSummarize'), 'ไม่มี export performSummarize');
+check('TEXT: promptStoreText export getPrompt', textExports(TEXT_FILES.promptStore, 'getPrompt'), 'ไม่มี export getPrompt');
+check('TEXT: safetyFilter export sanitizeOutput', textExports(TEXT_FILES.safetyFilter, 'sanitizeOutput'), 'ไม่มี export sanitizeOutput');
+check('TEXT: correctionPipeline export runCorrectionPipeline', textExports(TEXT_FILES.correction, 'runCorrectionPipeline'), 'ไม่มี export runCorrectionPipeline');
+check('TEXT: publishablePostText export getPublishablePostText/buildPublishableAnalysisResult/enforceTextNewsPublicationFloor',
+  ['getPublishablePostText', 'buildPublishableAnalysisResult', 'enforceTextNewsPublicationFloor'].every((n) => textExports(TEXT_FILES.publishable, n)),
+  'export ของตัวประกอบโพสต์ที่เผยแพร่ได้ไม่ครบ');
+
+check('TEXT: /api/queue/add → enqueueJob (queueService)', textWired(TEXT_FILES.queueAdd, 'enqueueJob', '@/lib/services/queueService'), 'queue ingress ไม่ได้ส่งงานเข้าคิว');
+check('TEXT: queue worker → /api/auto/process', /\/api\/auto\/process(?![\w/-])/.test(textSource(TEXT_FILES.queueWorker)), 'worker ไม่ได้ส่งงานข่าวต่อให้ /api/auto/process (นับเฉพาะในโค้ด ไม่นับคอมเมนต์)');
+check('TEXT: /api/auto/process → processAutoFlowText', textWired(TEXT_FILES.processRoute, 'processAutoFlowText', '@/lib/services/autoFlowServiceText'), 'route ไม่ได้เรียกสาย TEXT');
+check('TEXT: autoFlowServiceText → performSummarize (summarizeServiceText)', textWired(TEXT_FILES.autoFlow, 'performSummarize', '@/lib/services/summarizeServiceText'), 'ไม่ได้ต่อ summarizeServiceText');
+check('TEXT: autoFlowServiceText → runCorrectionPipeline (correction)', textWired(TEXT_FILES.autoFlow, 'runCorrectionPipeline', '@/lib/correction/correctionPipeline'), 'ไม่ได้ต่อด่านแก้ไข correction');
+check('TEXT: autoFlowServiceText → publishablePostText (buildPublishableAnalysisResult/enforceTextNewsPublicationFloor)',
+  textWired(TEXT_FILES.autoFlow, 'buildPublishableAnalysisResult', '@/lib/utils/publishablePostText')
+  && textWired(TEXT_FILES.autoFlow, 'enforceTextNewsPublicationFloor', '@/lib/utils/publishablePostText'),
+  'ไม่ได้ประกอบผลผ่าน publishablePostText');
+check('TEXT: summarizeServiceText → getPrompt (promptStoreText)', textWired(TEXT_FILES.summarize, 'getPrompt', '@/lib/ai/promptStoreText'), 'ไม่ได้โหลดพรอมต์สาย TEXT');
+check('TEXT: summarizeServiceText → callSmartAI (aiRouter)', textWired(TEXT_FILES.summarize, 'callSmartAI', '@/lib/ai/aiRouter'), 'ไม่ได้เรียกโมเดลผ่าน aiRouter');
+check('TEXT: summarizeServiceText มีกฎเหล็ก FACEBOOK SAFETY ในพรอมต์', textSource(TEXT_FILES.summarize).includes('กฎเหล็ก FACEBOOK SAFETY'), 'ไม่มี safety rules ใน prompt สาย TEXT (นับเฉพาะในโค้ด/สตริงพรอมต์ ไม่นับคอมเมนต์)');
+check('TEXT: claudeClient (นักเขียนหลัก) → sanitizeOutput (safetyFilter)', textWired('src/lib/ai/claudeClient.js', 'sanitizeOutput', './safetyFilter'), 'ผลนักเขียนไม่ผ่าน safety filter (ต้อง import และเรียก sanitizeOutput( จริง)');
 
 // ============================================
 // REPORT
