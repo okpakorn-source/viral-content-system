@@ -1,0 +1,4 @@
+# ★ 23 ก.ย. 69 (แคมเปญแก้บั๊ก ข้อ 1 · เจ้าของอนุมัติ): hook เป็น shell script ต้องเป็น LF เสมอ
+#   เครื่องนี้ core.autocrlf=true → ถ้าไม่ล็อก checkout ใหม่จะกลายเป็น CRLF แล้ว sh พังจาก \r (ผู้ตรวจอิสระชี้)
+scripts/golden-lock/hooks/* text eol=lf
+.github/workflows/*.yml text eol=lf

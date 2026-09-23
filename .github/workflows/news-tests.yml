@@ -1,0 +1,40 @@
+# ★ 23 ก.ย. 69 (แคมเปญแก้บั๊ก ข้อ 1 · เจ้าของอนุมัติ) — ด่านเทสระบบข่าวบน GitHub (CFG-03)
+# ─────────────────────────────────────────────────────────────────────────────
+# ทำไม: ไม่เคยมีขั้นไหนรันเทสอัตโนมัติ → เทสข่าวแดงค้างบน main 16 วัน (7→23 ก.ย. 69) โดยไม่มีใครเห็น
+# ทำอะไร: ทุก push/PR เข้า main → ติดตั้งตาม lockfile → npm run test:news (scripts/test-news.mjs อ่าน tests/news-suite.json)
+#   · เทสข่าวยิง API จริงไม่ได้ (ตัวรันถอดคีย์ทุกตัว) และ job นี้ไม่ใช้ secret ใดๆ
+#   · runner เป็น Linux = working tree เป็น LF → เทสที่เคยแดงปลอมเพราะ CRLF บน Windows (CFG-08) ไม่เกี่ยวที่นี่
+#   · เทสปก/คลิปไม่อยู่ในด่านนี้ (ดู exclude ใน tests/news-suite.json พร้อมเหตุผล)
+# npm ci --ignore-scripts: เทสข่าวทุกไฟล์ stub prisma/sharp/sqlite เอง (ตรวจ 23 ก.ย. 69) — ข้าม postinstall
+#   (prisma generate ต้องอ่าน prisma.config.ts/DATABASE_URL) และการ build native ที่ไม่เกี่ยวกับเทส ·
+#   ถ้าเทสข่าวใหม่ต้องใช้ prisma client/native จริง ให้ถอด --ignore-scripts ออก
+name: news-tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: news-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  news-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci --ignore-scripts
+
+      - run: npm run test:news
