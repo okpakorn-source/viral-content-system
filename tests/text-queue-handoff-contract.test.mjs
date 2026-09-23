@@ -390,6 +390,15 @@ function makeProcessPost({
     if (writerError) throw writerError;
     return { success: true, data: clone(legacyData) };
   };
+  // ★ 24 ก.ย. 69 — เก็บ promise ของ handlePost ตัวใน: เมื่อ deadline ชนะ Promise.race ใน runWithPipelineDeadline
+  //   งานตัวในยังวิ่งต่อ ("งานมาช้า") → เทสรอให้มันจบจริงด้วย promise ของมันเอง แทนการนอน setTimeout แล้วหวังว่าทัน
+  //   (ยังเรียก runWithPipelineDeadline ตัวจริงของ production ด้วยพารามิเตอร์เดิม — แค่เฝ้าดูค่าที่ fn คืน)
+  const pipelineRuns = [];
+  const trackedRunWithPipelineDeadline = (deadline, fn) => runWithPipelineDeadline(deadline, () => {
+    const run = fn();
+    pipelineRuns.push(run);
+    return run;
+  });
   const processFunctions = new Function(
     'NextResponse', 'rlog', 'logPipeline', 'detectInputType', 'routePipeline',
     'process', 'isSupabaseReady', 'ensureWorkflow', 'processAutoFlowText',
@@ -429,7 +438,7 @@ function makeProcessPost({
     queueService,
     getActivePipelineDeadline,
     error => error?.errorType === 'PIPELINE_DEADLINE_EXCEEDED',
-    runWithPipelineDeadline,
+    trackedRunWithPipelineDeadline,
     20_000,
   );
   return {
@@ -437,6 +446,7 @@ function makeProcessPost({
     postWithDeadline: processFunctions.hard,
     getWriterCalls: () => writerCalls,
     getServerArchiveCalls: () => clone(serverArchiveCalls),
+    getPipelineRuns: () => [...pipelineRuns],
   };
 }
 
@@ -570,6 +580,62 @@ async function waitFor(predicate, turns = 40) {
   if (predicate() || turns <= 0) return predicate();
   await new Promise(resolve => setImmediate(resolve));
   return waitFor(predicate, turns - 1);
+}
+
+// ★ 24 ก.ย. 69 — CI (ubuntu · node 22.23.2) แดง 7/12 cancelled 5: ข้อ "hard deadline ยิงระหว่าง await ที่ไม่รับ signal"
+//   รอ response ที่มาได้ทางเดียวคือ timer 30ms ของ createPipelineDeadline ซึ่ง production สั่ง unref() (ตั้งใจ ไม่ให้ค้าง process)
+//   ขณะ writer ค้างที่ gate ของเทส → ไม่มี handle ที่ ref เหลือ → event loop ว่าง → 'beforeExit' ก่อน timer ยิง
+//   node 22: exitHandler ของ node:test ยกเลิกเทสที่ค้าง + ทุกข้อที่ยังไม่รันทันที ("Promise resolution is still pending
+//   but the event loop has already resolved") · node 24: nodejs/node#58800 ใส่ keepAlive setInterval รอ subtests → เขียวบังเอิญ
+//   ข้อ "deadline ชน completed" รอด node 22 เพราะ setTimeout 2 วิที่ไม่เคย clear ค้ำ loop ไว้ = เปราะแบบเดียวกัน
+//   แก้: สองข้อนี้ยิง deadline เองผ่าน manualPipelineDeadline + รอทุกจุดผ่าน settleWithin (ไม่มี timer จริงเป็นตัวขับผล)
+
+// รอ promise ที่เทสควบคุมไม่เกิน ms แล้วแดงพร้อมข้อความ · timer นี้ ref โดยตั้งใจ: ระหว่างรอ event loop ไม่ว่าง
+// (node:test ของ node 22 จึงไม่ยกเลิกทั้งไฟล์) ถ้าสัญญาณไม่มาจริงจะแดงข้อเดียว · clear ทุกทางกัน timer รั่วค้ำ process
+async function settleWithin(promise, label, ms = 2_000) {
+  let guard = null;
+  const timeout = new Promise((_, reject) => {
+    guard = setTimeout(
+      () => reject(new Error(`${label} (รอเกิน ${ms}ms — กันเทสค้างจน node:test ยกเลิกทั้งไฟล์)`)),
+      ms,
+    );
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(guard);
+  }
+}
+
+// deadline ที่เทสกดยิงเอง: createPipelineDeadline ตัวจริงของ production + นาฬิกาหยุดนิ่ง/timer มือ
+// (แบบเดียวกับ fakeClock ใน tests/pipeline-deadline-contract.test.mjs) → หมดเวลาเฉพาะตอนเทสเรียก expire()
+// ไม่พึ่ง timer จริงที่ unref หรือความเร็วเครื่อง CI (เดิม Date.now()+30ms อาจหมดก่อน writer เริ่มบนเครื่องช้า)
+function manualPipelineDeadline(remainingMs) {
+  let now = 1_000_000;
+  const timers = [];
+  const deadline = createPipelineDeadline({
+    deadlineAt: now + remainingMs,
+    now: () => now,
+    setTimer(callback, delay) {
+      const timer = { at: now + delay, callback, cleared: false, unref() {} };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimer(timer) {
+      if (timer) timer.cleared = true;
+    },
+  });
+  return {
+    deadline,
+    timers,
+    expire() {
+      assert.equal(timers.length, 1, 'createPipelineDeadline ต้องตั้ง timer deadline หนึ่งตัว');
+      assert.equal(timers[0].at, deadline.deadlineAt, 'timer deadline ต้องครบกำหนดตรง deadlineAt');
+      assert.equal(timers[0].cleared, false, 'deadline ต้องยังไม่ถูก dispose ก่อนเทสยิง (route ต้องยังค้างอยู่)');
+      now = deadline.deadlineAt;
+      timers[0].callback();
+    },
+  };
 }
 
 async function assertAtomicClaimContract(queueSource = production.queue) {
@@ -1143,6 +1209,7 @@ test('hard deadline ยิงระหว่าง await ที่ไม่ร�
   const jobId = 'q_hard_deadline_contract';
   const attemptId = 'attempt_hard_deadline_contract';
   const writerGate = deferred();
+  const writerEntered = deferred();
   const statuses = [];
   let persistedStatus = 'processing';
   const queueJob = {
@@ -1169,21 +1236,30 @@ test('hard deadline ยิงระหว่าง await ที่ไม่ร�
       },
     },
     waitForWriter: writerGate.promise,
+    onWriter: () => writerEntered.resolve(),
   });
-  const deadline = createPipelineDeadline({ deadlineAt: Date.now() + 30 });
-  const response = await runtime.postWithDeadline({
+  const hardDeadline = manualPipelineDeadline(30);
+  const responsePromise = runtime.postWithDeadline({
     headers: { get: () => '' },
     json: async () => ({ ...clone(ORIGINAL_PAYLOAD), _queueJobId: jobId, _queueAttemptId: attemptId }),
     url: 'http://127.0.0.1:3963/api/auto/process',
-  }, deadline);
+  }, hardDeadline.deadline);
+  // writer ต้องเข้าไปค้างใน await ที่ไม่รับ signal ก่อน แล้วเทสจึงยิง deadline เอง (ไม่รอ timer จริงที่ unref)
+  await settleWithin(writerEntered.promise, 'writer ไม่เริ่มก่อน hard deadline');
+  hardDeadline.expire();
+  const response = await settleWithin(responsePromise, 'route ไม่คืน response หลัง hard deadline ยิง');
   assert.equal(response.status, 504);
   assert.equal(response.payload.errorType, 'PIPELINE_DEADLINE_EXCEEDED');
   assert.equal(response.payload.queueStatusPersisted, true);
   assert.equal(persistedStatus, 'failed');
   assert.deepEqual(statuses, ['failed']);
+  assert.equal(hardDeadline.timers[0].cleared, true, 'route จบแล้วต้อง dispose timer ของ deadline');
 
   writerGate.resolve();
-  await new Promise(resolve => setTimeout(resolve, 20));
+  // รอ "งานมาช้า" (handlePost ตัวในที่ race ทิ้งไว้) จบจริงก่อนตรวจ — แทน setTimeout 20ms ที่อาจตรวจก่อนงานถึงจุดเขียน
+  const lateRuns = runtime.getPipelineRuns();
+  assert.equal(lateRuns.length, 1, 'ต้องมี handlePost ตัวในที่ยังวิ่งต่อหลัง deadline หนึ่งงาน');
+  await settleWithin(Promise.allSettled(lateRuns), 'งานเขียนที่มาช้าไม่จบหลังปล่อย writer');
   assert.equal(persistedStatus, 'failed');
   assert.equal(statuses.includes('completed'), false);
 });
@@ -1229,23 +1305,26 @@ test('deadline ชน completed ที่กำลังเขียน: failed 
     },
     waitForWriter: Promise.resolve(),
   });
-  const deadline = createPipelineDeadline({ deadlineAt: Date.now() + 250 });
+  const hardDeadline = manualPipelineDeadline(250);
   const responsePromise = runtime.postWithDeadline({
     headers: { get: () => '' },
     json: async () => ({ ...clone(ORIGINAL_PAYLOAD), _queueJobId: jobId, _queueAttemptId: attemptId }),
     url: 'http://127.0.0.1:3963/api/auto/process',
-  }, deadline);
+  }, hardDeadline.deadline);
 
-  await Promise.race([
-    completionStarted.promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('completion ไม่เริ่มภายในเวลา')), 2_000)),
-  ]);
-  const response = await responsePromise;
+  // เดิม race กับ setTimeout 2 วิที่ไม่เคย clear (ค้ำ loop ไว้โดยบังเอิญให้ timer deadline ที่ unref ได้ยิง)
+  await settleWithin(completionStarted.promise, 'completion ไม่เริ่มภายในเวลา');
+  // completed ของ attempt นี้กำลังค้างเขียน (รอ releaseCompletion) → เทสยิง deadline ชนตรงจุดนี้พอดี
+  hardDeadline.expire();
+  const response = await settleWithin(responsePromise, 'route ไม่คืน response หลัง deadline ชน completed');
   assert.equal(response.status, 504);
   assert.equal(response.payload.queueStatusPersisted, true);
   assert.equal(persistedStatus, 'failed');
   releaseCompletion.resolve();
-  await new Promise(resolve => setTimeout(resolve, 20));
+  // รอ completed ที่ค้างอยู่ (ใน handlePost ตัวใน) เขียนจบจริงก่อนตรวจว่า failed ยังชนะ — แทน setTimeout 20ms
+  const lateRuns = runtime.getPipelineRuns();
+  assert.equal(lateRuns.length, 1, 'ต้องมี handlePost ตัวในที่ค้างเขียน completed อยู่หนึ่งงาน');
+  await settleWithin(Promise.allSettled(lateRuns), 'completed ที่ค้างไม่จบหลังปล่อย');
   assert.equal(persistedStatus, 'failed');
   assert.deepEqual(statuses, ['completed', 'failed']);
 });
