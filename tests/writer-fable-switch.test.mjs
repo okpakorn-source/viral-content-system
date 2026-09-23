@@ -1,7 +1,8 @@
 // 🔏 ข้อสอบลำดับนักเขียนข่าว: Opus 4.8 → Fable 5 → GPT-5.6 Sol อย่างละ 1 request
 // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 — นักเขียนหลักเปลี่ยนเป็น claude-opus-5-5 (ลำดับ/กติกาเดิม · เพดานต่อไม้ใหม่ 150/90/90 วิ) ข้อสอบคาดค่าใหม่
 // รัน Router จริงด้วย fake clients แล้วรัน client policy จริงด้วย fake SDK — ไม่มี API/network
-import { readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { importPatchedModule } from './helpers/temp-module.mjs';
 
 let pass = 0;
 let fail = 0;
@@ -10,15 +11,11 @@ const t = (name, cond) => {
   else { fail++; console.log('❌ ' + name); }
 };
 
-const importTemp = async (relativePath, source) => {
-  const url = new URL(relativePath, import.meta.url);
-  writeFileSync(url, source);
-  try {
-    return await import(url.href + '?t=' + Date.now() + Math.random());
-  } finally {
-    rmSync(url, { force: true });
-  }
-};
+// ★ 23 ก.ย. 69 (แคมเปญแก้บั๊ก ข้อ 1 · เจ้าของอนุมัติ) — CFG-14: importTemp เดิมเขียนไฟล์ชั่วคราวลง src/lib/ai/ (มี finally แล้ว
+//   แต่ยังเขียนลง src ระหว่างรัน + ชื่อชนกันถ้ารันขนาน) → ย้ายไป mkdtemp ใต้ os.tmpdir() ผ่าน tests/helpers/temp-module.mjs
+//   relativePath เดิมยังบอก "ตำแหน่งจริง" ที่ใช้ resolve import สัมพัทธ์ (ไม่มีไฟล์ถูกเขียนที่นั่นแล้ว) · call site เดิมไม่เปลี่ยน
+const importTemp = (relativePath, source) =>
+  importPatchedModule(source, new URL(relativePath, import.meta.url), relativePath.split('/').pop().replace(/\.tmp\.mjs$/, ''));
 
 // ── 1) Router จริง: พิสูจน์ลำดับ/จำนวน/ตัวเลือกห้าม retry ──
 let routerSource = readFileSync(new URL('../src/lib/ai/aiRouter.js', import.meta.url), 'utf8');

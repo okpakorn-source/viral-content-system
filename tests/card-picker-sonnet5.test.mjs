@@ -1,13 +1,19 @@
 // 🔏 ข้อสอบขั้น 4 sonnet-5 (15 ส.ค. 69 — เจ้าของอนุมัติ): ตัวจ่ายงาน + promptBlocks + ความเท่าเดิมของเส้น luna
 // รัน: node tests/card-picker-sonnet5.test.mjs
-import { readFileSync, writeFileSync, rmSync } from 'node:fs';
+// ★ 23 ก.ย. 69 (แคมเปญแก้บั๊ก ข้อ 1 · เจ้าของอนุมัติ) — CFG-14: เดิมเขียน src/lib/ai/_cc-under-test.tmp.mjs / _cc2-under-test.tmp.mjs
+//   แล้ว import ก่อนค่อย rmSync (ไม่มี finally — import ล้ม = ไฟล์ค้างใน src) → โหลดผ่าน tests/helpers/temp-module.mjs
+//   (mkdtemp ใต้ os.tmpdir() + import สัมพัทธ์ชี้ไฟล์จริงใน src/lib/ai/ + ลบใน finally) · ตรรกะข้อสอบเดิมทุกข้อ
+import { readFileSync } from 'node:fs';
+import { importPatchedModule } from './helpers/temp-module.mjs';
+
+const CLAUDE_CLIENT_URL = new URL('../src/lib/ai/claudeClient.js', import.meta.url);
 
 let pass = 0, fail = 0;
 const t = (name, cond) => { if (cond) { pass++; console.log('✅ ' + name); } else { fail++; console.log('❌ ' + name); } };
 
 // ── ① claudeClient: effort ต่อการเรียกชนะ env กลาง + promptBlocks → content array + cache_control ──
 {
-  let src = readFileSync(new URL('../src/lib/ai/claudeClient.js', import.meta.url), 'utf8');
+  let src = readFileSync(CLAUDE_CLIENT_URL, 'utf8');
   const stubs = [
     ["import Anthropic from '@anthropic-ai/sdk';", 'const Anthropic = class { constructor() {} };'],
     ["import { logApiUsage } from './usageLogger';", 'const logApiUsage = () => {};'],
@@ -22,10 +28,7 @@ const t = (name, cond) => { if (cond) { pass++; console.log('✅ ' + name); } el
     `function getClaudeClient() {
   return { messages: { create: async (body) => { globalThis.__CAP__ = body; return { stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 5 }, content: [{ type: 'text', text: '{"ok":1}' }] }; } } };
 }`);
-  const tmpUrl = new URL('../src/lib/ai/_cc-under-test.tmp.mjs', import.meta.url);
-  writeFileSync(tmpUrl, src);
-  const { callClaude } = await import(tmpUrl.href);
-  rmSync(tmpUrl);
+  const { callClaude } = await importPatchedModule(src, CLAUDE_CLIENT_URL, 'cc-under-test');
 
   // เคส 1: ไม่ส่ง effort/promptBlocks = พฤติกรรมเดิม (content เป็นสตริง + effort จาก env กลาง)
   await callClaude({ prompt: 'ทดสอบ', model: 'claude-sonnet-5', maxTokens: 500 });
@@ -64,7 +67,7 @@ for (const f of ['summarizeServiceText.js', 'summarizeService.js']) {
 
 // ── ③ รอบแก้ตามผู้ตรวจ (Sol 4 ข้อ + Fable 2 ข้อแฝง) ──
 {
-  let src = readFileSync(new URL('../src/lib/ai/claudeClient.js', import.meta.url), 'utf8');
+  let src = readFileSync(CLAUDE_CLIENT_URL, 'utf8');
   const stubs2 = [
     ["import Anthropic from '@anthropic-ai/sdk';", 'const Anthropic = class {};'],
     ["import { logApiUsage } from './usageLogger';", 'const logApiUsage = (x) => { globalThis.__USAGE__ = x; };'],
@@ -75,10 +78,7 @@ for (const f of ['summarizeServiceText.js', 'summarizeService.js']) {
     `function getClaudeClient() {
   return { messages: { create: async (body) => { globalThis.__CAP__ = body; return { stop_reason: 'end_turn', usage: { input_tokens: 100, output_tokens: 5, cache_creation_input_tokens: 900, cache_read_input_tokens: 50 }, content: [{ type: 'text', text: '{"ok":1}' }] }; } } };
 }`);
-  const tmpUrl2 = new URL('../src/lib/ai/_cc2-under-test.tmp.mjs', import.meta.url);
-  writeFileSync(tmpUrl2, src);
-  const { callClaude } = await import(tmpUrl2.href);
-  rmSync(tmpUrl2);
+  const { callClaude } = await importPatchedModule(src, CLAUDE_CLIENT_URL, 'cc2-under-test');
 
   // Fable แฝง 1 + Sol #3: blocks ล้วนไม่มี prompt ต้องไม่พัง
   let threw = false;

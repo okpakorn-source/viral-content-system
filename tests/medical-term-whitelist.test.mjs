@@ -4,7 +4,11 @@
 // โหลด "ซอร์สจริง ณ เวลารัน" แล้วแทน import นั้นด้วยตัวล้มเสมอ = AI-failure mock ตาม Sol ข้อ 5 ไปในตัว
 // (parity guard: อ่านจากไฟล์จริงทุกครั้ง regex ในไฟล์เปลี่ยน = ข้อสอบเห็นทันที)
 // รัน: node tests/medical-term-whitelist.test.mjs
-import { readFileSync, writeFileSync, rmSync } from 'node:fs';
+// ★ 23 ก.ย. 69 (แคมเปญแก้บั๊ก ข้อ 1 · เจ้าของอนุมัติ) — CFG-14: เดิมเขียน src/lib/correction/_audit-under-test.tmp.mjs
+//   แล้วค่อย rmSync (ไม่มี finally — import ล้ม = ไฟล์ค้างใน src) → โหลดผ่าน tests/helpers/temp-module.mjs
+//   (mkdtemp ใต้ os.tmpdir() + ลบใน finally) · stub/ตรรกะข้อสอบเดิมทุกข้อ
+import { readFileSync } from 'node:fs';
+import { importPatchedModule } from './helpers/temp-module.mjs';
 
 const srcUrl = new URL('../src/lib/correction/outputAuditService.js', import.meta.url);
 const stubbed = readFileSync(srcUrl, 'utf8').replace(
@@ -12,10 +16,7 @@ const stubbed = readFileSync(srcUrl, 'utf8').replace(
   "const callAI = async () => { throw new Error('AI-mock-failure (ข้อสอบ)'); };"
 );
 if (stubbed.includes('@/lib/ai/openai')) { console.log('❌ stub import ไม่สำเร็จ — โครงไฟล์เปลี่ยน ต้องอัปเดตข้อสอบ'); process.exit(1); }
-const tmpUrl = new URL('../src/lib/correction/_audit-under-test.tmp.mjs', import.meta.url);
-writeFileSync(tmpUrl, stubbed);
-const { auditOutput } = await import(tmpUrl.href);
-rmSync(tmpUrl);
+const { auditOutput } = await importPatchedModule(stubbed, srcUrl, 'audit-under-test');
 
 let pass = 0, fail = 0;
 const t = (name, cond) => { if (cond) { pass++; console.log('✅ ' + name); } else { fail++; console.log('❌ ' + name); } };

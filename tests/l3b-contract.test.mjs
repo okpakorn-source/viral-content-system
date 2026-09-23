@@ -1,9 +1,14 @@
 // 🔏 ข้อสอบสัญญา L3B (14 ส.ค. 69 — Sol backlog ข้อ 3 ขั้น 2): AI เกลาต้องทำงานจริง · ล้มต้อง fail-closed ท่อนยาว
 // โหลดซอร์สจริง + แทน import AI ด้วย mock (globalThis.__L3B_MOCK__ / __L3B_THROW__)
 // รัน: node tests/l3b-contract.test.mjs
-import { readFileSync, writeFileSync, rmSync } from 'node:fs';
+// ★ 23 ก.ย. 69 (แคมเปญแก้บั๊ก ข้อ 1 · เจ้าของอนุมัติ) — CFG-14: เดิมเขียน src/lib/correction/_l3b-under-test.tmp.mjs ระดับบนสุด
+//   แล้วค่อย rmSync (ไม่มี finally — import ล้ม = ไฟล์ค้างใน src) → โหลดผ่าน tests/helpers/temp-module.mjs
+//   (mkdtemp ใต้ os.tmpdir() + ลบใน finally) · stub/ตรรกะข้อสอบเดิมทุกข้อ
+import { readFileSync } from 'node:fs';
+import { importPatchedModule } from './helpers/temp-module.mjs';
 
-let src = readFileSync(new URL('../src/lib/correction/safeCorrectionService.js', import.meta.url), 'utf8');
+const SAFE_CORRECTION_URL = new URL('../src/lib/correction/safeCorrectionService.js', import.meta.url);
+let src = readFileSync(SAFE_CORRECTION_URL, 'utf8');
 const stubs = [
   ["import { callAI } from '@/lib/ai/openai';",
     'const callAI = async () => { if (globalThis.__L3B_THROW__) throw new Error("mock-ai-down"); return globalThis.__L3B_MOCK__; };'],
@@ -16,10 +21,7 @@ for (const [from, to] of stubs) {
   if (!src.includes(from)) { console.log('❌ stub ไม่เจอ:', from.slice(0, 40)); process.exit(1); }
   src = src.replace(from, to);
 }
-const tmpUrl = new URL('../src/lib/correction/_l3b-under-test.tmp.mjs', import.meta.url);
-writeFileSync(tmpUrl, src);
-const { safeCorrect } = await import(tmpUrl.href);
-rmSync(tmpUrl);
+const { safeCorrect } = await importPatchedModule(src, SAFE_CORRECTION_URL, 'l3b-under-test');
 
 let pass = 0, fail = 0;
 const t = (name, cond) => { if (cond) { pass++; console.log('✅ ' + name); } else { fail++; console.log('❌ ' + name); } };

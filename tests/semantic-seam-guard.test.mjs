@@ -1,9 +1,14 @@
 // 🧵 ข้อสอบ Seam Guard ด่าน L4.6 (14 ส.ค. 69 — สเปก Sol 9.1/10 · เจ้าของสั่ง "ระมัดระวังที่สุด")
 // โหลดซอร์สจริง ณ เวลารัน + แทน import AI ด้วย mock คุมผลได้ (globalThis.__L46_MOCK__)
 // รัน: node tests/semantic-seam-guard.test.mjs
-import { readFileSync, writeFileSync, rmSync } from 'node:fs';
+// ★ 23 ก.ย. 69 (แคมเปญแก้บั๊ก ข้อ 1 · เจ้าของอนุมัติ) — CFG-14: เดิมเขียน src/lib/correction/_seam-under-test.tmp.mjs
+//   แล้วค่อย rmSync (ไม่มี finally — import ล้ม = ไฟล์ค้างใน src) → โหลดผ่าน tests/helpers/temp-module.mjs
+//   (mkdtemp ใต้ os.tmpdir() + ลบใน finally) · stub/ตรรกะข้อสอบเดิมทุกข้อ
+import { readFileSync } from 'node:fs';
+import { importPatchedModule } from './helpers/temp-module.mjs';
 
-let src = readFileSync(new URL('../src/lib/correction/semanticSanityCheck.js', import.meta.url), 'utf8');
+const SEMANTIC_SANITY_URL = new URL('../src/lib/correction/semanticSanityCheck.js', import.meta.url);
+let src = readFileSync(SEMANTIC_SANITY_URL, 'utf8');
 const stubs = [
   ["import { callAI } from '@/lib/ai/openai';", 'const callAI = async () => globalThis.__L46_MOCK__;'],
   ["import { MODEL_FAST } from '@/lib/ai/modelConfig';", "const MODEL_FAST = 'mock';"],
@@ -14,10 +19,7 @@ for (const [from, to] of stubs) {
   if (!src.includes(from)) { console.log('❌ stub ไม่เจอ import:', from.slice(0, 50)); process.exit(1); }
   src = src.replace(from, to);
 }
-const tmpUrl = new URL('../src/lib/correction/_seam-under-test.tmp.mjs', import.meta.url);
-writeFileSync(tmpUrl, src);
-const { semanticSanityCheck } = await import(tmpUrl.href);
-rmSync(tmpUrl);
+const { semanticSanityCheck } = await importPatchedModule(src, SEMANTIC_SANITY_URL, 'seam-under-test');
 
 let pass = 0, fail = 0;
 const t = (name, cond) => { if (cond) { pass++; console.log('✅ ' + name); } else { fail++; console.log('❌ ' + name); } };

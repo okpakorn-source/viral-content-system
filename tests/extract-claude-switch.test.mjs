@@ -13,17 +13,14 @@
 //   EXTRACT_SWITCH_TEST_MUTATION=no-extract-effort   ถอด effort รายนัด (กลับไปผูก CLAUDE_WRITE_EFFORT)
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { importPatchedModule } from './helpers/temp-module.mjs';
 
-const importTemp = async (relativePath, source) => {
-  const url = new URL(relativePath, import.meta.url);
-  writeFileSync(url, source);
-  try {
-    return await import(url.href + '?t=' + Date.now() + Math.random());
-  } finally {
-    rmSync(url, { force: true });
-  }
-};
+// ★ 23 ก.ย. 69 (แคมเปญแก้บั๊ก ข้อ 1 · เจ้าของอนุมัติ) — CFG-14: importTemp เดิมเขียนไฟล์ชั่วคราวลง src/lib/ai/ (มี finally แล้ว
+//   แต่ยังเขียนลง src ระหว่างรัน + ชื่อชนกันถ้ารันขนาน) → ย้ายไป mkdtemp ใต้ os.tmpdir() ผ่าน tests/helpers/temp-module.mjs
+//   relativePath เดิมยังบอก "ตำแหน่งจริง" ที่ใช้ resolve import สัมพัทธ์ (ไม่มีไฟล์ถูกเขียนที่นั่นแล้ว) · call site เดิมไม่เปลี่ยน
+const importTemp = (relativePath, source) =>
+  importPatchedModule(source, new URL(relativePath, import.meta.url), relativePath.split('/').pop().replace(/\.tmp\.mjs$/, ''));
 
 const mustReplace = (src, from, to, label) => {
   const out = typeof from === 'string' ? src.replace(from, to) : src.replace(from, to);
