@@ -1,0 +1,221 @@
+{
+  "$comment": [
+    "★ 23 ก.ย. 69 (แคมเปญแก้บั๊ก ข้อ 1 · เจ้าของอนุมัติ) — รายชื่อด่านเทสระบบข่าว (CFG-03) ใช้โดย scripts/test-news.mjs (npm run test:news · pre-push → main · CI news-tests.yml)",
+    "ระบบข่าว = สาย TEXT (Discord → queue → /api/auto/process → autoFlowServiceText → summarizeServiceText → ai/* → correction/* → publishablePostText) + routine + news-filter + s5PinnedAi (สวิตช์รุ่นข่าว opus55 แตะ ANALYSIS_PIN_MODEL)",
+    "include = รันจริงทุกไฟล์ ต้องเขียว 100% · exclude = ไฟล์ที่จงใจไม่อยู่ในด่านข่าว (เทสปก/คลิปที่ตัวจับติดมา + เทสปกที่แดงนอกระบบข่าว) ต้องมี domain/status/reason",
+    "detect.patterns = ท่อน path/ชื่อโมดูลข่าว (ท่อนคั่นด้วย / จับได้ทั้ง '/', '\\' และรูป join(ROOT, 'src', 'lib', ...)) — ไฟล์เทสที่อ้างท่อนใดท่อนหนึ่งแต่ไม่อยู่ใน include/exclude = ด่านแดง",
+    "ไม่อยู่ใน detect โดยตั้งใจ: src/lib/aiClient.js (ตัวเรียก AI ร่วมของ MEGA/s5 — เทสปก ~20 ไฟล์ใช้) · src/lib/persistStore.js (ใช้ร่วมคลิป/ปก) → เทสข่าวที่แตะสองไฟล์นี้ต้องเพิ่ม include เอง (เช่น opus55-effort-cost)",
+    "status ใน exclude = ผลรันวันที่ 23 ก.ย. 69 (ถอดคีย์ API) · ไม่มีผลกับตัวรัน",
+    "★ 24 ก.ย. 69 รอบแก้ผู้ตรวจ (L2): detect เพิ่มโมดูลสาย TEXT ที่ขาด (lib/input-engine/ · utils/withTimeout · researchService · achievementResearch · providers/baseProvider · lib/scraper/ · utils/textCleaner · utils/newsCap · trace/blackbox — utils/pipelineDeadline กับ pipelineLogger มีท่อนที่กว้างกว่าอยู่แล้ว) → ไฟล์ที่โผล่ใหม่: tests/env-alias-apify.test.mjs (กุญแจ provider ของท่อดึงข่าว · เขียว) → include · tests/clip-golden-shared-clients.test.mjs ย้าย exclude → include (มีข้อเฝ้าฝั่งข่าว: ข่าวไม่ import clipAI · sanitize ข่าวคงเดิม · เขียว 4/4)"
+  ],
+  "detect": {
+    "dir": "tests",
+    "patterns": [
+      "autoFlowServiceText",
+      "summarizeServiceText",
+      "promptStoreText",
+      "safetyFilter",
+      "lib/correction/",
+      "publishablePostText",
+      "queueService",
+      "discord-bot",
+      "lib/routine/",
+      "newsFilterService",
+      "s5PinnedAi",
+      "modelConfig",
+      "usageLogger",
+      "rawFactCompletenessGate",
+      "viralFewshot",
+      "cardEssences",
+      "pipelineDeadline",
+      "pipelineLogger",
+      "aiRouter",
+      "claudeClient",
+      "geminiClient",
+      "lib/ai/",
+      "researchSwitch",
+      "generationLogger",
+      "newsArchiveService",
+      "lib/workflow/workflowEngine",
+      "app/api/auto/",
+      "app/api/queue/",
+      "app/api/bot/",
+      "app/api/news-filter/",
+      "lib/input-engine/",
+      "utils/withTimeout",
+      "researchService",
+      "achievementResearch",
+      "providers/baseProvider",
+      "lib/scraper/",
+      "utils/textCleaner",
+      "utils/newsCap",
+      "trace/blackbox"
+    ]
+  },
+  "include": [
+    "tests/archive-save-truth.test.mjs",
+    "tests/batch5-v2-pinned-ai.test.mjs",
+    "tests/bot-resume.test.mjs",
+    "tests/bot-review-reactions.test.mjs",
+    "tests/bot-tracking-route.test.mjs",
+    "tests/breakdown-angle-selection.test.mjs",
+    "tests/card-picker-sonnet5.test.mjs",
+    "tests/card-teacher-match.test.mjs",
+    "tests/clip-golden-shared-clients.test.mjs",
+    "tests/contextual-grounding-warning-only.test.mjs",
+    "tests/correction-fact-stability.test.mjs",
+    "tests/discord-queue-terminal-error.test.mjs",
+    "tests/diversity-warning-only.test.mjs",
+    "tests/env-alias-apify.test.mjs",
+    "tests/extract-claude-switch.test.mjs",
+    "tests/fab-gate-off.test.mjs",
+    "tests/fabrication-gate-fail-open.test.mjs",
+    "tests/generation-log-nonblocking.test.mjs",
+    "tests/health-attribution-grounding.test.mjs",
+    "tests/keywords-dream-schema.test.mjs",
+    "tests/l3b-contract.test.mjs",
+    "tests/medical-term-whitelist.test.mjs",
+    "tests/news-length-contract.test.mjs",
+    "tests/news-prepush-gate.test.mjs",
+    "tests/opus55-effort-cost.test.mjs",
+    "tests/opus55-switch.test.mjs",
+    "tests/opus55-timeouts.test.mjs",
+    "tests/pipeline-deadline-contract.test.mjs",
+    "tests/post-text-no-separate-title.test.mjs",
+    "tests/raw-fact-completeness-gate.test.mjs",
+    "tests/raw-first-prompt-authority.test.mjs",
+    "tests/research-switch.test.mjs",
+    "tests/routine-core.test.mjs",
+    "tests/routine-mutation.test.mjs",
+    "tests/routine-pipeline.test.mjs",
+    "tests/routine-routes.test.mjs",
+    "tests/routine-storage.test.mjs",
+    "tests/routine-validation.test.mjs",
+    "tests/semantic-seam-guard.test.mjs",
+    "tests/test-news-runner.test.mjs",
+    "tests/text-queue-handoff-contract.test.mjs",
+    "tests/usage-logger-pricing.test.mjs",
+    "tests/validate-workflow-text.test.mjs",
+    "tests/viral-fewshot-rotation.test.mjs",
+    "tests/viral-shortlist.test.mjs",
+    "tests/workflow-final-save-contract.test.mjs",
+    "tests/workflow-init-contract.test.mjs",
+    "tests/writer-fable-switch.test.mjs"
+  ],
+  "exclude": [
+    {
+      "file": "tests/ac0107-runtime-hero-crop.test.mjs",
+      "domain": "cover",
+      "status": "green",
+      "reason": "เทสระบบปก (MEGA hero crop) — ตัวจับติดเพราะ stub '@/lib/ai/openai' เป็นระเบิดพิสูจน์ว่าท่อปกไม่เรียก openai · ไม่ได้ทดสอบท่อข่าว"
+    },
+    {
+      "file": "tests/hero-face-crop-e2e-wiring.test.mjs",
+      "domain": "cover",
+      "status": "green",
+      "reason": "เทสระบบปก (hero face crop) — ตัวจับติดเพราะ stub '@/lib/ai/openai' เป็นระเบิดเหมือน ac0107 · ไม่ได้ทดสอบท่อข่าว"
+    },
+    {
+      "file": "tests/ai-honesty-dna.test.mjs",
+      "domain": "cover",
+      "status": "green",
+      "reason": "DNA ความซื่อสัตย์ของท่อปก (aiClient.callBrain / megaBrains / gemini.js) — หัวไฟล์ระบุ 'ไม่แตะระบบเขียนข่าว/openai.js/aiRouter' ตัวจับติดเพราะคอมเมนต์และ stub '@/lib/ai/openai'"
+    },
+    {
+      "file": "tests/ref-covers-patch-matchnewstype.test.mjs",
+      "domain": "cover",
+      "status": "green",
+      "reason": "PATCH /api/ref-covers ของคลังปก — grep ผู้สำรวจติดเพราะคอมเมนต์เอ่ย './usageLogger' ใน openai.js/geminiClient.js (ผู้สำรวจนับเป็นข่าวโดยพลาด)"
+    },
+    {
+      "file": "tests/clip-brain-usage-log.test.mjs",
+      "domain": "clip",
+      "status": "green",
+      "reason": "บัญชีค่าใช้จ่ายของสมองคลิป — stub usageLogger (ไฟล์ร่วมกับข่าว) เพื่อพิสูจน์ฝั่งคลิป ไม่ได้ทดสอบท่อข่าว"
+    },
+    {
+      "file": "tests/clip-editorial-raw.test.mjs",
+      "domain": "clip",
+      "status": "red",
+      "reason": "ใช้ clipAI/geminiClient + safetyFilter สำเนาของคลิปเอง · แดง 1/19 'video URL/file ต้องคง fallback defaults…' (ค่าเริ่มต้น fallback ของ clipAI เปลี่ยน) — ห้ามแก้ในงานข่าว ส่งเจ้าของระบบคลิป"
+    },
+    {
+      "file": "tests/clip-topic-ui.test.mjs",
+      "domain": "clip",
+      "status": "red",
+      "reason": "UI ประเด็นคลิป · ตัวจับติดเพราะ stub '@/lib/ai/modelConfig' · แดง 2/27 (รูปแบบ output การ์ด v2 เปลี่ยน) — ห้ามแก้ในงานข่าว"
+    },
+    {
+      "file": "tests/clip-topic-v2-wiring.test.mjs",
+      "domain": "clip",
+      "status": "red",
+      "reason": "สายไฟประเด็นคลิป v2 · stub '../../ai/usageLogger.js' · แดง 3/21 (golden snapshot ก่อนบล็อก 'เสียงคนเล่า' 9 ก.ย.) — ต้องอัปเดต snapshot ฝั่งคลิป"
+    },
+    {
+      "file": "tests/clip-verify-fixes.test.mjs",
+      "domain": "clip",
+      "status": "green",
+      "reason": "ตัวตรวจคลิป (clipBrain/clipVerify) · stub '../../ai/usageLogger.js' เท่านั้น ไม่ได้ทดสอบท่อข่าว"
+    },
+    {
+      "file": "tests/clip-verify-readiness.test.mjs",
+      "domain": "clip",
+      "status": "red",
+      "reason": "ความพร้อมตัวตรวจคลิป · stub '../../ai/usageLogger.js' · แดง 1/26 (snapshot pre-P3 ก่อนบล็อก 'เสียงคนเล่า' 9 ก.ย.) — ห้ามแก้ในงานข่าว"
+    },
+    {
+      "file": "tests/ac0084-capture-seam.test.mjs",
+      "domain": "cover",
+      "status": "red",
+      "reason": "ขาด fixture ระบบปก: REF-mrbqalpo-h1r1 ไม่อยู่ใน data/ref-cover-library.json แล้ว (มีใน tests/fixtures/ref-mrbqalpo-h1r1.json) — ระบบปกเลิกใช้ 7 ก.ย. · ตัวจับข่าวไม่ติด ใส่ไว้เพื่อบันทึกการจัดประเภท"
+    },
+    {
+      "file": "tests/batch2-v2-evidence-bridge.test.mjs",
+      "domain": "cover",
+      "status": "red",
+      "reason": "ขาด fixture ระบบปก ('fixture requires the tracked reference DNA' — REF-mrbqalpo-h1r1) · ฟื้นได้ด้วย tests/fixtures/ แบบ ac0099/ac0107"
+    },
+    {
+      "file": "tests/batch3-v2-required-role-policy.test.mjs",
+      "domain": "cover",
+      "status": "red",
+      "reason": "ขาด fixture ระบบปก ('Batch 3C fixture requires tracked reference DNA') · ฟื้นได้ด้วย tests/fixtures/"
+    },
+    {
+      "file": "tests/batch4-v2-metric-quarantine.test.mjs",
+      "domain": "cover",
+      "status": "red",
+      "reason": "ขาด fixture ระบบปก ('Batch 4C fixture requires tracked reference DNA') · ฟื้นได้ด้วย tests/fixtures/"
+    },
+    {
+      "file": "tests/candidate-metric-authority.test.mjs",
+      "domain": "cover",
+      "status": "red",
+      "reason": "ขาด fixture ระบบปก (loadRefDna 'ref REF-mrbqalpo-h1r1 must exist') · ฟื้นได้ด้วย tests/fixtures/"
+    },
+    {
+      "file": "tests/phase4-b6-unquarantine.test.mjs",
+      "domain": "cover",
+      "status": "red",
+      "reason": "ขาด fixture ระบบปก ('B6 fixture requires the tracked reference DNA') · ฟื้นได้ด้วย tests/fixtures/"
+    },
+    {
+      "file": "tests/final-decision-sidecar.test.mjs",
+      "domain": "cover",
+      "status": "red",
+      "reason": "พฤติกรรม s6_slots (megaAdapters) เปลี่ยนจากที่เทสจับไว้ — แดง 5/20 เช่น TOCTOU คาด 'story_rescue' ได้ 'llm_pick' · เจ้าของระบบปกต้องตัดสินว่าจะอัปเดต expectation หรือปลดเทส"
+    },
+    {
+      "file": "tests/promo-image-guard.test.mjs",
+      "domain": "cover",
+      "status": "red",
+      "reason": "TypeError reading 'id' (captures.brainArgs[0] ว่าง) — เส้นทางพูลบางใน s6_slots ไม่เรียกสมองแล้ว · ระบบปกเลิกใช้ ค่อยพิจารณาปลดเทส"
+    },
+    {
+      "file": "tests/story-timeline-c1.test.mjs",
+      "domain": "cover",
+      "status": "red",
+      "reason": "regex ซอร์สเก่า: คาด '.sort(storyRank(_legacyKeyOf(slot)))' แต่ megaAdapters.js เป็น 'storyRank(_fbLegacyKey)' (แดง 1/43) · ถ้าฟื้นให้คลาย regex เป็น storyRank\\([^)]+\\)"
+    }
+  ]
+}
