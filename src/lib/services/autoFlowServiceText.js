@@ -217,7 +217,10 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     workflowId: _autoWorkflowId,
     user: _user,
     signal: stageSignal,
-  }), 120000, 'extract'); // ★ 120s (was 60s) — โดน timeout จริงบน production (Discord 11 มิ.ย.) เหตุผลเดียวกับ blueprint
+  }), 180000, 'extract'); // ★ 180s (23 ก.ย. 69 · เดิม 120s · ก่อนนั้น 60s — โดน timeout จริงบน production Discord 11 มิ.ย.) เหตุผลเดียวกับ blueprint
+  // ★ 23 ก.ย. 69 (เจ้าของสั่ง): 120000→180000 (คอมเมนต์ท้ายบรรทัดบน = ประวัติรอบ 11 มิ.ย.) — ขั้นสกัดสลับเป็น opus-5-5 (EXTRACT_PRIMARY=claude)
+  //   ช้ากว่า 4-8 ราว +10 วิ (ผลวัดสกัด 1k โทเคน: 5-5 23.3 วิ vs 4-8 13.8 วิ · production 4-8 จริง 14.5 วิ)
+  //   + เผื่อเวลาให้ตัวสำรอง gemini → gpt ยังทำทันในงบขั้นนี้เมื่อ claude ล้ม/ช้า · ล็อกโดย tests/opus55-timeouts.test.mjs
 
   if (!extractRes.success || !extractRes.data?.newsBody) {
     throwStep('auto_extract', `สกัดข่าวไม่สำเร็จ: ${extractRes.error || 'ไม่มีเนื้อหา'}`);
@@ -651,6 +654,9 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     // ระหว่าง performResearch (ไม่มี inner cap, ~30-60s) + write_inner 180s + write_fallback 90s + STAGE 2.5/prep
     // เดิม 300s: write ช้าชน inner 180s แล้ว fallback เหลือเวลาไม่พอ → มุมตายทั้งที่ fallback กำลังจะรอด
     // (มุมทั้งหมดวิ่งขนาน — wall-clock รวมไม่เพิ่มในเคสปกติ; เพดานงานทั้งใบมี AbortController 900s ที่ worker ครอบอยู่)
+    // ★ 23 ก.ย. 69 (เจ้าของสั่ง): คง 420000 โดยตั้งใจ — withTimeoutSignal จอง (assertCanStart) เต็มค่า ms จากงบงาน 700s ก่อนเริ่ม
+    //   ยกเป็น 500s = ขั้นก่อนเขียนต้องจบใน 200s (เดิม 280s) → ล้มง่ายขึ้น (ผู้ตรวจอิสระ 2 คนชี้ตรงกัน) จึงคง 420s
+    //   write_inner ใหม่ 350s (โซ่ opus 150 + fable 90 + sol 90 = 330 + เผื่อ 20) + research ~60 = 410 ≤ 420 · ล็อกโดย tests/opus55-timeouts.test.mjs (ขอบบน 420 ด้วย)
   });
 
   const genResults = await Promise.allSettled(generationTasks);

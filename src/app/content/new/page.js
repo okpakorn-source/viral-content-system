@@ -550,8 +550,9 @@ function NewContentPageInner() {
         { at: 22,  fn: () => { wfComplete('auto_extract', 'สกัดเนื้อข่าวสำเร็จ'); wfStart('auto_breakdown', { model: 'GPT-5.6 Sol', api: '/api/summarize?mode=breakdown', detail: 'วิเคราะห์ core story + key points + 4 มุมข่าว...' }); } },
         { at: 60,  fn: () => { wfComplete('auto_breakdown', 'วิเคราะห์มุมข่าวสำเร็จ'); wfStart('auto_blueprint', { model: 'GPT-5.5', api: '/api/summarize?mode=blueprint', detail: 'วาง emotional arc: hook → twist → CTA...' }); } },
         { at: 78,  fn: () => { wfComplete('auto_blueprint', 'วาง Blueprint สำเร็จ'); wfStart('auto_research', { api: 'Serper Google Search API', detail: 'ค้นหาข้อเท็จจาก Google × angles...' }); } },
-        { at: 95,  fn: () => { wfComplete('auto_research', 'ค้นหาข้อมูลสำเร็จ'); wfStart('auto_classic', { model: 'Claude Opus 4.8', api: '/api/summarize?mode=analyze', detail: 'Angle 1: Research → Generate 2 เวอร์ชัน...' }); } },
-        { at: 200, fn: () => { wfComplete('auto_classic', '✅ Angle 1 สำเร็จ'); wfStart('auto_enhanced', { model: 'Claude Opus 4.8', api: '/api/summarize?mode=analyze', detail: 'กำลังเขียน Angle 2 + Blueprint inject + research facts — อาจใช้เวลา 2-4 นาที...' }); } },
+        // ★ 23 ก.ย. 69 (เจ้าของสั่ง): ป้ายนักเขียนปัจจุบัน 'Claude Opus 4.8' → 'Claude Opus 5.5' (2 บรรทัดล่าง · ป้ายแสดงผลอย่างเดียว)
+        { at: 95,  fn: () => { wfComplete('auto_research', 'ค้นหาข้อมูลสำเร็จ'); wfStart('auto_classic', { model: 'Claude Opus 5.5', api: '/api/summarize?mode=analyze', detail: 'Angle 1: Research → Generate 2 เวอร์ชัน...' }); } },
+        { at: 200, fn: () => { wfComplete('auto_classic', '✅ Angle 1 สำเร็จ'); wfStart('auto_enhanced', { model: 'Claude Opus 5.5', api: '/api/summarize?mode=analyze', detail: 'กำลังเขียน Angle 2 + Blueprint inject + research facts — อาจใช้เวลา 2-4 นาที...' }); } },
       ];
       const animateStart = Date.now();
       let animateIdx = 0;
@@ -783,8 +784,9 @@ function NewContentPageInner() {
         { at: 22,  fn: () => { wfComplete('auto_extract', 'สกัดเนื้อข่าวสำเร็จ'); wfStart('auto_breakdown', { model: 'GPT-5.6 Sol', api: '/api/summarize?mode=breakdown', detail: 'วิเคราะห์ core story + key points + 4 มุมข่าว...' }); } },
         { at: 60,  fn: () => { wfComplete('auto_breakdown', 'วิเคราะห์มุมข่าวสำเร็จ'); wfStart('auto_blueprint', { model: 'GPT-5.5', api: '/api/summarize?mode=blueprint', detail: 'วาง emotional arc: hook → twist → CTA...' }); } },
         { at: 78,  fn: () => { wfComplete('auto_blueprint', 'วาง Blueprint สำเร็จ'); wfStart('auto_research', { api: 'Serper Google Search API', detail: 'ค้นหาข้อเท็จจาก Google × angles...' }); } },
-        { at: 95,  fn: () => { wfComplete('auto_research', 'ค้นหาข้อมูลสำเร็จ'); wfStart('auto_classic', { model: 'Claude Opus 4.8', api: '/api/summarize?mode=analyze', detail: 'Multi-Angle generate × 3 angles ทำพร้อมกัน...' }); } },
-        { at: 170, fn: () => { wfComplete('auto_classic', '✅ สร้าง Classic สำเร็จ'); wfStart('auto_enhanced', { model: 'Claude Opus 4.8', api: '/api/summarize?mode=analyze (enhanced)', detail: 'กำลังเขียน Enhanced + Blueprint inject + research facts — อาจใช้เวลา 2-4 นาที...' }); } },
+        // ★ 23 ก.ย. 69 (เจ้าของสั่ง): ป้ายนักเขียนปัจจุบัน 'Claude Opus 4.8' → 'Claude Opus 5.5' (2 บรรทัดล่าง · ป้ายแสดงผลอย่างเดียว)
+        { at: 95,  fn: () => { wfComplete('auto_research', 'ค้นหาข้อมูลสำเร็จ'); wfStart('auto_classic', { model: 'Claude Opus 5.5', api: '/api/summarize?mode=analyze', detail: 'Multi-Angle generate × 3 angles ทำพร้อมกัน...' }); } },
+        { at: 170, fn: () => { wfComplete('auto_classic', '✅ สร้าง Classic สำเร็จ'); wfStart('auto_enhanced', { model: 'Claude Opus 5.5', api: '/api/summarize?mode=analyze (enhanced)', detail: 'กำลังเขียน Enhanced + Blueprint inject + research facts — อาจใช้เวลา 2-4 นาที...' }); } },
       ];
       const animateStart = Date.now();
       let animateIdx = 0;

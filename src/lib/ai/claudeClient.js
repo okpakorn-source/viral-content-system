@@ -7,7 +7,7 @@ const _fullLog = () => process.env.LOG_FULL_PROMPT === '1';
  * CLAUDE CLIENT — Anthropic (ตัวเขียนข่าวหลัก)
  * ========================================
  * ใช้สำหรับ: Content Writing (ภาษาไทยดีกว่าสาย GPT)
- * โมเดลจริง = DEFAULT_WRITE_MODEL ด้านล่าง (default claude-opus-4-8, สลับผ่าน env CLAUDE_WRITE_MODEL)
+ * โมเดลจริง = DEFAULT_WRITE_MODEL ด้านล่าง (default claude-opus-5-5 ตั้งแต่ 23 ก.ย. 69 · เดิม claude-opus-4-8, สลับผ่าน env CLAUDE_WRITE_MODEL)
  * ราคา: ดู MODEL_COSTS ใน modelConfig.js (อย่าเชื่อ comment เก่า)
  *
  * ตั้งค่า: ANTHROPIC_API_KEY ใน .env
@@ -28,11 +28,17 @@ let claudeClient = null;
 // ★ 4 ส.ค. 69 (เจ้าของสั่ง "เลือก opus 4.8 ประกอบเลย" หลังศึกตาบอด 6 นักเขียน × 5 ข่าวจริง):
 //   opus-4-8 อันดับเฉลี่ยดีสุด (2.60) สำนวน-ความแม่นสมดุลกว่า opus-5 · ราคาเท่ากัน
 //   ถอยกลับ: CLAUDE_WRITE_MODEL=claude-opus-5
-const DEFAULT_WRITE_MODEL = process.env.CLAUDE_WRITE_MODEL || 'claude-opus-4-8';
+// ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 — ราคา $4/$20 ต่อล้านโทเคน (cache read $0.20) ถูกกว่า 4.8 20%
+//   ต่างจาก 4.8: คิดก่อนตอบเสมอ ปิดไม่ได้ (ส่ง thinking disabled/budget_tokens = 400 — โค้ดนี้ไม่ส่ง thinking อยู่แล้ว)
+//   ปุ่มถอยกลับใหม่: CLAUDE_WRITE_MODEL=claude-opus-4-8
+//   (ของเดิม: const DEFAULT_WRITE_MODEL = process.env.CLAUDE_WRITE_MODEL || 'claude-opus-4-8';)
+const DEFAULT_WRITE_MODEL = process.env.CLAUDE_WRITE_MODEL || 'claude-opus-5-5';
 
 // Opus 4.7+ / Fable / Sonnet 5 ไม่รับ sampling params (temperature/top_p/top_k → 400)
 // ★ 16 ก.ค. 69 (B6): + sonnet-5/opus-5 — พิสูจน์ด้วย API จริง: "`temperature` is deprecated for this model"
 //   (เดิม regex ไม่ครอบ → A/B ตัวเขียน Sonnet 5 ล้มเงียบแล้ว fallback ไป gpt-5.5 โดยไม่มีใครรู้)
+// ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 — 'claude-opus-5-5' เข้าข่าย prefix 'opus-5' อยู่แล้ว
+//   (opus-5-5 ไม่รับ temperature/top_p/top_k เหมือนกัน → ได้ output_config.effort แทน) ไม่ต้องแก้ regex
 function modelRejectsSampling(model) {
   return /^claude-(opus-4-[78]|fable|sonnet-5|opus-5)/.test(model);
 }
@@ -130,7 +136,15 @@ PASS 5: อ่านใหม่เหมือนคนอ่านจริง
   //   งานเขียนที่ prompt ละเอียดอยู่แล้วใช้ "medium" = เร็วขึ้นมาก คุณภาพแทบไม่ต่าง
   //   ปรับได้ผ่าน .env: CLAUDE_WRITE_EFFORT=low|medium|high
   // ★ 15 ส.ค. 69: effort ต่อการเรียกชนะ env กลาง (ของเดิม: const writeEffort = process.env.CLAUDE_WRITE_EFFORT || 'medium';)
-  const writeEffort = effort || process.env.CLAUDE_WRITE_EFFORT || 'medium';
+  // ★ 23 ก.ย. 69 (เจ้าของสั่ง): const → let เพื่อบังคับขั้นต่ำของ opus-5-5 ด้านล่าง (ของเดิม: const writeEffort = effort || process.env.CLAUDE_WRITE_EFFORT || 'medium';)
+  let writeEffort = effort || process.env.CLAUDE_WRITE_EFFORT || 'medium';
+  // ★ 23 ก.ย. 69 (เจ้าของสั่ง "opus-5-5 ใช้ medium กับ high เท่านั้น ห้าม low"): low → medium
+  //   writeEffort บรรทัดบนรวมทั้ง effort ต่อการเรียกและ env CLAUDE_WRITE_EFFORT แล้ว → ครอบทั้งสองทาง
+  //   เฉพาะ prefix claude-opus-5-5 — รุ่นอื่น (เช่น opus-4-8 ปุ่มถอยกลับ) ส่ง low ได้ตามเดิมทุกไบต์
+  if (/^claude-opus-5-5/.test(model) && writeEffort === 'low') {
+    console.warn('[Claude] ⚠️ opus-5-5 ห้าม effort=low (เจ้าของสั่ง 23 ก.ย. 69) → ยกเป็น medium');
+    writeEffort = 'medium';
+  }
   console.log(`[Claude] model=${model}, temp=${stripSampling ? 'n/a (opus4.7+)' : temperature}, effort=${stripSampling ? writeEffort : 'n/a'}, maxTokens=${maxTokens}`);
   // ★ Sol #3 + Fable (15 ส.ค. 69): กันกับระเบิด — เรียกด้วย promptBlocks ล้วนโดยไม่ส่ง prompt ต้องไม่พังที่ preview
   //   (ของเดิม: prompt.slice(0, 300) ตรงๆ = TypeError เมื่อ prompt เป็น undefined)
@@ -143,6 +157,8 @@ ${String(_previewSrc)}
 
   // ★ 1 ส.ค. 69: opus-5/fable "คิดก่อนเขียน" เปิดเองอัตโนมัติ และช่วงคิดกิน max_tokens ร่วมกับเนื้อ
   //   → เผื่อเพดานขั้นต่ำ 16000 กันเนื้อโดนตัดกลางคัน (ยังอยู่ในโซน non-streaming ปลอดภัย)
+  // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 — 'claude-opus-5-5' เข้าข่าย prefix 'opus-5' อยู่แล้ว
+  //   opus-5-5 ปิดการคิดไม่ได้เลย (ต่างจาก 4.8 ที่ไม่ส่ง thinking = ไม่คิด) → ต้องได้เพดาน ≥16000 เสมอ ซึ่ง regex นี้ครอบให้แล้ว
   const _thinkingOn = /^claude-(opus-5|fable)/.test(model);
   const effMaxTokens = _thinkingOn ? Math.max(maxTokens, 16000) : maxTokens;
 
@@ -217,10 +233,14 @@ ${content}
   // ★ Sol #2 + รอบ 2 (15 ส.ค. 69): input จริง = input + cache_creation + cache_read (เดิมนับแค่ input_tokens ทำ /cost ต่ำกว่าจริง)
   //   usageLogger คิดทุกโทเคนที่อัตรา input ปกติ → แปลงโทเคนแคชเป็น "เทียบเท่าอัตราปกติ" ก่อนส่ง (cacheW 1.25x · cacheR 0.1x)
   //   เงินตรงเป๊ะ ตัวเลขโทเคนคือค่าเทียบเท่า (จดใน comment นี้กันงงตอนอ่าน /cost)
+  // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-5-5 แคชอ่าน $0.20/1M = 0.05× ของ input $4 → ตัวคูณ cacheR 0.05 เฉพาะ prefix claude-opus-5-5
+  //   รุ่นอื่นคง 0.1 เหมือนเดิมทุกไบต์ · cacheW 1.25 เท่าเดิมทุกรุ่น
+  //   (ของเดิม: inputTokens: Math.round(inputTokens + _cw * 1.25 + _cr * 0.1),)
+  const _cacheReadMul = /^claude-opus-5-5/.test(model) ? 0.05 : 0.1;
   logApiUsage({
     provider: 'anthropic',
     model,
-    inputTokens: Math.round(inputTokens + _cw * 1.25 + _cr * 0.1),
+    inputTokens: Math.round(inputTokens + _cw * 1.25 + _cr * _cacheReadMul),
     outputTokens,
     feature: 'callClaude'
   });

@@ -196,7 +196,8 @@ async function assertRouterBehavior(source = ROUTER_SOURCE, tag = 'router') {
   assert.deepEqual(
     globalThis.__LENGTH_ROUTER_CALLS__.map((call) => [call.model, call.textNewsLengthPolicy]),
     [
-      ['claude-opus-4-8', true],
+      // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 — ไม้แรกของ router จริง (const _primary ใน aiRouter.js)
+      ['claude-opus-5-5', true],
       ['claude-fable-5', true],
       ['gpt-5.6-sol', true],
     ],
@@ -277,8 +278,9 @@ async function assertClaudeClientBehavior(source = CLAUDE_SOURCE, tag = 'claude-
     return { stop_reason: 'end_turn', content: [{ type: 'text', text: '{}' }], usage: {} };
   } } };
   const client = await importData(transformClaude(source), tag);
-  await client.callClaude({ prompt: 'default', model: 'claude-opus-4-8', retryWithoutEffort: false });
-  await client.callClaude({ prompt: 'TEXT', model: 'claude-opus-4-8', retryWithoutEffort: false, textNewsLengthPolicy: true });
+  // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 — ใช้รุ่นเดียวกับนักเขียนหลักปัจจุบัน
+  await client.callClaude({ prompt: 'default', model: 'claude-opus-5-5', retryWithoutEffort: false });
+  await client.callClaude({ prompt: 'TEXT', model: 'claude-opus-5-5', retryWithoutEffort: false, textNewsLengthPolicy: true });
   assert.match(calls[0].system, /POLICY_180/u, 'Claude default system ต้องคง 180');
   assert.doesNotMatch(calls[0].system, /POLICY_146/u);
   assert.match(calls[1].system, /POLICY_146/u, 'Claude TEXT writer ต้องได้ 146');

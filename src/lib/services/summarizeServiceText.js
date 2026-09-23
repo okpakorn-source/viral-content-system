@@ -1908,10 +1908,14 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
     console.log(`📦 ${'─'.repeat(50)}\n`);
 
     try {
-      console.log(`[🤖 AI CALL] mode=write | calling SmartAI (Opus 4.8 > Fable 5 > GPT-5.6 Sol)...`);
+      console.log(`[🤖 AI CALL] mode=write | calling SmartAI (Opus 5.5 > Fable 5 > GPT-5.6 Sol)...`);
       // ★ 16 ก.ค. 69 (B4): ขั้นเขียน (แพง+ช้าสุด) เดิมไม่มีเพดานเวลาชั้นใน — โมเดลค้าง = ตายทั้งมุม
-      //   ครอบโซ่นักเขียนทั้งหมดด้วย 270s; ภายในแยก Opus 90s + Fable 75s + Sol 90s
+      //   ครอบโซ่นักเขียนทั้งหมดด้วย 350s; ภายในแยก Opus 150s + Fable 90s + Sol 90s
+      //   (ของเดิมบรรทัดบน: "ครอบโซ่นักเขียนทั้งหมดด้วย 270s; ภายในแยก Opus 90s + Fable 75s + Sol 90s")
       //   (review fix: outer เดิม 300s ไม่พอเพราะ research กินก่อน ~30-60s → ขยายเป็น 420s ที่ autoFlowServiceText)
+      // ★ 23 ก.ย. 69 (เจ้าของสั่ง): 270s→350s — นักเขียนหลัก opus-5-5 ช้ากว่า 4-8 (ผลวัด 34.5/39.7 วิ) → เพดานต่อไม้ใหม่ใน aiRouter.js
+      //   150+90+90 = 330s + เผื่อ 20s = 350s · outer generate_A คง 420s (withTimeoutSignal จองเต็มค่าจากงบ 700s — ยก generate_A จะบีบหน้าต่างก่อนเขียน)
+      //   350 + research ~60 = 410 ≤ 420 · ล็อกโดย tests/opus55-timeouts.test.mjs
       // callSmartAI('write') เป็นเจ้าของโซ่ Opus→Fable→Sol ครบแล้ว ห้ามยิง Sol ซ้ำที่ service
       const _writeOut = await withTimeoutSignal(
         (requestSignal) => callSmartAI('write', { prompt: multiPrompt,
@@ -1920,7 +1924,7 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
           signal: requestSignal,
           textNewsLengthPolicy: true,
         }),
-        270000, 'write_inner', signal
+        350000, 'write_inner', signal // ★ 23 ก.ย. 69 (เจ้าของสั่ง): 270000→350000 (เหตุผลในคอมเมนต์ด้านบน)
       );
       const { result, model: usedModel } = _writeOut;
       console.log(`[🤖 AI RESULT] model used: ${usedModel}`);
@@ -2493,7 +2497,7 @@ ${_timelineFlowGuidance}
           signal: requestSignal,
           textNewsLengthPolicy: true,
         }),
-        270000, 'mix_inner', signal
+        350000, 'mix_inner', signal // ★ 23 ก.ย. 69 (เจ้าของสั่ง): 270000→350000 ตาม write_inner (โซ่นักเขียนเดียวกัน 330s)
       );
       const result = smartResult.result;
       const usedModel = smartResult.model;

@@ -90,9 +90,10 @@ if (MUTATION === 'no-env-guard') {
     "effort: process.env.EXTRACT_CLAUDE_EFFORT || 'medium',\n        ",
     '', 'mutation no-extract-effort');
 } else if (MUTATION === 'hardcoded-model') {
+  // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 — สตริงกลายพันธุ์ตามค่า default ใหม่ในซอร์ส
   routerSource = mustReplace(routerSource,
-    "model: process.env.EXTRACT_CLAUDE_MODEL || 'claude-opus-4-8',",
-    "model: 'claude-opus-4-8',", 'mutation hardcoded-model');
+    "model: process.env.EXTRACT_CLAUDE_MODEL || 'claude-opus-5-5',",
+    "model: 'claude-opus-5-5',", 'mutation hardcoded-model');
 } else if (MUTATION) {
   throw new Error('ไม่รู้จัก mutation: ' + MUTATION);
 }
@@ -145,7 +146,8 @@ test('1 ไม่ตั้ง env → chain = [gemini, gpt4o] เดิมเป
 });
 
 // ═══ 2) EXTRACT_PRIMARY=claude → claude นำ · สำเร็จแล้วไม่แตะ gemini ═══
-test('2 เปิดสวิตช์ → callClaude ก่อนด้วย claude-opus-4-8 temp 0.2 maxTokens 4000 ไม่มี textNewsLengthPolicy · ไม่เรียก gemini', async () => {
+// ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 — default ของ EXTRACT_CLAUDE_MODEL (ของเดิมในข้อ 2 คาด claude-opus-4-8)
+test('2 เปิดสวิตช์ → callClaude ก่อนด้วย claude-opus-5-5 temp 0.2 maxTokens 4000 ไม่มี textNewsLengthPolicy · ไม่เรียก gemini', async () => {
   reset();
   process.env.EXTRACT_PRIMARY = 'claude';
   const { out, chain, logs } = await runExtract();
@@ -153,12 +155,12 @@ test('2 เปิดสวิตช์ → callClaude ก่อนด้วย c
   assert.equal(calls().length, 1, 'สำเร็จครั้งแรกต้องจบ ไม่เรียกตัวสำรอง');
   const c = calls()[0];
   assert.equal(c.fn, 'claude');
-  assert.equal(c.model, 'claude-opus-4-8');
+  assert.equal(c.model, 'claude-opus-5-5');
   assert.equal(c.temperature, 0.2);
   assert.equal(c.maxTokens, 4000);
   assert.equal('textNewsLengthPolicy' in c, false, 'ห้ามส่ง textNewsLengthPolicy (สิทธิ์สายเขียน TEXT เท่านั้น)');
-  assert.equal(out.model, 'claude-opus-4-8', 'usedModel ที่ logPipeline ใช้ต้องเป็นโมเดลจริง');
-  assert.ok(logs.includes('[SmartAI] extract primary = claude-opus-4-8 (EXTRACT_PRIMARY=claude)'),
+  assert.equal(out.model, 'claude-opus-5-5', 'usedModel ที่ logPipeline ใช้ต้องเป็นโมเดลจริง');
+  assert.ok(logs.includes('[SmartAI] extract primary = claude-opus-5-5 (EXTRACT_PRIMARY=claude)'),
     'ต้องมี log บรรทัดประกาศสวิตช์ตามสเปก');
 });
 

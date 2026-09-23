@@ -1,4 +1,5 @@
 // 🔏 ข้อสอบลำดับนักเขียนข่าว: Opus 4.8 → Fable 5 → GPT-5.6 Sol อย่างละ 1 request
+// ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 — นักเขียนหลักเปลี่ยนเป็น claude-opus-5-5 (ลำดับ/กติกาเดิม · เพดานต่อไม้ใหม่ 150/90/90 วิ) ข้อสอบคาดค่าใหม่
 // รัน Router จริงด้วย fake clients แล้วรัน client policy จริงด้วย fake SDK — ไม่มี API/network
 import { readFileSync, writeFileSync, rmSync } from 'node:fs';
 
@@ -48,11 +49,12 @@ for (const [from, to] of routerStubs) {
 }
 routerSource = routerSource.replace(/import \{ callGemini[^\n]*\n/, 'const callGemini = async () => ({ content: "gemini" }); const isGeminiAvailable = () => false;\n');
 routerSource = routerSource.replace(/import \{ MODEL_PRIMARY[^\n]*\n/, "const MODEL_PRIMARY = 'gpt-5.6-sol';\n");
-const productionTimeoutsPresent = /opus:\s*90_000[\s\S]*fable:\s*75_000[\s\S]*sol:\s*90_000/.test(routerSource);
+// ★ 23 ก.ย. 69 (เจ้าของสั่ง): เพดานต่อไม้ใหม่ opus 150s · fable 90s · sol คง 90s (ของเดิม: opus 90s · fable 75s · sol 90s)
+const productionTimeoutsPresent = /opus:\s*150_000[\s\S]*fable:\s*90_000[\s\S]*sol:\s*90_000/.test(routerSource);
 // ใช้ utility จริง แต่ย่อเวลาเฉพาะสำเนาในข้อสอบให้ timeout เกิดในไม่กี่มิลลิวินาที
 routerSource = routerSource
-  .replace('opus: 90_000', 'opus: 5')
-  .replace('fable: 75_000', 'fable: 5')
+  .replace('opus: 150_000', 'opus: 5')
+  .replace('fable: 90_000', 'fable: 5')
   .replace('sol: 90_000', 'sol: 5');
 const router = await importTemp('../src/lib/ai/_router-under-test.tmp.mjs', routerSource);
 const callSmartAI = router.callSmartAI;
@@ -68,16 +70,16 @@ const reset = ({ claude = [], gpt = [], available = true } = {}) => {
 
 reset();
 await callSmartAI('write', { prompt: 'x' });
-t('1 ปกติเรียก Opus 4.8 เพียงครั้งเดียว',
+t('1 ปกติเรียก Opus 5.5 เพียงครั้งเดียว',
   globalThis.__CALLS__.length === 1
-  && globalThis.__CALLS__[0].model === 'claude-opus-4-8'
+  && globalThis.__CALLS__[0].model === 'claude-opus-5-5'
   && globalThis.__CALLS__[0].maxRetries === 0
   && globalThis.__CALLS__[0].retryWithoutEffort === false);
 
 reset({ claude: ['throw'] });
 const fableResult = await callSmartAI('write', { prompt: 'x' });
 t('2 Opus ล้มจึงเรียก Fable ครั้งเดียว',
-  globalThis.__CALLS__.map(c => c.model).join('|') === 'claude-opus-4-8|claude-fable-5'
+  globalThis.__CALLS__.map(c => c.model).join('|') === 'claude-opus-5-5|claude-fable-5'
   && fableResult.model === 'claude-fable-5'
   && globalThis.__CALLS__[1].maxRetries === 0
   && globalThis.__CALLS__[1].retryWithoutEffort === false);
@@ -85,14 +87,14 @@ t('2 Opus ล้มจึงเรียก Fable ครั้งเดียว
 reset({ claude: ['refusal'] });
 await callSmartAI('write', { prompt: 'x' });
 t('3 Claude refusal ถอย Fable โดยไม่ข้ามขั้น',
-  globalThis.__CALLS__.map(c => c.model).join('|') === 'claude-opus-4-8|claude-fable-5');
+  globalThis.__CALLS__.map(c => c.model).join('|') === 'claude-opus-5-5|claude-fable-5');
 
 reset({ claude: ['throw', 'throw'] });
 const solResult = await callSmartAI('write', { prompt: 'x' });
 const solCall = globalThis.__CALLS__[2];
 t('4 Opus+Fable ล้มจึงเรียก Sol หนึ่งครั้งแบบห้าม Terra/SDK retry',
   globalThis.__CALLS__.map(c => `${c.fn}:${c.model}`).join('|')
-    === 'claude:claude-opus-4-8|claude:claude-fable-5|gpt:gpt-5.6-sol'
+    === 'claude:claude-opus-5-5|claude:claude-fable-5|gpt:gpt-5.6-sol'
   && solCall.allowModelFallback === false
   && solCall.maxRetries === 0
   && solResult.model === 'gpt-5.6-sol');
@@ -102,7 +104,7 @@ let exhausted = false;
 try { await callSmartAI('write', { prompt: 'x' }); } catch { exhausted = true; }
 t('5 ทั้งสามล้มแล้วจบทันที ไม่มี Sol/Terra รอบเพิ่ม',
   exhausted && globalThis.__CALLS__.map(c => c.model).join('|')
-    === 'claude-opus-4-8|claude-fable-5|gpt-5.6-sol');
+    === 'claude-opus-5-5|claude-fable-5|gpt-5.6-sol');
 
 reset({ claude: ['hang', 'throw'] });
 await Promise.race([
@@ -111,7 +113,7 @@ await Promise.race([
 ]);
 t('5.1 Opus หมดเวลาเฉพาะตัวแล้ว Fable และ Sol ยังทำหน้าที่สำรองอย่างละครั้ง',
   globalThis.__CALLS__.map(c => c.model).join('|')
-    === 'claude-opus-4-8|claude-fable-5|gpt-5.6-sol'
+    === 'claude-opus-5-5|claude-fable-5|gpt-5.6-sol'
   && productionTimeoutsPresent);
 
 reset();
@@ -119,7 +121,7 @@ process.env.CLAUDE_WRITE_MODEL = 'claude-fable-5';
 process.env.CLAUDE_WRITE_FALLBACK_MODEL = 'claude-opus-5';
 await callSmartAI('write', { prompt: 'x' });
 t('6 ค่า env เก่าบน Vercel ไม่ทับลำดับนักเขียนข่าว',
-  globalThis.__CALLS__.length === 1 && globalThis.__CALLS__[0].model === 'claude-opus-4-8');
+  globalThis.__CALLS__.length === 1 && globalThis.__CALLS__[0].model === 'claude-opus-5-5');
 
 reset({ gpt: ['throw'] });
 await callSmartAI('breakdown', { prompt: 'x' });
@@ -212,7 +214,7 @@ globalThis.__CLAUDE_CLIENT__ = { messages: { create: async (body, options) => {
 } } };
 try {
   await claudeModule.callClaude({
-    prompt: 'x', model: 'claude-opus-4-8', maxRetries: 0, retryWithoutEffort: false,
+    prompt: 'x', model: 'claude-opus-5-5', maxRetries: 0, retryWithoutEffort: false,
   });
 } catch {}
 t('12 callClaude writer-mode ยิง request เดียว ส่ง maxRetries=0 และไม่ retry effort',
@@ -222,10 +224,13 @@ t('12 callClaude writer-mode ยิง request เดียว ส่ง maxRetr
 // ── 4) Service ต้องไม่เรียก GPT รอบสองหลัง Router จบครบสามโมเดล ──
 const textService = readFileSync(new URL('../src/lib/services/summarizeServiceText.js', import.meta.url), 'utf8');
 const legacyService = readFileSync(new URL('../src/lib/services/summarizeService.js', import.meta.url), 'utf8');
+// ★ 23 ก.ย. 69 (เจ้าของสั่ง): write_inner 270000→350000 (โซ่ใหม่ 150+90+90 = 330 วิ + เผื่อ 20) · mix_inner 270000→350000 ตาม write_inner (โซ่นักเขียนเดียวกัน)
+//   (ของเดิม: && (textService.match(/270000, '(?:write|mix)_inner'/g) || []).length === 2)
 t('13 text service ไม่มี write_fallback/mix_fallback ซ้ำหลัง SmartAI',
   !textService.includes("'write_fallback'")
   && !textService.includes("'mix_fallback'")
-  && (textService.match(/270000, '(?:write|mix)_inner'/g) || []).length === 2);
+  && (textService.match(/350000, 'write_inner'/g) || []).length === 1
+  && (textService.match(/350000, 'mix_inner'/g) || []).length === 1);
 t('14 legacy mix ไม่มี catch ที่ยิง callAI ซ้ำหลัง callSmartAI write',
   !/callSmartAI\('write',[\s\S]{0,500}catch[\s\S]{0,250}callAI/.test(legacyService));
 

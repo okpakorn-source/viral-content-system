@@ -51,6 +51,23 @@ test('gemini-3.6-flash: คิดราคาได้จริง (ไม่ใ
   assert.equal(captured.data.costUsd, 10.5, 'input 1M×$1.50 + output 1M×$9.00 = $10.50');
 });
 
+// ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 — ราคาทางการ $4/$20 ต้องได้จากแถวตรงตัว
+//   ไม่ใช่ตกไป partial-match 'claude-opus-5' (5/25) — ถอดแถว 'claude-opus-5-5' ทั้งสองตารางแล้วเคสนี้ต้องแดง (ได้ 30 แทน 24)
+test('claude-opus-5-5: คิดราคาตรงแถวของตัวเอง 4.0/20.0 ต่อ 1M token (ไม่ใช่ 5/25 ของ opus-5)', async () => {
+  globalThis.__USAGE_LOG_CAPTURED = null;
+  await logApiUsage({ provider: 'anthropic', model: 'claude-opus-5-5', inputTokens: 1_000_000, outputTokens: 1_000_000 });
+  const captured = globalThis.__USAGE_LOG_CAPTURED;
+  assert.ok(captured, 'ต้องเรียกถึง prisma.apiUsageLog.create');
+  assert.equal(captured.data.costUsd, 24, 'input 1M×$4 + output 1M×$20 = $24');
+});
+
+test('claude-opus-5-5: ตัวคูณ token เศษส่วนคิดถูกสัดส่วน', async () => {
+  globalThis.__USAGE_LOG_CAPTURED = null;
+  await logApiUsage({ provider: 'anthropic', model: 'claude-opus-5-5', inputTokens: 12000, outputTokens: 3000 });
+  const expected = (12000 / 1_000_000) * 4.0 + (3000 / 1_000_000) * 20.0;
+  assert.ok(Math.abs(globalThis.__USAGE_LOG_CAPTURED.data.costUsd - expected) < 1e-9);
+});
+
 test('claude-opus-5: ตัวคูณ token เศษส่วนคิดถูกสัดส่วน (regression กันพิมพ์ราคาผิดหลักสิบ)', async () => {
   globalThis.__USAGE_LOG_CAPTURED = null;
   await logApiUsage({ provider: 'anthropic', model: 'claude-opus-5', inputTokens: 2900, outputTokens: 900 });

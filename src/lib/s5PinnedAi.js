@@ -117,8 +117,13 @@ export function resolvePin() {
   //   override/ถอยกลับเฉพาะสายนี้เท่านั้น (แยกจาก ANALYSIS_MODEL ที่ยังคุม resolveModel() ทั่วไปเหมือนเดิม
   //   สำหรับ provider ที่ไม่ใช่ anthropic) · เคส/pin เก่าที่บันทึกไว้แล้วไม่กระทบ (keywords อ่านคืนผ่าน
   //   readStoredPin จาก case.meta เดิม ไม่เรียก resolvePin() ซ้ำ)
+  // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 · ถอยกลับไม่ต้องแก้โค้ด: ANALYSIS_PIN_MODEL=claude-opus-4-8
+  //   (ของเดิม: ? (process.env.ANALYSIS_PIN_MODEL || 'claude-opus-4-8'))
+  //   ⚠️ opus-5-5 คิดก่อนตอบเสมอ (ปิดไม่ได้) และช่วงคิดกิน max_tokens ร่วมกับคำตอบ — สายนี้ยิงผ่าน aiClient.callAnthropic
+  //   ชุด 2 (23 ก.ย. 69): aiClient.callAnthropic ยก max_tokens เป็น ≥16000 + ส่ง output_config.effort (ANALYSIS_EFFORT || medium · clamp low→medium) ให้รุ่นที่คิดแล้ว
+  //   → ดูล็อกจริงรอบแรก ถ้าคำตอบว่าง/JSON ขาดท้าย ให้ถอยด้วย env ด้านบนก่อน
   const model = provider === 'anthropic'
-    ? (process.env.ANALYSIS_PIN_MODEL || 'claude-opus-4-8')
+    ? (process.env.ANALYSIS_PIN_MODEL || 'claude-opus-5-5')
     : resolveModel(provider);
   // ★ correction item 4 (round 2): ปฏิเสธ model ว่าง/ยาวเกิน/มีช่องว่างหัวท้าย — ห้าม trim ให้แล้วยอมรับ
   //   (เช่น ANALYSIS_MODEL="  claude-x  " ใน env ต้องถือว่า INVALID ไม่ใช่ "ตัดขอบให้เป็นค่าที่ใช้ได้")

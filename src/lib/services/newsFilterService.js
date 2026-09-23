@@ -30,7 +30,10 @@ import { callClaude, isClaudeAvailable } from '@/lib/ai/claudeClient';
 //   3 ขั้น AI ของหน้านี้ (สกัดแก่น extractFactCore / จำแนกประโยค filterNewsWithAI / แยกประเด็น splitTopics) → claude-opus-4-8
 //   Claude ไม่มีคีย์ / ล่ม / เกินเวลา / ตอบไม่เป็น JSON → ถอยเส้นเดิม gpt-5.6-luna ทุกไบต์ (luna ล้มอีก → ผู้เรียกถอย regex ตามเดิม)
 //   ถอยกลับทั้งหมดโดยไม่แก้โค้ด: env NEWS_FILTER_MODEL=gpt-5.6-luna · ระดับความคิด: env NEWS_FILTER_EFFORT=low|medium|high (ค่าเริ่มต้น medium)
-const NEWS_FILTER_MODEL = process.env.NEWS_FILTER_MODEL || 'claude-opus-4-8';
+// ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 — ทั้ง 3 ขั้นของหน้านี้ · ถอยกลับไม่ต้องแก้โค้ด: NEWS_FILTER_MODEL=claude-opus-4-8
+//   (ของเดิม: const NEWS_FILTER_MODEL = process.env.NEWS_FILTER_MODEL || 'claude-opus-4-8';)
+//   opus-5-5 คิดก่อนตอบเสมอ → callClaude ยกเพดานเป็น ≥16000 ให้เอง (_thinkingOn ครอบ prefix opus-5) · เส้นถอย luna คงเดิมทุกไบต์
+const NEWS_FILTER_MODEL = process.env.NEWS_FILTER_MODEL || 'claude-opus-5-5';
 const NEWS_FILTER_TIMEOUT_MS = 100_000; // เพดานต่อการเรียก Claude — เกินแล้วยกเลิก HTTP จริงและถอย luna (route maxDuration = 180)
 const NEWS_FILTER_CLAUDE_MIN_TOKENS = 6000; // max_tokens ฝั่ง Claude = เนื้อออกล้วน (ไม่รวมคิด) — ภาษาไทยกินโทเคนมาก เพดาน 3000 ของ luna ตัดกลางคันได้ · จ่ายตามที่เขียนจริง
 // system prompt สั้น — ไม่ส่ง = callClaude ยัด DNA เขียนข่าว ~9KB ที่ไม่เกี่ยวกับงานสกัด (จ่ายฟรี + บิดงาน)
@@ -38,7 +41,7 @@ const NEWS_FILTER_SYSTEM = 'คุณเป็นบรรณาธิการ�
 
 /**
  * เรียก AI ของหน้า news-filter — คืน { result, model } · result = object ที่ parse แล้ว (ทั้งสองเส้น)
- * ลำดับ: claude-opus-4-8 → (ล้ม/หมดเวลา) → gpt-5.6-luna เส้นเดิม · โยน error ต่อเฉพาะเมื่อ luna ก็ล้ม
+ * ลำดับ: NEWS_FILTER_MODEL (default claude-opus-5-5 ตั้งแต่ 23 ก.ย. 69 · เดิม claude-opus-4-8) → (ล้ม/หมดเวลา) → gpt-5.6-luna เส้นเดิม · โยน error ต่อเฉพาะเมื่อ luna ก็ล้ม
  */
 async function callNewsFilterAI({ prompt, temperature, maxTokens, label = 'news-filter' }) {
   const wantClaude = /^claude-/.test(NEWS_FILTER_MODEL);

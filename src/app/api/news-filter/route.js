@@ -1,4 +1,5 @@
 export const maxDuration = 180; // ★ 9 ก.ย. 69: 60→180 — สกัดด้วย claude-opus-4-8 ช้ากว่า luna + คิวรอได้ 40s + ถอย luna ต้องจบในรอบเดียว (เดิม 60)
+// ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 (default NEWS_FILTER_MODEL ใน newsFilterService.js) — maxDuration 180 คงเดิม
 import { NextResponse } from 'next/server';
 import { filterNews, filterNewsWithAI, extractFactCore } from '@/lib/services/newsFilterService';
 import { createStore } from '@/lib/persistStore';
@@ -100,6 +101,7 @@ export async function POST(request) {
 
     // เรียกระบบกรอง — 3 เครื่อง:
     //   ★ 9 ก.ย. 69: โมเดลของทุกเครื่อง AI = claude-opus-4-8 ถอย luna (สวิตช์ NEWS_FILTER_MODEL ใน newsFilterService.js) · ป้าย engine ติดชื่อโมเดลจริง
+    //   ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 — ถอย luna/regex เหมือนเดิม · ป้าย engine ยังติดชื่อโมเดลจริง
     //   useAI=true (ค่าเริ่มต้นใหม่ 13 มิ.ย.) → extractFactCore: AI เขียนใหม่เหลือข้อเท็จจริงดิบ (ตรงเป้าทีม)
     //   useAI='classify' → filterNewsWithAI: จำแนกประโยคทีละอัน (เก่า เก็บไว้เป็นทางเลือก)
     //   useAI=false → filterNews: regex เร็ว/ออฟไลน์ (fallback)

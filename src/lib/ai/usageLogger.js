@@ -14,6 +14,9 @@ const PRICING = {
   'gemini-3.5-flash': { input: 1.50, output: 9.00 },
   'gemini-3.1-pro': { input: 2.0, output: 12.0 },
   'claude-opus-4-8': { input: 5.0, output: 25.0 },
+  // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 — ราคาทางการ $4/$20 ต่อ 1M token
+  //   ต้องมีแถวตรงตัว: ถ้าไม่มี ตัวหา partial-match ด้านล่าง (startsWith เรียงยาว→สั้น) จะไปจับ 'claude-opus-5' = 5/25 ผิดราคา
+  'claude-opus-5-5': { input: 4.0, output: 20.0 },
   // ★ 29 ก.ค. 69 (lane2 cost-audit A1 — COST-AUDIT.md ข้อ 2-A): ก่อนหน้านี้ไม่มีราคาโมเดลนี้เลย ทั้งที่เป็นตัวเขียนจริง
   //   ของท่อปกตั้งแต่ 26 ก.ค. (aiClient.js default) → /cost รายงาน $0 ทั้งท่อ ราคาชั่วคราว = ชั้นเดียวกับ claude-opus-4-8
   //   เดิม (grandfathered) รอยืนยันราคาทางการจาก Anthropic จริงภายหลัง

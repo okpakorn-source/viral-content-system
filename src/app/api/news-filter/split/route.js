@@ -1,4 +1,5 @@
 export const maxDuration = 180; // ★ 9 ก.ย. 69: 60→180 — แยกประเด็นด้วย claude-opus-4-8 ช้ากว่า luna + ถอย luna ต้องจบในรอบเดียว (เดิม 60)
+// ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 (default NEWS_FILTER_MODEL ใน newsFilterService.js) — maxDuration 180 คงเดิม
 import { NextResponse } from 'next/server';
 import { splitTopics } from '@/lib/services/newsFilterService';
 import { createStore } from '@/lib/persistStore';

@@ -69,6 +69,8 @@ export const MODEL_COSTS = {
   'gpt-5.6-luna':  { input: 1.0, output: 6.0 },
   // Anthropic (ตัวเขียนจริง + ตัว A/B)
   'claude-opus-4-8': { input: 5.0, output: 25.0 },
+  // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 — ราคาทางการ $4/$20 (cache read $0.20) · คงแถว 4.8 ไว้เพื่อประวัติ/ปุ่มถอยกลับ
+  'claude-opus-5-5': { input: 4.0, output: 20.0 },
   'claude-fable-5': { input: 10.0, output: 50.0 }, // ★ 15 ส.ค. 69 นักเขียนหลักใหม่ — ไม่มีแถวนี้ /cost จะบันทึก $0 (ผู้ตรวจ Fable จับ)
   'claude-sonnet-5': { input: 2.0, output: 10.0 }, // โปรถึง 31 ส.ค. 69 → หลังนั้น 3/15
   // Legacy

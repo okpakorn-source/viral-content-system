@@ -1476,7 +1476,7 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
     console.log(`📦 ${'─'.repeat(50)}\n`);
 
     try {
-      console.log(`[🤖 AI CALL] mode=write | calling SmartAI (Opus 4.8 > Fable 5 > GPT-5.6 Sol)...`);
+      console.log(`[🤖 AI CALL] mode=write | calling SmartAI (Opus 5.5 > Fable 5 > GPT-5.6 Sol)...`);
       const { result, model: usedModel } = await callSmartAI('write', { prompt: multiPrompt, temperature: 0.7, maxTokens: 6000 }); // ★ 6000 (was 10000) — perf: 2 versions × ~500-600w = ~3000t + buffer
       console.log(`[🤖 AI RESULT] model used: ${usedModel}`);
       console.log(`[🤖 AI RESULT] versions: ${result?.versions?.length || 0}`);

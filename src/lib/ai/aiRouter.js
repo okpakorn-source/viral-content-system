@@ -7,7 +7,7 @@
  * Strategy:
  *   Extraction → Gemini Flash (เร็ว + ถูก)
  *   Breakdown  → GPT-4o (คิดลึก + structured)
- *   Writing    → Claude Opus 4.8 → Claude Fable 5
+ *   Writing    → Claude Opus 5.5 (★ 23 ก.ย. 69 · เดิม Opus 4.8) → Claude Fable 5
  *   Fallback   → GPT-5.6 Sol (ถ้า Claude ใช้งานไม่ได้)
  */
 import { callAI } from './openai.js';
@@ -17,9 +17,16 @@ import { MODEL_PRIMARY } from './modelConfig.js';
 import { rethrowPipelineDeadline } from '../utils/pipelineDeadline.js';
 import { withTimeoutSignal } from '../utils/withTimeout.js';
 
+// ★ 23 ก.ย. 69 (เจ้าของสั่ง): เพดานเวลาต่อไม้ของนักเขียน — opus 90s→150s · fable 75s→90s · sol คง 90s (ของเดิม: opus 90s · fable 75s · sol 90s)
+//   ผลวัดจริง 23 ก.ย. 19:10 (คีย์ production · พรอมต์เขียน 17k โทเคน · 2 เวอร์ชัน): opus-5-5 medium 34.5/39.7 วิ (TTFB 17–21 วิ)
+//   เทียบ opus-4-8 32.3 วิ · production 4-8 นักเขียนจริง 35–37 วิ → ตั้งเพดาน 150 วิ = margin ~3.8× ของรอบช้าสุดที่วัดได้ (39.7 วิ) เผื่อพรอมต์จริงใหญ่กว่า
+//   ตัวเลขเจ้าของอนุมัติจากผลวัด ("ปรับเพดานเวลาให้รอนานขึ้นได้จะได้ไม่ล้ม") · ผลรวมโซ่ 150+90+90 = 330 วิ
+//   ⚠️ ข้อจำกัด: withTimeoutSignal จอง (assertCanStart) เต็มค่า ms จากงบงาน 700s ก่อนเริ่มทุกขั้น → generate_A คง 420s (ยก = บีบหน้าต่างก่อนเขียน)
+//   จึงต้องให้ write_inner ≤ 420−60(research) = 360 → ตั้ง 350 และโซ่ 330 ต้องพอดีใน 350 (ดู tests/opus55-timeouts.test.mjs)
+//   → write_inner (summarizeServiceText) = 350 ≥ 330+เผื่อ 20 และ generate_A (autoFlowServiceText) = 420 ≥ write_inner+research 60 — tests/opus55-timeouts.test.mjs ล็อกไว้
 const WRITER_ATTEMPT_TIMEOUT_MS = Object.freeze({
-  opus: 90_000,
-  fable: 75_000,
+  opus: 150_000,
+  fable: 90_000,
   sol: 90_000,
 });
 
@@ -125,8 +132,10 @@ function getStrategy(task) {
       // Extraction: ใช้ Gemini Flash (ถูก + เร็ว) -> fallback gpt4o
       // ★ 9 ก.ย. 69 (เจ้าของสั่ง): EXTRACT_PRIMARY=claude (เทียบตรงตัวเท่านั้น) → นำ chain ด้วย claude-opus-4-8
       //   ไม่ตั้ง/ค่าอื่น = chain เดิมทุกไบต์ · เปิดแล้ว gemini→gpt4o ยังเป็นตัวสำรองตามลำดับเดิม
+      // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 — default ของ EXTRACT_CLAUDE_MODEL (log นี้ + case 'claude-extract')
+      //   ถอยกลับไม่ต้องแก้โค้ด: EXTRACT_CLAUDE_MODEL=claude-opus-4-8
       if (process.env.EXTRACT_PRIMARY === 'claude' && isClaudeAvailable()) {
-        console.log(`[SmartAI] extract primary = ${process.env.EXTRACT_CLAUDE_MODEL || 'claude-opus-4-8'} (EXTRACT_PRIMARY=claude)`);
+        console.log(`[SmartAI] extract primary = ${process.env.EXTRACT_CLAUDE_MODEL || 'claude-opus-5-5'} (EXTRACT_PRIMARY=claude)`);
         chain.push('claude-extract');
       }
       if (isGeminiAvailable()) chain.push('gemini');
@@ -146,6 +155,7 @@ function getStrategy(task) {
     case 'write':
       // Content Writing: Opus 4.8 -> Fable 5 -> GPT-5.6 Sol (ครั้งละ 1 request)
       // ★ 21 ส.ค. 69 (เจ้าของเลือกจากศึกตาบอด R118): นักเขียนหลัก → claude-opus-4-8
+      // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 — นักเขียนหลัก = claude-opus-5-5 → Fable 5 → Sol (ลำดับ/กติกาเดิม · เพดานต่อไม้ใหม่ 150/90/90 วิ)
       //   ผ่าน token เฉพาะสายเขียน เพื่อไม่ให้ fallback Sol→Terra / SDK retry ของงานอื่นเปลี่ยนตาม
       //   case 'claude' เดิมคงไว้ทุกไบต์ให้ breakdown/ผู้ใช้อื่น (แผน Fable: ห้ามแก้ DEFAULT_WRITE_MODEL กลาง กันลาม fabricationGate)
       //   ของเดิม: if (isClaudeAvailable()) chain.push('claude');
@@ -182,7 +192,10 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
     //   fable-5 ล้มซ้ำ → โยนต่อให้ writer-sol หนึ่งครั้ง แล้วจบ (ไม่มี Terra/ไม่มี Sol รอบสอง)
     case 'claude-write': {
       // ล็อกในโค้ดเพื่อไม่ให้ค่า CLAUDE_WRITE_MODEL เก่าบน Vercel ทับผลศึกตาบอดของเจ้าของ
-      const _primary = 'claude-opus-4-8';
+      // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 (ของเดิม: const _primary = 'claude-opus-4-8';)
+      //   สายนี้ไม่อ่าน env โดยตั้งใจ → ถอยกลับ = แก้ค่านี้คืนเป็น 'claude-opus-4-8'
+      //   opus-5-5 คิดก่อนตอบเสมอ (ปิดไม่ได้) → callClaude ยกเพดาน max_tokens ≥16000 ให้เอง (_thinkingOn ครอบ prefix opus-5)
+      const _primary = 'claude-opus-5-5';
       const _fb = 'claude-fable-5';
       try {
         return await runWriterAttempt(
@@ -228,7 +241,8 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
         systemPrompt: systemPrompt || EXTRACT_CLAUDE_SYSTEM_PROMPT,
         effort: process.env.EXTRACT_CLAUDE_EFFORT || 'medium',
         maxRetries: 0,
-        model: process.env.EXTRACT_CLAUDE_MODEL || 'claude-opus-4-8',
+        // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 · ถอยกลับ: EXTRACT_CLAUDE_MODEL=claude-opus-4-8
+        model: process.env.EXTRACT_CLAUDE_MODEL || 'claude-opus-5-5',
       });
       if (!out || typeof out !== 'object') throw new Error('claude-extract ได้ผลว่าง — ส่งต่อตัวสำรอง');
       return out;

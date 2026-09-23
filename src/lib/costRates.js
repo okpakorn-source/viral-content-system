@@ -13,6 +13,14 @@ const num = (v, d) => {
 // ราคา LLM ต่อ 1,000,000 token: { in: ราคา input, out: ราคา output }
 export const LLM_RATES = {
   'claude-opus-4-8': { in: num(process.env.RATE_CLAUDE_OPUS_IN, 15), out: num(process.env.RATE_CLAUDE_OPUS_OUT, 75) },
+  // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 — ตารางนี้ = ประมาณการชั้นเก่า (ม.ค. 2026) ของ costStore (ระบบปก) + clipBrainPipeline
+  //   หน่วยเดียวกัน ($/1M token) แต่แถว 4.8 ตั้ง 15/75 (ราคาจริง 5/25) → ใช้สัดส่วนเดียวกับแถว 4.8 ×0.8 (ราคาจริง 5.5/4.8 = 4/5)
+  //   = 12/60 เมื่อไม่ตั้ง env · ถ้าตั้ง RATE_CLAUDE_OPUS_IN/OUT เป็นราคาจริงของ 4.8 (5/25) แถวนี้จะได้ราคาจริงของ 5.5 (4/20) ตามเอง
+  //   ไม่มีแถวนี้ = ตกไป PROVIDER_DEFAULT.anthropic 15/75
+  // ★ 23 ก.ย. 69 (เจ้าของสั่ง · ชุด 2): เลิกสูตร ×0.8 ของชุด 1 ข้างบน → ใช้ราคาจริงทางการ $4 in / $20 out ต่อ 1M token ตรงๆ
+  //   ปรับได้ผ่าน env ของรุ่นนี้เอง RATE_CLAUDE_OPUS55_IN/OUT (ไม่ผูก RATE_CLAUDE_OPUS_IN/OUT ของแถว 4.8 อีกต่อไป)
+  //   (ของเดิมชุด 1: in = RATE_CLAUDE_OPUS_IN||15 ×4/5 · out = RATE_CLAUDE_OPUS_OUT||75 ×4/5 → 12/60 เมื่อไม่ตั้ง env)
+  'claude-opus-5-5': { in: num(process.env.RATE_CLAUDE_OPUS55_IN, 4), out: num(process.env.RATE_CLAUDE_OPUS55_OUT, 20) },
   'gpt-4o': { in: num(process.env.RATE_GPT4O_IN, 2.5), out: num(process.env.RATE_GPT4O_OUT, 10) },
   'gemini-2.5-flash': { in: num(process.env.RATE_GEMINI_FLASH_IN, 0.3), out: num(process.env.RATE_GEMINI_FLASH_OUT, 2.5) },
   'gemini-2.0-flash': { in: 0.1, out: 0.4 },

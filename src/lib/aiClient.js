@@ -119,6 +119,21 @@ async function callAnthropic({ system, user, model, maxTokens, temperature, sign
     system,
     messages: [{ role: 'user', content: user }],
   };
+  // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-5-5 (ค่าเริ่มต้นใหม่ของ ANALYSIS_PIN_MODEL ใน s5PinnedAi) คิดก่อนตอบเสมอ ปิดไม่ได้
+  //   และช่วงคิดกิน max_tokens ร่วมกับคำตอบ → ผู้เรียก /api/analyze 4000 · /api/keywords 3500 เสี่ยงคำตอบว่าง/JSON ขาดท้าย
+  //   (1) ตระกูลที่คิดเอง /^claude-(opus-5|fable)/ → max_tokens ≥ 16000 (เหตุผลเดียวกับ _thinkingOn ใน ai/claudeClient.js)
+  //   (2) ส่ง output_config.effort เฉพาะตระกูลเดียวกัน = ANALYSIS_EFFORT || (opus-5-5: 'medium' = ค่าเริ่มต้น API ของรุ่นนี้ · รุ่นอื่น: 'high' = ค่าเริ่มต้น API เดิม → พฤติกรรม opus-5/fable ไม่เปลี่ยน) · opus-5-5 ห้าม low → ยกเป็น medium
+  //   รุ่นอื่น (opus-4-8 / รุ่นเก่า / ชื่อที่ไม่ขึ้นต้นแบบนี้) ไม่ยกเพดานและไม่ส่ง output_config = payload เดิมทุกไบต์
+  if (/^claude-(opus-5|fable)/.test(model)) {
+    payload.max_tokens = Math.max(maxTokens, 16000);
+    const _is55 = /^claude-opus-5-5/.test(model);
+    let effort = process.env.ANALYSIS_EFFORT || (_is55 ? 'medium' : 'high');
+    if (_is55 && effort === 'low') {
+      console.warn('[aiClient] ⚠️ opus-5-5 ห้าม effort=low (เจ้าของสั่ง 23 ก.ย. 69) → ยกเป็น medium');
+      effort = 'medium';
+    }
+    payload.output_config = { effort };
+  }
   // โมเดลรุ่นใหม่ (claude 5 / opus-4-8) เลิกรับ temperature แล้ว
   // ส่งเฉพาะเมื่อ opt-in ผ่าน env สำหรับโมเดลรุ่นเก่าที่ยังต้องการ
   if (process.env.ANALYSIS_SEND_TEMPERATURE === '1' && typeof temperature === 'number') {
