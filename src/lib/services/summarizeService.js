@@ -12,6 +12,7 @@ import { buildNarrativePayload, formatNarrativePayload, checkNarrativeSimilarity
 import { clusterMatch, findClusterScore, mapCategory, EMOTION_CLUSTERS, CONFLICT_CLUSTERS } from '@/lib/ai/semanticClusters';
 import { MODEL_PRIMARY, MODEL_FAST, MODEL_HEAVY_FALLBACK , MODEL_BLUEPRINT } from '@/lib/ai/modelConfig';
 import { withTimeout } from '@/lib/utils/withTimeout';
+import { riskPromptWriterLines, riskPromptWriterShortLine } from '@/lib/ai/riskWords'; // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S2 · เจ้าของอนุมัติ): คำแทนในกฎ FACEBOOK SAFETY มาจากตารางกลาง (ถอย RISK_WORDS_LEGACY=1)
 
 const MODEL_GEMINI_PRO = 'gemini-3.6-flash'; // ★ 1 ส.ค. 69 เจ้าของสั่ง 3.5→3.6 (ใหม่ ไว ไม่ล่ม)
 
@@ -651,8 +652,10 @@ export async function performSummarize({
     let result;
     let breakdownModelUsed = MODEL_PRIMARY;
     try {
+      // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S1 · เจ้าของอนุมัติ): sanitizeScope 'facts' — ผลแตกประเด็นเป็น JSON ข้อเท็จจริง
+      //   ไม่ผ่านตัวกรองคำเสี่ยง (ตัวกรองเคยทำคำประสม/ราชาศัพท์พังและพลิกข้อเท็จจริง) · ถอยกลับ: SANITIZE_LEGACY=1
       result = await withTimeout(
-        callAI({ prompt, model: MODEL_PRIMARY, temperature: 0.4, maxTokens: 24000 }),
+        callAI({ prompt, model: MODEL_PRIMARY, temperature: 0.4, maxTokens: 24000, sanitizeScope: 'facts' }),
         200000,
         'breakdown_gpt55_inner'
       );
@@ -660,7 +663,7 @@ export async function performSummarize({
       console.warn(`[Breakdown-Service] ⚠️ ${MODEL_PRIMARY} failed/timeout: "${primaryErr.message}" — retrying with ${MODEL_HEAVY_FALLBACK} fallback...`);
       breakdownModelUsed = MODEL_HEAVY_FALLBACK;
       result = await withTimeout(
-        callAI({ prompt, model: MODEL_HEAVY_FALLBACK, temperature: 0.4, maxTokens: 8000 }),
+        callAI({ prompt, model: MODEL_HEAVY_FALLBACK, temperature: 0.4, maxTokens: 8000, sanitizeScope: 'facts' }), // ★ 24 ก.ย. 69 (S1)
         90000,
         'breakdown_fallback'
       );
@@ -841,7 +844,8 @@ export async function performSummarize({
                 model: MODEL_FAST,
                 temperature: 0.1,
                 maxTokens: 1000,
-                prompt: analyzerPrompt
+                prompt: analyzerPrompt,
+                sanitizeScope: 'facts', // ★ 24 ก.ย. 69 (S1): DNA ข่าว = metadata จับคู่การ์ด ไม่ใช่ข้อความโพสต์
               });
               
               // Map Deep DNA to legacy fields for compatibility with Stage 2 Cluster Match
@@ -1432,22 +1436,25 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
           'เขียนในมุมมองที่ต่างกันตามจำนวนที่ขอ (ตัวอย่างมุมมอง: ไทม์ไลน์เหตุการณ์, ขยี้จังหวะอารมณ์, เปิดเรื่องแรงๆ, มุมมองคนในเหตุการณ์, หรือเจาะลึกความจริง)\n\n') +
       '=== กฎเหล็ก FACEBOOK SAFETY — บังคับทุกเวอร์ชัน ===\n' +
       'ห้ามใช้คำเสี่ยงต่อไปนี้ในเนื้อหาที่เขียน ให้ rewrite เป็นคำปลอดภัยเสมอ:\n\n' +
-      '"ฆ่า" → "ก่อเหตุ" หรือ "ก่อเหตุร้ายแรง"\n' +
-      '"ฆาตกรรม" → "เหตุสูญเสีย" หรือ "คดีร้ายแรง"\n' +
-      '"ศพ" → "ร่างของผู้จากไป"\n' +
-      '"ตาย/ดับ/สิ้นใจ/เสียชีวิต" → ห้ามใช้ตรงๆ ทุกคำ ให้ใช้สำนวนเลี่ยงที่สุภาพ สวย และเข้ากับบริบทของเรื่อง เช่น "จากไปอย่างสงบ" "ไม่อยู่แล้ว" "ลาลับ" "สิ้นลมอย่างสงบ" "ปิดตำนาน" "หลับไม่ตื่นอีกเลย" — เลือกให้เหมาะกับโทนข่าวนั้นๆ ห้ามใช้สำนวนเดียวซ้ำทุกจุด/ทุกเวอร์ชัน ⚠️แต่ต้องบอกการจากไปให้ชัดอย่างน้อย 1 ครั้งเสมอ ห้ามเลี่ยงจนคนอ่านไม่รู้ว่าเสียชีวิตแล้ว (ห้ามเล่าฉากก่อนเสียชีวิตค้างไว้โดยไม่เฉลย)\n' +
-      '"สยอง/โหด/สลด" → "สะเทือนใจ" หรือ "น่าตกใจ"\n' +
-      '"เลือด" → "ร่องรอยเหตุการณ์" (⚠️ยกเว้นศัพท์การแพทย์/อวัยวะ เช่น "เส้นเลือด" "เส้นเลือดในสมอง" — ห้ามแทนที่ ให้คงคำเดิม)\n' +
-      '"แทง" → "ใช้ของมีคม"\n' +
-      '"ยิง" → "ใช้อาวุธปืน"\n' +
-      '"ข่มขืน" → "ล่วงละเมิดทางเพศ"\n' +
-      '"ผูกคอ/จบชีวิต" → "จากไปอย่างน่าเศร้า"\n' +
-      '"การพนัน/บ่อน/แทงบอล/เว็บพนัน" → "เกมเสี่ยงโชคผิดกฎหมาย" (เลี่ยงให้มากที่สุด)\n' +
-      '"ยาบ้า/ยาไอซ์/เสพยา" → "สิ่งผิดกฎหมาย" หรือ "ของมึนเมาผิดกฎหมาย"\n' +
-      '"เมาแล้วขับ/ตั้งวงเหล้า" → เกลาคำให้นุ่มลง เช่น "ขับขี่ในสภาพไม่พร้อม" "ร่วมวงสังสรรค์" (สลาก/ลอตเตอรี่รัฐบาลใช้ได้ปกติ)\n' +
-      '"ชำแหละ/หมกศพ" → "เหตุรุนแรงอย่างยิ่ง"\n' +
-      '"ทุบตี/ทำร้าย" → "ใช้ความรุนแรง"\n' +
-      '"จัดฉาก" → "สร้างสถานการณ์"\n\n' +
+      // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S2 · เจ้าของอนุมัติ) — PL-15 แฝดสาย URL: คำแทนมาจากตารางกลาง riskWords.js (variant 'url' คงบรรทัด ตาย/ดับ ของสายนี้)
+      //   RISK_WORDS_LEGACY=1 = บล็อกเดิมด้านล่างทุกไบต์
+      riskPromptWriterLines('url',
+        '"ฆ่า" → "ก่อเหตุ" หรือ "ก่อเหตุร้ายแรง"\n' +
+        '"ฆาตกรรม" → "เหตุสูญเสีย" หรือ "คดีร้ายแรง"\n' +
+        '"ศพ" → "ร่างของผู้จากไป"\n' +
+        '"ตาย/ดับ/สิ้นใจ/เสียชีวิต" → ห้ามใช้ตรงๆ ทุกคำ ให้ใช้สำนวนเลี่ยงที่สุภาพ สวย และเข้ากับบริบทของเรื่อง เช่น "จากไปอย่างสงบ" "ไม่อยู่แล้ว" "ลาลับ" "สิ้นลมอย่างสงบ" "ปิดตำนาน" "หลับไม่ตื่นอีกเลย" — เลือกให้เหมาะกับโทนข่าวนั้นๆ ห้ามใช้สำนวนเดียวซ้ำทุกจุด/ทุกเวอร์ชัน ⚠️แต่ต้องบอกการจากไปให้ชัดอย่างน้อย 1 ครั้งเสมอ ห้ามเลี่ยงจนคนอ่านไม่รู้ว่าเสียชีวิตแล้ว (ห้ามเล่าฉากก่อนเสียชีวิตค้างไว้โดยไม่เฉลย)\n' +
+        '"สยอง/โหด/สลด" → "สะเทือนใจ" หรือ "น่าตกใจ"\n' +
+        '"เลือด" → "ร่องรอยเหตุการณ์" (⚠️ยกเว้นศัพท์การแพทย์/อวัยวะ เช่น "เส้นเลือด" "เส้นเลือดในสมอง" — ห้ามแทนที่ ให้คงคำเดิม)\n' +
+        '"แทง" → "ใช้ของมีคม"\n' +
+        '"ยิง" → "ใช้อาวุธปืน"\n' +
+        '"ข่มขืน" → "ล่วงละเมิดทางเพศ"\n' +
+        '"ผูกคอ/จบชีวิต" → "จากไปอย่างน่าเศร้า"\n' +
+        '"การพนัน/บ่อน/แทงบอล/เว็บพนัน" → "เกมเสี่ยงโชคผิดกฎหมาย" (เลี่ยงให้มากที่สุด)\n' +
+        '"ยาบ้า/ยาไอซ์/เสพยา" → "สิ่งผิดกฎหมาย" หรือ "ของมึนเมาผิดกฎหมาย"\n' +
+        '"เมาแล้วขับ/ตั้งวงเหล้า" → เกลาคำให้นุ่มลง เช่น "ขับขี่ในสภาพไม่พร้อม" "ร่วมวงสังสรรค์" (สลาก/ลอตเตอรี่รัฐบาลใช้ได้ปกติ)\n' +
+        '"ชำแหละ/หมกศพ" → "เหตุรุนแรงอย่างยิ่ง"\n' +
+        '"ทุบตี/ทำร้าย" → "ใช้ความรุนแรง"\n' +
+        '"จัดฉาก" → "สร้างสถานการณ์"\n\n') +
       'หลักการ: เปลี่ยน "ความแรง" → "อารมณ์" เน้น emotional storytelling ไม่ใช่ shock/gore\n' +
       'ห้าม clickbait: "คุณจะไม่เชื่อ", "แชร์ด่วน", "ดูก่อนโดนลบ"\n' +
       'ห้าม engagement bait: "พิมพ์ 1", "เมนต์ 99", "ใครเห็นด้วยกดไลก์"\n' +
@@ -1719,6 +1726,7 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
         // ★ 2 ส.ค. 69: 1200→8000 — ค่าเดิมจากยุคโมเดลเล็ก พอโล๊ะเป็น luna (reasoning คิดกินโควตา) เพดานไม่พอ
         //   → ตอบว่างเปล่า ล้มเงียบ ~5/9 งาน (Blueprint: ❌ ใน log) — โรคเดียวกับที่แก้สำเร็จใน breakdown/picker/สารบัญ
         maxTokens: 8000,
+        sanitizeScope: 'facts', // ★ 24 ก.ย. 69 (S1): blueprint = แผนจากข้อเท็จจริง ไม่ผ่านตัวกรองคำเสี่ยง
       });
 
       if (!blueprintResult?.core_emotion) {
@@ -1777,7 +1785,7 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
         logPipeline({ workflowId, step: 'research', status: 'success', model: usedModel, duration: Date.now() - _pipelineStart, detail: 'Research via ' + usedModel }).catch(() => {});
       } catch (err) {
         console.warn(`[Research-Service] SmartAI failed: ${err.message}, fallback GPT-4o`);
-        result = await callAI({ prompt: researchPrompt, temperature: 0.5, maxTokens: 6000 });
+        result = await callAI({ prompt: researchPrompt, temperature: 0.5, maxTokens: 6000, sanitizeScope: 'facts' }); // ★ 24 ก.ย. 69 (S1): ข้อเท็จจริงรีเสิร์ช
         usedModel = MODEL_PRIMARY;
       }
 
@@ -1948,7 +1956,8 @@ ${emotionalCore ? `แก่น Emotional: ${emotionalCore}` : ''}
         '- ❌ ห้ามพิมพ์ชื่อมุมมอง (ห้ามพิมพ์ Angle: ลงในเนื้อหา)\n' +
         '- ❌ ห้ามใช้คำขึ้นต้นซ้ำซาก: ลองนึกภาพว่า, ลองจินตนาการว่า, ถ้าคุณต้อง\n\n' +
         '=== กฎเหล็ก FACEBOOK SAFETY ===\n' +
-        'ห้ามใช้คำเสี่ยง: ฆ่า→ก่อเหตุ, ศพ→ร่างของผู้จากไป, ตาย/เสียชีวิต→สำนวนเลี่ยงสวยๆ ตามบริบท (จากไปอย่างสงบ/ลาลับ/ปิดตำนาน — ห้ามซ้ำจำเจ), สยอง→สะเทือนใจ, เลือด→ร่องรอยเหตุการณ์, พนัน/ยาเสพติด/วงเหล้า→เลี่ยงหรือเกลาให้นุ่ม\n' +
+        // ★ 24 ก.ย. 69 (S2): บรรทัดสั้นโหมดผสมก็อ่านคำแทนจากตารางกลาง (variant 'url') · ถอย RISK_WORDS_LEGACY=1
+        riskPromptWriterShortLine('url', 'ห้ามใช้คำเสี่ยง: ฆ่า→ก่อเหตุ, ศพ→ร่างของผู้จากไป, ตาย/เสียชีวิต→สำนวนเลี่ยงสวยๆ ตามบริบท (จากไปอย่างสงบ/ลาลับ/ปิดตำนาน — ห้ามซ้ำจำเจ), สยอง→สะเทือนใจ, เลือด→ร่องรอยเหตุการณ์, พนัน/ยาเสพติด/วงเหล้า→เลี่ยงหรือเกลาให้นุ่ม\n') +
         '=== จบ SAFETY ===\n\n' +
         'ตอบเป็น JSON:\n' +
         '{\n' +
@@ -2076,7 +2085,7 @@ ${keyPoints}
     const prompt = extractionPrompt.prompt
       .replace('{content}', text.slice(0, 8000))
       .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
-    const result = await callAI({ prompt, temperature: 0.2 });
+    const result = await callAI({ prompt, temperature: 0.2, sanitizeScope: 'facts' }); // ★ 24 ก.ย. 69 (S1): ขั้นสกัด (legacy) = ข้อเท็จจริง
     if (result?.news_body && result.news_body.length >= 20) newsData = result;
   } catch (err) { console.error('[Legacy-S1] ERROR:', err.message); }
 
@@ -2172,7 +2181,8 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
         model: MODEL_FAST,
         temperature: 0.1,
         maxTokens: 800,
-        prompt: analyzerPrompt
+        prompt: analyzerPrompt,
+        sanitizeScope: 'facts', // ★ 24 ก.ย. 69 (S1): metadata วิเคราะห์ข่าว ไม่ใช่ข้อความโพสต์
       });
       
       newsTypeDetected = newsAnalysis?.primaryCategory || '';

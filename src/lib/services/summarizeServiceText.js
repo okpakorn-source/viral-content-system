@@ -18,6 +18,7 @@ import { buildNarrativePayload, formatNarrativePayload, checkNarrativeSimilarity
 import { clusterMatch, findClusterScore, mapCategory, EMOTION_CLUSTERS, CONFLICT_CLUSTERS } from '@/lib/ai/semanticClusters';
 import { randomUUID } from 'node:crypto';
 import { rethrowPipelineDeadline } from '@/lib/utils/pipelineDeadline';
+import { riskPromptWriterLines, riskPromptWriterShortLine } from '@/lib/ai/riskWords'; // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S2 · เจ้าของอนุมัติ): คำแทนในกฎ FACEBOOK SAFETY มาจากตารางกลาง (ถอย RISK_WORDS_LEGACY=1)
 
 // ★ 16 ก.ค. 69 (B4): sync กับสาย URL (summarizeService.js:15) — เดิม hardcode 'gemini-2.5-pro' ตกรุ่น 2 เวอร์ชัน
 //   ที่ทีมเลิกใช้เอง (มั่ว/แต่งเรื่อง) ทำ STAGE 2.5 (AI re-rank พร้อมท์) ของสายข้อความตายเงียบ
@@ -951,8 +952,10 @@ export async function performSummarize({
       try {
         // ★ 16 ก.ค. 69 (B4): เปลี่ยนเป็น withTimeoutSignal — เมื่อเปิด WITHTIMEOUT_ABORT=1 จะยกเลิก request
         //   จริงตอน timeout (เดิม gpt-5.5 วิ่งต่อจนจบโดนบิลแล้วผลถูกทิ้ง = จ่าย 2 โมเดลซ้อน); สวิตช์ปิด = เดิมเป๊ะ
+        // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S1 · เจ้าของอนุมัติ): sanitizeScope 'facts' — ผลแตกประเด็นเป็น JSON ข้อเท็จจริง
+        //   ไม่ผ่านตัวกรองคำเสี่ยง (ตัวกรองเคยทำคำประสม/ราชาศัพท์พังและพลิกข้อเท็จจริง) · ถอยกลับ: SANITIZE_LEGACY=1
         result = await withTimeoutSignal(
-          (requestSignal) => callAI({ prompt, model: MODEL_BREAKDOWN, temperature: 0.4, maxTokens: 24000, signal: requestSignal }),
+          (requestSignal) => callAI({ prompt, model: MODEL_BREAKDOWN, temperature: 0.4, maxTokens: 24000, signal: requestSignal, sanitizeScope: 'facts' }),
           200000,
           'breakdown_primary_inner',
           signal,
@@ -963,7 +966,7 @@ export async function performSummarize({
         console.warn(`[Breakdown-Service] ⚠️ ${MODEL_BREAKDOWN} failed/timeout: "${primaryErr.message}" — retrying with ${MODEL_HEAVY_FALLBACK} fallback...`);
         breakdownModelUsed = MODEL_HEAVY_FALLBACK;
         result = await withTimeoutSignal(
-          (requestSignal) => callAI({ prompt, model: MODEL_HEAVY_FALLBACK, temperature: 0.4, maxTokens: 24000, signal: requestSignal }),
+          (requestSignal) => callAI({ prompt, model: MODEL_HEAVY_FALLBACK, temperature: 0.4, maxTokens: 24000, signal: requestSignal, sanitizeScope: 'facts' }), // ★ 24 ก.ย. 69 (S1)
           90000,
           'breakdown_fallback',
           signal,
@@ -1151,6 +1154,7 @@ export async function performSummarize({
                 maxTokens: 1000,
                 prompt: analyzerPrompt,
                 signal,
+                sanitizeScope: 'facts', // ★ 24 ก.ย. 69 (S1): DNA ข่าว = metadata จับคู่การ์ด ไม่ใช่ข้อความโพสต์ (เคยพังลง dna-exemplars)
               });
               
               // Map Deep DNA to legacy fields for compatibility with Stage 2 Cluster Match
@@ -1858,22 +1862,26 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
           'เขียนในมุมมองที่ต่างกันตามจำนวนที่ขอ (ตัวอย่างมุมมอง: ไทม์ไลน์เหตุการณ์, ขยี้จังหวะอารมณ์, เปิดเรื่องแรงๆ, มุมมองคนในเหตุการณ์, หรือเจาะลึกความจริง)\n\n') +
       '=== กฎเหล็ก FACEBOOK SAFETY — บังคับทุกเวอร์ชัน ===\n' +
       'ห้ามใช้คำเสี่ยงต่อไปนี้ในเนื้อหาที่เขียน ให้ rewrite เป็นคำปลอดภัยเสมอ:\n\n' +
-      '"ฆ่า" → "ก่อเหตุ" หรือ "ก่อเหตุร้ายแรง"\n' +
-      '"ฆาตกรรม" → "เหตุสูญเสีย" หรือ "คดีร้ายแรง"\n' +
-      '"ศพ" → "ร่างของผู้จากไป"\n' +
-      '"ตาย/ดับ/สิ้นใจ" → เลี่ยงคำห้วนเหล่านี้ แต่ ⚠️"เสียชีวิต" และ "จากไป" คือคำมาตรฐานที่ปลอดภัย ใช้ตรงๆ ได้เสมอ (16 ก.ค. 69: เลิกแบน "เสียชีวิต" — บทเรียนเคส #01641 การบังคับเลี่ยงทุกคำทำตัวเขียนละข้อเท็จจริงการตายทั้งเรื่อง) สำนวนสุภาพอื่นใช้สลับได้ เช่น "จากไปอย่างสงบ" "ลาลับ" — ห้ามใช้สำนวนเดียวซ้ำทุกจุด/ทุกเวอร์ชัน ⚠️ต้องบอกการจากไปให้ชัดอย่างน้อย 1 ครั้งเสมอ ห้ามเลี่ยงจนคนอ่านไม่รู้ว่าเสียชีวิตแล้ว (ห้ามเล่าฉากก่อนเสียชีวิตค้างไว้โดยไม่เฉลย)\n' +
-      '"สยอง/โหด/สลด" → "สะเทือนใจ" หรือ "น่าตกใจ"\n' +
-      '"เลือด" → "ร่องรอยเหตุการณ์" (⚠️ยกเว้นศัพท์การแพทย์/อวัยวะ เช่น "เส้นเลือด" "เส้นเลือดในสมอง" — ห้ามแทนที่ ให้คงคำเดิม)\n' +
-      '"แทง" → "ใช้ของมีคม"\n' +
-      '"ยิง" → "ใช้อาวุธปืน"\n' +
-      '"ข่มขืน" → "ล่วงละเมิดทางเพศ"\n' +
-      '"ผูกคอ/จบชีวิต" → "จากไปอย่างน่าเศร้า"\n' +
-      '"การพนัน/บ่อน/แทงบอล/เว็บพนัน" → "เกมเสี่ยงโชคผิดกฎหมาย" (เลี่ยงให้มากที่สุด)\n' +
-      '"ยาบ้า/ยาไอซ์/เสพยา" → "สิ่งผิดกฎหมาย" หรือ "ของมึนเมาผิดกฎหมาย"\n' +
-      '"เมาแล้วขับ/ตั้งวงเหล้า" → เกลาคำให้นุ่มลง เช่น "ขับขี่ในสภาพไม่พร้อม" "ร่วมวงสังสรรค์" (สลาก/ลอตเตอรี่รัฐบาลใช้ได้ปกติ)\n' +
-      '"ชำแหละ/หมกศพ" → "เหตุรุนแรงอย่างยิ่ง"\n' +
-      '"ทุบตี/ทำร้าย" → "ใช้ความรุนแรง"\n' +
-      '"จัดฉาก" → "สร้างสถานการณ์"\n\n' +
+      // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S2 · เจ้าของอนุมัติ) — PL-15: คำแทนมาจากตารางกลาง riskWords.js ชุดเดียวกับตัวกรอง/L2/L3
+      //   (เดิม ศพ→ร่างของผู้จากไป · ฆ่า→ก่อเหตุ · ผูกคอ→จากไปอย่างน่าเศร้า ต่างจากตัวกรอง และ "ยิง"→"ใช้อาวุธปืน" ขัดกับ system prompt ที่ห้าม "อาวุธ")
+      //   RISK_WORDS_LEGACY=1 = บล็อกเดิมด้านล่างทุกไบต์
+      riskPromptWriterLines('text',
+        '"ฆ่า" → "ก่อเหตุ" หรือ "ก่อเหตุร้ายแรง"\n' +
+        '"ฆาตกรรม" → "เหตุสูญเสีย" หรือ "คดีร้ายแรง"\n' +
+        '"ศพ" → "ร่างของผู้จากไป"\n' +
+        '"ตาย/ดับ/สิ้นใจ" → เลี่ยงคำห้วนเหล่านี้ แต่ ⚠️"เสียชีวิต" และ "จากไป" คือคำมาตรฐานที่ปลอดภัย ใช้ตรงๆ ได้เสมอ (16 ก.ค. 69: เลิกแบน "เสียชีวิต" — บทเรียนเคส #01641 การบังคับเลี่ยงทุกคำทำตัวเขียนละข้อเท็จจริงการตายทั้งเรื่อง) สำนวนสุภาพอื่นใช้สลับได้ เช่น "จากไปอย่างสงบ" "ลาลับ" — ห้ามใช้สำนวนเดียวซ้ำทุกจุด/ทุกเวอร์ชัน ⚠️ต้องบอกการจากไปให้ชัดอย่างน้อย 1 ครั้งเสมอ ห้ามเลี่ยงจนคนอ่านไม่รู้ว่าเสียชีวิตแล้ว (ห้ามเล่าฉากก่อนเสียชีวิตค้างไว้โดยไม่เฉลย)\n' +
+        '"สยอง/โหด/สลด" → "สะเทือนใจ" หรือ "น่าตกใจ"\n' +
+        '"เลือด" → "ร่องรอยเหตุการณ์" (⚠️ยกเว้นศัพท์การแพทย์/อวัยวะ เช่น "เส้นเลือด" "เส้นเลือดในสมอง" — ห้ามแทนที่ ให้คงคำเดิม)\n' +
+        '"แทง" → "ใช้ของมีคม"\n' +
+        '"ยิง" → "ใช้อาวุธปืน"\n' +
+        '"ข่มขืน" → "ล่วงละเมิดทางเพศ"\n' +
+        '"ผูกคอ/จบชีวิต" → "จากไปอย่างน่าเศร้า"\n' +
+        '"การพนัน/บ่อน/แทงบอล/เว็บพนัน" → "เกมเสี่ยงโชคผิดกฎหมาย" (เลี่ยงให้มากที่สุด)\n' +
+        '"ยาบ้า/ยาไอซ์/เสพยา" → "สิ่งผิดกฎหมาย" หรือ "ของมึนเมาผิดกฎหมาย"\n' +
+        '"เมาแล้วขับ/ตั้งวงเหล้า" → เกลาคำให้นุ่มลง เช่น "ขับขี่ในสภาพไม่พร้อม" "ร่วมวงสังสรรค์" (สลาก/ลอตเตอรี่รัฐบาลใช้ได้ปกติ)\n' +
+        '"ชำแหละ/หมกศพ" → "เหตุรุนแรงอย่างยิ่ง"\n' +
+        '"ทุบตี/ทำร้าย" → "ใช้ความรุนแรง"\n' +
+        '"จัดฉาก" → "สร้างสถานการณ์"\n\n') +
       'หลักการ: เปลี่ยน "ความแรง" → "อารมณ์" เน้น emotional storytelling ไม่ใช่ shock/gore\n' +
       'ห้าม clickbait: "คุณจะไม่เชื่อ", "แชร์ด่วน", "ดูก่อนโดนลบ"\n' +
       'ห้าม engagement bait: "พิมพ์ 1", "เมนต์ 99", "ใครเห็นด้วยกดไลก์"\n' +
@@ -2228,6 +2236,7 @@ ${_timelineFlowGuidance}
         //   → ตอบว่างเปล่า ล้มเงียบ ~5/9 งาน (Blueprint: ❌ ใน log) — โรคเดียวกับที่แก้สำเร็จใน breakdown/picker/สารบัญ
         maxTokens: 8000,
         signal,
+        sanitizeScope: 'facts', // ★ 24 ก.ย. 69 (S1): blueprint = แผนจากข้อเท็จจริง ไม่ผ่านตัวกรองคำเสี่ยง
       });
 
       if (!blueprintResult?.core_emotion) {
@@ -2302,7 +2311,7 @@ ${_timelineFlowGuidance}
         rethrowPipelineDeadline(err, 'research_inner');
         console.warn(`[Research-Service] SmartAI failed: ${err.message}, fallback ${MODEL_NEWS_ANALYSIS}`);
         result = await withTimeoutSignal(
-          (requestSignal) => callAI({ prompt: researchPrompt, temperature: 0.5, maxTokens: 6000, signal: requestSignal }),
+          (requestSignal) => callAI({ prompt: researchPrompt, temperature: 0.5, maxTokens: 6000, signal: requestSignal, sanitizeScope: 'facts' }), // ★ 24 ก.ย. 69 (S1): ข้อเท็จจริงรีเสิร์ช (callSmartAI('analyze') ได้ 'facts' จาก router อยู่แล้ว)
           60000, 'research_fallback', signal
         );
         usedModel = (result && result._modelUsed) || MODEL_NEWS_ANALYSIS; // ★ B1: log โมเดลจริง ไม่ hardcode
@@ -2476,7 +2485,8 @@ ${_timelineFlowGuidance}
         '- ใช้ข้อมูลจากข่าวจริงเท่านั้น ห้ามแต่งเรื่องเพิ่ม\n' +
         '- ระบุว่าผสมจากมุมไหนบ้าง (ใน mixed_from)\n\n' +
         '=== กฎเหล็ก FACEBOOK SAFETY ===\n' +
-        'ห้ามใช้คำเสี่ยง: ฆ่า→ก่อเหตุ, ศพ→ร่างของผู้จากไป, ตาย/ดับ→เลี่ยงคำห้วน (⚠️"เสียชีวิต"/"จากไป" เป็นคำมาตรฐานปลอดภัย ใช้ตรงๆ ได้ — ต้องบอกการจากไปชัด ≥1 ครั้ง ห้ามเลี่ยงจนคนอ่านไม่รู้ว่าเสียชีวิตแล้ว), สยอง→สะเทือนใจ, เลือด→ร่องรอยเหตุการณ์, พนัน/ยาเสพติด/วงเหล้า→เลี่ยงหรือเกลาให้นุ่ม\n' +
+        // ★ 24 ก.ย. 69 (S2): บรรทัดสั้นโหมดผสมก็อ่านคำแทนจากตารางกลาง · ถอย RISK_WORDS_LEGACY=1
+        riskPromptWriterShortLine('text', 'ห้ามใช้คำเสี่ยง: ฆ่า→ก่อเหตุ, ศพ→ร่างของผู้จากไป, ตาย/ดับ→เลี่ยงคำห้วน (⚠️"เสียชีวิต"/"จากไป" เป็นคำมาตรฐานปลอดภัย ใช้ตรงๆ ได้ — ต้องบอกการจากไปชัด ≥1 ครั้ง ห้ามเลี่ยงจนคนอ่านไม่รู้ว่าเสียชีวิตแล้ว), สยอง→สะเทือนใจ, เลือด→ร่องรอยเหตุการณ์, พนัน/ยาเสพติด/วงเหล้า→เลี่ยงหรือเกลาให้นุ่ม\n') +
         '=== จบ SAFETY ===\n\n' +
         'ตอบเป็น JSON:\n' +
         '{\n' +
@@ -2612,7 +2622,7 @@ ${keyPoints}
     const prompt = extractionPrompt.prompt
       .replace('{content}', text || '')
       .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
-    const result = await callAI({ prompt, temperature: 0.2 });
+    const result = await callAI({ prompt, temperature: 0.2, sanitizeScope: 'facts' }); // ★ 24 ก.ย. 69 (S1): ขั้นสกัด (legacy) = ข้อเท็จจริง
     if (result?.news_body && result.news_body.length >= 20) newsData = result;
   } catch (err) { console.error('[Legacy-S1] ERROR:', err.message); }
 
@@ -2708,7 +2718,8 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
         model: MODEL_FAST_CHEAP,
         temperature: 0.1,
         maxTokens: 800,
-        prompt: analyzerPrompt
+        prompt: analyzerPrompt,
+        sanitizeScope: 'facts', // ★ 24 ก.ย. 69 (S1): metadata วิเคราะห์ข่าว ไม่ใช่ข้อความโพสต์
       });
       
       newsTypeDetected = newsAnalysis?.primaryCategory || '';

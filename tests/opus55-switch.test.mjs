@@ -183,6 +183,8 @@ const transformClaude = (source) => {
     .replace("import Anthropic from '@anthropic-ai/sdk';", 'class Anthropic {}')
     .replace("import { logApiUsage } from './usageLogger';", 'const logApiUsage = () => {};')
     .replace("import { sanitizeOutput } from './safetyFilter';", 'const sanitizeOutput = (value) => value;')
+    // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S2): claudeClient import รายการคำเสี่ยงจากตารางกลาง — stub ให้คืนข้อความเดิม (ข้อสอบนี้ไม่ได้วัดพรอมต์คำเสี่ยง)
+    .replace("import { riskPromptSystemLines } from './riskWords.js';", 'const riskPromptSystemLines = (legacyText) => legacyText;')
     .replace(/import \{ ironRule5LengthLine, legacyLengthRule \}[^\n]*\n/u, "const ironRule5LengthLine = () => ''; const legacyLengthRule = () => '';\n")
     .replace(/import \{ preparePipelineSignal, rethrowPipelineDeadline \}[^\n]*\n/u, 'const preparePipelineSignal = (signal) => signal; const rethrowPipelineDeadline = () => {};\n');
   const start = out.indexOf('function getClaudeClient() {');

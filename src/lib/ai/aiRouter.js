@@ -63,6 +63,17 @@ const EXTRACT_CLAUDE_SYSTEM_PROMPT = `คุณเป็น AI ผู้สก�
 
 === จบกฎเหล็ก DNA ===`;
 
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S1 · เจ้าของอนุมัติ) — MC-01/PL-02: ขอบเขตตัวกรองคำเสี่ยง (safetyFilter.sanitizeOutput)
+//   ผล "ข้อเท็จจริง" (สกัด/แตกประเด็น/รีเสิร์ช) ห้ามผ่านตัวกรอง — ตัวกรองเคยพลิกข้อเท็จจริงตั้งแต่ขั้นสกัด (ผูกคอแต่ช่วยทัน→เสียชีวิต)
+//   นักเขียน ('write') = ข้อความโพสต์ → ผ่านตัวกรองขอบคำ · งานอื่น (default) caller ตัดสินเองผ่าน options.sanitizeScope
+//   caller ส่ง options.sanitizeScope มาชนะตารางนี้ · SANITIZE_LEGACY=1 = client กรองแบบเดิมทุก call ไม่สนค่านี้
+const TASK_SANITIZE_SCOPE = Object.freeze({
+  extract: 'facts',
+  breakdown: 'facts',
+  analyze: 'facts',
+  write: 'post',
+});
+
 function runWriterAttempt(factory, timeoutMs, step, parentSignal) {
   // บังคับให้ withTimeoutSignal ยกเลิก HTTP จริงแม้ caller เก่าไม่ได้ส่ง signal มา
   const abortableParent = parentSignal
@@ -76,10 +87,12 @@ function runWriterAttempt(factory, timeoutMs, step, parentSignal) {
  * @param {object} options - { prompt, temperature, maxTokens, systemPrompt, textNewsLengthPolicy }
  */
 export async function callSmartAI(task, options) {
-  const { prompt, temperature, maxTokens, systemPrompt, signal, textNewsLengthPolicy = false } = options;
+  const { prompt, temperature, maxTokens, systemPrompt, signal, textNewsLengthPolicy = false, sanitizeScope: sanitizeScopeOpt } = options;
   // สิทธิ์พื้น 146/no-cap เป็นของนักเขียนข่าว TEXT เท่านั้น
   // ต่อให้ caller งานอื่นส่ง true ผิดมา Router ต้องตัดทิ้ง ไม่ให้รั่วเข้า Breakdown/การ์ด/Blueprint/QC
   const useTextNewsLengthPolicy = task === 'write' && textNewsLengthPolicy === true;
+  // ★ 24 ก.ย. 69 (S1): ขอบเขตตัวกรองคำเสี่ยงตาม task (caller ส่งมาเองชนะ) — ดู TASK_SANITIZE_SCOPE
+  const sanitizeScope = sanitizeScopeOpt || TASK_SANITIZE_SCOPE[task];
   
   // กำหนด strategy ตาม task
   const strategy = getStrategy(task);
@@ -100,6 +113,7 @@ export async function callSmartAI(task, options) {
         systemPrompt,
         signal,
         textNewsLengthPolicy: useTextNewsLengthPolicy,
+        sanitizeScope,
       });
       if (i > 0) {
         console.log(`[SmartAI] ✅ Fallback ${modelName} succeeded`);
@@ -181,10 +195,11 @@ function getStrategy(task) {
   return { chain, defaultTemp, defaultMaxTokens };
 }
 
-async function callModel(modelName, { prompt, temperature, maxTokens, systemPrompt, signal, textNewsLengthPolicy }) {
+// ★ 24 ก.ย. 69 (S1): + sanitizeScope ส่งต่อทุก client (ของเดิม: callModel(modelName, { prompt, temperature, maxTokens, systemPrompt, signal, textNewsLengthPolicy }))
+async function callModel(modelName, { prompt, temperature, maxTokens, systemPrompt, signal, textNewsLengthPolicy, sanitizeScope }) {
   switch (modelName) {
     case 'claude':
-      return callClaude({ prompt, temperature, maxTokens, systemPrompt, signal, textNewsLengthPolicy });
+      return callClaude({ prompt, temperature, maxTokens, systemPrompt, signal, textNewsLengthPolicy, sanitizeScope });
 
     // ★ 21 ส.ค. 69 (เจ้าของเคาะจากศึกตาบอด R118): สายนักเขียนโดยเฉพาะ
     //   opus-4.8 ล้ม (refusal/HTTP/เนื้อว่าง/JSON พัง — โยนเป็น error จาก callClaude ทั้งหมด) → ถอย fable-5
@@ -202,6 +217,7 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
           (requestSignal) => callClaude({
             prompt, temperature, maxTokens, systemPrompt, signal: requestSignal, model: _primary,
             maxRetries: 0, retryWithoutEffort: false, textNewsLengthPolicy,
+            sanitizeScope,
           }),
           WRITER_ATTEMPT_TIMEOUT_MS.opus, 'writer_opus', signal
         );
@@ -213,6 +229,7 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
           (requestSignal) => callClaude({
             prompt, temperature, maxTokens, systemPrompt, signal: requestSignal, model: _fb,
             maxRetries: 0, retryWithoutEffort: false, textNewsLengthPolicy,
+            sanitizeScope,
           }),
           WRITER_ATTEMPT_TIMEOUT_MS.fable, 'writer_fable', signal
         );
@@ -223,6 +240,7 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
         (requestSignal) => callAI({
           prompt, temperature, maxTokens, model: MODEL_PRIMARY, signal: requestSignal,
           allowModelFallback: false, maxRetries: 0, textNewsLengthPolicy,
+          sanitizeScope,
         }),
         WRITER_ATTEMPT_TIMEOUT_MS.sol, 'writer_sol', signal
       );
@@ -243,16 +261,17 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
         maxRetries: 0,
         // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 · ถอยกลับ: EXTRACT_CLAUDE_MODEL=claude-opus-4-8
         model: process.env.EXTRACT_CLAUDE_MODEL || 'claude-opus-5-5',
+        sanitizeScope, // ★ 24 ก.ย. 69 (S1): 'facts' — ผลสกัดต้องคงคำต้นฉบับ ไม่ผ่านตัวกรองคำเสี่ยง
       });
       if (!out || typeof out !== 'object') throw new Error('claude-extract ได้ผลว่าง — ส่งต่อตัวสำรอง');
       return out;
     }
     case 'gemini':
       // callGemini มี timeout 15s ในตัว — ไม่ต้องส่ง signal
-      return callGemini({ prompt, temperature, maxTokens, signal });
+      return callGemini({ prompt, temperature, maxTokens, signal, sanitizeScope });
     case 'gpt4o':
     default:
-      return callAI({ prompt, temperature, maxTokens, model: MODEL_PRIMARY, signal, textNewsLengthPolicy });
+      return callAI({ prompt, temperature, maxTokens, model: MODEL_PRIMARY, signal, textNewsLengthPolicy, sanitizeScope });
   }
 }
 

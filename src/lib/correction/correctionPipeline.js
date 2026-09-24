@@ -17,6 +17,17 @@ import { editorialPolish } from './editorialPolishService';
 import { semanticSanityCheck } from './semanticSanityCheck';
 import { fabricationGate } from './fabricationGate'; // ★ 4 ส.ค. 69 ด่านจับของเกิน — ผลทดลองศึก 6 นักเขียน (FAB_GATE=0 ปิดได้)
 import { bbStep } from '@/lib/trace/blackbox'; // ★ 1 ส.ค. 69 กล่องดำ: เก็บ before/after ทุกด่าน — ชี้ตัวการได้ไม่ต้องเดา
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S2 · เจ้าของอนุมัติ) — PL-04 จุดพี่น้อง: rollback scrub เดิม split/join แทน "ทุกตำแหน่ง" รวมคำที่ L2 ยกเว้น
+//   ("ตามลำดับ"→"ตามลำจากไป" กลับมาทางนี้) → แทนเฉพาะตำแหน่งที่กฎเดียวกันจับ (ทุกตำแหน่ง) · RISK_WORDS_LEGACY=1 = split/join เดิม
+import { replaceRiskWordIssue } from '@/lib/ai/safetyFilter';
+import { isRiskWordsLegacy } from '@/lib/ai/riskWords';
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S3 · เจ้าของอนุมัติ) — PL-01: L4.5 ล้างสถานที่หลอนฉบับ "ขอบคำ + ฐานความจริงเนื้อดิบ" (./placeScrub.js)
+//   บล็อกเดิม regex โลภ [ก-๙]+ ตัดทั้งวลีและเทียบกับเนื้อที่ AI สกัด → ค่าเริ่มต้นใช้ scrubHallucinatedPlaces · L45_LEGACY=1 = บล็อกเดิมในท่อทุกไบต์
+import { scrubHallucinatedPlaces, isL45Legacy } from './placeScrub';
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S4 · เจ้าของอนุมัติ) — PL-05: rollback scrub ฉบับ "ขอบคำ + ข้ามกฎ suggestion ว่าง + คง engagement-bait removal" (./rollbackScrub.js)
+//   บล็อกเดิม (โหมดถอย) รับกฎ suggestion ว่าง ("เร่งด่วน"→"เร่ง") · issue ไม่มี ruleId ยัง split/join ("ระดับ"→"ระจากไป") · คืน bait ที่ L3 ลบแล้ว
+//   → ค่าเริ่มต้นใช้ scrubRollbackContent · CORR_ROLLBACK_LEGACY=1 = บล็อกเดิมในท่อทุกไบต์ (รวมกิ่ง S2)
+import { scrubRollbackContent, isCorrRollbackLegacy } from './rollbackScrub';
 // ★ 12 มิ.ย.: FlagFixer + ViralPolish ถูกปลดออกตามคำสั่งทีม ("AI เพี้ยน — ย้อน workflow กลับแบบ 11 มิ.ย. หัวค่ำ")
 //   ไฟล์ flagFixerService.js / viralPolishService.js ยังอยู่ เผื่ออนาคต — ห้ามต่อกลับโดยไม่ผ่านทีม
 
@@ -170,19 +181,54 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData, r
         { action: factCheck.action, drifts: factCheck.drifts.length });
 
       // rollback คืนเนื้อก่อน L3 ซึ่งอาจมีคำต้องห้าม: ล้างแบบแทนตรงก่อนเข้าด่านถัดไป
+      // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S4 · เจ้าของอนุมัติ) — PL-05: บล็อกเดิม (โหมดถอยด้านล่าง) (1) รับกฎ suggestion ว่าง ('ด่วน'/'AV'/'xxx' → '' ยาว 0 ≤ 25)
+      //   ทั้งที่ L3A ข้ามโดยตั้งใจ → "เร่งด่วน"→"เร่ง" "ทางด่วน"→"ทาง" · (2) issue ไม่มี ruleId ยัง split/join ทุกตำแหน่ง ("ระดับ"→"ระจากไป" "สองตายาย"→"สองจากไปาย") ·
+      //   (3) ล้างเฉพาะ forbidden_word → คำชวนเมนต์ (engagement_bait) ที่ L3 ลบไปแล้วกลับเข้าโพสต์ทั้งที่ Facebook ลด reach
+      //   → ค่าเริ่มต้น: scrubRollbackContent (./rollbackScrub.js) — ข้าม suggestion ว่าง · ruleId → แทนตรงตำแหน่งที่กฎจับ (S2) · ไม่มี ruleId → ขอบคำ Intl.Segmenter (ตัวแทนคำของ S1)
+      //     · ลบ bait สั้น (<30 เหมือน L3A) ทุกตำแหน่งบนขอบคำ เฉพาะเมื่อฉบับหลังลบยังผ่านด่านข้อเท็จจริง (ไม่งั้นด่านท้ายทิ้งทั้ง scrub) · CORR_ROLLBACK_LEGACY=1 = บล็อกเดิมทุกไบต์
       let _rollbackScrub = null;
       if (_initialFactRolledBack) {
         try {
           const reAudit = await auditOutput({ ...version, content: safeContent });
-          const _forbidden = (reAudit.issues || []).filter(x => x.type === 'forbidden_word' && x.text
-            && typeof x.suggestion === 'string'
-            && x.suggestion.length <= 25 && !/เช่น|สำนวน|บริบท|\//.test(x.suggestion));
-          for (const iss of _forbidden) {
-            safeContent = safeContent.split(iss.text).join(iss.suggestion);
-          }
-          _rollbackScrub = { reAuditIssues: (reAudit.issues || []).length, forbiddenScrubbed: _forbidden.length };
-          if (_forbidden.length > 0) {
-            console.log(`  L4+ Rollback Scrub: ล้างคำต้องห้าม ${_forbidden.length} จุดจากเนื้อ rollback`);
+          if (isCorrRollbackLegacy()) {
+            // โหมดถอย CORR_ROLLBACK_LEGACY=1 — บล็อกเดิมทุกไบต์ รวมกิ่ง S2 (ห้ามแก้ · ของจริงอยู่ที่ ./rollbackScrub.js)
+            const _forbidden = (reAudit.issues || []).filter(x => x.type === 'forbidden_word' && x.text
+              && typeof x.suggestion === 'string'
+              && x.suggestion.length <= 25 && !/เช่น|สำนวน|บริบท|\//.test(x.suggestion));
+            for (const iss of _forbidden) {
+              // ★ 24 ก.ย. 69 (S2): issue มี ruleId → แทนทุกตำแหน่งที่กฎนั้นจับจริง (ไม่โดน ลำดับ/เส้นเลือด/ทำร้ายตัวเอง) · ไม่มี/โหมดถอย → split/join เดิม
+              if (!isRiskWordsLegacy() && iss.ruleId) {
+                const _scrubbed = replaceRiskWordIssue(safeContent, iss, { all: true });
+                if (_scrubbed !== null) safeContent = _scrubbed;
+              } else {
+                safeContent = safeContent.split(iss.text).join(iss.suggestion);
+              }
+            }
+            _rollbackScrub = { reAuditIssues: (reAudit.issues || []).length, forbiddenScrubbed: _forbidden.length };
+            if (_forbidden.length > 0) {
+              console.log(`  L4+ Rollback Scrub: ล้างคำต้องห้าม ${_forbidden.length} จุดจากเนื้อ rollback`);
+            }
+          } else {
+            // ★ S4 (ค่าเริ่มต้น): verify = ด่านข้อเท็จจริงเดียวกับด่านท้าย — bait ที่ลบแล้วเลข/ชื่อหาย (พิมพ์ 1 · คุณคิดยังไง?) ต้องคงไว้ ไม่งั้นด่านท้ายทิ้งทั้ง scrub
+            const _scrubBefore = safeContent;
+            const _rs = scrubRollbackContent(safeContent, reAudit.issues || [], {
+              verify: (candidate) => checkFactPreservation(version.content, candidate, newsData || {}).action !== 'rollback',
+            });
+            safeContent = _rs.content;
+            const _baitRemoved = _rs.bait.filter(b => b.removed).map(b => b.text);
+            const _baitKept = _rs.bait.filter(b => !b.removed).map(b => `${b.text} (${b.reason})`);
+            _rollbackScrub = {
+              reAuditIssues: (reAudit.issues || []).length,
+              forbiddenScrubbed: _rs.forbidden.length, // นับ issue ที่เข้าเกณฑ์ (ความหมายเดิม) — ไม่นับกฎ suggestion ว่างแล้ว
+              forbiddenReplaced: _rs.forbidden.filter(f => f.changed).length,
+              skippedEmptySuggestion: _rs.skippedEmpty.length,
+              baitRemoved: _baitRemoved.slice(0, 5),
+              baitKept: _baitKept.slice(0, 5),
+            };
+            bbStep(_bb, 'L4+-ล้างเนื้อ rollback', _scrubBefore, safeContent, { rollbackScrub: _rollbackScrub });
+            if (_rs.forbidden.length > 0 || _rs.bait.length > 0) {
+              console.log(`  L4+ Rollback Scrub: ล้างคำต้องห้าม ${_rs.forbidden.length} จุด (แทนจริง ${_rollbackScrub.forbiddenReplaced} · ข้ามกฎว่าง ${_rs.skippedEmpty.length}) · bait ลบ ${_baitRemoved.length} คง ${_baitKept.length} จากเนื้อ rollback`);
+            }
           }
         } catch (scrubErr) {
           console.warn(`  L4+ Rollback Scrub: SKIPPED (${scrubErr.message})`);
@@ -193,33 +239,55 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData, r
       // === Layer 4.5: Hallucination Scrubbing ===
       // ★ ปรับ 12 มิ.ย. (ลูปคุณภาพจับได้): เดิมแทนทุกอย่างด้วย "ที่เกิดเหตุ" ทื่อๆ → ได้คำพิกล
       //   ("ผที่เกิดเหตุ", ข่าวโรงพยาบาลกลายเป็น "ที่เกิดเหตุ") — เปลี่ยนเป็นแทนแบบรักษาชนิดสถานที่
+      // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S3 · เจ้าของอนุมัติ) — PL-01: บล็อกเดิม (โหมดถอยด้านล่าง) regex `\s*([ก-๙a-zA-Z]+)` กิน "ชื่อ" โลภทั้งวลี
+      //   แล้ว split/join ทิ้งทั้งก้อน ("จังหวัดขอนแก่นมีเพื่อนบ้านกว่า"→"ในพื้นที่" · "ถนนเส้นเดียวที่น้ำยังไม่ท่วม"→"บนถนน" · "วัดความดันที่โรงพยาบาลทุกเดือน"→"วัด" ·
+      //   กล่องดำ 20 ส.ค. "วัดเหล่านั้นไม่ใช่การลงโทษ"→"วัด") และเทียบกับ newsData.newsBody (เนื้อที่ AI สกัด) ทั้งที่ท่อรับ rawSourceText มาแล้ว
+      //   → ค่าเริ่มต้น: scrubHallucinatedPlaces — ฐานความจริง = rawSourceText ถ้ามี (ไม่มีจึง newsBody) + researchFacts เสริม · ตัดชื่อด้วย Intl.Segmenter
+      //     · ไม่มั่นใจ (หัวชื่อเป็นคำหยุด/โทเค็นเดียวติดคำต่อเนื่อง/ยาวเกิน/สั้นเกิน/ไม่มีเครื่องตัดคำ) = ไม่แตะ · ล้ม = ปล่อยเนื้อเดิมผ่าน (fail-open) · L45_LEGACY=1 = บล็อกเดิมทุกไบต์
       let scrubbedContent = safeContent;
-      if (newsData && newsData.newsBody) {
-        const placeRegex = /(จ\.|อ\.|ต\.|ซ\.|ถ\.|จังหวัด|อำเภอ|ตำบล|ซอย|ถนน|โรงพยาบาล|สถานี|วัด|โรงเรียน|มหาวิทยาลัย|สนามบิน)\s*([ก-๙a-zA-Z]+)/g;
-        const TYPE_REPLACEMENT = {
-          'จ.': 'ในพื้นที่', 'จังหวัด': 'ในพื้นที่', 'อ.': 'ในพื้นที่', 'อำเภอ': 'ในพื้นที่',
-          'ต.': 'ในพื้นที่', 'ตำบล': 'ในพื้นที่', 'ซ.': 'ในซอย', 'ซอย': 'ในซอย', 'ถ.': 'บนถนน', 'ถนน': 'บนถนน',
-          'โรงพยาบาล': 'โรงพยาบาล', 'สถานี': 'สถานี', 'วัด': 'วัด', 'โรงเรียน': 'โรงเรียน',
-          'มหาวิทยาลัย': 'มหาวิทยาลัย', 'สนามบิน': 'สนามบิน',
-        };
-        const places = new Map(); // full match → { prefix }
-        let match;
-        while ((match = placeRegex.exec(scrubbedContent)) !== null) {
-          places.set(match[0].trim(), { prefix: match[1] });
-        }
-        const sourceBody = newsData.newsBody.replace(/\s+/g, '');
-        for (const [place, info] of places) {
-          const cleanPlace = place.replace(placeRegex, '$2');
-          // ชื่อ ≥4 ตัวอักษรเท่านั้น (สั้นกว่านี้เสี่ยงจับคำทั่วไป) + ไม่อยู่ในต้นฉบับจริง
-          if (cleanPlace.length >= 4 && !sourceBody.includes(cleanPlace)) {
-            const replacement = TYPE_REPLACEMENT[info.prefix] || 'ในพื้นที่';
-            console.log(`  L4.5 Hallucination Scrub: "${place}" -> "${replacement}" (รักษาชนิดสถานที่)`);
-            scrubbedContent = scrubbedContent.split(place).join(replacement);
+      let _placeScrubDebug = null;
+      if (isL45Legacy()) {
+        // โหมดถอย L45_LEGACY=1 — บล็อกเดิมทุกไบต์ (ห้ามแก้ · ของจริงอยู่ที่ ./placeScrub.js)
+        if (newsData && newsData.newsBody) {
+          const placeRegex = /(จ\.|อ\.|ต\.|ซ\.|ถ\.|จังหวัด|อำเภอ|ตำบล|ซอย|ถนน|โรงพยาบาล|สถานี|วัด|โรงเรียน|มหาวิทยาลัย|สนามบิน)\s*([ก-๙a-zA-Z]+)/g;
+          const TYPE_REPLACEMENT = {
+            'จ.': 'ในพื้นที่', 'จังหวัด': 'ในพื้นที่', 'อ.': 'ในพื้นที่', 'อำเภอ': 'ในพื้นที่',
+            'ต.': 'ในพื้นที่', 'ตำบล': 'ในพื้นที่', 'ซ.': 'ในซอย', 'ซอย': 'ในซอย', 'ถ.': 'บนถนน', 'ถนน': 'บนถนน',
+            'โรงพยาบาล': 'โรงพยาบาล', 'สถานี': 'สถานี', 'วัด': 'วัด', 'โรงเรียน': 'โรงเรียน',
+            'มหาวิทยาลัย': 'มหาวิทยาลัย', 'สนามบิน': 'สนามบิน',
+          };
+          const places = new Map(); // full match → { prefix }
+          let match;
+          while ((match = placeRegex.exec(scrubbedContent)) !== null) {
+            places.set(match[0].trim(), { prefix: match[1] });
           }
+          const sourceBody = newsData.newsBody.replace(/\s+/g, '');
+          for (const [place, info] of places) {
+            const cleanPlace = place.replace(placeRegex, '$2');
+            // ชื่อ ≥4 ตัวอักษรเท่านั้น (สั้นกว่านี้เสี่ยงจับคำทั่วไป) + ไม่อยู่ในต้นฉบับจริง
+            if (cleanPlace.length >= 4 && !sourceBody.includes(cleanPlace)) {
+              const replacement = TYPE_REPLACEMENT[info.prefix] || 'ในพื้นที่';
+              console.log(`  L4.5 Hallucination Scrub: "${place}" -> "${replacement}" (รักษาชนิดสถานที่)`);
+              scrubbedContent = scrubbedContent.split(place).join(replacement);
+            }
+          }
+        }
+      } else {
+        try {
+          const _ps = scrubHallucinatedPlaces(safeContent, { rawSourceText, newsBody: newsData?.newsBody, researchFacts });
+          scrubbedContent = _ps.content;
+          _placeScrubDebug = {
+            authority: _ps.authority, segmenter: _ps.segmenter, candidates: _ps.candidates, grounded: _ps.grounded,
+            scrubbed: _ps.scrubbed.slice(0, 5), skipped: _ps.skipped.slice(0, 5),
+          };
+          if (_ps.scrubbed.length > 0) console.log(`  L4.5 Place Scrub: ล้าง ${_ps.scrubbed.length} จุด (ฐาน=${_ps.authority} · คง ${_ps.grounded} · ไม่มั่นใจ ${_ps.skipped.length})`);
+        } catch (psErr) {
+          console.warn(`  L4.5 Place Scrub: SKIPPED (${psErr.message})`);
+          _placeScrubDebug = { error: psErr.message };
         }
       }
 
-      bbStep(_bb, 'L4.5-ล้างสถานที่หลอน', safeContent, scrubbedContent);
+      bbStep(_bb, 'L4.5-ล้างสถานที่หลอน', safeContent, scrubbedContent, _placeScrubDebug ? { placeScrub: _placeScrubDebug } : undefined);
 
       // === Layer 4.6: Semantic Sanity Check (AI) ===
       let semanticContent = scrubbedContent;
@@ -297,6 +365,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData, r
           rejectedFactDrifts: _rejectedFactDrifts,
           rolledBack: _factRolledBack,
           rollbackScrub: _rollbackScrub,
+          ...(_placeScrubDebug ? { placeScrub: _placeScrubDebug } : {}), // ★ S3: เฉพาะค่าเริ่มต้น (โหมดถอยไม่มีคีย์นี้ = debug เดิม)
           semanticCheck: semanticDebug,
           polishChanges: changes.length,
           path: _factRolledBack ? 'rollback' : 'corrected',

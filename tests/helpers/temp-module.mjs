@@ -56,3 +56,42 @@ export async function importPatchedModule(source, originalUrl, name = 'module-un
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+/**
+ * ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S2 · เจ้าของอนุมัติ) — โหลด "กราฟ" ของซอร์สที่ patch แล้วหลายไฟล์ในโฟลเดอร์ชั่วคราวเดียว
+ *   ใช้เมื่อโมดูลที่ทดสอบ import โมดูลที่ถูก patch ด้วยกัน (เช่น safetyFilter → riskWords ที่กลายพันธุ์) — importPatchedModule ตัวเดียว
+ *   จะชี้ import สัมพัทธ์ไปไฟล์จริงเสมอ จึงกลายพันธุ์ตารางกลางไม่ถึงตัวกรอง
+ * @param {Record<string, { source: string, originalUrl: URL|string, links?: Record<string, string> }>} modules
+ *   key = ชื่อโมดูลในกราฟ · links = { '<specifier ตามที่เขียนในซอร์ส>': '<ชื่อโมดูลในกราฟ>' } → specifier นั้นชี้ไฟล์ในกราฟแทนไฟล์จริง
+ *   specifier อื่นแปลงเหมือน importPatchedModule (สัมพัทธ์ → file:// ของตำแหน่งจริง · แพ็กเกจ → URL ที่ resolve แล้ว)
+ * @returns {Promise<Record<string, object>>} namespace ของทุกโมดูลในกราฟ (import ตามลำดับ key ที่ให้มา · ลบโฟลเดอร์ใน finally)
+ */
+export async function importPatchedGraph(modules) {
+  const dir = mkdtempSync(join(tmpdir(), 'news-test-graph-'));
+  try {
+    const fileOf = (name) => join(dir, `${String(name).replace(/[^\w.-]+/g, '-')}.mjs`);
+    for (const [name, { source, originalUrl, links = {} }] of Object.entries(modules)) {
+      if (/\bimport\.meta\b/.test(source)) {
+        throw new Error(`importPatchedGraph(${name}): ซอร์สใช้ import.meta — ย้ายไปโฟลเดอร์ชั่วคราวแล้วจะอ้างไฟล์ผิดที่ ต้องจัดการเฉพาะกรณี`);
+      }
+      let linked = source;
+      for (const [spec, target] of Object.entries(links)) {
+        if (!modules[target]) throw new Error(`importPatchedGraph(${name}): link "${spec}" → "${target}" ไม่มีในกราฟ`);
+        const targetUrl = pathToFileURL(fileOf(target)).href;
+        let hit = 0;
+        linked = linked.replace(SPECIFIER_RE, (match, lead, quote, s) => {
+          if (s !== spec) return match;
+          hit += 1;
+          return `${lead}${quote}${targetUrl}${quote}`;
+        });
+        if (hit === 0) throw new Error(`importPatchedGraph(${name}): หา import "${spec}" ในซอร์สไม่เจอ`);
+      }
+      writeFileSync(fileOf(name), absolutizeImports(linked, originalUrl));
+    }
+    const out = {};
+    for (const name of Object.keys(modules)) out[name] = await import(pathToFileURL(fileOf(name)).href);
+    return out;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}

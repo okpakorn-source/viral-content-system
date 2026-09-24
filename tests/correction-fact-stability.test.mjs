@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S2 · เจ้าของอนุมัติ): rollback scrub ของท่อเรียก replaceRiskWordIssue/isRiskWordsLegacy (ตารางกลาง) —
+//   ต้องฉีดเข้า new Function ด้วย ไม่งั้น scrub โยน ReferenceError เงียบๆ (try/catch ในท่อกลืน) แล้วข้อสอบผ่านโดยไม่ได้ทดสอบ scrub จริง
+import { replaceRiskWordIssue } from '../src/lib/ai/safetyFilter.js';
+import { isRiskWordsLegacy } from '../src/lib/ai/riskWords.js';
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S3 · เจ้าของอนุมัติ): L4.5 ของท่อเรียก scrubHallucinatedPlaces/isL45Legacy (./placeScrub.js) — ฉีดของจริงเช่นกัน
+//   (ข้อสอบนี้ส่ง newsData={} ไม่มี raw → ด่านคืนเนื้อเดิมทั้ง 2 โหมด · ถ้าไม่ฉีด ท่อจะโยน ReferenceError แล้วเข้าเส้น fail-open เงียบๆ)
+import { scrubHallucinatedPlaces, isL45Legacy } from '../src/lib/correction/placeScrub.js';
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S4 · เจ้าของอนุมัติ): rollback scrub ของท่อเรียก scrubRollbackContent/isCorrRollbackLegacy (./rollbackScrub.js) — ฉีดของจริงเช่นกัน
+//   (issue ปลอมในข้อสอบนี้ไม่มี ruleId → ค่าเริ่มต้นแทนบนขอบคำ Intl.Segmenter ('FORBIDDEN' คั่นด้วยช่องว่าง = ขอบคำ) · ไม่มี bait ในข้อสอบนี้)
+import { scrubRollbackContent, isCorrRollbackLegacy } from '../src/lib/correction/rollbackScrub.js';
 
 const factSource = readFileSync(new URL('../src/lib/correction/factPreservationCheck.js', import.meta.url), 'utf8');
 const checkFactPreservation = new Function(
@@ -86,6 +96,12 @@ function makePipeline(overrides = {}) {
     }),
     fabricationGate: async (content) => ({ content, debug: { sus: 0, confirmed: 0, fixed: false } }),
     bbStep: () => {},
+    isRiskWordsLegacy, // ★ S2: ของจริง (อ่าน env RISK_WORDS_LEGACY)
+    replaceRiskWordIssue, // ★ S2: ของจริง (issue ปลอมในข้อสอบนี้ไม่มี ruleId → ท่อถอยไป split/join เดิม)
+    isL45Legacy, // ★ S3: ของจริง (อ่าน env L45_LEGACY)
+    scrubHallucinatedPlaces, // ★ S3: ของจริง (ไม่มี raw/newsBody ในข้อสอบนี้ → ฐาน 'none' = ไม่แตะ)
+    isCorrRollbackLegacy, // ★ S4: ของจริง (อ่าน env CORR_ROLLBACK_LEGACY)
+    scrubRollbackContent, // ★ S4: ของจริง (issue ปลอมไม่มี ruleId → แทนบนขอบคำ · verify ในท่อ = checkFactPreservation ที่ข้อสอบฉีด)
   };
   const deps = { ...defaults, ...overrides };
   return new Function(
@@ -97,6 +113,12 @@ function makePipeline(overrides = {}) {
     'semanticSanityCheck',
     'fabricationGate',
     'bbStep',
+    'isRiskWordsLegacy',
+    'replaceRiskWordIssue',
+    'isL45Legacy',
+    'scrubHallucinatedPlaces',
+    'isCorrRollbackLegacy',
+    'scrubRollbackContent',
     `${pipelineFunctionSource}\nreturn runCorrectionPipeline;`,
   )(
     deps.auditOutput,
@@ -107,6 +129,12 @@ function makePipeline(overrides = {}) {
     deps.semanticSanityCheck,
     deps.fabricationGate,
     deps.bbStep,
+    deps.isRiskWordsLegacy,
+    deps.replaceRiskWordIssue,
+    deps.isL45Legacy,
+    deps.scrubHallucinatedPlaces,
+    deps.isCorrRollbackLegacy,
+    deps.scrubRollbackContent,
   );
 }
 
@@ -185,6 +213,9 @@ test('rollback scrub ที่ทำให้ drift ต้องถูกตร�
   const [result] = await runEnabled(() => runPipeline([{ content: original, style: 'rollback-scrub-test' }], {}, {}));
   assert.ok(checked.length >= 3, 'candidate, scrubbed rollback และ fallback จริงต้องถูกตรวจ');
   assert.ok(checked.some((content) => content.includes('FACT_REMOVED')));
+  // ★ S2: scrub ต้องรันจริง (ไม่ใช่ล้มเงียบด้วย ReferenceError แล้วถูก try/catch กลืน)
+  assert.equal(result._correctionDebug.rollbackScrub?.error, undefined, 'rollback scrub ต้องไม่ล้ม');
+  assert.equal(result._correctionDebug.rollbackScrub?.forbiddenScrubbed, 1, 'scrub ต้องล้างคำต้องห้าม 1 จุดจริง');
   assert.equal(result.content, original, 'scrub ที่ทำให้ fact drift ต้องถูกทิ้ง');
   assert.equal(checked.at(-1), result.content);
   assert.equal(result._correctionDebug.factPreserved, true);

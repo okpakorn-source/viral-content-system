@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { logApiUsage } from './usageLogger';
 import { sanitizeOutput } from './safetyFilter';
+import { riskPromptOpenAIBlock } from './riskWords.js'; // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S2 · เจ้าของอนุมัติ): รายการคำเสี่ยงใน system prompt มาจากตารางกลาง (ถอย RISK_WORDS_LEGACY=1)
 import { MODEL_PRIMARY } from './modelConfig.js';
 import { ironRule5LengthLine, legacyLengthRule } from './legacyLengthRules.js'; // 🗑️ กฎที่ 5 ยุคแรก (ถอด 17 ส.ค. 69 · ถอยคืน LEGACY_LENGTH_RULES=1)
 import { preparePipelineSignal, rethrowPipelineDeadline } from '../utils/pipelineDeadline.js';
@@ -27,7 +28,10 @@ export function getOpenAIClient() {
  * เรียก AI — Single prompt system
  * callAI({ prompt: "..." }) — prompt เดียวครบ
  */
-export async function callAI({ prompt, systemPrompt, userPrompt, imageContents, model = MODEL_PRIMARY, temperature = 0.7, maxTokens = 4000, signal, allowModelFallback = true, maxRetries, textNewsLengthPolicy = false }) {
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S1 · เจ้าของอนุมัติ): + sanitizeScope ('facts' = ผลข้อเท็จจริง ไม่ผ่านตัวกรองคำเสี่ยง ·
+//   'post'/ไม่ส่ง = ข้อความโพสต์ ผ่านตัวกรองขอบคำ) — SANITIZE_LEGACY=1 = ตัวกรองเดิมทุก call ไม่สนค่านี้ (ดู safetyFilter.js)
+//   ของเดิม: export async function callAI({ ..., maxRetries, textNewsLengthPolicy = false }) {
+export async function callAI({ prompt, systemPrompt, userPrompt, imageContents, model = MODEL_PRIMARY, temperature = 0.7, maxTokens = 4000, signal, allowModelFallback = true, maxRetries, textNewsLengthPolicy = false, sanitizeScope }) {
   const client = getOpenAIClient();
 
   if (!client) {
@@ -115,7 +119,7 @@ PASS 5: อ่านใหม่เหมือนเป็นคนอ่าน
 === FACEBOOK SAFETY RULES (บังคับทุกคำตอบ) ===
 ก่อนสร้างเนื้อหาทุกครั้ง ต้องตรวจสอบและ rewrite คำเสี่ยงทั้งหมด:
 
-[ความรุนแรง] ห้ามใช้: ฆ่า, ยิงหัว, ปาดคอ, หั่นศพ, เลือดสาด, ศพ, สยอง, โหด, คว้านท้อง, ไลฟ์ตาย, ดับสลด
+${riskPromptOpenAIBlock(`[ความรุนแรง] ห้ามใช้: ฆ่า, ยิงหัว, ปาดคอ, หั่นศพ, เลือดสาด, ศพ, สยอง, โหด, คว้านท้อง, ไลฟ์ตาย, ดับสลด
 → ใช้แทน: ทำร้ายจนเสียชีวิต, เหตุรุนแรง, ร่างผู้เสียชีวิต, เหตุสะเทือนใจ, เหตุไม่คาดคิด
 
 [Self-harm] ห้ามใช้: ผูกคอ, ยิงตัวตาย, กระโดดตึก, อยากตาย, จบชีวิต, ลาก่อนโลกนี้
@@ -140,7 +144,7 @@ PASS 5: อ่านใหม่เหมือนเป็นคนอ่าน
 → ใช้แทน: หลายคนพูดถึง, กลายเป็นประเด็น, คนบนโซเชียลวิจารณ์
 
 [Engagement Bait] ห้ามใช้: พิมพ์ 1, เมนต์ 99, แชร์วนไป, ใครเห็นด้วยกดไลก์
-→ ใช้แทน: คุณคิดเห็นยังไง, ถ้าเป็นคุณจะ..., มองเรื่องนี้ยังไง
+→ ใช้แทน: คุณคิดเห็นยังไง, ถ้าเป็นคุณจะ..., มองเรื่องนี้ยังไง`)}
 
 หลักการ: เปลี่ยนจาก "ความแรง" → "อารมณ์" เน้น emotional storytelling, human emotion, social conflict แทน shock/gore/rage bait
 === จบ FACEBOOK SAFETY RULES ===`;
@@ -251,7 +255,8 @@ ${content}
       // === POST-PROCESSING SAFETY FILTER ===
       // ★ 16 ก.ค. 69 (B1 + review fix): ติดป้ายโมเดลจริง "หลัง" sanitizeOutput — sanitize สร้าง object ใหม่
       //   ป้าย non-enumerable ที่ติดไว้ก่อนหน้าหายระหว่างทาง (จับได้จากเทสจริง: usedModel โชว์ 'gpt4o' แทนโมเดลจริง)
-      const _safe = sanitizeOutput(parsed);
+      // ★ 24 ก.ย. 69 (S1): ส่ง scope ให้ตัวกรอง — 'facts' คืน parsed เดิม (ของเดิม: sanitizeOutput(parsed))
+      const _safe = sanitizeOutput(parsed, { scope: sanitizeScope });
       try { Object.defineProperty(_safe, '_modelUsed', { value: currentModel, enumerable: false }); } catch {}
       return _safe;
     } catch (err) {

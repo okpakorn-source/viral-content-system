@@ -15,6 +15,7 @@ const _fullLog = () => process.env.LOG_FULL_PROMPT === '1';
 import Anthropic from '@anthropic-ai/sdk';
 import { logApiUsage } from './usageLogger';
 import { sanitizeOutput } from './safetyFilter';
+import { riskPromptSystemLines } from './riskWords.js'; // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S2 · เจ้าของอนุมัติ): รายการคำเสี่ยงใน system prompt มาจากตารางกลาง (ถอย RISK_WORDS_LEGACY=1)
 import { ironRule5LengthLine, legacyLengthRule } from './legacyLengthRules.js'; // 🗑️ กฎที่ 5 ยุคแรก (ถอด 17 ส.ค. 69 · ถอยคืน LEGACY_LENGTH_RULES=1)
 import { preparePipelineSignal, rethrowPipelineDeadline } from '../utils/pipelineDeadline.js';
 
@@ -63,7 +64,10 @@ function getClaudeClient() {
 //   ของเดิม: export async function callClaude({ prompt, systemPrompt, model, temperature = 0.7, maxTokens = 8000, signal })
 //   effort: ชนะ env กลาง CLAUDE_WRITE_EFFORT เฉพาะการเรียกนั้น (ผลแล็บ 44+12 นัด: จุดเลือกการ์ด A=low B=medium)
 //   promptBlocks: อาเรย์ [{text, cache}] → content blocks + cache_control (แคชสารบัญคงที่ ลดต้นทุน ~85%)
-export async function callClaude({ prompt, systemPrompt, model = DEFAULT_WRITE_MODEL, temperature = 0.7, maxTokens = 8000, signal, effort, promptBlocks, maxRetries, retryWithoutEffort = true, textNewsLengthPolicy = false }) {
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S1 · เจ้าของอนุมัติ): + sanitizeScope ('facts' = ผลข้อเท็จจริง ไม่ผ่านตัวกรองคำเสี่ยง ·
+//   'post'/ไม่ส่ง = ข้อความโพสต์ ผ่านตัวกรองขอบคำ) — SANITIZE_LEGACY=1 = ตัวกรองเดิมทุก call ไม่สนค่านี้ (ดู safetyFilter.js)
+//   ของเดิม: export async function callClaude({ ..., retryWithoutEffort = true, textNewsLengthPolicy = false }) {
+export async function callClaude({ prompt, systemPrompt, model = DEFAULT_WRITE_MODEL, temperature = 0.7, maxTokens = 8000, signal, effort, promptBlocks, maxRetries, retryWithoutEffort = true, textNewsLengthPolicy = false, sanitizeScope }) {
   const client = getClaudeClient();
   if (!client) throw new Error('ANTHROPIC_API_KEY ไม่ได้ตั้งค่า — ไปตั้งค่าที่ Settings');
 
@@ -125,8 +129,8 @@ PASS 5: อ่านใหม่เหมือนคนอ่านจริง
 === จบ HUMAN WRITING DNA V2 ===
 
 === FACEBOOK SAFETY RULES ===
-ห้ามใช้คำเสี่ยง: ฆ่า, ศพ, สยอง, โหด, เลือด, ข่มขืน, ผูกคอ, ดับสลด, บาดเจ็บสาหัส, สะเก็ดระเบิด, ระเบิด, สนามรบ, คลิปหลุด, อาวุธ, กระสุน, เลือดสาด, ฆ่าตัวตาย
-ใช้แทน: จากไป, ร่างผู้เสียหาย, น่าตกใจ, รุนแรง, ร่องรอยเหตุการณ์, ล่วงละเมิดทางเพศ, จากไปอย่างน่าเศร้า, ได้รับบาดเจ็บหนัก, เหตุการณ์ไม่คาดฝัน, พื้นที่ปฏิบัติหน้าที่
+${riskPromptSystemLines(`ห้ามใช้คำเสี่ยง: ฆ่า, ศพ, สยอง, โหด, เลือด, ข่มขืน, ผูกคอ, ดับสลด, บาดเจ็บสาหัส, สะเก็ดระเบิด, ระเบิด, สนามรบ, คลิปหลุด, อาวุธ, กระสุน, เลือดสาด, ฆ่าตัวตาย
+ใช้แทน: จากไป, ร่างผู้เสียหาย, น่าตกใจ, รุนแรง, ร่องรอยเหตุการณ์, ล่วงละเมิดทางเพศ, จากไปอย่างน่าเศร้า, ได้รับบาดเจ็บหนัก, เหตุการณ์ไม่คาดฝัน, พื้นที่ปฏิบัติหน้าที่`)}
 ⚠️ "เสียชีวิต" และ "จากไป" คือคำมาตรฐานที่ปลอดภัย — ใช้บอกการตายได้ตรงๆ เสมอ (10 ก.ค. 69: เดิมแบน "เสียชีวิต" ทำตัวเขียนเลี่ยงคำจนละข้อเท็จจริงการตายทั้งเรื่อง — เคส #01641 แม่เสียชีวิตแล้วแต่เขียนเหมือนยังอยู่)
 เปลี่ยน "ความแรง" → "อารมณ์" เน้น emotional storytelling — แต่ห้ามเลี่ยงคำจนข้อเท็จจริงสำคัญหายไปจากเรื่อง
 === จบ SAFETY RULES ===`;
@@ -257,7 +261,8 @@ ${content}
     if (jsonStr.endsWith('```')) jsonStr = jsonStr.slice(0, -3);
     jsonStr = jsonStr.trim();
     // ★ 16 ก.ค. 69 (B1): แนบโมเดลจริงไปกับผล (non-enumerable — ไม่ปนใน JSON.stringify/spread เหมือน openai.js)
-    const _parsed = sanitizeOutput(JSON.parse(jsonStr));
+    // ★ 24 ก.ย. 69 (S1): ส่ง scope ให้ตัวกรอง — 'facts' คืน object เดิม (ของเดิม: sanitizeOutput(JSON.parse(jsonStr)))
+    const _parsed = sanitizeOutput(JSON.parse(jsonStr), { scope: sanitizeScope });
     if (_parsed && typeof _parsed === 'object') {
       try { Object.defineProperty(_parsed, '_modelUsed', { value: model, enumerable: false }); } catch {}
     }
@@ -268,7 +273,7 @@ ${content}
       const startIdx = content.indexOf('{');
       const endIdx = content.lastIndexOf('}');
       if (startIdx !== -1 && endIdx !== -1) {
-        const _parsed2 = sanitizeOutput(JSON.parse(content.slice(startIdx, endIdx + 1)));
+        const _parsed2 = sanitizeOutput(JSON.parse(content.slice(startIdx, endIdx + 1)), { scope: sanitizeScope });
         if (_parsed2 && typeof _parsed2 === 'object') {
           try { Object.defineProperty(_parsed2, '_modelUsed', { value: model, enumerable: false }); } catch {}
         }

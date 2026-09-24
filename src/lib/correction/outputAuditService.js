@@ -9,11 +9,21 @@
  * - engagement bait
  * 
  * ห้ามแก้ output ใน layer นี้ — แค่ตรวจแล้ว report
+ *
+ * ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S2 · เจ้าของอนุมัติ) — OV-01/PL-15/PL-04: คำเสี่ยงอ่านจากตารางกลาง
+ *   ค่าเริ่มต้น: findRiskWords (เครื่องสแกนเดียวกับตัวกรอง safetyFilter · กฎชุด 'audit' ของ src/lib/ai/riskWords.js)
+ *     → ไม่จับกลางคำ (ประเทศพม่า/ทศพล — เดิม /ศพ/g จับแล้ว L3A แทนเป็น "ประเทร่างผู้เสียหายม่า") · ไม่จับคำแทนที่ตัวกรองสร้างเอง
+ *       ("ใช้อาวุธปืน" — เดิม /อาวุธ/g จับแล้วแทนซ้ำเป็น "สิ่งของอันตรายปืน") · กฎยาวชนะกฎสั้นไม่ซ้อนกัน ("ยิงตาย" = 1 issue ไม่ใช่ ยิง+ตาย)
+ *     issue แนบ ruleId/aiRewrite/start/end ให้ L3 แทนคำตรงตำแหน่งที่กฎนี้จับจริง (ไม่ใช่ String.replace ตำแหน่งแรก) และ location นับจากตำแหน่งจริง
+ *   RISK_WORDS_LEGACY=1: ลูป FORBIDDEN_WORDS เดิมทุกไบต์ (ตารางด้านล่างคงไว้เพื่อโหมดถอย ห้ามแก้)
  */
 
 import { callAI } from '@/lib/ai/openai';
+import { findRiskWords } from '../ai/safetyFilter.js';
+import { isRiskWordsLegacy } from '../ai/riskWords.js';
 
 // === คำเสี่ยง Facebook (regex-based fast check) ===
+// ★ 24 ก.ย. 69 (S2): ใช้เฉพาะโหมดถอย RISK_WORDS_LEGACY=1 — ตารางจริงอยู่ที่ src/lib/ai/riskWords.js (RISK_RULES)
 const FORBIDDEN_WORDS = [
   // === ความรุนแรง / ชีวิต (HIGH) ===
   { pattern: /ฆ่า(?!เชื้อ|แมลง)/g, type: 'forbidden_word', severity: 'high', suggestion: 'ก่อเหตุ' },
@@ -118,19 +128,38 @@ export async function auditOutput(version) {
     // === FAST CHECKS (regex/string — ไม่เรียก AI) ===
 
     // 1. Forbidden words
-    for (const rule of FORBIDDEN_WORDS) {
-      const matches = content.match(rule.pattern);
-      if (matches) {
-        matches.forEach(m => {
-          const idx = content.indexOf(m);
-          const paraIndex = content.substring(0, idx).split('\n\n').length - 1;
-          issues.push({
-            type: rule.type,
-            text: m,
-            location: paraIndex,
-            severity: rule.severity,
-            suggestion: rule.suggestion,
+    if (isRiskWordsLegacy()) {
+      // โหมดถอย RISK_WORDS_LEGACY=1 — ลูปเดิมทุกไบต์ (ตาราง FORBIDDEN_WORDS ของไฟล์นี้)
+      for (const rule of FORBIDDEN_WORDS) {
+        const matches = content.match(rule.pattern);
+        if (matches) {
+          matches.forEach(m => {
+            const idx = content.indexOf(m);
+            const paraIndex = content.substring(0, idx).split('\n\n').length - 1;
+            issues.push({
+              type: rule.type,
+              text: m,
+              location: paraIndex,
+              severity: rule.severity,
+              suggestion: rule.suggestion,
+            });
           });
+        }
+      }
+    } else {
+      // ★ 24 ก.ย. 69 (S2): ตารางกลาง + เครื่องสแกนเดียวกับตัวกรอง — hit ไม่ซ้อนกัน มีตำแหน่งจริง
+      for (const hit of findRiskWords(content)) {
+        const paraIndex = content.substring(0, hit.start).split('\n\n').length - 1;
+        issues.push({
+          type: 'forbidden_word',
+          text: hit.text,
+          location: paraIndex,
+          severity: hit.rule.severity,
+          suggestion: hit.replacement,
+          ruleId: hit.rule.id,              // ให้ L3/scrub ค้นตำแหน่งด้วยกฎเดียวกัน (PL-04)
+          aiRewrite: hit.rule.aiRewrite === true, // เส้นทาง L3B (AI เกลา) ตัดสินจากตาราง ไม่ใช่รายการแยกใน L3
+          start: hit.start,
+          end: hit.end,
         });
       }
     }

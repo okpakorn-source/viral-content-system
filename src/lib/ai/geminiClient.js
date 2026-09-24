@@ -18,6 +18,7 @@ const _fullLog = () => process.env.LOG_FULL_PROMPT === '1';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { logApiUsage } from './usageLogger';
 import { sanitizeOutput } from './safetyFilter';
+import { riskPromptSystemLines } from './riskWords.js'; // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S2 · เจ้าของอนุมัติ): รายการคำเสี่ยงใน system prompt มาจากตารางกลาง (ถอย RISK_WORDS_LEGACY=1)
 import { preparePipelineSignal, rethrowPipelineDeadline } from '../utils/pipelineDeadline.js';
 
 let geminiClient = null;
@@ -93,7 +94,11 @@ export function buildGeminiVideoModelCandidates(model, allowModelFallback = true
  * เหมาะสำหรับ: extraction, summarization, fast tasks
  */
 // ★ 1 ส.ค. 69 (เจ้าของสั่ง): สายข่าว text → gemini-3.6-flash (ใหม่ ไว ไม่ล่ม) · ถอยกลับ: GEMINI_TEXT_MODEL=gemini-3.5-flash
-export async function callGemini({ prompt, model = process.env.GEMINI_TEXT_MODEL || 'gemini-3.6-flash', temperature = 0.3, maxTokens = 4000, signal }) {
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S1 · เจ้าของอนุมัติ): + sanitizeScope ('facts' = ผลข้อเท็จจริง ไม่ผ่านตัวกรองคำเสี่ยง ·
+//   'post'/ไม่ส่ง = ข้อความโพสต์ ผ่านตัวกรองขอบคำ) — เฉพาะ callGemini(text) · สายวิดีโอ/vision ด้านล่างไม่แตะ
+//   SANITIZE_LEGACY=1 = ตัวกรองเดิมทุก call ไม่สนค่านี้ (ดู safetyFilter.js)
+//   ของเดิม: export async function callGemini({ prompt, model = ..., temperature = 0.3, maxTokens = 4000, signal }) {
+export async function callGemini({ prompt, model = process.env.GEMINI_TEXT_MODEL || 'gemini-3.6-flash', temperature = 0.3, maxTokens = 4000, signal, sanitizeScope }) {
   const client = getGeminiClient();
   if (!client) throw new Error('GEMINI_API_KEY ไม่ได้ตั้งค่า — ไปตั้งค่าที่ Settings');
 
@@ -114,8 +119,8 @@ ${prompt}
 ใช้ข้อมูลจากเนื้อข่าวที่ให้มาเท่านั้น ห้ามแต่งเรื่องเพิ่ม
 
 === FACEBOOK SAFETY RULES ===
-ห้ามใช้คำเสี่ยง: ฆ่า, ศพ, สยอง, โหด, เลือด, ข่มขืน, ผูกคอ, ดับสลด, บาดเจ็บสาหัส, สะเก็ดระเบิด, ระเบิด, สนามรบ, คลิปหลุด, อาวุธ, กระสุน, เลือดสาด, ฆ่าตัวตาย
-ใช้แทน: จากไป, ร่างผู้เสียหาย, น่าตกใจ, รุนแรง, ร่องรอยเหตุการณ์, ล่วงละเมิดทางเพศ, จากไปอย่างน่าเศร้า, ได้รับบาดเจ็บหนัก, เหตุการณ์ไม่คาดฝัน, พื้นที่ปฏิบัติหน้าที่
+${riskPromptSystemLines(`ห้ามใช้คำเสี่ยง: ฆ่า, ศพ, สยอง, โหด, เลือด, ข่มขืน, ผูกคอ, ดับสลด, บาดเจ็บสาหัส, สะเก็ดระเบิด, ระเบิด, สนามรบ, คลิปหลุด, อาวุธ, กระสุน, เลือดสาด, ฆ่าตัวตาย
+ใช้แทน: จากไป, ร่างผู้เสียหาย, น่าตกใจ, รุนแรง, ร่องรอยเหตุการณ์, ล่วงละเมิดทางเพศ, จากไปอย่างน่าเศร้า, ได้รับบาดเจ็บหนัก, เหตุการณ์ไม่คาดฝัน, พื้นที่ปฏิบัติหน้าที่`)}
 ⚠️ "เสียชีวิต" และ "จากไป" เป็นคำมาตรฐานที่ปลอดภัย ใช้ตรงๆ ได้เสมอ — สถานะเป็น/ตายของบุคคลต้องตรงต้นฉบับ 100% ห้ามเลี่ยงคำจนข้อเท็จจริงการตายหายไปจากผลสกัด
 (16 ก.ค. 69: ถอด "เสียชีวิต" ออกจากลิสต์ห้าม — บทเรียนเคส #01641 เดิมแบนแล้วตัวเขียนละข้อเท็จจริงการตายทั้งเรื่อง แก้ครบแล้วฝั่ง Claude/OpenAI แต่ตกค้างที่นี่)
 เปลี่ยน "ความแรง" → "อารมณ์" เน้น emotional storytelling
@@ -153,7 +158,8 @@ ${content}
 
   try {
     // ★ 16 ก.ค. 69 (B1): แนบโมเดลจริงไปกับผล (non-enumerable — ไม่ปนใน JSON.stringify/spread เหมือน openai.js)
-    const _parsed = sanitizeOutput(JSON.parse(content));
+    // ★ 24 ก.ย. 69 (S1): ส่ง scope ให้ตัวกรอง — 'facts' คืน object เดิม (ของเดิม: sanitizeOutput(JSON.parse(content)))
+    const _parsed = sanitizeOutput(JSON.parse(content), { scope: sanitizeScope });
     if (_parsed && typeof _parsed === 'object') {
       try { Object.defineProperty(_parsed, '_modelUsed', { value: model, enumerable: false }); } catch {}
     }
@@ -164,7 +170,7 @@ ${content}
       const startIdx = content.indexOf('{');
       const endIdx = content.lastIndexOf('}');
       if (startIdx !== -1 && endIdx !== -1) {
-        const _parsed2 = sanitizeOutput(JSON.parse(content.slice(startIdx, endIdx + 1)));
+        const _parsed2 = sanitizeOutput(JSON.parse(content.slice(startIdx, endIdx + 1)), { scope: sanitizeScope });
         if (_parsed2 && typeof _parsed2 === 'object') {
           try { Object.defineProperty(_parsed2, '_modelUsed', { value: model, enumerable: false }); } catch {}
         }
