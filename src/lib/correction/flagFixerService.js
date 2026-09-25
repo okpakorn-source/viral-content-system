@@ -12,6 +12,11 @@
 
 import { callAI } from '@/lib/ai/openai';
 import { callClaude, isClaudeAvailable } from '@/lib/ai/claudeClient'; // ★ 1 ส.ค. 69: ชั้นเขียนแทนประโยคใช้ตัวเขียนหลัก opus-5 ก่อน
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S7 · เจ้าของอนุมัติ) — PL-11/MC-14 (หนี้เดียวกับ L4.6): 3 การเรียก AI ของชั้นนี้ไม่มีเพดานเวลา/ไม่ส่ง signal และไม่ส่ง systemPrompt
+//   → ครอบ correctionAiCall + system สั้น (ตรวจมุมเปิด = CHECK · แก้จุดที่ธงชี้ = FIX) · หมดเวลา = catch เดิม (คงเวอร์ชันเดิม / ไม่มีธง same_angle)
+//   ชั้นนี้ถูกปลดออกจากท่อตั้งแต่ 12 มิ.ย. (ดู correctionPipeline.js) — แก้ไว้ให้ครบทั้งโฟลเดอร์ ไม่มีผลกับข่าวที่ออกจนกว่าทีมจะต่อกลับ
+//   ถอย: CORRECTION_AI_TIMEOUT_MS=0 · CORRECTION_CHECK_SYSTEM=0 → ตั้งทั้งคู่ = การเรียกเดิมทุกไบต์ (ดู ./correctionAiGuard.js)
+import { correctionAiCall, correctionAiExtras, CORRECTION_CHECK_SYSTEM_PROMPT, CORRECTION_FIX_SYSTEM_PROMPT } from './correctionAiGuard.js';
 
 const MODEL_FIX = 'gpt-5.6-terra'; // ภาษาไทยลื่นพอ + เร็ว/ถูกกว่า write-tier (★ 1 ส.ค. 69 โล๊ะ 4o→terra)
 
@@ -93,11 +98,12 @@ export function detectFlags(versions, sourceText) {
  * (เช่น ทุกเวอร์ชันเปิดด้วยรถ 31 คันจอดเรียง) — โปรแกรมเทียบตัวอักษรจับไม่ได้ ใช้ AI เช็คเชิงความหมาย 1 ครั้ง
  * เวอร์ชันแรกของกลุ่มถือเป็นเจ้าของมุม ที่เหลือถูกสั่งเขียนเปิดใหม่ด้วยมุมที่กำหนดให้
  */
-async function detectSameAngleOpenings(versions) {
+async function detectSameAngleOpenings(versions, options = {}) {
   if (versions.length < 2) return [];
   const opens = versions.map((v, i) => `${i + 1}: ${String(v.content || '').split('\n')[0].slice(0, 150)}`).join('\n');
   try {
-    const raw = await callAI({
+    // ★ S7: ครอบเพดานต่อครั้ง + signal + system สั้นงานตรวจ (ของเดิม: const raw = await callAI({ … }); ไม่มี signal/systemPrompt)
+    const raw = await correctionAiCall('correction:L1.5:same-angle', (signal) => callAI({
       model: 'gpt-5.6-luna', temperature: 0.1, maxTokens: 800,
       prompt: `ประโยคเปิดของแต่ละเวอร์ชัน (ข่าวเดียวกัน เขียนคนละมุม):
 ${opens}
@@ -106,7 +112,8 @@ ${opens}
 เวอร์ชันแรกของกลุ่มเป็นเจ้าของมุม — ระบุเฉพาะตัวที่ต้องเขียนใหม่ พร้อมมุมเปิดใหม่ที่ต่างจริง (อิงจากเนื้อที่เห็น)
 ถ้าทุกเวอร์ชันเปิดต่างมุมกันดีแล้ว ตอบ {"rewrite":[]}
 ตอบ JSON เท่านั้น: {"rewrite":[{"v":2,"newAngle":"เช่น เปิดด้วยคำพูดของผู้รับมอบ / เปิดด้วยปัญหาที่พื้นที่เจอก่อนได้รถ"}]}`,
-    });
+      ...correctionAiExtras(signal, CORRECTION_CHECK_SYSTEM_PROMPT), // ★ S7: { signal, systemPrompt } · โหมดถอย = {}
+    }), { signal: options?.signal });
     const parsed = typeof raw === 'object' ? raw : JSON.parse(String(raw).match(/\{[\s\S]*\}/)?.[0] || '{}');
     return (parsed?.rewrite || []).filter(r => r.v >= 2 && r.v <= versions.length);
   } catch { return []; }
@@ -115,12 +122,12 @@ ${opens}
 /**
  * แก้เวอร์ชันที่มีธง — 1 AI call ต่อเวอร์ชันที่มีปัญหาเท่านั้น
  */
-export async function fixFlaggedVersions(versions, newsData) {
+export async function fixFlaggedVersions(versions, newsData, options = {}) { // ★ S7: + options.signal (ผู้เรียกส่งต่อมา ถ้ามี)
   const sourceText = newsData?.newsBody || '';
   const problems = detectFlags(versions, sourceText);
 
   // ★ เช็คเปิดมุมซ้ำเชิงความหมาย (ข้ามถ้าโปรแกรมจับเปิดซ้ำตรงตัวไปแล้ว — เดี๋ยวซ้ำซ้อน)
-  const sameAngle = await detectSameAngleOpenings(versions);
+  const sameAngle = await detectSameAngleOpenings(versions, options);
   for (const r of sameAngle) {
     const idx = r.v - 1;
     if (!problems[idx].includes('dup_opening') && !problems[idx].includes('same_angle')) {
@@ -169,12 +176,19 @@ ${content}
 
 ตอบ JSON เท่านั้น: {"fixedContent":"เนื้อโพสต์ฉบับแก้แล้วทั้งหมด"}`;
       // ★ 1 ส.ค. 69 (เจ้าของสั่ง "GPT ที่แตะภาษาตรง → opus5"): ชั้นนี้เขียนประโยคแทนจริง → claude-opus-5 ก่อน · ล้ม/ไม่มีคีย์ → terra เดิม
+      // ★ S7: ทั้ง 2 ทางครอบ correctionAiCall + system สั้นงานแก้เฉพาะจุด — หมดเวลา = โซ่เดิม (claude → terra → catch คงเวอร์ชันเดิม)
+      //   ของเดิม: result = await callClaude({ model: 'claude-opus-5', maxTokens: 3000, prompt: _fixPrompt });
+      //           result = await callAI({ model: MODEL_FIX, temperature: 0.4, maxTokens: 3000, prompt: _fixPrompt });
       let result;
       try {
         if (!isClaudeAvailable()) throw new Error('no-claude-key');
-        result = await callClaude({ model: 'claude-opus-5', maxTokens: 3000, prompt: _fixPrompt });
+        result = await correctionAiCall('correction:L1.5:claude-opus-5', (signal) => callClaude({
+          model: 'claude-opus-5', maxTokens: 3000, prompt: _fixPrompt, ...correctionAiExtras(signal, CORRECTION_FIX_SYSTEM_PROMPT),
+        }), { signal: options?.signal });
       } catch (_clErr) {
-        result = await callAI({ model: MODEL_FIX, temperature: 0.4, maxTokens: 3000, prompt: _fixPrompt });
+        result = await correctionAiCall('correction:L1.5:terra', (signal) => callAI({
+          model: MODEL_FIX, temperature: 0.4, maxTokens: 3000, prompt: _fixPrompt, ...correctionAiExtras(signal, CORRECTION_FIX_SYSTEM_PROMPT),
+        }), { signal: options?.signal });
       }
       // callAI คืน object เสมอ (json_object mode) — ดึง field ออกมา (เผื่อ string ไว้กัน client เปลี่ยน)
       const fixed = String((typeof result === 'object' ? result?.fixedContent : result) || '').trim();

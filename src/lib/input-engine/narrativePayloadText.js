@@ -13,6 +13,7 @@
 import { isLegacyLengthOn, legacyLengthRule } from '../ai/legacyLengthRules.js';
 import { isCardAuthorityR3Enabled } from '../ai/cardAuthority.js';
 import { objTextList, objText, isObjFixEnabled, quoteTextFix } from '../utils/objText.js'; // 🔧 19 ส.ค. 69 (HOOKS_OBJ_FIX): ตัวแปลงกลาง object → ข้อความ (กัน "[object Object]" หลุดเข้าตัวเขียน) — ถอย HOOKS_OBJ_FIX=0
+import { factsInsufficientLine } from '../ai/factSourcePolicy.js'; // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S9 · เจ้าของอนุมัติ) — OV-05: บรรทัด [FACTS INSUFFICIENT] แบบสาย URL (ไม่เติม เล่าเท่าที่มี สั้นได้) · ถอย NARRATIVE_LEGACY=1 = ข้อความเดิมทุกไบต์
 
 // ─── Fact Extraction Helper ────────────────────────────────────────
 
@@ -509,8 +510,13 @@ export function formatNarrativePayload(payload) {
       ? '✅ **อนุญาตให้ยกตัวอย่างสถานการณ์จำลอง (Simulation) ที่สอดคล้องกับบริบท เพื่อขยายความให้ครบ 250 คำได้ โดยเฉพาะกรณีที่เป็นนโยบายหรือข้อความเชิงวิชาการ**\n'
       : '✅ **สำหรับข่าวนโยบายหรือข้อความเชิงวิชาการ ให้อธิบายหลักการ ผลกระทบ และความสำคัญจากข้อเท็จจริงหรือบริบทที่ให้มาเพื่อให้เข้าใจง่ายขึ้น แต่ห้ามสร้างสถานการณ์จำลอง บุคคล คำพูด หรือรายละเอียดที่ข่าวไม่ได้ให้มา และพอดีแล้วต้องพอ ห้ามหาคำมาเติม**\n';
   }
+  // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S9 · เจ้าของอนุมัติ) — OV-05: เดิมบรรทัดนี้ (1cfdef43 · 1 มิ.ย. 69 · ฝังพร้อมบรรทัด Simulation ด้านบน) สั่ง
+  //   "ให้มุ่งเน้นการขยายความอธิบายถึงผลกระทบ ความสำคัญ หรือยกตัวอย่างให้เห็นภาพชัดเจนขึ้น" = ชวนแต่งเติมสิ่งที่ต้นฉบับไม่มี
+  //   ตรงข้ามกับไฟล์แฝดสาย URL (narrativePayload.js "เขียนระวังอย่าแต่งเพิ่ม") และตอนริบใบอนุญาต Simulation 16 ส.ค. ไม่ได้ถูกแก้ตาม
+  //   → ใช้คำสั่งแบบสาย URL: ไม่เติม เล่าเท่าที่มี สั้นได้ (จบแถวขั้นต่ำของกฎความยาว) · เปลี่ยนเฉพาะกรณี insufficient (factCount ≤ 2)
+  //   ข้อความอยู่ที่ ../ai/factSourcePolicy.js · ถอยกลับ: NARRATIVE_LEGACY=1 = ข้อความเดิมทุกไบต์
   if (payload.factSufficiency === 'insufficient') {
-    p += '⚠️ [FACTS INSUFFICIENT] ข้อเท็จจริงน้อย — ให้มุ่งเน้นการขยายความอธิบายถึงผลกระทบ ความสำคัญ หรือยกตัวอย่างให้เห็นภาพชัดเจนขึ้น\n';
+    p += factsInsufficientLine();
   }
   p += '=== จบ FACT SAFETY ===\n\n';
 

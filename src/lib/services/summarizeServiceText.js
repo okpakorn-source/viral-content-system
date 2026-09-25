@@ -19,6 +19,8 @@ import { clusterMatch, findClusterScore, mapCategory, EMOTION_CLUSTERS, CONFLICT
 import { randomUUID } from 'node:crypto';
 import { rethrowPipelineDeadline } from '@/lib/utils/pipelineDeadline';
 import { riskPromptWriterLines, riskPromptWriterShortLine } from '@/lib/ai/riskWords'; // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S2 · เจ้าของอนุมัติ): คำแทนในกฎ FACEBOOK SAFETY มาจากตารางกลาง (ถอย RISK_WORDS_LEGACY=1)
+import { slimSystem, EXTRACT_SYSTEM_PROMPT, BREAKDOWN_SYSTEM_PROMPT, BLUEPRINT_SYSTEM_PROMPT, NEWS_DNA_SYSTEM_PROMPT, RESEARCH_SYSTEM_PROMPT, CARD_PICKER_SYSTEM_PROMPT } from '@/lib/ai/taskSystemPrompts'; // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S8 · เจ้าของอนุมัติ) — OV-04: system สั้นเฉพาะงานให้ทุก call ที่ไม่ใช่งานเขียน (เดิมไม่ส่ง = ได้ DNA นักเขียน + กฎ 180 คำ + รายการคำเสี่ยง ~5,958 ตัวอักษร/นัด) · งานเขียน callSmartAI('write') ไม่แตะ · ถอย SYSTEM_PROMPT_SLIM=0 = args เดิมทุกไบต์
+import { buildBreakdownPrompt } from '@/lib/ai/factSourcePolicy'; // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S9 · เจ้าของอนุมัติ) — PL-23: พรอมต์แตกประเด็นเรียกเนื้อที่สกัดแล้วว่า "เนื้อที่สกัดแล้ว" + แนบ RAW จริง (rawSourceText) เป็นแหล่งความจริงหลัก (>12k ตัดพร้อมบอก) · ถอย NARRATIVE_LEGACY=1 = ห่วงโซ่ .replace เดิมทุกไบต์
 
 // ★ 16 ก.ค. 69 (B4): sync กับสาย URL (summarizeService.js:15) — เดิม hardcode 'gemini-2.5-pro' ตกรุ่น 2 เวอร์ชัน
 //   ที่ทีมเลิกใช้เอง (มั่ว/แต่งเรื่อง) ทำ STAGE 2.5 (AI re-rank พร้อมท์) ของสายข้อความตายเงียบ
@@ -936,13 +938,27 @@ export async function performSummarize({
 
     console.log(`[Breakdown-Service] Context: source=${contextSource}, title="${(actualNewsTitle || '').slice(0, 60)}", bodyLen=${actualNewsBody?.length}ch`);
 
-    const prompt = breakdownPrompt.prompt
-      .replace('{title}', actualNewsTitle || actualNewsBody.slice(0, 100))
-      .replace('{content}', actualNewsBody)
-      .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติมจากผู้ใช้: "${customPrompt}"` : '');
+    // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S9 · เจ้าของอนุมัติ) — PL-23: เดิมห่วงโซ่ .replace ครอบ "เนื้อที่ AI สกัดแล้ว" (actualNewsBody)
+    //   ด้วยหัว "=== เนื้อข่าวต้นฉบับ ===" และกฎเหล็กเรียกมันว่า RAW ทั้งที่ RAW จริง (rawSourceText = ข้อความที่ผู้ใช้วาง) ไปถึงเฉพาะนักเขียน/ด่าน
+    //   → buildBreakdownPrompt: ป้าย "เนื้อที่สกัดแล้ว" + แนบ RAW จริงเป็นแหล่งความจริงหลัก (เกิน 12k ตัวอักษรตัดพร้อมบอก) · ไม่มี RAW = เนื้อที่สกัดแล้วคือ RAW ของกฎ
+    //   ถอยกลับ: NARRATIVE_LEGACY=1 = ห่วงโซ่เดิมทุกไบต์ (แม่แบบใน promptStoreText.js ไม่ถูกแตะ)
+    //   เดิม: const prompt = breakdownPrompt.prompt.replace('{title}', actualNewsTitle || actualNewsBody.slice(0, 100)).replace('{content}', actualNewsBody).replace('{custom_instruction}', …)
+    const _bdBuild = buildBreakdownPrompt({
+      template: breakdownPrompt.prompt,
+      title: actualNewsTitle || actualNewsBody.slice(0, 100),
+      content: actualNewsBody,
+      customInstruction: customPrompt ? `คำสั่งเพิ่มเติมจากผู้ใช้: "${customPrompt}"` : '',
+      rawSourceText,
+    });
+    const prompt = _bdBuild.prompt;
 
     console.log(`[Breakdown-Service] 📋 PROMPT LENGTH: ${prompt.length}ch`);
     console.log(`[Breakdown-Service] 📋 NEWS IN PROMPT: ${actualNewsBody.length}ch of actual news content`);
+    if (_bdBuild.mode !== 'legacy') {
+      console.log(_bdBuild.rawSource.attached
+        ? `[Breakdown-Service] 📎 RAW-SOURCE: แนบข้อความดิบ ${_bdBuild.rawSource.shownChars}/${_bdBuild.rawSource.totalChars}ch เป็นแหล่งความจริงหลัก${_bdBuild.rawSource.truncated ? ` (ตัดท้าย ${_bdBuild.rawSource.cutChars}ch เกินเพดาน 12k)` : ''} · เนื้อที่สกัดแล้ว ${actualNewsBody.length}ch เป็นตัวช่วยอ่าน`
+        : '[Breakdown-Service] 📎 RAW-SOURCE: ไม่มีข้อความดิบแนบ — ใช้เนื้อที่สกัดแล้วเป็น RAW ของกฎ (ป้ายบอกว่าเป็นผล AI สกัด)');
+    }
 
     try {
       // ★ 21 ส.ค. 69: Breakdown ใช้ Sol + สัญญา 4 มุมตามที่เจ้าของเคาะจาก R73
@@ -954,8 +970,10 @@ export async function performSummarize({
         //   จริงตอน timeout (เดิม gpt-5.5 วิ่งต่อจนจบโดนบิลแล้วผลถูกทิ้ง = จ่าย 2 โมเดลซ้อน); สวิตช์ปิด = เดิมเป๊ะ
         // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S1 · เจ้าของอนุมัติ): sanitizeScope 'facts' — ผลแตกประเด็นเป็น JSON ข้อเท็จจริง
         //   ไม่ผ่านตัวกรองคำเสี่ยง (ตัวกรองเคยทำคำประสม/ราชาศัพท์พังและพลิกข้อเท็จจริง) · ถอยกลับ: SANITIZE_LEGACY=1
+        // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S8 · เจ้าของอนุมัติ) — OV-04: ...slimSystem(BREAKDOWN_SYSTEM_PROMPT) ทั้ง sol และ terra ถอย = system สั้นงานแตกประเด็น (บทบาท + กฎเหล็ก 1–4)
+        //   เดิมไม่ส่ง systemPrompt = ได้ system สายเขียน ~5,958 ตัวอักษร (HUMAN WRITING DNA + "อย่างน้อย 180 คำ" + รายการคำเสี่ยง) · ถอยกลับ: SYSTEM_PROMPT_SLIM=0 = args เดิมทุกไบต์
         result = await withTimeoutSignal(
-          (requestSignal) => callAI({ prompt, model: MODEL_BREAKDOWN, temperature: 0.4, maxTokens: 24000, signal: requestSignal, sanitizeScope: 'facts' }),
+          (requestSignal) => callAI({ prompt, model: MODEL_BREAKDOWN, temperature: 0.4, maxTokens: 24000, signal: requestSignal, sanitizeScope: 'facts', ...slimSystem(BREAKDOWN_SYSTEM_PROMPT) }),
           200000,
           'breakdown_primary_inner',
           signal,
@@ -966,7 +984,7 @@ export async function performSummarize({
         console.warn(`[Breakdown-Service] ⚠️ ${MODEL_BREAKDOWN} failed/timeout: "${primaryErr.message}" — retrying with ${MODEL_HEAVY_FALLBACK} fallback...`);
         breakdownModelUsed = MODEL_HEAVY_FALLBACK;
         result = await withTimeoutSignal(
-          (requestSignal) => callAI({ prompt, model: MODEL_HEAVY_FALLBACK, temperature: 0.4, maxTokens: 24000, signal: requestSignal, sanitizeScope: 'facts' }), // ★ 24 ก.ย. 69 (S1)
+          (requestSignal) => callAI({ prompt, model: MODEL_HEAVY_FALLBACK, temperature: 0.4, maxTokens: 24000, signal: requestSignal, sanitizeScope: 'facts', ...slimSystem(BREAKDOWN_SYSTEM_PROMPT) }), // ★ 24 ก.ย. 69 (S1) · S8: system สั้นชุดเดียวกับ sol
           90000,
           'breakdown_fallback',
           signal,
@@ -1018,6 +1036,7 @@ export async function performSummarize({
           newsBodyLength: actualNewsBody.length,
           promptLength: prompt.length,
           newsTitle: actualNewsTitle || '',
+          ...(_bdBuild.mode !== 'legacy' ? { rawSource: { mode: _bdBuild.mode, ..._bdBuild.rawSource } } : {}), // ★ 24 ก.ย. 69 (S9 — PL-23): สรุปการแนบ RAW ให้ autoFlow ลง log (โหมดถอย = ไม่มีคีย์นี้ = รูปเดิม)
         }
       };
     } catch (err) {
@@ -1155,6 +1174,7 @@ export async function performSummarize({
                 prompt: analyzerPrompt,
                 signal,
                 sanitizeScope: 'facts', // ★ 24 ก.ย. 69 (S1): DNA ข่าว = metadata จับคู่การ์ด ไม่ใช่ข้อความโพสต์ (เคยพังลง dna-exemplars)
+                ...slimSystem(NEWS_DNA_SYSTEM_PROMPT), // ★ 24 ก.ย. 69 (S8 — OV-04): system สั้นงานวิเคราะห์ DNA — เดิมไม่ส่ง = ได้ system สายเขียน ~5,958 ตัวอักษร (ถอย SYSTEM_PROMPT_SLIM=0)
               });
               
               // Map Deep DNA to legacy fields for compatibility with Stage 2 Cluster Match
@@ -1325,6 +1345,7 @@ ${_aiPickerOn ? `เกณฑ์สำคัญ (เรียงตามน้�
                   aiSelection = await callAI({
                     prompt: aiFallbackPrompt,
                     model: process.env.CARD_PICKER_MODEL || MODEL_FAST_CHEAP, // gpt-5.6-luna
+                    ...slimSystem(CARD_PICKER_SYSTEM_PROMPT), // ★ 24 ก.ย. 69 (S8 — OV-04): system สั้นงานเลือกการ์ด ชุดเดียวกับจุด B สาย claude (ถอย SYSTEM_PROMPT_SLIM=0)
                     temperature: 0.1, // สาย 5.x ถูกตัดทิ้งอัตโนมัติใน callAI
                     maxTokens: 1200,
                     signal,
@@ -1339,6 +1360,7 @@ ${_aiPickerOn ? `เกณฑ์สำคัญ (เรียงตามน้�
                     temperature: 0.1,
                     maxTokens: 400,
                     signal,
+                    ...slimSystem(CARD_PICKER_SYSTEM_PROMPT), // ★ S8: callGemini รับ systemPrompt แล้ว (ถอย SYSTEM_PROMPT_SLIM=0)
                   });
                 }
               } else if (isGeminiAvailable()) {
@@ -1348,6 +1370,7 @@ ${_aiPickerOn ? `เกณฑ์สำคัญ (เรียงตามน้�
                   temperature: 0.1,
                   maxTokens: 300,
                   signal,
+                  ...slimSystem(CARD_PICKER_SYSTEM_PROMPT), // ★ S8: system สั้นงานเลือกการ์ด (ถอย SYSTEM_PROMPT_SLIM=0)
                 });
               } else {
                 // Fallback to callAI if Gemini not available (พฤติกรรมเดิม)
@@ -1357,6 +1380,7 @@ ${_aiPickerOn ? `เกณฑ์สำคัญ (เรียงตามน้�
                   temperature: 0.1,
                   maxTokens: 300,
                   signal,
+                  ...slimSystem(CARD_PICKER_SYSTEM_PROMPT), // ★ S8: system สั้นงานเลือกการ์ด (ถอย SYSTEM_PROMPT_SLIM=0)
                 });
               }
 
@@ -2237,6 +2261,7 @@ ${_timelineFlowGuidance}
         maxTokens: 8000,
         signal,
         sanitizeScope: 'facts', // ★ 24 ก.ย. 69 (S1): blueprint = แผนจากข้อเท็จจริง ไม่ผ่านตัวกรองคำเสี่ยง
+        ...slimSystem(BLUEPRINT_SYSTEM_PROMPT), // ★ 24 ก.ย. 69 (S8 — OV-04): system สั้นงานวางโครงอารมณ์ — เดิมไม่ส่ง = ได้ system สายเขียน ~5,958 ตัวอักษร (ถอย SYSTEM_PROMPT_SLIM=0)
       });
 
       if (!blueprintResult?.core_emotion) {
@@ -2300,8 +2325,10 @@ ${_timelineFlowGuidance}
       let result, usedModel;
       try {
         // ★ 16 ก.ค. 69 (B4): เพิ่มเพดานเวลาชั้นใน 120s (เดิมไม่มี — พึ่ง outer อย่างเดียว)
+        // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S8 · เจ้าของอนุมัติ) — OV-04: ...slimSystem(RESEARCH_SYSTEM_PROMPT) ทั้งเส้น router และเส้นถอย callAI (router มีค่าเริ่มต้นชุดเดียวกันให้ task 'analyze' อยู่แล้ว — ส่งชัดที่นี่ให้อ่านออก)
+        //   เดิมไม่ส่ง = ได้ system สายเขียน ~5,958 ตัวอักษร · ถอยกลับ: SYSTEM_PROMPT_SLIM=0 = args เดิมทุกไบต์
         const smartResult = await withTimeoutSignal(
-          (requestSignal) => callSmartAI('analyze', { prompt: researchPrompt, temperature: 0.5, maxTokens: 6000, signal: requestSignal }),
+          (requestSignal) => callSmartAI('analyze', { prompt: researchPrompt, temperature: 0.5, maxTokens: 6000, signal: requestSignal, ...slimSystem(RESEARCH_SYSTEM_PROMPT) }),
           120000, 'research_inner', signal
         );
         result = smartResult.result;
@@ -2311,7 +2338,7 @@ ${_timelineFlowGuidance}
         rethrowPipelineDeadline(err, 'research_inner');
         console.warn(`[Research-Service] SmartAI failed: ${err.message}, fallback ${MODEL_NEWS_ANALYSIS}`);
         result = await withTimeoutSignal(
-          (requestSignal) => callAI({ prompt: researchPrompt, temperature: 0.5, maxTokens: 6000, signal: requestSignal, sanitizeScope: 'facts' }), // ★ 24 ก.ย. 69 (S1): ข้อเท็จจริงรีเสิร์ช (callSmartAI('analyze') ได้ 'facts' จาก router อยู่แล้ว)
+          (requestSignal) => callAI({ prompt: researchPrompt, temperature: 0.5, maxTokens: 6000, signal: requestSignal, sanitizeScope: 'facts', ...slimSystem(RESEARCH_SYSTEM_PROMPT) }), // ★ 24 ก.ย. 69 (S1): ข้อเท็จจริงรีเสิร์ช (callSmartAI('analyze') ได้ 'facts' จาก router อยู่แล้ว) · S8: system สั้นชุดเดียวกับเส้น router
           60000, 'research_fallback', signal
         );
         usedModel = (result && result._modelUsed) || MODEL_NEWS_ANALYSIS; // ★ B1: log โมเดลจริง ไม่ hardcode
@@ -2622,7 +2649,7 @@ ${keyPoints}
     const prompt = extractionPrompt.prompt
       .replace('{content}', text || '')
       .replace('{custom_instruction}', customPrompt ? `คำสั่งเพิ่มเติม: "${customPrompt}"` : '');
-    const result = await callAI({ prompt, temperature: 0.2, sanitizeScope: 'facts' }); // ★ 24 ก.ย. 69 (S1): ขั้นสกัด (legacy) = ข้อเท็จจริง
+    const result = await callAI({ prompt, temperature: 0.2, sanitizeScope: 'facts', ...slimSystem(EXTRACT_SYSTEM_PROMPT) }); // ★ 24 ก.ย. 69 (S1): ขั้นสกัด (legacy) = ข้อเท็จจริง · S8: system กฎสกัดชุดเดียวกับ chain สกัด (ถอย SYSTEM_PROMPT_SLIM=0)
     if (result?.news_body && result.news_body.length >= 20) newsData = result;
   } catch (err) { console.error('[Legacy-S1] ERROR:', err.message); }
 
@@ -2720,6 +2747,7 @@ ${focusAngle ? '\n=== มุมมองที่ต้องการเน้�
         maxTokens: 800,
         prompt: analyzerPrompt,
         sanitizeScope: 'facts', // ★ 24 ก.ย. 69 (S1): metadata วิเคราะห์ข่าว ไม่ใช่ข้อความโพสต์
+        ...slimSystem(NEWS_DNA_SYSTEM_PROMPT), // ★ 24 ก.ย. 69 (S8 — OV-04): system สั้นงานวิเคราะห์ DNA — เดิมไม่ส่ง = ได้ system สายเขียน ~5,958 ตัวอักษร (ถอย SYSTEM_PROMPT_SLIM=0)
       });
       
       newsTypeDetected = newsAnalysis?.primaryCategory || '';
@@ -3002,6 +3030,7 @@ ${_aiCands.join('\n')}
             model: _pickerModelB, // gpt-5.6-luna
             temperature: 0.1, // สาย 5.x ถูกตัดทิ้งอัตโนมัติใน callAI
             maxTokens: 2000, // ★ Opus P2-E: ผู้เข้ารอบ 8→16 ใบ อินพุตเบิ้ล — ขยายเพดานตาม (เดิม 1200 เสี่ยงตอบว่าง)
+            ...slimSystem(CARD_PICKER_SYSTEM_PROMPT), // ★ 24 ก.ย. 69 (S8 — OV-04): system สั้นชุดเดียวกับสาย claude ข้างบน — เดิมสาย luna ไม่ส่ง = ได้ system สายเขียน ~5,958 ตัวอักษร (ถอย SYSTEM_PROMPT_SLIM=0)
             signal: _pickCtl.signal,
           });
         }

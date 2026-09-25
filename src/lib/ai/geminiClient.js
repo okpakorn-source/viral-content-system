@@ -98,7 +98,10 @@ export function buildGeminiVideoModelCandidates(model, allowModelFallback = true
 //   'post'/ไม่ส่ง = ข้อความโพสต์ ผ่านตัวกรองขอบคำ) — เฉพาะ callGemini(text) · สายวิดีโอ/vision ด้านล่างไม่แตะ
 //   SANITIZE_LEGACY=1 = ตัวกรองเดิมทุก call ไม่สนค่านี้ (ดู safetyFilter.js)
 //   ของเดิม: export async function callGemini({ prompt, model = ..., temperature = 0.3, maxTokens = 4000, signal }) {
-export async function callGemini({ prompt, model = process.env.GEMINI_TEXT_MODEL || 'gemini-3.6-flash', temperature = 0.3, maxTokens = 4000, signal, sanitizeScope }) {
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S8 · เจ้าของอนุมัติ) — MC-16: + systemPrompt (ไม่ส่ง = systemInstruction ฝังเดิมทุกไบต์ · ส่ง = ใช้แทนทั้งก้อน)
+//   ให้ตัวสำรองใน chain สกัดได้ system ชุดเดียวกับ claude-extract — aiRouter ส่งมาเฉพาะเมื่อ SYSTEM_PROMPT_SLIM เปิด (ค่าเริ่มต้น) · เฉพาะ callGemini(text) สายวิดีโอ/vision ไม่แตะ
+//   ของเดิม (S1): export async function callGemini({ prompt, model = ..., temperature = 0.3, maxTokens = 4000, signal, sanitizeScope }) {
+export async function callGemini({ prompt, model = process.env.GEMINI_TEXT_MODEL || 'gemini-3.6-flash', temperature = 0.3, maxTokens = 4000, signal, sanitizeScope, systemPrompt }) {
   const client = getGeminiClient();
   if (!client) throw new Error('GEMINI_API_KEY ไม่ได้ตั้งค่า — ไปตั้งค่าที่ Settings');
 
@@ -115,7 +118,8 @@ ${prompt}
       maxOutputTokens: maxTokens,
       responseMimeType: 'application/json',
     },
-    systemInstruction: `คุณเป็น AI assistant ที่ต้องตอบเป็น JSON เท่านั้น
+    // ★ 24 ก.ย. 69 (S8 — MC-16): systemPrompt จาก caller ชนะ · ไม่ส่ง = ก้อนฝังเดิมทุกไบต์ (ของเดิม: systemInstruction: `คุณเป็น AI assistant …`)
+    systemInstruction: systemPrompt || `คุณเป็น AI assistant ที่ต้องตอบเป็น JSON เท่านั้น
 ใช้ข้อมูลจากเนื้อข่าวที่ให้มาเท่านั้น ห้ามแต่งเรื่องเพิ่ม
 
 === FACEBOOK SAFETY RULES ===

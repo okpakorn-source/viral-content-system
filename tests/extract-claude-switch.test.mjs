@@ -11,6 +11,8 @@
 // รอบแก้ 1 (9 ก.ย. 69 · finding M1/M2/L1 ผู้ตรวจอิสระ) เพิ่ม 2 โหมด:
 //   EXTRACT_SWITCH_TEST_MUTATION=no-extract-system   ถอด systemPrompt เฉพาะขั้นสกัด (กลับไปได้ system สายเขียน)
 //   EXTRACT_SWITCH_TEST_MUTATION=no-extract-effort   ถอด effort รายนัด (กลับไปผูก CLAUDE_WRITE_EFFORT)
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S8 · เจ้าของอนุมัติ): EXTRACT_CLAUDE_SYSTEM_PROMPT ย้ายไป src/lib/ai/taskSystemPrompts.js ชื่อ EXTRACT_SYSTEM_PROMPT (MC-16 — ตัวสำรอง gemini/gpt ได้ชุดเดียวกัน
+//   ข้อสอบ tests/system-prompt-slim-ov04.test.mjs) · สตริง mutation ตามชื่อใหม่ · no-extract-system ถอดค่าเริ่มต้นระดับ router ด้วย (ไม่งั้น claude ยังได้ system จาก router → ข้อ 7 ไม่แดง)
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
@@ -73,14 +75,17 @@ if (MUTATION === 'no-env-guard') {
     'mutation order-swap');
 } else if (MUTATION === 'leak-length-policy') {
   routerSource = mustReplace(routerSource,
-    'prompt, temperature, maxTokens, signal,\n        systemPrompt: systemPrompt || EXTRACT_CLAUDE_SYSTEM_PROMPT,',
-    'prompt, temperature, maxTokens, signal, textNewsLengthPolicy,\n        systemPrompt: systemPrompt || EXTRACT_CLAUDE_SYSTEM_PROMPT,',
+    'prompt, temperature, maxTokens, signal,\n        systemPrompt: systemPrompt || EXTRACT_SYSTEM_PROMPT,',
+    'prompt, temperature, maxTokens, signal, textNewsLengthPolicy,\n        systemPrompt: systemPrompt || EXTRACT_SYSTEM_PROMPT,',
     'mutation leak-length-policy');
 } else if (MUTATION === 'no-extract-system') {
   // รอบแก้ 1 (M1): ถอด systemPrompt เฉพาะขั้นสกัด — กลับไปส่งค่าจาก caller (undefined = system สายเขียน)
   routerSource = mustReplace(routerSource,
-    'systemPrompt: systemPrompt || EXTRACT_CLAUDE_SYSTEM_PROMPT,',
+    'systemPrompt: systemPrompt || EXTRACT_SYSTEM_PROMPT,',
     'systemPrompt,', 'mutation no-extract-system');
+  routerSource = mustReplace(routerSource, // ★ S8: router แทรกชุดสกัดให้ทุกโมเดลตั้งแต่ callSmartAI — ถอดด้วยจึงจะกลับไป "ไม่มี system สกัด" จริง
+    'const systemPrompt = taskSystemPrompt(task, systemPromptOpt);',
+    'const systemPrompt = systemPromptOpt;', 'mutation no-extract-system (router default)');
 } else if (MUTATION === 'no-extract-effort') {
   // รอบแก้ 1 (M2): ถอด effort รายนัด — กลับไปผูก CLAUDE_WRITE_EFFORT ของสายเขียน
   routerSource = mustReplace(routerSource,

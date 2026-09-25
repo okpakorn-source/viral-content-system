@@ -10,6 +10,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S7 · เจ้าของอนุมัติ): ด่านเรียก AI ผ่าน correctionAiCall/correctionAiExtras (./correctionAiGuard.js) — ฉีดของจริงเข้า new Function
+//   (ไม่ฉีด = ReferenceError ถูก try/catch ในด่านกลืนเป็น fail-open แล้วข้อ "เปิดคืนได้" แดง) · ค่าเริ่มต้น = เพดาน 60s (mock ตอบทันที ไม่มีผล)
+import { correctionAiCall, correctionAiExtras } from '../src/lib/correction/correctionAiGuard.js';
 
 const sourceCode = readFileSync(new URL('../src/lib/correction/fabricationGate.js', import.meta.url), 'utf8');
 const runtimeStart = sourceCode.indexOf('const GATE_CHECK_SYS');
@@ -31,9 +34,9 @@ function makeGate() {
   };
   const callClaude = async () => { calls.claude++; return { content: fixedContent }; };
   const fabricationGate = new Function(
-    'callAI', 'callClaude', 'isClaudeAvailable', 'MODEL_FAST_CHEAP',
+    'callAI', 'callClaude', 'isClaudeAvailable', 'MODEL_FAST_CHEAP', 'correctionAiCall', 'correctionAiExtras', // ★ S7
     `${runtimeSource}\nreturn fabricationGate;`,
-  )(callAI, callClaude, () => true, 'test-model');
+  )(callAI, callClaude, () => true, 'test-model', correctionAiCall, correctionAiExtras);
   return { fabricationGate, calls };
 }
 

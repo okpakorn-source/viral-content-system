@@ -16,6 +16,7 @@ import { callGemini, isGeminiAvailable } from './geminiClient.js';
 import { MODEL_PRIMARY } from './modelConfig.js';
 import { rethrowPipelineDeadline } from '../utils/pipelineDeadline.js';
 import { withTimeoutSignal } from '../utils/withTimeout.js';
+import { EXTRACT_SYSTEM_PROMPT, taskSystemPrompt, slimSystem } from './taskSystemPrompts.js'; // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S8 · เจ้าของอนุมัติ) — OV-04/MC-16: system สั้นเฉพาะงาน + ชุดสกัดเดียวกันทุกโมเดลใน chain (ถอย SYSTEM_PROMPT_SLIM=0)
 
 // ★ 23 ก.ย. 69 (เจ้าของสั่ง): เพดานเวลาต่อไม้ของนักเขียน — opus 90s→150s · fable 75s→90s · sol คง 90s (ของเดิม: opus 90s · fable 75s · sol 90s)
 //   ผลวัดจริง 23 ก.ย. 19:10 (คีย์ production · พรอมต์เขียน 17k โทเคน · 2 เวอร์ชัน): opus-5-5 medium 34.5/39.7 วิ (TTFB 17–21 วิ)
@@ -36,32 +37,9 @@ const WRITER_ATTEMPT_TIMEOUT_MS = Object.freeze({
 //   ก้อนนี้ = บทบาทผู้สกัด + กฎเหล็ก 1-4 ยกข้อความตรงจาก claudeClient.js (ไม่เขียนกฎใหม่ ไม่ใส่กฎสายเขียน/wordlist)
 //   หมายเหตุ: กฎ 1-4 ของ claudeClient ไม่มีข้อ "ห้ามเดาเพศ" ตรงตัว — ยกข้อความมาตามจริง ไม่แต่งกฎเพิ่ม
 //   (กฎห้ามทึกทักเพศจากชื่อของระบบอยู่ในพรอมต์สายเขียน promptStoreText.js · ขั้นสกัดคุมด้วยกฎ 2 "ห้ามเดา ห้ามแก้" อยู่แล้ว)
-const EXTRACT_CLAUDE_SYSTEM_PROMPT = `คุณเป็น AI ผู้สกัดข้อเท็จจริงจากเนื้อข่าว
-ตอบเป็น JSON เท่านั้น ใช้ key names ตามที่ระบุใน prompt
-
-=== กฎเหล็ก DNA ระบบ (IRON RULES — บังคับทุกคำสั่ง ทุกโหมด ห้ามฝ่าฝืน) ===
-
-[กฎที่ 1: ห้ามทำนอก Flow]
-- ทำเฉพาะสิ่งที่คำสั่งสั่งเท่านั้น ห้ามคิดเอง ห้ามเพิ่มขั้นตอน ห้ามข้ามขั้นตอน
-- ถ้าคำสั่งบอกให้ "สกัดข่าว" → ทำแค่สกัดข่าว ห้ามวิเคราะห์เพิ่ม
-- ถ้าคำสั่งบอกให้ "แตกประเด็น" → ทำแค่แตกประเด็น ห้ามเขียนเนื้อหา
-
-[กฎที่ 2: ห้ามแต่งเรื่อง]
-- ใช้ข้อมูลจากเนื้อข่าวที่ให้มาเท่านั้น ห้ามเพิ่มข้อมูลจากความรู้ของตัวเอง
-- ชื่อคน สถานที่ ตัวเลข วันที่ → ต้องตรงกับข่าวต้นฉบับ 100% ห้ามเดา ห้ามแก้
-- ถ้าข่าวไม่ได้ระบุข้อมูลบางอย่าง → ห้ามสร้างขึ้นมาเอง ให้ข้ามไป
-- สถานะบุคคล "ยังมีชีวิต/เสียชีวิตแล้ว" ต้องตรงต้นฉบับ 100% และต้องบอกให้ชัดในเนื้อหา — ถ้าต้นฉบับบอกว่าใครเสียชีวิตแล้ว ห้ามเล่าฉากอดีตของคนนั้นแบบละคำบอกการจากไป จนคนอ่านเข้าใจว่ายังมีชีวิตอยู่ (นี่คือการบิดเบือนร้ายแรงที่สุด ห้ามเกิดเด็ดขาด แม้พร้อมท์จะสั่งโทนอบอุ่น/ห้ามเศร้าก็ตาม — ความจริงมาก่อนโทนเสมอ)
-
-[กฎที่ 3: ติดขัดต้องแจ้ง ห้ามแก้เอง]
-- ถ้าข้อมูลไม่เพียงพอ → ใส่ "_error": "ข้อมูลไม่เพียงพอ: [รายละเอียด]" ใน JSON
-- ถ้าเนื้อข่าวไม่ชัด → ใส่ "_warning": "เนื้อข่าวคลุมเครือ: [จุดที่ไม่ชัด]"
-- ห้ามเดาหรือสร้างข้อมูลขึ้นมาเพื่อ "แก้ปัญหา" ให้แจ้งปัญหาแทน
-
-[กฎที่ 4: JSON เท่านั้น]
-- ตอบเป็น JSON เท่านั้น ใช้ key names ตามที่ระบุใน prompt
-- ถ้า prompt มีเนื้อข่าวอยู่ระหว่าง === เนื้อข่าว === ให้ใช้ข้อมูลจากส่วนนั้นเท่านั้น
-
-=== จบกฎเหล็ก DNA ===`;
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S8 · เจ้าของอนุมัติ) — MC-16: ข้อความก้อนนี้ย้ายไป ./taskSystemPrompts.js ในชื่อ EXTRACT_SYSTEM_PROMPT (ข้อความเดิมทุกไบต์ —
+//   ข้อสอบ tests/system-prompt-slim-ov04.test.mjs ล็อกความเท่ากับกฎเหล็ก 1–4 ของ claudeClient.js) เพราะตัวสำรอง gemini/gpt ใน chain สกัดต้องได้ system ชุดเดียวกับ claude-extract
+//   (ของเดิม: const EXTRACT_CLAUDE_SYSTEM_PROMPT = `คุณเป็น AI ผู้สกัดข้อเท็จจริงจากเนื้อข่าว … === จบกฎเหล็ก DNA ===`; — 26 บรรทัด · เนื้อหาเดียวกับ correctionAiGuard.js IRON_RULES_1_TO_4)
 
 // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S1 · เจ้าของอนุมัติ) — MC-01/PL-02: ขอบเขตตัวกรองคำเสี่ยง (safetyFilter.sanitizeOutput)
 //   ผล "ข้อเท็จจริง" (สกัด/แตกประเด็น/รีเสิร์ช) ห้ามผ่านตัวกรอง — ตัวกรองเคยพลิกข้อเท็จจริงตั้งแต่ขั้นสกัด (ผูกคอแต่ช่วยทัน→เสียชีวิต)
@@ -87,7 +65,12 @@ function runWriterAttempt(factory, timeoutMs, step, parentSignal) {
  * @param {object} options - { prompt, temperature, maxTokens, systemPrompt, textNewsLengthPolicy }
  */
 export async function callSmartAI(task, options) {
-  const { prompt, temperature, maxTokens, systemPrompt, signal, textNewsLengthPolicy = false, sanitizeScope: sanitizeScopeOpt } = options;
+  // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S8 · เจ้าของอนุมัติ) — OV-04/MC-16: system สั้นเฉพาะงานระดับ router — caller ส่งมาเองชนะ ·
+  //   extract/breakdown/analyze ไม่ส่ง = ค่าเริ่มต้นจากตาราง TASK_SYSTEM_PROMPT (extract → EXTRACT_SYSTEM_PROMPT ชุดเดียวกับ claude-extract ให้ gemini/gpt ตัวสำรองด้วย = MC-16)
+  //   · 'write' ไม่แทรกเด็ดขาด (system นักเขียนเดิมทุกไบต์) · SYSTEM_PROMPT_SLIM=0 = ส่งต่อค่าจาก caller เท่านั้นเหมือนเดิม
+  //   (ของเดิม: const { prompt, temperature, maxTokens, systemPrompt, signal, textNewsLengthPolicy = false, sanitizeScope: sanitizeScopeOpt } = options;)
+  const { prompt, temperature, maxTokens, systemPrompt: systemPromptOpt, signal, textNewsLengthPolicy = false, sanitizeScope: sanitizeScopeOpt } = options;
+  const systemPrompt = taskSystemPrompt(task, systemPromptOpt);
   // สิทธิ์พื้น 146/no-cap เป็นของนักเขียนข่าว TEXT เท่านั้น
   // ต่อให้ caller งานอื่นส่ง true ผิดมา Router ต้องตัดทิ้ง ไม่ให้รั่วเข้า Breakdown/การ์ด/Blueprint/QC
   const useTextNewsLengthPolicy = task === 'write' && textNewsLengthPolicy === true;
@@ -249,14 +232,14 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
     //   callClaude โยน error เองเมื่อ refusal/เนื้อว่าง/JSON พัง → ตกไป gemini ตามกลไก chain เดิม
     //   ผลว่างแบบไม่ throw (เช่น JSON null) → บังคับโยนที่นี่ กันคืนค่าว่างเป็น "สำเร็จ" แล้วตัดโอกาสตัวสำรอง
     //   รอบแก้ 1 (9 ก.ย. 69 · finding M1/M2/L1 ผู้ตรวจอิสระ — เจ้าของอนุมัติ):
-    //   - systemPrompt: กฎสกัดล้วน EXTRACT_CLAUDE_SYSTEM_PROMPT — caller ที่ส่ง systemPrompt เองมายังชนะได้ตามเดิม
+    //   - systemPrompt: กฎสกัดล้วน EXTRACT_CLAUDE_SYSTEM_PROMPT — caller ที่ส่ง systemPrompt เองมายังชนะได้ตามเดิม (★ 24 ก.ย. 69 S8: ปัจจุบันชื่อ EXTRACT_SYSTEM_PROMPT ใน ./taskSystemPrompts.js — router ส่งชุดเดียวกันให้ gemini/gpt ตัวสำรองด้วย)
     //     (สาย extract จริงไม่เคยส่ง → เดิม undefined = ได้ system สายเขียนของ claudeClient ทั้งก้อน)
     //   - effort: EXTRACT_CLAUDE_EFFORT (ไม่ตั้ง = medium) — per-call ชนะ env ใน callClaude → ไม่ผูก CLAUDE_WRITE_EFFORT สายเขียน
     //   - maxRetries 0: กัน SDK retry ซ้อนกินงบ stage 120s (เพดานรวมมี withTimeoutSignal ชั้นนอกแล้ว) · signal ส่งต่อเดิม
     case 'claude-extract': {
       const out = await callClaude({
         prompt, temperature, maxTokens, signal,
-        systemPrompt: systemPrompt || EXTRACT_CLAUDE_SYSTEM_PROMPT,
+        systemPrompt: systemPrompt || EXTRACT_SYSTEM_PROMPT, // ★ 24 ก.ย. 69 (S8 — MC-16): ชื่อเดิม EXTRACT_CLAUDE_SYSTEM_PROMPT · โหมดถอย router ส่ง undefined มา = ยังได้ชุดสกัดตามรอบแก้ M1 เหมือนเดิม
         effort: process.env.EXTRACT_CLAUDE_EFFORT || 'medium',
         maxRetries: 0,
         // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 · ถอยกลับ: EXTRACT_CLAUDE_MODEL=claude-opus-4-8
@@ -268,10 +251,14 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
     }
     case 'gemini':
       // callGemini มี timeout 15s ในตัว — ไม่ต้องส่ง signal
-      return callGemini({ prompt, temperature, maxTokens, signal, sanitizeScope });
+      // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S8 · เจ้าของอนุมัติ) — MC-16: ส่ง system สั้นเฉพาะงานให้ gemini ด้วย (callGemini รับ systemPrompt แล้ว · ไม่ส่ง = systemInstruction ฝังเดิม)
+      //   โหมดถอย SYSTEM_PROMPT_SLIM=0: slimSystem คืน {} = args เดิมทุกไบต์ (ของเดิม: return callGemini({ prompt, temperature, maxTokens, signal, sanitizeScope });)
+      return callGemini({ prompt, temperature, maxTokens, signal, sanitizeScope, ...slimSystem(systemPrompt) });
     case 'gpt4o':
     default:
-      return callAI({ prompt, temperature, maxTokens, model: MODEL_PRIMARY, signal, textNewsLengthPolicy, sanitizeScope });
+      // ★ 24 ก.ย. 69 (S8 — OV-04/MC-16): ส่ง system สั้นเฉพาะงานให้ gpt ด้วย (เดิมทิ้ง systemPrompt = ได้ system สายเขียนของ openai.js ทั้งก้อน แม้ caller ส่งมา)
+      //   โหมดถอย SYSTEM_PROMPT_SLIM=0: slimSystem คืน {} = args เดิมทุกไบต์ (ของเดิม: return callAI({ prompt, temperature, maxTokens, model: MODEL_PRIMARY, signal, textNewsLengthPolicy, sanitizeScope });)
+      return callAI({ prompt, temperature, maxTokens, model: MODEL_PRIMARY, signal, textNewsLengthPolicy, sanitizeScope, ...slimSystem(systemPrompt) });
   }
 }
 

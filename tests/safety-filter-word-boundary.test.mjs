@@ -409,6 +409,7 @@ test('W1 summarizeServiceText/summarizeService: breakdown · blueprint · รี
     assert.match(src, /MODEL_BREAKDOWN|breakdown_gpt55_inner/u);
     assert.match(src, /maxTokens: 24000, signal: requestSignal, sanitizeScope: 'facts'|maxTokens: 24000, sanitizeScope: 'facts'/u, `${rel}: breakdown หลักต้องเป็น facts`);
     assert.match(src, /maxTokens: 8000,\n\s+(signal,\n\s+)?sanitizeScope: 'facts'/u, `${rel}: blueprint ต้องเป็น facts`);
-    assert.match(src, /callAI\(\{ prompt, temperature: 0\.2, sanitizeScope: 'facts' \}\)/u, `${rel}: สกัด legacy ต้องเป็น facts`);
+    // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S8 · เจ้าของอนุมัติ): สาย TEXT ต่อท้ายด้วย ...slimSystem(EXTRACT_SYSTEM_PROMPT) (system สั้นขั้นสกัด) · สาย URL ยังเป็นรูปเดิม — regex รับทั้งสองรูป · facts ยังต้องอยู่
+    assert.match(src, /callAI\(\{ prompt, temperature: 0\.2, sanitizeScope: 'facts'(?:, \.\.\.slimSystem\(EXTRACT_SYSTEM_PROMPT\))? \}\)/u, `${rel}: สกัด legacy ต้องเป็น facts`);
   }
 });

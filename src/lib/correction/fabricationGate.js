@@ -27,6 +27,12 @@
 import { callAI } from '@/lib/ai/openai';
 import { callClaude, isClaudeAvailable } from '@/lib/ai/claudeClient';
 import { MODEL_FAST_CHEAP } from '@/lib/ai/modelConfig';
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S7 · เจ้าของอนุมัติ) — PL-11: 3 การเรียก AI ของด่านนี้ไม่มีเพดานเวลาต่อครั้ง/ไม่ส่ง signal (ด่านปิดเป็นค่าตั้งต้น
+//   แต่เปิดคืนได้ด้วย FAB_GATE=1) → ครอบ correctionAiCall (CORRECTION_AI_TIMEOUT_MS ค่าเริ่มต้น 60s · signal) หมดเวลา = catch เดิม fail-open ปล่อยเนื้อเดิม
+//   system prompt ของด่านนี้สั้นอยู่แล้ว (GATE_*_SYS) ไม่แตะ · ถอย CORRECTION_AI_TIMEOUT_MS=0 = การเรียกเดิมทุกไบต์ (ดู ./correctionAiGuard.js)
+//   ⚠️ tests/fab-gate-off + fabrication-gate-fail-open ตัดซอร์สจากบรรทัดประกาศ GATE_CHECK_SYS ด้านล่าง (indexOf) โยนเข้า new Function → ฉีด correctionAiCall/correctionAiExtras
+//      เป็นพารามิเตอร์ด้วย · ห้ามพิมพ์คำว่า const ติดกับชื่อตัวแปรนั้นในคอมเมนต์เหนือบรรทัดประกาศ (indexOf จะเจอคอมเมนต์ก่อน = ซอร์สที่ตัดได้พัง)
+import { correctionAiCall, correctionAiExtras } from './correctionAiGuard.js';
 
 // system prompt สั้น — กัน callClaude/callAI ยัดกฎเขียนข่าวก้อนใหญ่ที่ไม่เกี่ยวกับงานตรวจ (บทเรียน Opus NOTE-6)
 const GATE_CHECK_SYS = 'คุณคือผู้ตรวจข้อเท็จจริงของกองบรรณาธิการ เทียบบทความกับต้นฉบับอย่างเข้มงวด ตอบเป็น JSON เท่านั้น';
@@ -58,10 +64,12 @@ function codeVerifyInSource(source, claim) {
  * @param {string} newsBody - ข่าวต้นฉบับ (ความจริงอ้างอิง)
  * @param {string|null} researchFacts - ★ 14 ส.ค. 69: ข้อเท็จจริงรีเสิร์ชที่ยืนยันแล้ว (ฐานความจริงเสริม —
  *   เดิมด่านเห็นแค่ต้นฉบับ ข้อมูลรีเสิร์ชถูกต้องเลยโดนตัดเป็น "ของเกิน" = ฆ่าการพัฒนาเรื่องแบบยุค 2 เดือน)
+ * @param {{ signal?: AbortSignal }} [options] - ★ S7: signal ของผู้เรียก (runCorrectionPipeline ส่งต่อมา ถ้ามี) — รวมเข้ากับเพดานต่อครั้ง
  * @returns {{ content: string, debug: object }} เนื้อหลังด่าน + บันทึกการตรวจ (fail-open เสมอ)
  */
-export async function fabricationGate(content, newsBody, researchFacts = null) {
+export async function fabricationGate(content, newsBody, researchFacts = null, options = {}) {
   const debug = { checked: false, sus: 0, confirmed: 0, fixed: false };
+  const _gateSignal = options?.signal; // ★ S7
   if (!isFabGateEnabled()) {
     console.log('  [FabGate] ⏭️ ปิดอยู่ตามคำสั่งเจ้าของ (ค่าตั้งต้นในโค้ด=ปิด · เปิดคืนด้วย FAB_GATE=1) — ปล่อยเนื้อเดิมผ่าน');
     // ป้ายเหตุผล: ใช้ 'FAB_GATE_OFF' ไม่ใช่ 'FAB_GATE=0' เดิม
@@ -81,7 +89,8 @@ export async function fabricationGate(content, newsBody, researchFacts = null) {
 
   try {
     // === ขั้น 1: luna ชี้ผู้ต้องสงสัย ===
-    const flagRes = await callAI({
+    // ★ S7: ครอบเพดานต่อครั้ง + signal (ของเดิม: const flagRes = await callAI({ … });)
+    const flagRes = await correctionAiCall('correction:L1.8:flag', (signal) => callAI({
       model: MODEL_FAST_CHEAP,
       temperature: 0.1,
       maxTokens: 3000,
@@ -93,7 +102,8 @@ export async function fabricationGate(content, newsBody, researchFacts = null) {
         'สำนวนแต่ง/ภาพเปรียบ/การเรียบเรียงใหม่จากข้อเท็จจริงเดิม ไม่นับเป็นของเกิน\n' +
         `=== ต้นฉบับ ===\n${source.slice(0, 8000)}\n=== บทความ ===\n${content}\n=== จบ ===\n` +
         'ตอบ JSON: {"fabrications":["ข้อความของเกินที่พบ", ...]} — ไม่พบให้ตอบ {"fabrications":[]}',
-    });
+      ...correctionAiExtras(signal), // ★ S7: { signal } · โหมดถอย = {}
+    }), { signal: _gateSignal });
     debug.checked = true;
     const sus = Array.isArray(flagRes?.fabrications) ? flagRes.fabrications.filter((x) => typeof x === 'string' && x.trim()) : [];
     debug.sus = sus.length;
@@ -106,7 +116,8 @@ export async function fabricationGate(content, newsBody, researchFacts = null) {
     // === ขั้น 3: luna ทวนซ้ำ (ยืนยันชั้นสอง) ===
     let confirmed;
     try {
-      const reRes = await callAI({
+      // ★ S7: ครอบเพดานต่อครั้ง + signal (ของเดิม: const reRes = await callAI({ … });)
+      const reRes = await correctionAiCall('correction:L1.8:confirm', (signal) => callAI({
         model: MODEL_FAST_CHEAP,
         temperature: 0.1,
         maxTokens: 2000,
@@ -115,7 +126,8 @@ export async function fabricationGate(content, newsBody, researchFacts = null) {
           'ทวนอีกครั้งอย่างเข้มงวด: รายการต่อไปนี้ ข้อไหน "มีระบุในต้นฉบับจริง" (รวมการเขียนคนละสำนวนแต่ความหมายเดียวกัน) ให้ตัดออกจากรายการ เหลือเฉพาะของเกินแท้\n' +
           `=== ต้นฉบับ ===\n${source.slice(0, 8000)}\n=== รายการ ===\n${survived.map((f, i) => `${i + 1}. ${f}`).join('\n')}\n` +
           'ตอบ JSON: {"confirmed":["..."]}',
-      });
+        ...correctionAiExtras(signal), // ★ S7: { signal } · โหมดถอย = {}
+      }), { signal: _gateSignal });
       if (!Array.isArray(reRes?.confirmed)) {
         debug.fixSkipped = 'confirmation-invalid-response';
         console.warn('  [FabGate] ทวนซ้ำตอบรูปแบบไม่ถูกต้อง — ปล่อยเนื้อเดิมผ่าน (fail-open)');
@@ -150,7 +162,8 @@ export async function fabricationGate(content, newsBody, researchFacts = null) {
     //   เหตุผลที่เลือก opus-5: เย็บแผลนิ่ง 2/2 · เร็วสุดในกลุ่มที่ทำได้ · ระบบใช้รุ่นนี้อยู่แล้วที่ด่าน L4.6 (ไม่เพิ่มค่ายใหม่)
     //   ต้นทุน +~฿0.85/ครั้ง = +~฿1.7/ข่าว (2 เวอร์ชัน) จากค่าทำข่าวทั้งใบ ~฿46 · จ่ายเฉพาะข่าวที่เจอของเกินจริง
     //   ถอยกลับ: FAB_GATE_FIX_MODEL=claude-opus-4-8
-    const fixRes = await callClaude({
+    // ★ S7: ครอบเพดานต่อครั้ง + signal (ของเดิม: const fixRes = await callClaude({ … });)
+    const fixRes = await correctionAiCall('correction:L1.8:fix', (signal) => callClaude({
       model: (process.env.FAB_GATE_FIX_MODEL || 'claude-opus-5').trim().replace(/^["']|["']$/g, ''),
       maxTokens: 4000,
       systemPrompt: GATE_FIX_SYS,
@@ -159,7 +172,8 @@ export async function fabricationGate(content, newsBody, researchFacts = null) {
         `ของเกิน:\n${confirmed.map((f, i) => `${i + 1}. ${f}`).join('\n')}\n` +
         `=== ต้นฉบับ (ไว้ทวน) ===\n${source.slice(0, 8000)}\n=== บทความ ===\n${content}\n=== จบ ===\n` +
         'ตอบ JSON: {"content":"บทความฉบับแก้"}',
-    });
+      ...correctionAiExtras(signal), // ★ S7: { signal } · โหมดถอย = {}
+    }), { signal: _gateSignal });
     const fixedContent = typeof fixRes?.content === 'string' ? fixRes.content.trim() : '';
     if (!fixedContent || fixedContent.length < 100) {
       debug.fixSkipped = 'empty-fix';

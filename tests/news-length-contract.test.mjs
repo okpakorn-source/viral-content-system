@@ -177,6 +177,8 @@ const callClaude = async (args) => {
     ["import { MODEL_PRIMARY } from './modelConfig.js';", "const MODEL_PRIMARY = 'gpt-5.6-sol';"],
     ["import { rethrowPipelineDeadline } from '../utils/pipelineDeadline.js';", 'const rethrowPipelineDeadline = () => {};'],
     ["import { withTimeoutSignal } from '../utils/withTimeout.js';", 'const withTimeoutSignal = (factory, _ms, _step, parent) => factory(parent || new AbortController().signal);'],
+    // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S8 · เจ้าของอนุมัติ): aiRouter import system สั้นเฉพาะงาน (taskSystemPrompts) — stub ให้ส่งต่อค่าจาก caller (ข้อสอบนี้วัดเฉพาะกฎความยาว · data: URL resolve import สัมพัทธ์ไม่ได้)
+    ["import { EXTRACT_SYSTEM_PROMPT, taskSystemPrompt, slimSystem } from './taskSystemPrompts.js';", "const EXTRACT_SYSTEM_PROMPT = 'EXTRACT_SYSTEM_STUB'; const taskSystemPrompt = (_task, callerSystemPrompt) => callerSystemPrompt; const slimSystem = () => ({});"],
   ];
   for (const [from, to] of replacements) {
     assert.ok(transformed.includes(from), `router test หา import ไม่เจอ: ${from}`);

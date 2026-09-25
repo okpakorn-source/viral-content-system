@@ -30,6 +30,7 @@ import { isLegacyLengthOn, NEW_LENGTH_CFG } from '@/lib/ai/legacyLengthRules';
 // ★ 19 ส.ค. 69 รอบ 3 (ANGLE_CLOSING_SPLIT): กติกาจับคู่แผนจบ+เงื่อนไขทุบท้าย อยู่ที่เดียวใน narrativePayloadText
 //   (ปลายทาง dependency — ไม่เกิด circular import) เพื่อให้ log ฝั่งนี้ตรงกับที่ฝั่งเขียนใช้จริงเสมอ
 import { assignAngleClosings, closingTailMatches } from '@/lib/input-engine/narrativePayloadText';
+import { breakdownRawSourceArgs } from '@/lib/ai/factSourcePolicy'; // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S9 · เจ้าของอนุมัติ) — PL-23: ส่ง RAW จริง (ข้อความที่ผู้ใช้วาง) เข้าขั้นแตกประเด็นเป็นแหล่งความจริงหลัก · ถอย NARRATIVE_LEGACY=1 = args เดิมทุกไบต์
 import { isCardAuthorityR6Enabled } from '@/lib/ai/cardAuthority'; // 🎛️ สวิตช์ปลดหาง "ห้ามขึ้นต้นด้วยวันที่" (19 ส.ค. 69) — ห้ามอ่าน env CARD_AUTH* เอง ต้อง import จากไฟล์กลางเท่านั้น
 import {
   getActivePipelineDeadline,
@@ -267,6 +268,9 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     workflowId: _autoWorkflowId,
     user: _user,
     signal: stageSignal,
+    // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S9 · เจ้าของอนุมัติ) — PL-23: แตกประเด็นเคยเห็นแต่เนื้อที่ AI สกัด (text ด้านบน) แต่พรอมต์เรียกมันว่า RAW
+    //   → ส่งข้อความดิบที่ผู้ใช้วาง (writerRawSourceText ชุดเดียวกับนักเขียน/ด่าน) ไปด้วย · สาย URL/คลิป = ไม่มี = {} · ถอย NARRATIVE_LEGACY=1 = {} = args เดิมทุกไบต์
+    ...breakdownRawSourceArgs(writerRawSourceText),
   }), 300000, 'breakdown'); // ★ 300s (10 ก.ค. 69) = inner gpt-5.5 200s + fallback gpt-4o 60s + เผื่อ 40s — ห้ามต่ำกว่าผลรวมชั้นใน ไม่งั้น job ตายทั้งงานทั้งที่ fallback กำลังจะรอด
 
   if (!breakRes.success || !breakRes.data) {
@@ -275,6 +279,11 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   const breakdownData = breakRes.data;
   rlog.inject('breakdownData', `${breakdownData.key_points?.length||0} key_points | ${breakdownData.possible_angles?.length||0} angles | core: "${(breakdownData.core_story||'').slice(0,40)}"`);
   addLog('Step3', `✅ ${breakdownData.key_points?.length || 0} ประเด็น, ${breakdownData.possible_angles?.length || 0} มุมข่าว (${((Date.now() - step3Start) / 1000).toFixed(1)}s)`);
+  // ★ 24 ก.ย. 69 (S9 — PL-23): บอกพนักงานว่าแตกประเด็นยึด RAW จริง (มีเฉพาะค่าเริ่มต้น + สายข้อความ · โหมดถอย/สาย URL ไม่มีบรรทัดนี้)
+  if (breakRes.debug?.rawSource?.attached) {
+    const _rs = breakRes.debug.rawSource;
+    addLog('Step3', `📎 แตกประเด็นยึดข้อความดิบ ${_rs.shownChars}/${_rs.totalChars} ตัวอักษรเป็นแหล่งความจริงหลัก${_rs.truncated ? ` (ตัดท้าย ${_rs.cutChars} เกินเพดาน 12k — ส่วนที่เหลืออ่านจากเนื้อที่สกัดแล้ว)` : ''} · เนื้อที่สกัดแล้วเป็นตัวช่วยอ่าน`);
+  }
   await logPipeline({ workflowId: _autoWorkflowId, step: 'breakdown', status: 'success', duration: Date.now() - step3Start, detail: (breakdownData.key_points?.length || 0) + ' key points' }).catch(() => {});
 
   // ===================================================================
@@ -883,6 +892,19 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         repairedVersions: factOutcome.repairedIndexes.map(index => index + 1),
         quarantinedVersions: failingIndexes.map(index => index + 1),
         diagnostics: [...issueDiagnostics, ...missingDiagnostics],
+        // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S6 · เจ้าของอนุมัติ) — PL-06/OV-13: สรุปด่านคำเสี่ยงหลัง Sol editor (rawFactCompletenessGate → editorPostSanitize.js)
+        //   มีเฉพาะเมื่อ EDITOR_POST_SANITIZE เปิด (ค่าเริ่มต้น) และ editor ได้ทำงาน · สวิตช์ปิด = ไม่มีคีย์นี้ = รูปสรุปเดิมทุกคีย์ · เก็บเฉพาะตัวนับ/คำที่แทน ไม่เก็บเนื้อ
+        ...(Array.isArray(factOutcome.editorPostSanitize) ? {
+          editorPostSanitize: factOutcome.editorPostSanitize.map(item => ({
+            version: item.versionIndex + 1,
+            changed: item.changed === true,
+            sanitizeChanged: item.sanitizeChanged === true,
+            newRiskWords: (item.newRiskWords || []).slice(0, 8),
+            replaced: item.replaced || 0,
+            skippedEmpty: (item.skippedEmpty || []).slice(0, 5),
+            remaining: item.remaining || 0,
+          })),
+        } : {}),
       };
       if (factOutcome.passingVersions.length === 0) {
         const reviewDiagnostic = {
@@ -912,6 +934,28 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         addLog('FactGate', `🛠️ Sol แก้ content แบบก้อนเดียว ${factOutcome.repairedIndexes.map(index => `V${index + 1}`).join(', ')} และตรวจ RAW ซ้ำผ่าน`);
       } else {
         addLog('FactGate', '✅ Sol ตรวจเนื้อโพสต์ทุกย่อหน้ากับ RAW เต็มผ่านทุกฉบับ');
+      }
+      // ★ 24 ก.ย. 69 (S6): ผลด่านคำเสี่ยงหลัง Sol editor ลง log งานให้พนักงานเห็น (มีเฉพาะค่าเริ่มต้น + editor ได้ทำงาน · ไว้วัดความถี่ที่ editor ใส่คำเสี่ยง)
+      if (Array.isArray(factualGateSummary.editorPostSanitize) && factualGateSummary.editorPostSanitize.length > 0) {
+        const touched = factualGateSummary.editorPostSanitize.filter(item => item.changed);
+        const kept = [...new Set(touched.flatMap(item => item.skippedEmpty))];
+        addLog('FactGate', touched.length > 0
+          ? `🧹 ด่านคำเสี่ยงหลัง Sol editor แทนคำใน ${touched.map(item => `V${item.version}`).join(', ')}: ${[...new Set(touched.flatMap(item => item.newRiskWords))].slice(0, 6).join(', ') || 'ตัวกรองขอบคำ'}${kept.length ? ` · คงกฎคำแทนว่าง ${kept.join(', ')}` : ''}`
+          : '🧹 ด่านคำเสี่ยงหลัง Sol editor: ไม่พบคำเสี่ยงใหม่ในฉบับที่แก้');
+        // ★ 24 ก.ย. 69 รอบแก้ 2 (S6): คำเสี่ยงกฎ L3B (ตาย/ดับ/เลือด/ระเบิด/ยาเสพติด/เหล้า…) ที่ด่าน "คงคำไว้" (แทนตรงแล้วเพี้ยน — บทเรียน 16 ก.ค. 69 B2)
+        //   → คำเตือนคุณภาพให้พนักงานเกลาก่อนโพสต์ เฉพาะฉบับที่ผ่านและจะถูกส่งออก · ↩️ ผลแก้ถูกย้อนเท่าฉบับเดิม = ลง log ไว้ให้เห็นเหตุที่ auditor อาจกัก
+        //   (อ่านจากผลด่านตรง factOutcome.editorPostSanitize — สรุป factualGate คงรูปเดิมของ S6 รอบแรก เก็บเฉพาะตัวนับ/คำที่แทน)
+        const gateItems = factOutcome.editorPostSanitize;
+        const flagged = gateItems.filter(item => Array.isArray(item.needsReview) && item.needsReview.length > 0 && !failingIndexes.includes(item.versionIndex));
+        if (flagged.length > 0) {
+          const warning = `Sol editor ใส่คำเสี่ยงที่ต้องเกลาตามบริบทใน ${flagged.map(item => `V${item.versionIndex + 1} (${item.needsReview.slice(0, 8).join(', ')})`).join(' · ')} — ด่านคำเสี่ยงไม่แทนตรง (กฎกลุ่ม ตาย/เลือด/ระเบิด/ยาเสพติด/เหล้า แทนตรงแล้วเพี้ยน) ให้พนักงานเกลาก่อนโพสต์`;
+          pipelineQualityWarnings.push(warning);
+          addLog('FactGate', `⚠️ ${warning}`);
+        }
+        const reverted = gateItems.filter(item => item.revertedToPrior === true);
+        if (reverted.length > 0) {
+          addLog('FactGate', `↩️ ด่านคำเสี่ยงย้อนผลแก้ของ Sol editor กลับเท่าฉบับเดิมใน ${reverted.map(item => `V${item.versionIndex + 1}`).join(', ')} (editor คืนถ้อยคำ RAW ของคำที่ตัวกรองแทนไว้)`);
+        }
       }
 
       if (factOutcome.repairedIndexes.length > 0) {

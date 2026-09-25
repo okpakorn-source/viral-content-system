@@ -40,7 +40,13 @@ import { scrubRollbackContent, isCorrRollbackLegacy } from './rollbackScrub';
  */
 // ★ 14 ส.ค. 69 (เจ้าของสั่ง "คืนการพัฒนาเรื่องแบบยุค 2 เดือน"): researchFacts = ข้อเท็จจริงรีเสิร์ชที่ยืนยันแล้ว
 //   ส่งให้ด่าน L1.8 ใช้เป็นฐานความจริงเพิ่ม — เดิมด่านเห็นแค่ต้นฉบับ ข้อมูลรีเสิร์ชถูกต้องเลยโดนตัดเป็น "ของเกิน"
-export async function runCorrectionPipeline(versions, newsData, breakdownData, researchFacts = null, rawSourceText = null) {
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S7 · เจ้าของอนุมัติ) — PL-11: options.signal = signal ของผู้เรียก ส่งต่อให้ทุกด่านที่เรียก AI (L1.8 · L3 · L4.6)
+//   ตรวจแล้ว: autoFlowServiceText (:794) / autoFlowService (:537) เรียกท่อนี้ตรงๆ ไม่มี stageSignal ให้ส่ง — เส้นตายรวมของ route ถึงทุก call อยู่แล้ว
+//   ผ่าน preparePipelineSignal (AsyncLocalStorage) และ correctionAiCall รวมเข้ากับเพดานต่อครั้ง (./correctionAiGuard.js) · ท่อนี้ไม่ครอบ withTimeoutSignal ทั้งชั้น
+//   โดยตั้งใจ: ครอบทั้งชั้นแล้วเวลาเหลือไม่พอ = PipelineDeadlineError โยนถึง autoFlowServiceText (rethrowPipelineDeadline) = ข่าวล้ม — ขัดกติกา "ห้ามทำให้งานล้ม"
+//   เพดานจึงอยู่ระดับ call ภายในด่าน ให้ catch ของด่านกลืนแบบ fail-open · ไม่ส่ง options = พฤติกรรมเดิม (signal undefined)
+export async function runCorrectionPipeline(versions, newsData, breakdownData, researchFacts = null, rawSourceText = null, options = {}) {
+  const _corrSignal = options?.signal; // ★ S7
   // === Bypass check ===
   if (process.env.SKIP_CORRECTION === 'true') {
     console.log('[CorrectionPipeline] ⏭️ SKIPPED (SKIP_CORRECTION=true)');
@@ -82,7 +88,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData, r
       //   ล้ม/ปิดสวิตช์ = ปล่อยเนื้อเดิมผ่าน (fail-open ภายใน fabricationGate เอง)
       let _fabDebug = null;
       try {
-        const _gate = await fabricationGate(version.content, rawSourceText || newsData?.newsBody, researchFacts);
+        const _gate = await fabricationGate(version.content, rawSourceText || newsData?.newsBody, researchFacts, { signal: _corrSignal }); // ★ S7: + signal
         bbStep(_bb, 'L1.8-ด่านของเกิน', version.content, _gate.content,
           { sus: _gate.debug.sus, confirmed: _gate.debug.confirmed, fixed: _gate.debug.fixed, skipped: _gate.debug.skipped });
         if (_gate.debug.fixed) version = { ...version, content: _gate.content };
@@ -103,7 +109,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData, r
         let cleanContent = version.content;
         let cleanSemanticDebug = { checked: false };
         try {
-          const semResult = await semanticSanityCheck(version.content);
+          const semResult = await semanticSanityCheck(version.content, { signal: _corrSignal }); // ★ S7: + signal
           cleanContent = semResult.sanitizedContent;
           cleanSemanticDebug = {
             checked: true,
@@ -165,7 +171,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData, r
 
 
       // === Layer 3: Safe Correction ===
-      const { correctedContent, rollbackContent, corrections } = await safeCorrect(version.content, audit.issues);
+      const { correctedContent, rollbackContent, corrections } = await safeCorrect(version.content, audit.issues, { signal: _corrSignal }); // ★ S7: + signal
       const actualCorrections = corrections.filter(c => c.type !== 'skipped_low');
       console.log(`  L3 Correct: ${actualCorrections.length} applied`);
       bbStep(_bb, 'L3-แก้คำ', version.content, correctedContent, { corrections: actualCorrections.slice(0, 5).map(c => ({ type: c.type, text: String(c.text || '').slice(0, 60) })) });
@@ -293,7 +299,7 @@ export async function runCorrectionPipeline(versions, newsData, breakdownData, r
       let semanticContent = scrubbedContent;
       let semanticDebug = { checked: false };
       try {
-        const semanticResult = await semanticSanityCheck(scrubbedContent);
+        const semanticResult = await semanticSanityCheck(scrubbedContent, { signal: _corrSignal }); // ★ S7: + signal
         semanticContent = semanticResult.sanitizedContent;
         semanticDebug = {
           checked: true,

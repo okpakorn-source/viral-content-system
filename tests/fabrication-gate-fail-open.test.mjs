@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S7 · เจ้าของอนุมัติ): ด่านเรียก AI ผ่าน correctionAiCall/correctionAiExtras (./correctionAiGuard.js) — ฉีดของจริงเข้า new Function
+//   (ไม่ฉีด = ReferenceError ถูก try/catch ในด่านกลืนเป็น fail-open แล้วข้อ happy path แดง) · ค่าเริ่มต้น = เพดาน 60s (mock ตอบทันที ไม่มีผล)
+import { correctionAiCall, correctionAiExtras } from '../src/lib/correction/correctionAiGuard.js';
 
 // 🔴 16 ส.ค. 69 — ตั้งแต่วันนี้ "ตัวผ่า" ปิดเป็นค่าตั้งต้นในโค้ด (เจ้าของสั่งปิดถาวร)
 //   ข้อสอบชุดนี้ตรวจ "พฤติกรรมภายในด่าน" จึงต้องเปิดด่านก่อน ไม่งั้นด่านข้ามทันทีแล้วทุกข้อจะเจอ undefined
@@ -32,8 +35,10 @@ function makeGate({ confirmation = 'success' } = {}) {
     'callClaude',
     'isClaudeAvailable',
     'MODEL_FAST_CHEAP',
+    'correctionAiCall', // ★ S7
+    'correctionAiExtras', // ★ S7
     `${runtimeSource}\nreturn fabricationGate;`,
-  )(callAI, callClaude, () => true, 'test-model');
+  )(callAI, callClaude, () => true, 'test-model', correctionAiCall, correctionAiExtras);
   return { fabricationGate, calls };
 }
 

@@ -17,6 +17,13 @@ import { keyNumbersOf, hasKeyNumber } from './flagFixerService';
 // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S5 · เจ้าของอนุมัติ) — MC-07/PL-12: findRiskWords = ด่านตรวจผล AI ของ L3A (ผลแก้ห้ามเพิ่มคำเสี่ยง) ดู validateL3aFix ท้ายไฟล์
 import { replaceRiskWordIssue, findRiskWords } from '../ai/safetyFilter.js';
 import { isRiskWordsLegacy } from '../ai/riskWords.js';
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S7 · เจ้าของอนุมัติ) — PL-11: L3B/L3A เรียก AI โดยไม่มีเพดานเวลาต่อครั้ง/ไม่ส่ง signal (L3A ยังเรียกทีละประโยคแบบลำดับ)
+//   → ครอบ correctionAiCall (CORRECTION_AI_TIMEOUT_MS ค่าเริ่มต้น 60s · signal ยกเลิก HTTP จริง) + เบรกเกอร์ L3A ต่อเวอร์ชัน (หมดเวลาครั้งแรก = ประโยคที่เหลือไม่เรียกซ้ำ)
+//   หมดเวลา = เส้น fail-open เดิมของแต่ละด่าน (L3B: แทนคำสั้น+ธง needs_review · L3A: คงประโยคเดิม) · ถอย CORRECTION_AI_TIMEOUT_MS=0 = การเรียกเดิมทุกไบต์ (ดู ./correctionAiGuard.js)
+import { correctionAiCall, correctionAiExtras, isCorrectionAiTimeout } from './correctionAiGuard.js';
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S8 · เจ้าของอนุมัติ) — OV-04: L3B/L3A ส่ง system สั้นเฉพาะงานเกลา (เดิมไม่ส่ง = ได้ system สายเขียน ~5,958 ตัวอักษร ที่สั่ง "อย่างน้อย 180 คำ" ขัดกับ "ห้ามยาวขึ้น"
+//   ของพรอมต์ L3B/L3A + AUTO CLEAN "เขียนใหม่" ทั้งที่งานคือแก้เฉพาะจุด) · slimSystem คืน {} เมื่อ SYSTEM_PROMPT_SLIM=0 = args เดิมทุกไบต์ · fixSentenceWithAILegacy ไม่แตะ
+import { slimSystem, CORRECTION_RISK_REWRITE_SYSTEM_PROMPT, CORRECTION_PHRASE_FIX_SYSTEM_PROMPT } from '../ai/taskSystemPrompts.js';
 
 /**
  * ★ 24 ก.ย. 69 (S2): แทนคำเสี่ยง 1 issue — ค่าเริ่มต้น: ถ้า issue มี ruleId (มาจาก L2 ตารางกลาง) แทนตรงตำแหน่งที่กฎนั้นจับในข้อความปัจจุบัน
@@ -107,12 +114,15 @@ function finalizeWithGuard(rollbackContent, correctedContent, corrections) {
  * แก้ content ตาม issues ที่ audit พบ
  * @param {string} content - เนื้อหาต้นฉบับ
  * @param {Array} issues - จาก auditOutput()
+ * @param {{ signal?: AbortSignal }} [options] - ★ S7: signal ของผู้เรียก (runCorrectionPipeline ส่งต่อมา ถ้ามี) — รวมเข้ากับเพดานต่อครั้งของ L3A/L3B
  * @returns {{ correctedContent: string, rollbackContent: string, corrections: Array }}
  */
-export async function safeCorrect(content, issues) {
+export async function safeCorrect(content, issues, options = {}) {
   const rollbackContent = content; // เก็บต้นฉบับไว้เสมอ
   let correctedContent = content;
   const corrections = [];
+  // ★ S7: สถานะ L3A ต่อเวอร์ชัน — signal ผู้เรียก + เบรกเกอร์ (timedOut=true หลังหมดเวลาครั้งแรก → ประโยคที่เหลือของเวอร์ชันนี้ไม่เรียก AI ซ้ำ)
+  const _l3aRun = { signal: options?.signal, timedOut: false };
 
   try {
     if (!issues || issues.length === 0) {
@@ -188,7 +198,7 @@ export async function safeCorrect(content, issues) {
             const phrasesInSentence = directReplaceIssues
               .filter((i) => i.type === 'ai_wording' && typeof i.text === 'string' && sentenceWithIssue.includes(i.text))
               .map((i) => i.text);
-            const fixedSentence = await fixSentenceWithAI(sentenceWithIssue, issue, phrasesInSentence); // ★ S5 (ของเดิม: fixSentenceWithAI(sentenceWithIssue, issue))
+            const fixedSentence = await fixSentenceWithAI(sentenceWithIssue, issue, phrasesInSentence, _l3aRun); // ★ S5 (ของเดิม: fixSentenceWithAI(sentenceWithIssue, issue)) · ★ S7: + _l3aRun (signal/เบรกเกอร์)
             if (fixedSentence && fixedSentence !== sentenceWithIssue) {
               // ★ S5: replacer function — กัน $& / $' / $` ในผล AI ถูก String.replace ขยาย · โหมด legacy คงบรรทัดเดิมทุกไบต์
               correctedContent = l3aAiFixMode() === 'legacy'
@@ -225,8 +235,9 @@ export async function safeCorrect(content, issues) {
     if (aiRewriteIssues.length > 0) {
       try {
         const riskyWords = aiRewriteIssues.map(i => `"${i.text}" → ควรเปลี่ยนเป็นคำที่ปลอดภัย (suggestion: "${i.suggestion}")`).join('\n');
-        
-        const result = await callAI({
+
+        // ★ 24 ก.ย. 69 (S7): ครอบเพดานต่อครั้ง + signal (ของเดิม: const result = await callAI({ … }); ไม่มี signal/timeout) — หมดเวลา = โยนเข้า catch ด้านล่าง (เส้นเดิม)
+        const result = await correctionAiCall('correction:L3B', (signal) => callAI({
           model: MODEL_FAST,
           temperature: 0.1,
           maxTokens: 8000, // ★ ผู้ตรวจ F#1: L3B คืนทั้งบทความใน JSON — 2000 ตันกับข่าวจริง
@@ -247,7 +258,9 @@ ${correctedContent}
 === จบ ===
 
 ตอบเป็น JSON เท่านั้น: {"content": "เนื้อหาที่แก้แล้วทั้งหมด"} ห้ามอธิบาย ห้ามใส่ข้อความอื่นนอก JSON`,
-        });
+          ...correctionAiExtras(signal), // ★ S7: { signal } · โหมดถอย = {} (S7 ไม่แตะ systemPrompt ของ L3B)
+          ...slimSystem(CORRECTION_RISK_REWRITE_SYSTEM_PROMPT), // ★ 24 ก.ย. 69 (S8 — OV-04): system สั้นงานเกลาคำเสี่ยง (บทบาท + กฎเหล็ก 1–4) · ถอย SYSTEM_PROMPT_SLIM=0 = ไม่ส่ง
+        }), { signal: options?.signal });
 
         // ★ 14 ส.ค. 69 (Sol backlog ข้อ 3 ขั้น 2 — แก้สัญญา L3B): callAI คืน JSON object เสมอ
         //   เดิมเช็ค typeof string = ไม่มีวันผ่าน → ตกไป direct replace ทุกครั้ง (ต้นตอ "Fallback direct replace" เคสจริง)
@@ -469,19 +482,27 @@ export function validateL3aFix(sentence, candidate, phrases) {
  * @param {string} sentence
  * @param {{ text: string }} issue   issue ai_wording ของ L2 (วลีหลัก)
  * @param {string[]} [phrases]       วลี AI ทุกตัวในประโยคเดียวกัน (safeCorrect รวมมาให้ — จ่าย 1 ครั้ง/ประโยค)
+ * @param {{ signal?: AbortSignal, timedOut?: boolean }} [run]  ★ S7: สถานะต่อเวอร์ชันจาก safeCorrect (signal ผู้เรียก + เบรกเกอร์หมดเวลา)
  * @returns {Promise<string|null>}   ประโยคที่แก้แล้ว · null = คงประโยคเดิม
  */
-async function fixSentenceWithAI(sentence, issue, phrases) {
+async function fixSentenceWithAI(sentence, issue, phrases, run = {}) {
   const mode = l3aAiFixMode();
   if (mode === 'off') {
     console.log(`[SafeCorrection] L3A: L3A_AI_FIX=0 — ไม่เรียก AI เกลาวลี "${issue.text}" (คงประโยคเดิม)`);
     return null;
   }
   if (mode === 'legacy') return fixSentenceWithAILegacy(sentence, issue);
+  // ★ 24 ก.ย. 69 (S7 — PL-11 "L3A await ทีละ issue แบบลำดับ"): เบรกเกอร์ต่อเวอร์ชัน — provider ช้า/ค้างจนหมดเวลาครั้งแรกแล้ว ประโยคที่เหลือไม่รอซ้ำอีก N×60s
+  //   (ข้ามด่าน L3A ของเวอร์ชันนี้แบบ fail-open = คงประโยคเดิม ไม่จ่ายเงินเพิ่ม) · โหมดถอยไม่มีเพดาน → timedOut ไม่มีวันเป็น true = พฤติกรรมเดิม
+  if (run.timedOut) {
+    console.warn(`[SafeCorrection] L3A: ข้ามวลี "${issue.text}" — AI หมดเวลาไปแล้วในเวอร์ชันนี้ (เบรกเกอร์ · คงประโยคเดิม)`);
+    return null;
+  }
 
   const list = [...new Set([issue.text, ...(Array.isArray(phrases) ? phrases : [])].filter((p) => typeof p === 'string' && p))];
   try {
-    const result = await callAI({
+    // ★ S7: ครอบเพดานต่อครั้ง + signal (ของเดิม: const result = await callAI({ … }); ไม่มี signal/timeout)
+    const result = await correctionAiCall('correction:L3A', (signal) => callAI({
       model: MODEL_FAST,
       temperature: 0.1,
       maxTokens: L3A_MAX_TOKENS,
@@ -493,7 +514,9 @@ async function fixSentenceWithAI(sentence, issue, phrases) {
 คำที่ฟังเหมือน AI ที่ต้องแก้: ${list.map((p) => `"${p}"`).join(', ')}
 
 ตอบเป็น JSON เท่านั้น: {"sentence": "ประโยคที่แก้แล้ว"} ห้ามอธิบาย ห้ามใส่ข้อความอื่นนอก JSON`,
-    });
+      ...correctionAiExtras(signal), // ★ S7: { signal } · โหมดถอย = {} (S7 ไม่แตะ systemPrompt ของ L3A)
+      ...slimSystem(CORRECTION_PHRASE_FIX_SYSTEM_PROMPT), // ★ 24 ก.ย. 69 (S8 — OV-04): system สั้นงานเกลาวลี (ผลยังผ่าน validateL3aFix ของ S5 เหมือนเดิม) · ถอย SYSTEM_PROMPT_SLIM=0 = ไม่ส่ง
+    }), { signal: run.signal });
 
     const verdict = validateL3aFix(sentence, pickL3aSentence(result), list);
     if (!verdict.ok) {
@@ -503,6 +526,7 @@ async function fixSentenceWithAI(sentence, issue, phrases) {
     console.log(`[SafeCorrection] L3A: เกลาวลี ${list.map((p) => `"${p}"`).join(', ')} สำเร็จ (${sentence.length}→${verdict.fixed.length} ตัวอักษร)`);
     return verdict.fixed;
   } catch (err) {
+    if (isCorrectionAiTimeout(err)) run.timedOut = true; // ★ S7: สะดุดเบรกเกอร์ — ประโยคถัดไปของเวอร์ชันนี้ไม่เรียกซ้ำ
     console.warn(`[SafeCorrection] L3A: AI ล้ม (${err?.message || err}) — คงประโยคเดิม`);
     return null;
   }

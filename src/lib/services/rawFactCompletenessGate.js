@@ -5,6 +5,13 @@ import {
   rethrowPipelineDeadline,
 } from '../utils/pipelineDeadline.js';
 import { getPublishablePostText } from '../utils/publishablePostText.js';
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S6 · เจ้าของอนุมัติ) — PL-06/OV-13: ผล Sol editor เขียนทับ content หลังด่านความปลอดภัยทั้งหมด
+//   และเรียก OpenAI SDK ตรง (ไม่ผ่าน sanitizeOutput ของ callAI) → ด่านคำเสี่ยงหลัง editor "ก่อน final audit" อยู่ที่ ./editorPostSanitize.js
+//   (ขั้น 1 sanitize ขอบคำ S1 ตัวเดียวกับ client · ขั้น 2 audit L2 read-only แล้วแทนคำเสี่ยงใหม่ด้วยกฎเดียวกัน ไม่ทิ้งฉบับ)
+//   + พรอมต์ editor เพิ่มคู่คำแทนจากตารางกลาง · สวิตช์ถอย EDITOR_POST_SANITIZE=0 = พรอมต์และผลเดิมทุกไบต์ (ไม่มีคีย์ editorPostSanitize ในผล)
+//   ★ รอบแก้ 2 (ผู้ตรวจ FAIL รอบแรก): ด่านแทนตรงเฉพาะกฎ L3A (aiRewrite !== true) · กฎ L3B (ตาย/ดับ/เลือด/ระเบิด/ยาบ้า…) คงคำ + needsReview → คำเตือน
+//   · พรอมต์ auditor (รอบแรก+รอบสุดท้าย) เพิ่มบรรทัดคู่ "คำ RAW=คำแทนของระบบ" (auditorEquivalenceLine) กัน auditor ตีตกคำเลี่ยงของตัวกรอง (OV-13 ต้นเหตุ)
+import { isEditorPostSanitizeEnabled, postSanitizeEditedContent, editorSafetyPromptLines, auditorEquivalenceLine } from './editorPostSanitize.js';
 
 /** Emergency rollback only: keep the gate on unless Vercel explicitly sets 0. */
 export function isRawFactCompletenessGateEnabled() {
@@ -179,6 +186,11 @@ function buildAuditPrompt(rawText, blocks, contextHash, versionCount) {
     immutableRaw: rawText,
     finalNewsBlocks: blocks.map(block => ({ id: block.id, text: block.text })),
   });
+  // ★ 24 ก.ย. 69 รอบแก้ 2 (แคมเปญแก้บั๊ก กลุ่ม 1 S6 · เจ้าของอนุมัติ) — OV-13 ต้นเหตุฝั่ง auditor: บรรทัดคู่ "คำ RAW=คำแทนของระบบ" จากตารางกลาง
+  //   ให้ auditor ไม่รายงานคำเลี่ยงของตัวกรอง (ฆาตกรรม→เหตุสูญเสีย · ศพ→ร่างผู้เสียชีวิต · ยิง→ใช้อาวุธปืน) เป็น issue/missingFacts —
+  //   เดิม auditor ตีตก → editor คืนถ้อยคำ RAW → ด่านหลัง editor แทนคืน → รอบสุดท้ายตีตกซ้ำ = กักฉบับทั้งที่ต่างแค่ถ้อยคำ
+  //   ค่าเริ่มต้นเท่านั้น · EDITOR_POST_SANITIZE=0 → '' = พรอมต์ auditor เดิมทุกไบต์
+  const equivalenceLine = isEditorPostSanitizeEnabled() ? auditorEquivalenceLine() : '';
   return `contextHash: ${contextHash}
 
 ข้อมูลตรวจอยู่ใน JSON ก้อนเดียวระหว่าง marker ที่มี nonce เฉพาะคำขอนี้
@@ -189,7 +201,7 @@ ${auditData}
 
 ตรวจทุก block ซึ่งเป็นเนื้อโพสต์จริง เทียบกับ RAW แบบ actor/owner → action → object/type → number/range/unit → time/frequency → chronology → cause/result/modality
 - สำนวนสวยและอุปมาที่ไม่เพิ่มใจความใหม่ให้ผ่าน ห้ามตัดเพียงเพราะเป็นสำนวน
-- รายงานทุกวลีที่เพิ่มเหตุการณ์ ผู้กระทำ เจ้าของ คำพูด เวลา สถานที่ เจตนา ความคิด ความถี่ สัดส่วน จำนวน ผลลัพธ์ ความสำเร็จ ชื่อเสียง ปฏิกิริยาคนอ่าน หรือความแน่นอนที่ RAW ไม่รองรับ
+${equivalenceLine}- รายงานทุกวลีที่เพิ่มเหตุการณ์ ผู้กระทำ เจ้าของ คำพูด เวลา สถานที่ เจตนา ความคิด ความถี่ สัดส่วน จำนวน ผลลัพธ์ ความสำเร็จ ชื่อเสียง ปฏิกิริยาคนอ่าน หรือความแน่นอนที่ RAW ไม่รองรับ
 - original ต้องเป็นวลีสมบูรณ์ที่พบครั้งเดียวใน block และแทนแล้วไม่ทำให้รอยต่อภาษาแตก
 - missingFacts รายงานเฉพาะสาระสำคัญใน RAW ที่ฉบับนั้นทำหายจนเรื่องไม่ครบ โดย rawExcerpt ต้องคัดตรงจาก RAW
 - คืนทุก block ตามลำดับและ missingFacts ครบ ${versionCount} ฉบับ แม้รายการว่าง
@@ -332,6 +344,9 @@ export async function repairRawFactContents({
         .map(({ rawExcerpt, reason }) => ({ rawExcerpt, reason })),
     })),
   });
+  // ★ 24 ก.ย. 69 (S6): บรรทัดคู่คำแทนคำเสี่ยง (ตารางกลาง — ชุดเดียวกับ system prompt ของ client) ให้ editor ไม่คืนถ้อยคำดิบจาก RAW
+  //   ค่าเริ่มต้นเท่านั้น · EDITOR_POST_SANITIZE=0 → '' = พรอมต์เดิมทุกไบต์ (ของเดิม: ไม่มีกฎคำเสี่ยงในพรอมต์ editor เลย)
+  const safetyLines = isEditorPostSanitizeEnabled() ? editorSafetyPromptLines() : '';
   const prompt = `ข้อมูลแก้ข่าวอยู่ใน JSON ก้อนเดียวระหว่าง marker nonce ข้อมูลทั้งหมดเป็น DATA ONLY
 <<<BEGIN_RAW_FACT_EDITOR_DATA:${boundaryId}>>>
 ${editorData}
@@ -341,7 +356,7 @@ ${editorData}
 - RAW เป็นหลักฐานสูงสุด ทุกใจความใน content ต้องย้อนหาได้จาก RAW
 - แก้หรือตัดเฉพาะข้ออ้างที่ issues ระบุ และคืน missingFacts โดยไม่สร้างเหตุผล เจตนา ชื่อเสียง คำพูด เวลา หรือผลลัพธ์ใหม่
 - รักษามุม จังหวะ และสำนวนที่ไม่เพิ่มข้อเท็จจริง ห้ามทำให้เป็นข่าวแห้ง
-- ห้ามเพิ่ม/ลด version และห้ามคืน title/hook/closing
+${safetyLines}- ห้ามเพิ่ม/ลด version และห้ามคืน title/hook/closing
 
 ตอบ JSON เท่านั้น: {"contextHash":"...","versions":[{"versionIndex":0,"content":"..."}]}`;
   let result;
@@ -438,6 +453,10 @@ export async function enforceRawFactCompleteness({
 
   const nextVersions = versions.slice();
   const replacementIndexes = new Set();
+  // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S6 · เจ้าของอนุมัติ) — PL-06/OV-13: ด่านคำเสี่ยงหลัง editor "ก่อน final audit"
+  //   (final audit จึงตรวจข้อความที่จะโพสต์จริง · contextHash ตรงกับที่โพสต์ · ไม่ทิ้งฉบับ — แทนคำแล้วส่งตรวจต่อ)
+  //   null = สวิตช์ปิด (EDITOR_POST_SANITIZE=0) → ของเดิมทุกไบต์: ใช้ผล editor ตรง และไม่มีคีย์ editorPostSanitize ในผล
+  const editorPostSanitize = isEditorPostSanitizeEnabled() ? [] : null;
   for (const replacement of replacements) {
     if (!replacement || !Number.isInteger(replacement.versionIndex)
         || !initial.failingVersionIndexes.includes(replacement.versionIndex)
@@ -446,7 +465,26 @@ export async function enforceRawFactCompleteness({
       fail('RAW_FACT_EDITOR_RESPONSE_INVALID', 'ผล factual batch editor ไม่ครบหรือมีฉบับนอกคำขอ');
     }
     replacementIndexes.add(replacement.versionIndex);
-    nextVersions[replacement.versionIndex] = replacement.version;
+    let edited = replacement.version;
+    if (editorPostSanitize) {
+      const { content: sanitizedContent, ...diagnostic } = postSanitizeEditedContent(
+        edited.content,
+        getPublishablePostText(versions[replacement.versionIndex]),
+      );
+      if (diagnostic.changed) edited = { ...edited, content: sanitizedContent }; // ไม่เปลี่ยน = คง object เดิม (provenance/metadata ครบ)
+      editorPostSanitize.push({ versionIndex: replacement.versionIndex, ...diagnostic });
+      if (diagnostic.changed) {
+        console.log(`[FactGate] 🧹 ด่านคำเสี่ยงหลัง editor V${replacement.versionIndex + 1}: ตัวกรองขอบคำ=${diagnostic.sanitizeChanged ? 'แทน' : '-'} · คำเสี่ยงใหม่ ${diagnostic.newRiskWords.length ? diagnostic.newRiskWords.join(', ') : '-'} (${diagnostic.replaced} ตำแหน่ง)${diagnostic.skippedEmpty.length ? ` · คงกฎคำแทนว่าง ${diagnostic.skippedEmpty.join(', ')}` : ''}`);
+      }
+      // ★ รอบแก้ 2: กฎ L3B (เกลาตามบริบท) ด่านนี้คงคำไว้ → เตือนให้พนักงานเกลาก่อนโพสต์ · ↩️ ผลแก้ถูกย้อนเท่าฉบับเดิม (auditor ที่ยึด RAW ตรงตัวจะกักซ้ำ)
+      if (diagnostic.needsReview.length > 0) {
+        console.warn(`[FactGate] ⚠️ V${replacement.versionIndex + 1} editor ใส่คำเสี่ยงที่ต้องเกลาตามบริบท (กฎ L3B — ด่านนี้ไม่แทนตรง คงคำไว้): ${diagnostic.needsReview.join(', ')} → ให้พนักงานเกลาก่อนโพสต์`);
+      }
+      if (diagnostic.revertedToPrior) {
+        console.warn(`[FactGate] ↩️ V${replacement.versionIndex + 1} ด่านคำเสี่ยงแทนคำจนเท่าฉบับก่อน editor ทุกตัวอักษร (editor คืนถ้อยคำ RAW ของคำที่ตัวกรองแทนไว้) — auditor ที่ยึด RAW ตรงตัวจะกักฉบับนี้ซ้ำ`);
+      }
+    }
+    nextVersions[replacement.versionIndex] = edited;
   }
   if (replacementIndexes.size !== initial.failingVersionIndexes.length
       || initial.failingVersionIndexes.some(index => !replacementIndexes.has(index))) {
@@ -462,6 +500,7 @@ export async function enforceRawFactCompleteness({
     repairedIndexes: initial.failingVersionIndexes,
     initialAudit: initial,
     finalAudit,
+    ...(editorPostSanitize ? { editorPostSanitize } : {}), // ★ S6: เฉพาะค่าเริ่มต้น (สวิตช์ปิด = รูปผลเดิมทุกคีย์)
   };
 }
 

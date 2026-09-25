@@ -15,6 +15,10 @@
 import { callAI } from '@/lib/ai/openai';
 import { MODEL_FAST } from '@/lib/ai/modelConfig';
 import { callClaude, isClaudeAvailable } from '@/lib/ai/claudeClient'; // ★ 1 ส.ค. 69: ชั้นตัดสิน/ตัดประโยคจริง → opus-5 ก่อน
+// ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S7 · เจ้าของอนุมัติ) — PL-11/MC-14: เพดานเวลาต่อครั้ง (CORRECTION_AI_TIMEOUT_MS ค่าเริ่มต้น 60s · ส่ง signal ยกเลิก HTTP จริง)
+//   + system prompt สั้นเฉพาะงานตรวจ (เดิมไม่ส่ง systemPrompt → ได้ system สายเขียน ~3,900 ตัวอักษร ที่สั่ง "เขียนใหม่/เลี่ยงคำ" ให้งานที่ต้องคัดลอกข้อความพังตรงตัว)
+//   ถอย: CORRECTION_AI_TIMEOUT_MS=0 (ไม่ครอบ/ไม่ส่ง signal) · CORRECTION_CHECK_SYSTEM=0 (ไม่ส่ง systemPrompt) → ตั้งทั้งคู่ = การเรียกเดิมทุกไบต์ (ดู ./correctionAiGuard.js)
+import { correctionAiCall, correctionAiExtras, CORRECTION_CHECK_SYSTEM_PROMPT } from './correctionAiGuard.js';
 
 const SANITY_CHECK_PROMPT = `คุณเป็นบรรณาธิการภาษาไทยระดับสูง ตรวจสอบเนื้อหาด้านล่างว่ามี "ประโยคที่ไร้ความหมาย" หรือ "คำผิดร้ายแรง" หรือไม่
 
@@ -98,9 +102,10 @@ function quoteDebt(text) {
 /**
  * ตรวจเนื้อหา 1 version ด้วย AI
  * @param {string} content - เนื้อหาที่จะตรวจ
+ * @param {{ signal?: AbortSignal }} [options] - ★ S7: signal ของผู้เรียก (runCorrectionPipeline ส่งต่อมา ถ้ามี) — รวมเข้ากับเพดานต่อครั้ง
  * @returns {{ sanitizedContent: string, issuesFound: Array, fixed: boolean }}
  */
-export async function semanticSanityCheck(content) {
+export async function semanticSanityCheck(content, options = {}) {
   if (!content || content.length < 50) {
     return { sanitizedContent: content, issuesFound: [], fixed: false };
   }
@@ -109,12 +114,23 @@ export async function semanticSanityCheck(content) {
     const prompt = SANITY_CHECK_PROMPT.replace('{CONTENT}', content);
 
     // ★ 1 ส.ค. 69 (เจ้าของสั่ง "GPT ที่แตะภาษาตรง → opus5"): ชั้นนี้ชี้ประโยคที่จะถูกตัดจริง → claude-opus-5 ก่อน · ล้ม/ไม่มีคีย์ → luna เดิม
+    // ★ 24 ก.ย. 69 (S7): ทั้ง 2 ทางครอบ correctionAiCall (เพดานต่อครั้ง · signal) + system สั้นงานตรวจ — หมดเวลา/ยกเลิก = error ธรรมดา
+    //   เข้าโซ่เดิม: claude หมดเวลา → ลอง luna (คนละค่าย มีเพดานของตัวเอง) → luna หมดเวลา → catch นอกข้ามด่าน คืน content เดิม (fail-open เดิม)
+    //   ของเดิม: result = await callClaude({ model: 'claude-opus-5', maxTokens: 800, prompt });
+    //           result = await callAI({ model: MODEL_FAST, temperature: 0.1, maxTokens: 500, prompt });
+    //   (โหมดถอยทั้งคู่: correctionAiExtras คืน {} = args เดิมทุกไบต์ · correctionAiCall เรียก factory ตรง ไม่ครอบ)
+    const _l46Signal = options?.signal;
     let result;
     try {
       if (!isClaudeAvailable()) throw new Error('no-claude-key');
-      result = await callClaude({ model: 'claude-opus-5', maxTokens: 800, prompt });
+      result = await correctionAiCall('correction:L4.6:claude-opus-5', (signal) => callClaude({
+        model: 'claude-opus-5', maxTokens: 800, prompt, ...correctionAiExtras(signal, CORRECTION_CHECK_SYSTEM_PROMPT),
+      }), { signal: _l46Signal });
     } catch (_clErr) {
-      result = await callAI({ model: MODEL_FAST, temperature: 0.1, maxTokens: 500, prompt });
+      if (_clErr?.message !== 'no-claude-key') console.warn(`  L4.6 Semantic: claude ล้ม (${String(_clErr?.message || _clErr).slice(0, 120)}) → ลอง ${MODEL_FAST}`);
+      result = await correctionAiCall('correction:L4.6:luna', (signal) => callAI({
+        model: MODEL_FAST, temperature: 0.1, maxTokens: 500, prompt, ...correctionAiExtras(signal, CORRECTION_CHECK_SYSTEM_PROMPT),
+      }), { signal: _l46Signal });
     }
 
     if (!result || !result.hasIssues || !Array.isArray(result.issues) || result.issues.length === 0) {
