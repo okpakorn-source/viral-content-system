@@ -31,11 +31,21 @@
 //   S7_TEST_MUTATION=l46-rethrow       L4.6 หมดเวลาแล้วโยนออก (ไม่ fail-open) — ท่อได้ _correctionError
 //   S7_TEST_MUTATION=fab-no-timeout    ขั้น 1 ของ L1.8 ไม่ครอบเวลา
 //   S7_TEST_MUTATION=no-plumbing       runCorrectionPipeline ไม่ส่ง options.signal ต่อให้ด่าน
+//
+// ★ 25 ก.ย. 69 (CI run 36091468303 · ubuntu node 22: pass 6/24 cancelled 18 · Windows node 24 เขียว 24/24) — แก้ฝั่งเทสเท่านั้น
+//   ต้นเหตุ: ข้อ 7 B5 · 11 C2 · 13 C4 · 17 D3 (โหมดถอยเวลา = ไม่มี timer ของ withTimeoutSignal) รอคำตอบ AI ปลอมที่ตั้ง setTimeout
+//   แล้ว unref() → ไม่เหลือ handle ที่ ref → event loop ว่างกลางข้อ → node:test ของ node 22 ยกเลิกข้อนั้น + ทุกข้อที่เหลือ
+//   (node 24 มี keepAlive nodejs/node#58800 = เขียวบังเอิญ · บทเรียนเต็ม + กติกา: tests/helpers/fake-deadline.mjs)
+//   แก้: timer ของ AI ปลอม ref + clear ทุกทาง (ตอบ/abort/finally ของงาน) · ทุกงานรอผ่าน settleWithin (แดงข้อเดียว ไม่ลามทั้งไฟล์) ·
+//   B2 รอสัญญาณ "claude ถูกเรียกแล้ว" แทนนอน 30ms · F2/F3 ใช้ manualPipelineDeadline (createPipelineDeadline ตัวจริง + นาฬิกาหยุดนิ่ง/
+//   timer มือ) แทน Date.now()+timer จริงที่ production unref · assertion เดิมครบทุกข้อ
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { importPatchedGraph } from './helpers/temp-module.mjs';
-import { createPipelineDeadline, runWithPipelineDeadline } from '../src/lib/utils/pipelineDeadline.js';
+import { manualPipelineDeadline, settleWithin } from './helpers/fake-deadline.mjs';
+import { runWithPipelineDeadline } from '../src/lib/utils/pipelineDeadline.js';
 import { checkFactPreservation } from '../src/lib/correction/factPreservationCheck.js';
 import { editorialPolish } from '../src/lib/correction/editorialPolishService.js';
 import { scrubHallucinatedPlaces, isL45Legacy } from '../src/lib/correction/placeScrub.js';
@@ -152,18 +162,37 @@ const calls = [];
 const kindOf = (args) => (args.model === 'claude-opus-5' ? 'claude' : args.model === 'gpt-5.6-terra' ? 'terra' : 'luna');
 let behavior = () => { throw new Error('behavior ยังไม่ตั้ง'); };
 globalThis.__S7_CLAUDE_KEY__ = true;
-globalThis.__S7_AI__ = (fn, args) => { calls.push({ fn, kind: kindOf(args), args }); return behavior(args); };
+// ★ 25 ก.ย. 69: สัญญาณที่เทสคุม "AI ถูกเรียกครบ n ครั้ง" — รอสิ่งนี้แทนการนอน setTimeout แล้วหวังว่าโค้ดเดินถึง
+const callWaiters = [];
+globalThis.__S7_AI__ = (fn, args) => {
+  calls.push({ fn, kind: kindOf(args), args });
+  for (const w of callWaiters.filter((x) => calls.length >= x.n)) { callWaiters.splice(callWaiters.indexOf(w), 1); w.resolve(); }
+  return behavior(args);
+};
+const aiCalled = (n) => (calls.length >= n ? Promise.resolve() : new Promise((resolve) => { callWaiters.push({ n, resolve }); }));
 const abortError = (sig) => (sig.reason instanceof Error ? sig.reason : Object.assign(new Error('Request was aborted.'), { name: 'APIUserAbortError' }));
+// ★ 25 ก.ย. 69 (CI node 22): timer ของ AI ปลอม "ref" โดยตั้งใจ — เดิม unref() แล้วโหมดถอยเวลา (ไม่มี timer ของ withTimeoutSignal)
+//   ไม่เหลือ handle ที่ ref ระหว่างรอคำตอบ → event loop ว่าง → node 22 ยกเลิกทั้งไฟล์ · clear ทุกทางไม่ให้ค้ำ process/ข้ามข้อ:
+//   ตอบแล้ว · abort · finally ของ "งานรอบที่สร้างมัน" (settled) — เส้นไม่มี signal (withTimeout ทิ้งคำขอค้างไว้เฉยๆ) เหลือค้างได้จริง
+//   เจ้าของ timer = งานรอบนั้น (AsyncLocalStorage) ห้าม clear รวมทั้งไฟล์: งานที่ค้างจากข้อที่แดงไปแล้ว (เช่น B2 ใต้ mutation
+//   no-timeout แดงก่อน abort) จะไปลบ timer ของข้อที่กำลังรันจนค้างเป็นลูกโซ่ (C2 แดงตาม — จับได้จากการรัน mutation)
+const aiRunTimers = new AsyncLocalStorage();
 const respond = (args, answer, delay = 0) => new Promise((resolve, reject) => {
   const sig = args.signal;
+  const owned = aiRunTimers.getStore(); // Set ของงานรอบนี้ (undefined = เรียกนอก settled → ไม่ติดตาม แต่ยัง clear ตอนตอบ/abort)
   let timer = null;
+  const done = () => {
+    if (timer) { clearTimeout(timer); owned?.delete(timer); timer = null; }
+    sig?.removeEventListener?.('abort', onAbort);
+  };
+  const onAbort = () => { done(); reject(abortError(sig)); };
   if (sig && typeof sig.addEventListener === 'function') {
     if (sig.aborted) { reject(abortError(sig)); return; }
-    sig.addEventListener('abort', () => { if (timer) clearTimeout(timer); reject(abortError(sig)); }, { once: true });
+    sig.addEventListener('abort', onAbort, { once: true });
   }
-  const fire = () => { try { resolve(typeof answer === 'function' ? answer(args) : answer); } catch (e) { reject(e); } };
+  const fire = () => { done(); try { resolve(typeof answer === 'function' ? answer(args) : answer); } catch (e) { reject(e); } };
   if (delay <= 0) fire();
-  else { timer = setTimeout(fire, delay); timer.unref?.(); }
+  else { timer = setTimeout(fire, delay); owned?.add(timer); }
 });
 /** ตั้ง behavior ต่อชนิดคำขอ: { claude: [answer, delayMs] | Error, luna: …, terra: … } — ไม่ตั้งชนิดไหน = โยน error */
 const setAI = (plan) => {
@@ -174,11 +203,20 @@ const setAI = (plan) => {
     return respond(args, p[0], p[1] || 0);
   };
 };
-const reset = () => { calls.length = 0; globalThis.__S7_CLAUDE_KEY__ = true; };
+const reset = () => { calls.length = 0; callWaiters.length = 0; globalThis.__S7_CLAUDE_KEY__ = true; };
 const keysOf = (args) => Object.keys(args);
 const SLOW = 1500;   // AI ช้า (ms) — ต้องยาวกว่าเพดานทดสอบมาก
 const CAP = '100';   // เพดานทดสอบ CORRECTION_AI_TIMEOUT_MS (ms)
 const FAST_ENOUGH = 1000; // เพดานเวลาที่ยอมรับว่า "ไม่ได้รอ AI ช้า" (มี margin ให้เครื่องช้า)
+const SETTLE_MS = 5_000;  // ★ 25 ก.ย. 69: ตาข่าย settleWithin ต่องาน 1 รอบ (ข้อที่ผ่านใช้ < 1s) — ยาวกว่า SLOW/FAST_ENOUGH ให้ assertion เวลาเดิมรายงานก่อน
+// ★ 25 ก.ย. 69: รองานหนึ่งรอบใต้ settleWithin (timer ref ค้ำ loop ระหว่างรอ · ค้างจริง = แดงข้อเดียว ไม่ลามทั้งไฟล์)
+//   + finally เก็บ timer AI ปลอมที่ "งานรอบนี้" สร้างแล้วยังค้าง (อยู่ใน quiet เพื่อให้ console คืนแม้ตาข่ายยิง)
+const settled = (label, run) => {
+  const timers = new Set();
+  return aiRunTimers.run(timers, async () => {
+    try { return await settleWithin(run(), label, SETTLE_MS); } finally { for (const t of timers) clearTimeout(t); timers.clear(); }
+  });
+};
 
 // ── ข่าวตัวอย่าง 4 กลุ่ม (ย่อหน้าที่ 2 มีวลีพังกลางย่อหน้า — ไม่แตะประโยคเปิดที่ Seam Guard คุ้มครอง) ──
 const BROKEN = 'ระเสียชีวิตไปอีก';
@@ -194,7 +232,7 @@ const NEWS = {
 };
 const L46_ISSUE = { hasIssues: true, issues: [{ brokenText: BROKEN, reason: 'คำติดกันไร้ความหมาย', severity: 'high' }] };
 const L46_CLEAN = { hasIssues: false, issues: [] };
-const runL46 = (content, opts) => quiet(() => semanticSanityCheck(content, opts));
+const runL46 = (content, opts) => quiet(() => settled('L4.6 semanticSanityCheck ไม่คืนผล', () => semanticSanityCheck(content, opts)));
 
 // ═══ A) สวิตช์ ═══
 test('A1 CORRECTION_AI_TIMEOUT_MS: ไม่ตั้ง/ว่าง/ค่าเพี้ยน = 60000 · ตัวเลข (ทนอัญประกาศ/ช่องว่าง) = เพดาน · 0/off/legacy/false/no = โหมดถอย', async () => {
@@ -257,7 +295,8 @@ test('B2 ค่าเริ่มต้น + signal ผู้เรียก: Ab
   const ctrl = new AbortController();
   setAI({ claude: [L46_ISSUE, SLOW], luna: [L46_ISSUE, SLOW] });
   const p = runL46(NEWS.crime, { signal: ctrl.signal });
-  await new Promise((r) => setTimeout(r, 30));
+  // ★ 25 ก.ย. 69: รอสัญญาณที่เทสคุม (claude ถูกเรียกแล้ว ค้างรอคำตอบ) แทน setTimeout 30ms
+  await settleWithin(aiCalled(1), 'claude ต้องถูกเรียก (ค้างรอคำตอบ) ก่อนผู้เรียกยกเลิก');
   assert.equal(calls.length, 1);
   assert.ok(calls[0].args.signal instanceof AbortSignal, 'signal ที่ส่งให้ client ต้องเป็น AbortSignal (รวม parent + เพดาน)');
   assert.notEqual(calls[0].args.signal, ctrl.signal, 'ต้องเป็น signal ที่ compose แล้ว ไม่ใช่ตัวผู้เรียกตรงๆ');
@@ -340,7 +379,7 @@ const L3B_CONTENT = 'ชายคนหนึ่งพบเลือดบน�
 const L3B_ISSUE = { type: 'forbidden_word', text: 'เลือด', suggestion: 'ร่องรอยเหตุการณ์', severity: 'medium', location: 0 };
 const L3B_LONG_CONTENT = 'ผู้เห็นเหตุการณ์เล่าว่าภาพตรงหน้ามีเลือดสาดกระจายทั่วบริเวณ ก่อนหน่วยกู้ภัยจะมาถึงและนำตัวผู้บาดเจ็บส่งโรงพยาบาลได้ทันเวลาในที่สุด';
 const L3B_LONG_ISSUE = { type: 'forbidden_word', text: 'เลือดสาดกระจายทั่วบริเวณ', suggestion: 'เหตุรุนแรง', severity: 'high', location: 0 };
-const runL3 = (content, issues, opts) => quiet(() => safeCorrect(content, issues, opts));
+const runL3 = (content, issues, opts) => quiet(() => settled('L3 safeCorrect ไม่คืนผล', () => safeCorrect(content, issues, opts)));
 
 test('C1 L3B ค่าเริ่มต้น: args มี key signal + systemPrompt สั้นงานเกลาคำเสี่ยง (★ S8 · ไม่แตะ model/maxTokens 8000) · ตอบทันที = ai_context_rewrite เดิม · ช้าเกินเพดาน = แทนคำสั้น + ธง needs_review ท่อนยาว (เส้น fail-open เดิม)', async () => {
   reset(); setAI({ luna: [{ content: L3B_CONTENT.replace('เลือด', 'ร่องรอยบางอย่าง') }] });
@@ -434,7 +473,7 @@ const fabPlan = (delay1 = 0) => {
     claude: [{ content: FAB_FIXED }],
   };
 };
-const runFab = (env, opts) => withEnv({ FAB_GATE: '1', ...env }, () => quiet(() => fabricationGate(FAB_CONTENT, FAB_SOURCE, null, opts)));
+const runFab = (env, opts) => withEnv({ FAB_GATE: '1', ...env }, () => quiet(() => settled('L1.8 fabricationGate ไม่คืนผล', () => fabricationGate(FAB_CONTENT, FAB_SOURCE, null, opts))));
 
 test('D1 L1.8 ค่าเริ่มต้น: happy path ผ่าของเกินได้เหมือนเดิม · 3 คำขอมี key signal · system เดิมของด่านคงอยู่ (GATE_CHECK_SYS/GATE_FIX_SYS) ไม่ถูกแทนด้วย system กลาง', async () => {
   reset(); setAI(fabPlan());
@@ -474,7 +513,7 @@ const CLOSING = ' และนี่คือประโยคปิดท้�
 const FLAG_V1 = { content: 'เวอร์ชันแรกเล่าเรื่องจากมุมของแม่ที่รอลูกกลับบ้านทั้งคืน โดยไม่รู้ว่าลูกอยู่ที่ไหน' + CLOSING };
 const FLAG_V2 = { content: 'เวอร์ชันสองเล่าเรื่องจากมุมของเพื่อนบ้านที่เห็นเหตุการณ์ตั้งแต่ต้นจนจบ' + CLOSING };
 const FLAG_FIXED = FLAG_V2.content.replace(CLOSING, ' และในที่สุดทุกคนก็ได้กลับบ้านพร้อมหน้ากันอีกครั้ง');
-const runFlag = (opts) => quiet(() => fixFlaggedVersions([{ ...FLAG_V1 }, { ...FLAG_V2 }], { newsBody: '' }, opts));
+const runFlag = (opts) => quiet(() => settled('L1.5 fixFlaggedVersions ไม่คืนผล', () => fixFlaggedVersions([{ ...FLAG_V1 }, { ...FLAG_V2 }], { newsBody: '' }, opts)));
 
 test('E1 L1.5 ค่าเริ่มต้น: ตรวจมุมเปิด = system สั้นงานตรวจ + signal · แก้จุดที่ธงชี้ (claude-opus-5) = system สั้นงานแก้เฉพาะจุด + signal · ผลแก้ใช้จริง', async () => {
   reset(); setAI({ luna: [{ rewrite: [] }], claude: [{ fixedContent: FLAG_FIXED }] });
@@ -518,7 +557,8 @@ test('E3 L1.5 โหมดถอยทั้งคู่: args เดิมท�
 
 // ═══ F) ท่อจริง runCorrectionPipeline + เส้นตายรวมจริง ═══
 const runPipeline = (pipeline, content, options) =>
-  withEnv({ SKIP_CORRECTION: undefined }, () => quiet(async () => (await pipeline([{ content, style: 's7' }], { newsBody: content }, {}, null, content, options))[0]));
+  withEnv({ SKIP_CORRECTION: undefined }, () => quiet(async () => (await settled('runCorrectionPipeline ไม่คืนผล',
+    () => pipeline([{ content, style: 's7' }], { newsBody: content }, {}, null, content, options)))[0]));
 
 test('F1 ท่อส่ง options.signal ต่อให้ L1.8 / L3 / L4.6 ตัวเดียวกัน (===) · ไม่ส่ง options = signal undefined (พฤติกรรมเดิม)', async () => {
   const seen = { fab: [], l3: [], l46: [] };
@@ -541,7 +581,9 @@ test('F1 ท่อส่ง options.signal ต่อให้ L1.8 / L3 / L4.6 �
 test('F2 เส้นตายรวมจริงเหลือ 30s < เพดาน 60s: ค่าเริ่มต้นข้าม L4.6 ทันทีโดยไม่เรียก AI (ไม่จ่ายเงิน) ท่อไม่ล้ม content เดิม · โหมดถอย: เรียก AI ทั้งที่งบไม่พอ (บั๊กเดิม)', async () => {
   const pipeline = buildPipeline();
   reset(); setAI({ claude: [L46_ISSUE], luna: [L46_ISSUE] });
-  const deadline = createPipelineDeadline({ deadlineAt: Date.now() + 30_000 });
+  // ★ 25 ก.ย. 69: เส้นตายรวมจริง (createPipelineDeadline) + นาฬิกาหยุดนิ่ง/timer มือ — เหลือ 30s ตรงตัว ไม่ขึ้นกับความเร็วเครื่อง
+  //   และไม่สร้าง timer จริงที่ production unref (เดิม Date.now() + 30_000)
+  const { deadline } = manualPipelineDeadline(30_000);
   const v = await runWithPipelineDeadline(deadline, () => runPipeline(pipeline, NEWS.accident));
   assert.equal(calls.length, 0, 'งบเหลือไม่พอเพดาน → ต้องไม่เรียก AI เลย');
   assert.equal(v.content, NEWS.accident);
@@ -551,7 +593,7 @@ test('F2 เส้นตายรวมจริงเหลือ 30s < เพ�
   assert.equal(v._correctionDebug.path, 'clean');
 
   reset(); setAI({ claude: [L46_ISSUE], luna: [L46_ISSUE] });
-  const deadline2 = createPipelineDeadline({ deadlineAt: Date.now() + 30_000 });
+  const { deadline: deadline2 } = manualPipelineDeadline(30_000);
   const v2 = await withEnv({ CORRECTION_AI_TIMEOUT_MS: '0' }, () => runWithPipelineDeadline(deadline2, () => runPipeline(pipeline, NEWS.accident)));
   assert.equal(calls.length, 1, 'ของเดิม: เรียก claude ทั้งที่งบเหลือ 30s (แค่ 15s ขั้นต่ำของ client)');
   assert.equal(v2._correctionDebug.semanticCheck.fixed, true);
@@ -560,7 +602,9 @@ test('F2 เส้นตายรวมจริงเหลือ 30s < เพ�
 test('F3 เส้นตายรวมจริงงบพอ + claude ค้าง: ท่อคืนผลภายใน ≈ 2×เพดาน content เดิม เส้นตายไม่ถูกดึงจนหมด · request ถูกยกเลิกจริง (signal aborted)', async () => {
   const pipeline = buildPipeline();
   reset(); setAI({ claude: [L46_ISSUE, SLOW], luna: [L46_ISSUE, SLOW] });
-  const deadline = createPipelineDeadline({ deadlineAt: Date.now() + 600_000 });
+  // ★ 25 ก.ย. 69: เส้นตายรวมจริง + นาฬิกาหยุดนิ่ง/timer มือ (เดิม Date.now() + 600_000) — เส้นตายยิงได้ทางเดียวคือเทสเรียก expire()
+  //   (ข้อนี้ไม่เรียก) · ข้อสุดท้าย remainingMs() จึงยืนยันว่าไม่มีอะไรดึงเส้นตาย ส่วนเวลาจริงที่ใช้ตรวจด้วย ms < FAST_ENOUGH
+  const { deadline } = manualPipelineDeadline(600_000);
   const { value: v, ms } = await withEnv({ CORRECTION_AI_TIMEOUT_MS: CAP }, () => timed(() => runWithPipelineDeadline(deadline, () => runPipeline(pipeline, NEWS.royal))));
   assert.equal(v.content, NEWS.royal);
   assert.equal(v._correctionError, undefined, 'ท่อต้องไม่ล้ม (fail-open)');
