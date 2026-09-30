@@ -1,7 +1,9 @@
 export const maxDuration = 180; // ★ 9 ก.ย. 69: 60→180 — สกัดด้วย claude-opus-4-8 ช้ากว่า luna + คิวรอได้ 40s + ถอย luna ต้องจบในรอบเดียว (เดิม 60)
 // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 (default NEWS_FILTER_MODEL ใน newsFilterService.js) — maxDuration 180 คงเดิม
 import { NextResponse } from 'next/server';
-import { filterNews, filterNewsWithAI, extractFactCore } from '@/lib/services/newsFilterService';
+// ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — MC-13: + newsFilterBudget/isNewsFilterBudgetLegacy (งบเวลาต่อ request = maxDuration − 10s)
+//   (ของเดิม: import { filterNews, filterNewsWithAI, extractFactCore } from '@/lib/services/newsFilterService';)
+import { filterNews, filterNewsWithAI, extractFactCore, newsFilterBudget, isNewsFilterBudgetLegacy } from '@/lib/services/newsFilterService';
 import { createStore } from '@/lib/persistStore';
 import { randomUUID } from 'crypto';
 
@@ -25,6 +27,8 @@ import { randomUUID } from 'crypto';
  *   { success: true, data: { cleanText, originalWordCount, cleanWordCount, removedPercent, sentenceAnalysis, removedPatterns } }
  */
 export async function POST(request) {
+  // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — MC-13: จับเวลาเริ่ม request ก่อนทุกอย่าง (รวมเวลารอคิว) → งบของเครื่อง AI
+  const _reqStartedAt = Date.now();
   // ★ 19 มิ.ย. (ผู้ใช้): จัดคิวสกัดข่าว — พนักงานหลายคนยิงพร้อมกัน กันล้น + โชว์สถานะเรียลไทม์
   const _qstore = createStore('news-filter-queue');
   const _jobId = randomUUID();
@@ -106,10 +110,16 @@ export async function POST(request) {
     //   useAI='classify' → filterNewsWithAI: จำแนกประโยคทีละอัน (เก่า เก็บไว้เป็นทางเลือก)
     //   useAI=false → filterNews: regex เร็ว/ออฟไลน์ (fallback)
     let result;
+    // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — MC-13: เครื่อง AI ได้งบเวลาของ request (เริ่มนับก่อนรอคิว · งบ = maxDuration − 10s)
+    //   → Claude เพดานตามงบที่เหลือ + luna มีเพดาน = ตอบทันก่อน Vercel ตัด (ดู newsFilterService) · NEWS_FILTER_BUDGET_LEGACY=1 = ส่ง filterOptions เดิมทุกไบต์
+    //   (ของเดิม: filterNewsWithAI(text, filterOptions) / extractFactCore(text, filterOptions))
+    const aiOptions = isNewsFilterBudgetLegacy()
+      ? filterOptions
+      : { ...filterOptions, budget: newsFilterBudget(_reqStartedAt, maxDuration) };
     if (useAI === 'classify') {
-      result = await filterNewsWithAI(text, filterOptions);
+      result = await filterNewsWithAI(text, aiOptions);
     } else if (useAI) {
-      result = await extractFactCore(text, filterOptions);
+      result = await extractFactCore(text, aiOptions);
     } else {
       result = filterNews(text, filterOptions);
     }

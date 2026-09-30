@@ -59,6 +59,32 @@ function runWriterAttempt(factory, timeoutMs, step, parentSignal) {
   return withTimeoutSignal(factory, timeoutMs, step, abortableParent);
 }
 
+// ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — PL-07 / CFG-01 / MC-03 / BUG-03: เพดานต่อไม้ของ claude-extract
+//   บั๊ก (ผู้ตรวจยืนยัน 8 คน · ทำซ้ำได้ทั้งนาฬิกาเสมือนและเวลาจริง): case 'claude-extract' เรียก callClaude ด้วย signal ของ stage ตรงๆ
+//     ไม่มีเพดานของตัวเอง (SDK ค่าเริ่มต้น 600s) → Claude ช้า/ค้างกินงบขั้น extract (180s) จนหมด → stage abort → callSmartAI เห็น
+//     signal.aborted แล้วโยนทันที → gemini/gpt ไม่เคยได้ทำงาน + ผลถอยข้อความดิบ (extractFallback) แพ้ race → งานล้ม failedStep=extract
+//   แก้: ครอบด้วย runWriterAttempt แบบสายเขียน — เพดาน EXTRACT_CLAUDE_ATTEMPT_MS (ค่าเริ่มต้น 90000) ยกเลิก HTTP จริงเมื่อครบ แล้ว chain
+//     ตกไป gemini → gpt4o ตามเดิม (runWriterAttempt abort เฉพาะ controller ของไม้นี้ ไม่แตะ signal ของ stage → ผ่าน signal?.aborted ใน callSmartAI)
+//     stage ถูกยกเลิก/เส้นตายรวมหมดระหว่างไม้ = โยนต่อทันทีเหมือนเดิม (ไม่ถอย) · งบ extract 180s = claude ≤90 + gemini ≤15 (timeout ในตัว) + gpt ≥75
+//     ⚠️ withTimeoutSignal จองเต็มเพดาน (assertCanStart) จากงบงานรวม — ขั้น extract จอง 180s ก่อนเริ่มแล้ว จึงพอเสมอในท่อจริง
+//   สวิตช์ถอย (อ่านทุกครั้งที่เรียก ไม่แคช): EXTRACT_CLAUDE_ATTEMPT_MS = 0 | off | legacy | false | no → เรียก callClaude ตรงด้วย signal เดิม (เดิมทุกไบต์)
+//     · ตัวเลข >0 = เพดาน (ms) · ไม่ตั้ง/ว่าง/ค่าเพี้ยน (ไม่ใช่ตัวเลข/ติดลบ) = 90000 (กันตั้งค่าผิดแล้วเพดานหาย)
+//   ข้อสอบ: tests/extract-claude-attempt-cap.test.mjs (2 โหมด · นาฬิกาเสมือน + เส้นตายรวมจริง · mutation) · tests/extract-claude-switch.test.mjs ข้อ 7
+export const EXTRACT_CLAUDE_ATTEMPT_DEFAULT_MS = 90_000;
+const EXTRACT_CLAUDE_ATTEMPT_LEGACY_VALUES = new Set(['0', 'off', 'legacy', 'false', 'no']);
+
+/** เพดานต่อไม้ของ claude-extract (ms) · null = โหมดถอย (เรียกตรง ไม่ครอบ) */
+export function extractClaudeAttemptMs() {
+  const raw = process.env.EXTRACT_CLAUDE_ATTEMPT_MS;
+  if (raw == null) return EXTRACT_CLAUDE_ATTEMPT_DEFAULT_MS;
+  const v = String(raw).trim().replace(/^["']|["']$/g, '').trim().toLowerCase();
+  if (v === '') return EXTRACT_CLAUDE_ATTEMPT_DEFAULT_MS;
+  if (EXTRACT_CLAUDE_ATTEMPT_LEGACY_VALUES.has(v)) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return EXTRACT_CLAUDE_ATTEMPT_DEFAULT_MS;
+  return Math.round(n);
+}
+
 /**
  * เลือก model + เรียก AI อัตโนมัติ
  * @param {string} task - 'extract', 'breakdown', 'write', 'general'
@@ -236,8 +262,13 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
     //     (สาย extract จริงไม่เคยส่ง → เดิม undefined = ได้ system สายเขียนของ claudeClient ทั้งก้อน)
     //   - effort: EXTRACT_CLAUDE_EFFORT (ไม่ตั้ง = medium) — per-call ชนะ env ใน callClaude → ไม่ผูก CLAUDE_WRITE_EFFORT สายเขียน
     //   - maxRetries 0: กัน SDK retry ซ้อนกินงบ stage 120s (เพดานรวมมี withTimeoutSignal ชั้นนอกแล้ว) · signal ส่งต่อเดิม
+    //   ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — PL-07/CFG-01/MC-03/BUG-03: "เพดานรวมชั้นนอก + signal ส่งต่อเดิม" = Claude ค้างกินงบขั้นทั้งก้อน
+    //     → ค่าเริ่มต้นครอบ runWriterAttempt เพดาน EXTRACT_CLAUDE_ATTEMPT_MS (ดู extractClaudeAttemptMs ด้านบน) แล้ว chain ตกไป gemini→gpt4o ตามเดิม
+    //     · โหมดถอย (=0) เรียกตรงด้วย signal ของ stage = เดิมทุกไบต์ · args ของ callClaude ชุดเดิมทุกตัว
+    //     · พารามิเตอร์ชื่อ signal "บัง" signal ของ stage โดยตั้งใจ: ค่าเริ่มต้นได้ signal ต่อไม้ (รวมเพดานไม้+stage+เส้นตายรวม) · โหมดถอยได้ signal ของ stage
+    //     (ของเดิม: const out = await callClaude({ …args ชุดเดียวกับด้านล่าง… });)
     case 'claude-extract': {
-      const out = await callClaude({
+      const _callExtractClaude = (signal) => callClaude({
         prompt, temperature, maxTokens, signal,
         systemPrompt: systemPrompt || EXTRACT_SYSTEM_PROMPT, // ★ 24 ก.ย. 69 (S8 — MC-16): ชื่อเดิม EXTRACT_CLAUDE_SYSTEM_PROMPT · โหมดถอย router ส่ง undefined มา = ยังได้ชุดสกัดตามรอบแก้ M1 เหมือนเดิม
         effort: process.env.EXTRACT_CLAUDE_EFFORT || 'medium',
@@ -246,6 +277,10 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
         model: process.env.EXTRACT_CLAUDE_MODEL || 'claude-opus-5-5',
         sanitizeScope, // ★ 24 ก.ย. 69 (S1): 'facts' — ผลสกัดต้องคงคำต้นฉบับ ไม่ผ่านตัวกรองคำเสี่ยง
       });
+      const _extractAttemptMs = extractClaudeAttemptMs(); // ★ 30 ก.ย. 69 (กลุ่ม 2): null = โหมดถอย
+      const out = _extractAttemptMs === null
+        ? await _callExtractClaude(signal)
+        : await runWriterAttempt(_callExtractClaude, _extractAttemptMs, 'extract_claude', signal);
       if (!out || typeof out !== 'object') throw new Error('claude-extract ได้ผลว่าง — ส่งต่อตัวสำรอง');
       return out;
     }

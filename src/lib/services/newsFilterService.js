@@ -25,6 +25,7 @@
 import { callAI } from '@/lib/ai/openai';
 import { MODEL_FAST } from '@/lib/ai/modelConfig';
 import { callClaude, isClaudeAvailable } from '@/lib/ai/claudeClient';
+import { withTimeoutSignal } from '../utils/withTimeout.js'; // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — MC-13: เพดานเวลาแบบยกเลิก HTTP จริง (ดู callNewsFilterAIBudgeted)
 
 // ★ 9 ก.ย. 69 (เจ้าของสั่ง "เปลี่ยนจาก luna เป็น opus 4.8" — เฉพาะหน้า /news-filter ไม่แตะระบบข่าว):
 //   3 ขั้น AI ของหน้านี้ (สกัดแก่น extractFactCore / จำแนกประโยค filterNewsWithAI / แยกประเด็น splitTopics) → claude-opus-4-8
@@ -39,11 +40,119 @@ const NEWS_FILTER_CLAUDE_MIN_TOKENS = 6000; // max_tokens ฝั่ง Claude = 
 // system prompt สั้น — ไม่ส่ง = callClaude ยัด DNA เขียนข่าว ~9KB ที่ไม่เกี่ยวกับงานสกัด (จ่ายฟรี + บิดงาน)
 const NEWS_FILTER_SYSTEM = 'คุณเป็นบรรณาธิการข่าวที่เก่งเรื่องสกัดข้อเท็จจริง ตอบเป็น JSON ตามที่สั่งเท่านั้น';
 
+// ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — MC-13: งบเวลาต่อ request ของหน้า /news-filter (+ /api/news-filter/split · /m ใช้ route เดียวกัน)
+//   บั๊ก (ผู้ตรวจยืนยัน 2 คน · นาฬิกาเสมือน): route รอคิวได้ ~40.8s + Claude เพดานคงที่ 100s + ถอย luna ไม่มีเพดาน (callAI ไม่ส่ง signal
+//     → SDK 600s · retry 2 · ต่อ terra) > maxDuration 180 → Vercel ตัดฟังก์ชันกลางทาง ผู้ใช้ไม่ได้ทั้งผล luna และผล regex สำรอง (catch ไม่ทันทำงาน)
+//     เช่น คิวเต็ม + Claude ค้าง + luna 60s = ตอบที่ 200.8s · ไม่มีคิว + luna 85s = 185s · luna ว่างแล้วต่อ terra = 195.8s · split: Claude ค้าง + luna 90s = 190s
+//   แก้ (ค่าเริ่มต้น): งบรวม/request = maxDuration − 10s (route ส่ง options.budget = newsFilterBudget(เวลาเริ่ม request ก่อนรอคิว, maxDuration))
+//     · luna (ถอย) เพดาน NEWS_FILTER_FALLBACK_MS (ค่าเริ่มต้น 30000) และไม่เกินงบที่เหลือจริง · ยกเลิก HTTP จริง (withTimeoutSignal → signal → callAI → SDK)
+//     · Claude เพดาน = min(100s, งบรวม − เวลาที่ใช้ไปแล้ว(รวมรอคิว) − เพดาน luna) · เหลือ < 15s = ไม่พอ → ข้าม Claude ไป luna ทันที
+//     · งบหมดก่อนถึง luna → โยน error → ผู้เรียกถอยเส้นเดิม (extractFactCore/filterNewsWithAI → regex · splitTopics → engine 'failed')
+//     · ไม่ส่ง budget (ผู้เรียกอื่น) = เริ่มนับตอนเรียก · งบ 180−10 = 170s
+//   สวิตช์ถอย: NEWS_FILTER_BUDGET_LEGACY = 1 | true | on | yes | legacy → callNewsFilterAI เส้นเดิมทุกไบต์ (Claude 100s คงที่ · luna ไม่มีเพดาน) + route ส่ง options เดิม
+//   ข้อสอบ: tests/news-filter-budget-mc13.test.mjs (2 โหมด · route จริง + คิวเต็ม + นาฬิกาเสมือน · mutation)
+export const NEWS_FILTER_FALLBACK_DEFAULT_MS = 30_000;
+export const NEWS_FILTER_BUDGET_MARGIN_MS = 10_000; // งบรวม = maxDuration − ค่านี้ (เผื่อ finally/ออกคิว/ส่ง response)
+const NEWS_FILTER_CLAUDE_MIN_MS = 15_000; // Claude เหลือเวลาน้อยกว่านี้ = "ไม่พอ" (แนวเดียวกับ preparePipelineSignal ของท่อข่าว)
+const NEWS_FILTER_DEFAULT_MAX_DURATION_S = 180; // = maxDuration ของ route /api/news-filter และ /split (ใช้เมื่อผู้เรียกไม่ส่ง budget)
+const NEWS_FILTER_LEGACY_ON = new Set(['1', 'true', 'on', 'yes', 'legacy']);
+const cleanNewsFilterEnv = (raw) => String(raw ?? '').trim().replace(/^["']|["']$/g, '').trim().toLowerCase();
+
+/** NEWS_FILTER_BUDGET_LEGACY=1 → เส้นเดิมทุกไบต์ (อ่านทุกครั้งที่เรียก ไม่แคช) */
+export function isNewsFilterBudgetLegacy() {
+  return NEWS_FILTER_LEGACY_ON.has(cleanNewsFilterEnv(process.env.NEWS_FILTER_BUDGET_LEGACY));
+}
+
+/** เพดาน luna (ms) · ไม่ตั้ง/ว่าง/ค่าเพี้ยน/≤0 = 30000 */
+export function newsFilterFallbackMs() {
+  const v = cleanNewsFilterEnv(process.env.NEWS_FILTER_FALLBACK_MS);
+  const n = Number(v);
+  if (v === '' || !Number.isFinite(n) || n <= 0) return NEWS_FILTER_FALLBACK_DEFAULT_MS;
+  return Math.round(n);
+}
+
+/** งบของ request หนึ่งครั้ง — route เรียกตอนเริ่ม POST (ก่อนรอคิว) · totalMs = maxDuration − 10s */
+export function newsFilterBudget(startedAt = Date.now(), maxDurationSec = NEWS_FILTER_DEFAULT_MAX_DURATION_S) {
+  const totalMs = Math.max(0, Math.round(Number(maxDurationSec) * 1000) - NEWS_FILTER_BUDGET_MARGIN_MS);
+  return { startedAt: Number(startedAt), totalMs };
+}
+
+const isUsableBudget = (b) => !!b && Number.isFinite(Number(b.startedAt)) && Number(b.totalMs) > 0;
+
+/**
+ * แผนเวลา ณ ตอนนี้ของ request: claudeMs (0 = ไม่พอ ข้ามไป luna) · lunaMs (0 = งบหมด) · ตัวเลขประกอบไว้ log/เทส
+ * @param {{ startedAt: number, totalMs: number }} [budget]
+ */
+export function planNewsFilterBudget(budget, now = Date.now()) {
+  const b = isUsableBudget(budget) ? budget : newsFilterBudget(now);
+  const elapsedMs = Math.max(0, now - Number(b.startedAt));
+  const remainingMs = Math.max(0, Number(b.totalMs) - elapsedMs);
+  const fallbackMs = newsFilterFallbackMs();
+  const claudeRoom = Math.min(NEWS_FILTER_TIMEOUT_MS, remainingMs - fallbackMs);
+  return {
+    totalMs: Number(b.totalMs),
+    elapsedMs,
+    remainingMs,
+    fallbackMs,
+    claudeMs: claudeRoom >= NEWS_FILTER_CLAUDE_MIN_MS ? claudeRoom : 0,
+    lunaMs: Math.min(fallbackMs, remainingMs),
+  };
+}
+
+// parent signal เปล่า = บังคับ withTimeoutSignal โหมดยกเลิก HTTP จริง (route นี้ไม่มีเส้นตายรวมของท่อข่าว) — แบบเดียวกับ runWriterAttempt ใน aiRouter
+function runNewsFilterCapped(factory, ms, step) {
+  return withTimeoutSignal(factory, ms, step, new AbortController().signal);
+}
+
+/** ★ 30 ก.ย. 69 (กลุ่ม 2 · MC-13): เส้นมีงบเวลา — ลำดับโมเดล/args/ข้อความ log เดิม + เพดานตามงบ (ดูหัวข้อด้านบน) */
+async function callNewsFilterAIBudgeted({ prompt, temperature, maxTokens, label, budget }) {
+  const b = isUsableBudget(budget) ? budget : newsFilterBudget(); // ไม่ส่งมา = เริ่มนับตอนนี้ (ตรึงไว้ทั้งการเรียกครั้งนี้)
+  const wantClaude = /^claude-/.test(NEWS_FILTER_MODEL);
+  if (wantClaude && isClaudeAvailable()) {
+    const plan = planNewsFilterBudget(b);
+    if (plan.claudeMs > 0) {
+      try {
+        const result = await runNewsFilterCapped((signal) => callClaude({
+          prompt,
+          systemPrompt: NEWS_FILTER_SYSTEM,
+          model: NEWS_FILTER_MODEL,
+          temperature, // opus-4.7+ ไม่รับ sampling — callClaude ตัดทิ้งและใช้ effort แทนให้เอง
+          maxTokens: Math.max(maxTokens, NEWS_FILTER_CLAUDE_MIN_TOKENS),
+          effort: process.env.NEWS_FILTER_EFFORT || 'medium',
+          signal,
+          maxRetries: 1,
+        }), plan.claudeMs, `news_filter_claude:${label}`);
+        if (result && typeof result === 'object') return { result, model: NEWS_FILTER_MODEL };
+        console.warn(`[NewsFilter] ${label}: ${NEWS_FILTER_MODEL} ตอบไม่เป็น JSON object → ถอย ${MODEL_FAST}`);
+      } catch (e) {
+        console.warn(`[NewsFilter] ${label}: ${NEWS_FILTER_MODEL} ล้ม (${String(e?.message || e).slice(0, 80)}) → ถอย ${MODEL_FAST}`);
+      }
+    } else {
+      console.warn(`[NewsFilter] ${label}: งบเหลือ ${Math.round(plan.remainingMs / 1000)}s ไม่พอให้ ${NEWS_FILTER_MODEL} (เผื่อ ${MODEL_FAST} ${Math.round(plan.fallbackMs / 1000)}s + ขั้นต่ำ ${NEWS_FILTER_CLAUDE_MIN_MS / 1000}s) → ใช้ ${MODEL_FAST} ทันที`);
+    }
+  } else if (wantClaude) {
+    console.warn(`[NewsFilter] ${label}: ไม่มี ANTHROPIC_API_KEY → ใช้ ${MODEL_FAST}`);
+  }
+  const model = wantClaude ? MODEL_FAST : NEWS_FILTER_MODEL;
+  const lunaMs = planNewsFilterBudget(b).lunaMs; // คิดใหม่หลัง Claude — ไม่เกินงบที่เหลือจริง
+  if (lunaMs <= 0) {
+    const err = new Error(`งบเวลา request หมด — ไม่เรียก ${model} (ผู้เรียกถอยเส้นเดิม)`);
+    err.errorType = 'NEWS_FILTER_BUDGET_EXHAUSTED';
+    throw err;
+  }
+  const result = await runNewsFilterCapped((signal) => callAI({ prompt, model, temperature, maxTokens, signal }),
+    lunaMs, `news_filter_fallback:${label}`);
+  return { result, model };
+}
+
 /**
  * เรียก AI ของหน้า news-filter — คืน { result, model } · result = object ที่ parse แล้ว (ทั้งสองเส้น)
  * ลำดับ: NEWS_FILTER_MODEL (default claude-opus-5-5 ตั้งแต่ 23 ก.ย. 69 · เดิม claude-opus-4-8) → (ล้ม/หมดเวลา) → gpt-5.6-luna เส้นเดิม · โยน error ต่อเฉพาะเมื่อ luna ก็ล้ม
+ * ★ 30 ก.ย. 69 (กลุ่ม 2 · MC-13): ค่าเริ่มต้น = เส้นมีงบเวลา callNewsFilterAIBudgeted (budget จาก route) · NEWS_FILTER_BUDGET_LEGACY=1 = เส้นเดิมด้านล่างทุกไบต์
+ *   (ของเดิม: async function callNewsFilterAI({ prompt, temperature, maxTokens, label = 'news-filter' }) {)
  */
-async function callNewsFilterAI({ prompt, temperature, maxTokens, label = 'news-filter' }) {
+async function callNewsFilterAI({ prompt, temperature, maxTokens, label = 'news-filter', budget }) {
+  if (!isNewsFilterBudgetLegacy()) return callNewsFilterAIBudgeted({ prompt, temperature, maxTokens, label, budget });
   const wantClaude = /^claude-/.test(NEWS_FILTER_MODEL);
   if (wantClaude && isClaudeAvailable()) {
     const ctl = new AbortController();
@@ -576,6 +685,7 @@ ${numberedSentences}
       temperature: 0.2,
       maxTokens: 4000,
       label: 'classify',
+      budget: options.budget, // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — MC-13: งบเวลาของ request จาก route (โหมดถอยไม่ใช้)
     });
 
     // แปลงผลจาก AI กลับมาเป็น format เดียวกับ rule-based
@@ -747,7 +857,7 @@ ${text.slice(0, 8000)}
 
   try {
     // ★ 9 ก.ย. 69: claude-opus-4-8 นำ → ถอย luna (ดู callNewsFilterAI) — ของเดิม: callAI({ model: MODEL_FAST, maxTokens: 3000 })
-    const { result: aiResult, model: modelUsed } = await callNewsFilterAI({ prompt, temperature: 0.2, maxTokens: 3000, label: 'fact-core' });
+    const { result: aiResult, model: modelUsed } = await callNewsFilterAI({ prompt, temperature: 0.2, maxTokens: 3000, label: 'fact-core', budget: options.budget }); // ★ 30 ก.ย. 69 (กลุ่ม 2 · MC-13): + budget (ของเดิมไม่มี)
     const parsed = typeof aiResult === 'object' ? aiResult : JSON.parse(String(aiResult).match(/\{[\s\S]*\}/)?.[0] || '{}');
     const cleanText = String(parsed.factCore || '').trim();
     if (cleanText.length < 20) {
@@ -823,7 +933,7 @@ ${text.slice(0, 8000)}
 
   try {
     // ★ 9 ก.ย. 69: claude-opus-4-8 นำ → ถอย luna (ดู callNewsFilterAI) — ของเดิม: callAI({ model: MODEL_FAST, maxTokens: 4000 })
-    const { result: aiResult, model: modelUsed } = await callNewsFilterAI({ prompt, temperature: 0.2, maxTokens: 4000, label: 'split' });
+    const { result: aiResult, model: modelUsed } = await callNewsFilterAI({ prompt, temperature: 0.2, maxTokens: 4000, label: 'split', budget: options.budget }); // ★ 30 ก.ย. 69 (กลุ่ม 2 · MC-13): + budget (ของเดิมไม่มี)
     const parsed = typeof aiResult === 'object' ? aiResult : JSON.parse(String(aiResult).match(/\{[\s\S]*\}/)?.[0] || '{}');
     let topics = Array.isArray(parsed.topics) ? parsed.topics : [];
     topics = topics

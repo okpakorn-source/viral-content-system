@@ -116,6 +116,7 @@ const reset = ({ claude = [], gemini = [], gpt = [], claudeAvailable = true, gem
   delete process.env.EXTRACT_CLAUDE_MODEL;
   delete process.env.EXTRACT_CLAUDE_EFFORT;
   delete process.env.CLAUDE_WRITE_EFFORT;
+  delete process.env.EXTRACT_CLAUDE_ATTEMPT_MS; // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ): สวิตช์เพดานต่อไม้ claude-extract — ทุกข้อเริ่มที่ค่าเริ่มต้น
 };
 
 const runExtract = async (opts = {}) => {
@@ -252,6 +253,26 @@ test('7 claude-extract ส่ง systemPrompt กฎสกัด (ห้าม�
   assert.equal(c.systemPrompt.includes('กฎที่ 5'), false, 'กฎที่ 5-6 เป็นของสายเขียนเท่านั้น');
   // L1: ล็อก SDK retry + เคารพ signal จากชั้นนอก (withTimeoutSignal)
   assert.equal(c.maxRetries, 0, 'maxRetries ต้องเป็น 0 กัน SDK retry ซ้อนกินงบ stage');
+  // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — PL-07/CFG-01/MC-03/BUG-03: ค่าเริ่มต้น claude-extract อยู่ใต้เพดานต่อไม้ (runWriterAttempt)
+  //   → signal ที่ถึง callClaude = signal ต่อไม้ที่ "รวม" signal ของชั้นนอกไว้ (ไม่ใช่ตัวเดียวกันแล้ว) · ชั้นนอกยกเลิก = ไม้นี้ต้องถูกยกเลิกตาม
+  //   ความหมายเดิม "ส่งต่อ signal เดิมไม่เปลี่ยน" ย้ายไปอยู่ที่โหมดถอย EXTRACT_CLAUDE_ATTEMPT_MS=0 (ข้อ 7b) · พฤติกรรมเวลา: tests/extract-claude-attempt-cap.test.mjs
+  //   (ของเดิม: assert.equal(c.signal, ac.signal, 'ต้องส่งต่อ signal เดิมไม่เปลี่ยน');)
+  assert.ok(c.signal instanceof AbortSignal, 'ค่าเริ่มต้น: ต้องส่ง AbortSignal ต่อไม้ให้ callClaude');
+  assert.notEqual(c.signal, ac.signal, 'ค่าเริ่มต้น: signal ต่อไม้ต้องเป็นตัวใหม่ (มีเพดานไม้รวมอยู่)');
+  assert.equal(c.signal.aborted, false);
+  ac.abort(new Error('ชั้นนอกยกเลิก'));
+  assert.equal(c.signal.aborted, true, 'ชั้นนอก (stage) ยกเลิก → signal ต่อไม้ต้องถูกยกเลิกตาม');
+});
+
+test('7b โหมดถอย EXTRACT_CLAUDE_ATTEMPT_MS=0 → ส่งต่อ signal เดิมไม่เปลี่ยน (args เดิมทุกตัว)', async () => {
+  reset();
+  process.env.EXTRACT_PRIMARY = 'claude';
+  process.env.EXTRACT_CLAUDE_ATTEMPT_MS = '0';
+  const ac = new AbortController();
+  await runExtract({ signal: ac.signal });
+  const c = calls()[0];
+  assert.equal(c.fn, 'claude');
+  assert.equal(c.maxRetries, 0);
   assert.equal(c.signal, ac.signal, 'ต้องส่งต่อ signal เดิมไม่เปลี่ยน');
 });
 

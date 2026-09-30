@@ -1,7 +1,8 @@
 export const maxDuration = 180; // ★ 9 ก.ย. 69: 60→180 — แยกประเด็นด้วย claude-opus-4-8 ช้ากว่า luna + ถอย luna ต้องจบในรอบเดียว (เดิม 60)
 // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 (default NEWS_FILTER_MODEL ใน newsFilterService.js) — maxDuration 180 คงเดิม
 import { NextResponse } from 'next/server';
-import { splitTopics } from '@/lib/services/newsFilterService';
+// ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — MC-13: + newsFilterBudget/isNewsFilterBudgetLegacy (ของเดิม: import { splitTopics } from '@/lib/services/newsFilterService';)
+import { splitTopics, newsFilterBudget, isNewsFilterBudgetLegacy } from '@/lib/services/newsFilterService';
 import { createStore } from '@/lib/persistStore';
 import { randomUUID } from 'crypto';
 
@@ -14,6 +15,7 @@ import { randomUUID } from 'crypto';
  * Response: { success, data: { isSingleTopic, overview, topics: [{ id, emoji, category, title, summary, content, viralAngle, wordCount }] } }
  */
 export async function POST(request) {
+  const _reqStartedAt = Date.now(); // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — MC-13: เริ่มนับงบเวลาของ request
   try {
     const { text } = await request.json();
     if (!text || typeof text !== 'string' || text.trim().length < 20) {
@@ -24,7 +26,9 @@ export async function POST(request) {
     }
 
     console.log(`[NewsFilter Split API] textLength=${text.length}`);
-    const result = await splitTopics(text, {});
+    // ★ 30 ก.ย. 69 (กลุ่ม 2 · MC-13): Claude เพดานตามงบ + luna มีเพดาน (งบ = maxDuration − 10s) · NEWS_FILTER_BUDGET_LEGACY=1 = ส่ง {} เดิมทุกไบต์
+    //   (ของเดิม: const result = await splitTopics(text, {});)
+    const result = await splitTopics(text, isNewsFilterBudgetLegacy() ? {} : { budget: newsFilterBudget(_reqStartedAt, maxDuration) });
 
     // ★ 19 มิ.ย. (ผู้ใช้): เก็บ "ประวัติการแยกประเด็น" — บางข่าวทำได้หลายหัวข้อ ทีมกลับมาหยิบใช้ได้
     //   fire-and-forget ไม่บล็อก response | เก็บล่าสุด 60 รายการ
