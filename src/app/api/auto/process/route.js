@@ -138,7 +138,7 @@ export function compactDelegatedVersions(versions) {
  * Called after successful processing so Discord/queue content also gets archived.
  * Returns true only when the archive already exists or the write completed.
  */
-async function saveToArchiveServerSide({ newsData, breakdownData, sourceType, sourceUrl, workflowId, archivedBy, coverImage, classifyTimeoutMs = 20_000 }) {
+async function saveToArchiveServerSide({ newsData, breakdownData, sourceType, sourceUrl, workflowId, archivedBy, coverImage, classifyTimeoutMs = 20_000, skipClassify = false }) {
   try {
     if (!newsData?.newsTitle && !newsData?.newsBody) {
       console.warn(`[Archive-Server] Save skipped (workflow=${workflowId || 'unknown'}): missing news title/body`);
@@ -156,6 +156,9 @@ async function saveToArchiveServerSide({ newsData, breakdownData, sourceType, so
       archivedBy: archivedBy || 'auto-server',
       coverImage,
       classifyTimeoutMs,
+      // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — PL-13/Q6: เวลาเหลือไม่พอ AI จัดหมวด → ไม่ยิง AI ใช้หมวดค่าเริ่มต้น
+      //   (ส่งคีย์นี้เฉพาะตอนข้าม — ปกติ args เข้า saveNewsArchive เดิมทุกคีย์)
+      ...(skipClassify ? { skipClassify: true } : {}),
     });
     const action = result.deduped ? '⏭️ Reused' : '✅ Saved';
     console.log(`[Archive-Server] ${action}: "${result.item.title.slice(0, 50)}" [${result.item.category}]`);
@@ -163,6 +166,60 @@ async function saveToArchiveServerSide({ newsData, breakdownData, sourceType, so
   } catch (err) {
     console.warn(`[Archive-Server] Save failed (workflow=${workflowId || 'unknown'}, non-critical):`, err.message);
     return false;
+  }
+}
+
+/**
+ * ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — PL-13/Q6: เก็บคลังแบบ best-effort ที่ไม่ล้ำเส้นตาย
+ * ปัญหาเดิม: ท่อ TEXT บันทึกเคสแล้ว (saveAnalysis + generation log) แต่ route ยัง await เก็บคลัง (getAll ทั้งตาราง + AI จัดหมวด luna
+ *   ≤20s + add) ใน Promise.race ของ runWithPipelineDeadline → เส้นตาย 700s หมดระหว่างนั้น → reportHardDeadlineFailure ตีงานที่เสร็จเป็น
+ *   failed → บอทขึ้น ❌ → ด่านกันซ้ำปล่อยงาน failed → ทีมส่งซ้ำ = จ่ายทั้งท่อซ้ำ (queue/worker/route.js บันทึกโรคนี้ไว้เอง)
+ * ใหม่: งบรอคลัง = min(เวลาที่เหลือ − สำรองตอบกลับ 15s, เพดานรอ 30s)
+ *   · งบ ≤ 0 → ข้ามคลังทั้งขั้น (archive_skipped: deadline_reserve)
+ *   · งบ < AI 20s + เผื่อ DB 10s → เก็บคลังด้วยหมวดค่าเริ่มต้น ไม่ยิง AI (archive_skipped: classify_skipped · saveNewsArchive skipClassify)
+ *   · คลังช้าเกินงบ → เลิกรอ (archive_skipped: archive_wait_budget) — งานเบื้องหลังเก็บต่อเองได้ · client fallback กันซ้ำด้วย fingerprint
+ *   ไม่ throw ไม่แตะสถานะคิว → ข่าวที่บันทึกเคสแล้วไปถึง respond(completed) ก่อนเส้นตายเสมอ (เหลือ ≥ 15s สำหรับเขียน completed)
+ *   archiveSaved=false = UI ใช้ client fallback ตามสัญญาเดิม
+ * คืน { saved, skipped: null | { event: 'archive_skipped', reason, remainingMs, waitBudgetMs, classifySkipped } }
+ * ค่าตั้งเป็นตัวเลขตรงใน default โดยตั้งใจ (ฟังก์ชันนี้ถูกตัดไปรันในเทส — ห้ามอ้างค่าคงที่ระดับโมดูล) · ถอย: ARCHIVE_BEST_EFFORT=0 (ที่ handlePost)
+ */
+export async function saveArchiveBestEffort(archiveArgs, {
+  deadline = null,
+  save = saveToArchiveServerSide,
+  responseReserveMs = 15_000,
+  classifyTimeoutMs = 20_000,
+  storeMarginMs = 10_000,
+  maxWaitMs = 30_000,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
+} = {}) {
+  const remainingMs = typeof deadline?.remainingMs === 'function'
+    ? deadline.remainingMs()
+    : Number.POSITIVE_INFINITY;
+  const waitBudgetMs = Math.min(maxWaitMs, remainingMs - responseReserveMs);
+  const skipped = (reason, classifySkipped) => ({
+    event: 'archive_skipped',
+    reason,
+    remainingMs: Number.isFinite(remainingMs) ? remainingMs : null,
+    waitBudgetMs: Math.max(0, waitBudgetMs),
+    classifySkipped,
+  });
+  if (!(waitBudgetMs > 0)) return { saved: false, skipped: skipped('deadline_reserve', true) };
+
+  const classifySkipped = waitBudgetMs < classifyTimeoutMs + storeMarginMs;
+  let timer = null;
+  const archiveRun = Promise.resolve()
+    .then(() => save(classifySkipped ? { ...archiveArgs, skipClassify: true } : archiveArgs))
+    .then(saved => ({ saved: saved === true }), () => ({ saved: false }));
+  const budgetRun = new Promise((resolve) => {
+    timer = setTimer(() => resolve({ timedOut: true }), waitBudgetMs);
+  });
+  try {
+    const outcome = await Promise.race([archiveRun, budgetRun]);
+    if (outcome.timedOut) return { saved: false, skipped: skipped('archive_wait_budget', classifySkipped) };
+    return { saved: outcome.saved, skipped: classifySkipped ? skipped('classify_skipped', true) : null };
+  } finally {
+    clearTimer(timer);
   }
 }
 
@@ -472,7 +529,36 @@ async function handlePost(request, startTime, deadlineState = {}) {
 
         // 🗄️ Auto-save to news archive — server-side ที่เดียว (web/Discord ผ่าน queue ทั้งคู่)
         let archiveSaved = false;
-        if (isFromQueue) {
+        let archiveSkipped = null; // ★ 30 ก.ย. 69 (PL-13/Q6): บันทึก archive_skipped ลงผลงาน/คิวเมื่อคลังถูกข้ามหรือข้าม AI จัดหมวด
+        // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — PL-13/Q6: ถึงจุดนี้ = ท่อบันทึกเคสแล้ว (saveAnalysis) → คลังเป็น best-effort
+        //   ที่ห้ามล้ำเส้นตาย/ห้ามเปลี่ยนสถานะงาน (เดิมเส้นตายหมดระหว่าง AI จัดหมวด → งานเสร็จถูกตี failed → ส่งซ้ำจ่ายซ้ำ)
+        //   มีเส้นตาย (production ทุกงาน) → saveArchiveBestEffort · ไม่มีเส้นตาย (เรียก handler ตรง) หรือ
+        //   ARCHIVE_BEST_EFFORT=0/legacy/off/false/no (ทนช่องว่าง/อัญประกาศ/ตัวพิมพ์) → เส้นเดิมทุกไบต์ (อ่าน env ที่นี่ที่เดียว)
+        const archiveBestEffortDeadline = isFromQueue
+          && !['0', 'legacy', 'off', 'false', 'no'].includes(String(process.env.ARCHIVE_BEST_EFFORT ?? '').trim().replace(/^["']|["']$/g, '').trim().toLowerCase())
+          ? getActivePipelineDeadline()
+          : null;
+        if (archiveBestEffortDeadline) {
+          ({ saved: archiveSaved, skipped: archiveSkipped } = await saveArchiveBestEffort({
+            newsData: legacyData.newsData,
+            breakdownData: legacyData.breakdownData,
+            sourceType: detection.inputType,
+            sourceUrl: detection.primaryUrl || '',
+            workflowId: _wfId,
+            archivedBy: body.userId || 'auto-server',
+            coverImage: delegateRes.autoCoverResult?.success ? delegateRes.autoCoverResult.base64 : null,
+          }, { deadline: archiveBestEffortDeadline }));
+          if (archiveSkipped) {
+            const remainingSec = archiveSkipped.remainingMs === null ? '-' : (archiveSkipped.remainingMs / 1000).toFixed(1);
+            addLog('Archive', archiveSkipped.reason === 'classify_skipped'
+              ? `⏭️ archive_skipped (classify_skipped): เหลือ ${remainingSec}s — ${archiveSaved ? 'เก็บคลังด้วยหมวดค่าเริ่มต้น' : 'เก็บคลังไม่สำเร็จ'} ไม่ยิง AI จัดหมวด · ข่าวส่งตามปกติ`
+              : `⏭️ archive_skipped (${archiveSkipped.reason}): เหลือ ${remainingSec}s — ไม่รอคลังต่อเพื่อส่งข่าวที่บันทึกเคสแล้วก่อนเส้นตาย (archiveSaved=false · client fallback ยังใช้ได้)`);
+          } else if (!archiveSaved) {
+            addLog('Archive', '⚠️ Server-side save failed — archiveSaved=false (client fallback remains available)');
+          }
+          // งบรอคลังเหลือสำรอง ≥ 15s เสมอ — ถ้าหมดจริง (race ชั้นนอกตอบ 504 ไปแล้ว) งานที่มาช้าหยุดตรงนี้ ไม่เขียน completed ทับ failed
+          getActivePipelineDeadline()?.throwIfExpired('enhanced_archive');
+        } else if (isFromQueue) {
           archiveSaved = await saveToArchiveServerSide({
             newsData: legacyData.newsData,
             breakdownData: legacyData.breakdownData,
@@ -489,6 +575,7 @@ async function handlePost(request, startTime, deadlineState = {}) {
         const responsePayload = {
           success:       true,
           archiveSaved, // true เฉพาะเมื่อคลังมีข่าวนี้แล้วหรือบันทึกสำเร็จจริง
+          ...(archiveSkipped ? { archiveSkipped } : {}), // ★ 30 ก.ย. 69 (PL-13/Q6): มีเฉพาะเมื่อข้ามคลัง/ข้าม AI จัดหมวด
           workflowId:    _wfId,
           data:          { ...legacyData, versions, analysisResult, workflowId: _wfId },
           newsData:      legacyData.newsData,

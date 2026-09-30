@@ -350,10 +350,13 @@ function makeProcessPost({
   serverArchiveResult = true,
   processSource = production.process,
 }) {
+  // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — PL-13/Q6: handlePost เรียก saveArchiveBestEffort (route.js) เมื่อมีเส้นตาย
+  //   → ตัดตัวจริงมาประกอบด้วย (ค่า default save = saveToArchiveServerSide ตัวที่ harness ฉีดด้านล่าง) · เทสสองโหมดอยู่ที่ tests/archive-best-effort-pl13.test.mjs
   const helpers = [
     'validateVersionWriterProvenance',
     'prepareEnhancedAnalysisResult',
     'compactDelegatedVersions',
+    'saveArchiveBestEffort',
   ].map(name => extractTopLevelFunction(processSource, name)).join('\n');
   const originalHandler = extractTopLevelFunction(processSource, 'handlePost');
   const handler = originalHandler.replace(

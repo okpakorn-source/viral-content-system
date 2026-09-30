@@ -22,6 +22,7 @@ export async function saveNewsArchive({
   archivedBy = 'system',
   coverImage,
   classifyTimeoutMs = null,
+  skipClassify = false, // ★ 30 ก.ย. 69 (PL-13/Q6): route ส่งมาเฉพาะตอนเวลาเหลือไม่พอ AI จัดหมวด
 }) {
   if (!title && !newsBody) {
     throw new Error('ต้องมี title หรือ newsBody');
@@ -65,13 +66,16 @@ export async function saveNewsArchive({
   let category = 'ทั่วไป';
   let summary = '';
   let tags = [];
+  // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — PL-13/Q6: skipClassify = route เหลือเวลาไม่พอให้ AI จัดหมวด (≤20s)
+  //   → ไม่ยิง AI (ไม่เสียเงิน · ไม่ล้ำเส้นตายงาน) ใช้ค่าเริ่มต้นข้างบน (ทั่วไป / สรุปว่าง / แท็กว่าง) · ไม่ส่ง = ยิง AI เหมือนเดิมทุกไบต์
+  if (skipClassify) console.warn('[Archive] AI classify skipped (archive_skipped: เวลาเหลือไม่พอ) — ใช้หมวดค่าเริ่มต้น ทั่วไป');
   try {
     const timeout = Number(classifyTimeoutMs);
-    const timeoutSignal = Number.isFinite(timeout) && timeout > 0
+    const timeoutSignal = !skipClassify && Number.isFinite(timeout) && timeout > 0
       && typeof globalThis.AbortSignal?.timeout === 'function'
       ? globalThis.AbortSignal.timeout(timeout)
       : undefined;
-    const aiResult = await callAI({
+    const aiResult = skipClassify ? null : await callAI({
       model: MODEL_FAST,
       temperature: 0.1,
       maxTokens: 400,

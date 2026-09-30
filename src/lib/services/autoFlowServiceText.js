@@ -20,6 +20,7 @@ import {
 import { saveAnalysis, saveFactualReview } from '@/lib/workflow/workflowEngine';
 import {
   buildPublishableAnalysisResult,
+  buildQuarantineSnapshot, // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — PL-14: เก็บร่างที่ด่านข้อเท็จจริงกักจริง (คืน null เมื่อ PUBLISH_QUARANTINE=0)
   countFinalVersionSources,
   enforceTextNewsPublicationFloor,
   getPublishablePostText,
@@ -681,6 +682,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   let enhancedVersionCount = 0;
   const totalResearchItems = [];
   const angleFailures = [];
+  const angleFailureDetails = []; // ★ 30 ก.ย. 69 (PL-08): มุมที่ล้ม + เหตุ แบบมีโครงสร้าง (คู่กับ angleFailures ที่เป็นข้อความ)
   const usedPresetByPromptId = new Map();
 
   genResults.forEach((res, angleIndex) => {
@@ -688,6 +690,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     if (res.status !== 'fulfilled' || !res.value?.success || !res.value.data) {
       const reason = res.reason?.message || res.reason || res.value?.error || 'Unknown Error';
       angleFailures.push(`${expectedAngle}: ${reason}`);
+      angleFailureDetails.push({ angleIndex, angle: expectedAngle, reason: String(reason) });
       addLog('Error', `❌ Generation Failed for "${expectedAngle}": ${reason}`);
       return;
     }
@@ -703,6 +706,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         || !writerModel || !promptId) {
       const reason = `contract ไม่ครบ (versions=${Array.isArray(rawVersions) ? rawVersions.length : 'invalid'}/${versionsPerAngle}, model=${writerModel || '-'}, promptId=${promptId || '-'})`;
       angleFailures.push(`${expectedAngle}: ${reason}`);
+      angleFailureDetails.push({ angleIndex, angle: expectedAngle, reason });
       addLog('Error', `❌ Generation contract failed for "${expectedAngle}": ${reason}`);
       return;
     }
@@ -713,6 +717,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     if (invalidVersion >= 0) {
       const reason = `version ${invalidVersion + 1} ไม่มี title/content ที่ใช้งานได้`;
       angleFailures.push(`${expectedAngle}: ${reason}`);
+      angleFailureDetails.push({ angleIndex, angle: expectedAngle, reason });
       addLog('Error', `❌ Generation contract failed for "${expectedAngle}": ${reason}`);
       return;
     }
@@ -738,11 +743,40 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     allVersions.push(...versions);
   });
 
-  if (angleFailures.length > 0 || allVersions.length !== totalVersions) {
+  // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — PL-08: เดิม all-or-nothing (a56d011a 21 ส.ค. → main 554d0286)
+  //   มุมเดียวล้ม (โซ่นักเขียนล้มครบ / หมดเวลาต่อมุม / ผิดสัญญา versions/title) = ทิ้งทั้งงานรวมมุมที่จ่ายค่าเขียนแล้ว
+  //   → ทีมส่งซ้ำ = จ่ายทุกขั้นซ้ำ · ขัดนโยบายเดียวกันในไฟล์นี้ (ตัดมุมก่อนเขียน "การันตีอย่างน้อย 1 เวอร์ชัน" · ด่านข้อเท็จจริง/ความยาว
+  //   ส่งเฉพาะฉบับที่ผ่าน · ชั้น correction เก็บร่างที่จ่ายแล้ว) และสาย URL (autoFlowService: ล้มเมื่อ 0 เวอร์ชัน)
+  //   ใหม่ (ค่าเริ่มต้น): ≥1 มุมผ่านสัญญาครบ → ส่งเฉพาะมุมที่สำเร็จ + ระบุมุมที่ล้มพร้อมเหตุ (คำเตือนคุณภาพ + data.angleGate)
+  //   ล้มทั้งงานเฉพาะเมื่อทุกมุมล้ม (ข้อความ/ขั้นเดิม) · มุมที่ผิดสัญญาถูกตัดทั้งมุม ไม่ซ่อม/ไม่เรียกนักเขียนซ้ำ · ตรวจสัญญา/provenance
+  //   รายมุมเดิมครบทุกข้อ · เส้นตายรวม (PipelineDeadlineError) ยังล้มทั้งงานที่ rethrow ด้านบน · ระบบไม่มีตัวตั้ง ANGLE_MIN/เวอร์ชันขั้นต่ำ
+  //   (ตรวจ 30 ก.ย. — มีแค่ ANGLE_MIN_MATCH_SCORE ของการจับคู่การ์ด) → ขั้นต่ำ = 1 มุมตามนโยบาย "มุมแรกเก็บเสมอ"
+  //   ถอย: PARTIAL_ANGLES=0 (หรือ legacy/off/false/no) = all-or-nothing เดิมทุกไบต์
+  let angleGate = null;
+  const succeededAngleCount = anglesToUse.length - angleFailureDetails.length;
+  if (isPartialAnglesEnabled()
+      && angleFailures.length > 0
+      && angleFailureDetails.length === angleFailures.length
+      && succeededAngleCount >= 1
+      && allVersions.length === succeededAngleCount * versionsPerAngle) {
+    const failedIndexes = new Set(angleFailureDetails.map(item => item.angleIndex));
+    angleGate = {
+      status: 'partial',
+      plannedAngles: anglesToUse.length,
+      plannedVersions: totalVersions,
+      deliveredVersions: allVersions.length,
+      succeededAngles: finalAngleNames.filter((_, index) => !failedIndexes.has(index)),
+      failedAngles: angleFailureDetails.map(item => ({ angle: item.angle, reason: item.reason.slice(0, 300) })),
+      warning: `เขียนสำเร็จ ${succeededAngleCount}/${anglesToUse.length} มุม — มุมที่ล้ม: ${angleFailureDetails.map(item => `${item.angle} (${item.reason.slice(0, 120)})`).join(' | ')} · ส่งเฉพาะ ${allVersions.length} เวอร์ชันจากมุมที่สำเร็จ ไม่เรียกนักเขียนซ้ำ`,
+    };
+    addLog('Summary', `⚠️ ${angleGate.warning}`);
+  } else if (angleFailures.length > 0 || allVersions.length !== totalVersions) {
     throwStep('auto_generate_contract', `ผลเขียนไม่ครบทุกมุม (${allVersions.length}/${totalVersions} เวอร์ชัน) — ${angleFailures.join(' | ') || 'จำนวนเวอร์ชันไม่ตรงแผน'}`);
   }
 
-  addLog('Summary', `📊 รวมครบ ${allVersions.length}/${totalVersions} เวอร์ชัน (Classic: ${classicVersionCount}, Enhanced: ${enhancedVersionCount})`);
+  addLog('Summary', angleGate
+    ? `📊 รวมได้ ${allVersions.length}/${totalVersions} เวอร์ชัน (เฉพาะมุมที่สำเร็จ · Classic: ${classicVersionCount}, Enhanced: ${enhancedVersionCount})`
+    : `📊 รวมครบ ${allVersions.length}/${totalVersions} เวอร์ชัน (Classic: ${classicVersionCount}, Enhanced: ${enhancedVersionCount})`);
   if (blueprint) addLog('Summary', `🧬 Blueprint: ${blueprint.core_emotion}`);
   if (totalResearchItems.length) addLog('Summary', `🔍 Research: ${totalResearchItems.length} แหล่งข้อมูล`);
 
@@ -791,6 +825,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   // === POST-GENERATION CORRECTION PIPELINE ===
   let finalVersions;
   const pipelineQualityWarnings = [];
+  if (angleGate?.warning) pipelineQualityWarnings.push(angleGate.warning); // ★ 30 ก.ย. 69 (PL-08): พนักงานเห็นมุมที่ล้ม+เหตุ (บอท Discord แสดง qualityWarnings)
   const correctionResearchFacts = (factPool?.facts || [])
     .map((x) => (typeof x === 'string' ? x : (x?.text || x?.content || '')))
     .filter(Boolean)
@@ -850,6 +885,9 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   // ห้ามเรียก writer/Fable ซ้ำและห้ามวนซ่อม เพื่อจำกัดค่า API แบบพิสูจน์ call-count ได้
   let factualGateSummary = null;
   let textLengthGateSummary = null;
+  // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — PL-14: เลขฉบับเดิม (ก่อน Sol กัก) ให้ด่านความยาวรายงานตรงตัว
+  //   (เดิมนับใหม่หลังคัด → V2 เดิมถูกรายงานเป็น "V1") · publishablePostText ใช้เฉพาะค่าเริ่มต้น (PUBLISH_QUARANTINE=0 = index+1 เดิม)
+  let lengthGateVersionNumbers = null;
   if ((detectedType === 'text' || detectedType === 'plain_text') && isRawFactCompletenessGateEnabled()) {
     try {
       const factOutcome = await enforceRawFactCompleteness({
@@ -906,6 +944,16 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
           })),
         } : {}),
       };
+      // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — PL-14: ร่างที่ Sol กัก (หลัง editor = เนื้อที่ auditor ตีตกจริง) ถูกเก็บจริง
+      //   ใน factualGate.quarantine (publishable:false · ไม่เข้า versions/summary) → ไปถึงเคส workflow ทั้งทาง saveAnalysis (บางฉบับผ่าน)
+      //   และ saveFactualReview (ศูนย์ฉบับผ่าน) ให้ดู/กู้ได้ · PUBLISH_QUARANTINE=0 → buildQuarantineSnapshot คืน null = ไม่มีคีย์นี้ (รูปสรุปเดิม)
+      const factualQuarantine = failingIndexes.length > 0
+        ? buildQuarantineSnapshot(
+          failingIndexes.map(index => (Array.isArray(factOutcome.versions) ? factOutcome.versions[index] : null) || finalVersions[index]),
+          { stage: 'factual', versionNumbers: failingIndexes.map(index => index + 1), minimumWords: NEW_LENGTH_CFG.min },
+        )
+        : null;
+      if (factualQuarantine) factualGateSummary.quarantine = factualQuarantine;
       if (factOutcome.passingVersions.length === 0) {
         const reviewDiagnostic = {
           ...factualGateSummary,
@@ -918,16 +966,21 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
           diagnostic: reviewDiagnostic,
           save: saveFactualReview,
         });
-        const reviewError = new Error('ไม่มีฉบับที่ผ่านด่านข้อเท็จจริง เนื้อข่าวถูกกักไว้ให้ตรวจและไม่ถูกส่งออก');
+        // ★ 30 ก.ย. 69 (PL-14): ข้อความตรงจริง — ค่าเริ่มต้นเก็บร่างลงเคสแล้วจริง (บรรทัดบน) จึงบอกที่เก็บ · PUBLISH_QUARANTINE=0 = ข้อความเดิม
+        const reviewError = new Error(factualQuarantine
+          ? `ไม่มีฉบับที่ผ่านด่านข้อเท็จจริง — เก็บร่างที่ถูกกัก ${factualQuarantine.versions.map(item => `V${item.version}`).join(', ')} ไว้ในเคส workflow ${_autoWorkflowId} (สถานะ factual_review) ให้พนักงานตรวจ/กู้ได้ และไม่ถูกส่งออก`
+          : 'ไม่มีฉบับที่ผ่านด่านข้อเท็จจริง เนื้อข่าวถูกกักไว้ให้ตรวจและไม่ถูกส่งออก');
         reviewError.code = 'FACTUAL_REVIEW_REQUIRED';
         reviewError.errorType = 'FACTUAL_REVIEW_REQUIRED';
         reviewError.failedStep = 'auto_factual_gate';
         throw reviewError;
       }
 
+      lengthGateVersionNumbers = finalVersions.map((_, index) => index + 1)
+        .filter(number => !failingIndexes.includes(number - 1)); // ★ 30 ก.ย. 69 (PL-14): เลขฉบับเดิมของฉบับที่ผ่าน (ลำดับเดียวกับ passingVersions)
       finalVersions = factOutcome.passingVersions;
       if (failingIndexes.length > 0) {
-        const warning = `Sol กักฉบับที่ไม่ผ่านข้อเท็จจริง ${failingIndexes.map(index => `V${index + 1}`).join(', ')} · ส่งให้พนักงานเฉพาะ ${finalVersions.length} ฉบับที่ผ่าน`;
+        const warning = `Sol กักฉบับที่ไม่ผ่านข้อเท็จจริง ${failingIndexes.map(index => `V${index + 1}`).join(', ')} · ส่งให้พนักงานเฉพาะ ${finalVersions.length} ฉบับที่ผ่าน${factualQuarantine ? ' · ร่างที่ถูกกักเก็บไว้ในผลงาน (factualGate.quarantine) ให้ตรวจ/กู้ได้ ไม่ถูกส่งออก' : ''}`;
         pipelineQualityWarnings.push(warning);
         addLog('FactGate', `⚠️ ${warning}`);
       } else if (factOutcome.repairedIndexes.length > 0) {
@@ -999,29 +1052,66 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   // จึงตรวจข้อความที่พนักงานโพสต์จริงตรงนี้เป็นด่านสุดท้าย: กักทั้งฉบับ ห้าม pad/rerun AI
   // LEGACY_LENGTH_RULES=1 ต้องถอยพฤติกรรมเดิมครบ และท่อ URL ไม่ผ่าน service TEXT นี้อยู่แล้ว
   if ((detectedType === 'text' || detectedType === 'plain_text') && !isLegacyLengthOn()) {
-    const lengthOutcome = enforceTextNewsPublicationFloor(finalVersions, {
-      minimumWords: NEW_LENGTH_CFG.min,
-    });
-    finalVersions = lengthOutcome.passingVersions;
-    textLengthGateSummary = {
-      status: lengthOutcome.status,
-      publishable: true,
-      minimumWords: lengthOutcome.minimumWords,
-      checks: lengthOutcome.checks,
-      quarantinedVersions: lengthOutcome.checks
-        .filter(check => !check.passes)
-        .map(check => check.version),
-    };
-    if (lengthOutcome.quarantinedVersions.length > 0) {
-      const rejected = lengthOutcome.checks
-        .filter(check => !check.passes)
-        .map(check => `V${check.version} (${check.wordCount} คำ)`)
-        .join(', ');
-      const warning = `กักฉบับหลังตรวจที่สั้นกว่าขั้นต่ำ ${NEW_LENGTH_CFG.min} คำ: ${rejected} · ส่งเฉพาะ ${finalVersions.length} ฉบับที่ผ่าน โดยไม่เติมคำหรือเรียก AI ซ้ำ`;
-      pipelineQualityWarnings.push(warning);
-      addLog('LengthGate', `⚠️ ${warning}`);
-    } else {
-      addLog('LengthGate', `✅ ผลสุดท้ายทุกฉบับยาวอย่างน้อย ${NEW_LENGTH_CFG.min} คำ · ไม่มีเพดานสูงสุด`);
+    try {
+      const lengthOutcome = enforceTextNewsPublicationFloor(finalVersions, {
+        minimumWords: NEW_LENGTH_CFG.min,
+        ...(lengthGateVersionNumbers ? { versionNumbers: lengthGateVersionNumbers } : {}), // ★ 30 ก.ย. 69 (PL-14) เลขฉบับเดิม
+      });
+      finalVersions = lengthOutcome.passingVersions;
+      textLengthGateSummary = {
+        status: lengthOutcome.status,
+        publishable: true,
+        minimumWords: lengthOutcome.minimumWords,
+        checks: lengthOutcome.checks,
+        quarantinedVersions: lengthOutcome.checks
+          .filter(check => !check.passes)
+          .map(check => check.version),
+        // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — PL-14: หน่วยนับ + ร่างที่ถูกกักจริง (publishable:false · ไม่เข้า versions/summary)
+        //   ถึงเคส workflow ผ่าน saveAnalysis ให้ดู/กู้ได้ · PUBLISH_QUARANTINE=0 = ไม่มีสองคีย์นี้ (รูปสรุปเดิมทุกคีย์)
+        ...(lengthOutcome.unit ? { unit: lengthOutcome.unit } : {}),
+        ...(lengthOutcome.quarantine ? { quarantine: lengthOutcome.quarantine } : {}),
+      };
+      if (lengthOutcome.quarantinedVersions.length > 0) {
+        const rejected = lengthOutcome.checks
+          .filter(check => !check.passes)
+          .map(check => `V${check.version} (${check.wordCount} คำ)`)
+          .join(', ');
+        const warning = `กักฉบับหลังตรวจที่สั้นกว่าขั้นต่ำ ${NEW_LENGTH_CFG.min} คำ: ${rejected} · ส่งเฉพาะ ${finalVersions.length} ฉบับที่ผ่าน โดยไม่เติมคำหรือเรียก AI ซ้ำ${lengthOutcome.quarantine ? ' · นับคำไทยแบบ ICU · ร่างที่ถูกกักเก็บไว้ในผลงาน (lengthGate.quarantine) ให้ดู/กู้ได้ ไม่ถูกส่งออก' : ''}`;
+        pipelineQualityWarnings.push(warning);
+        addLog('LengthGate', `⚠️ ${warning}`);
+      } else {
+        addLog('LengthGate', `✅ ผลสุดท้ายทุกฉบับยาวอย่างน้อย ${NEW_LENGTH_CFG.min} คำ · ไม่มีเพดานสูงสุด`);
+      }
+    } catch (lengthError) {
+      // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — PL-14: ทุกฉบับสั้นกว่าพื้น — เดิมโยนทิ้งทั้งที่ข้อความบอก "ระบบกักผลไว้"
+      //   ค่าเริ่มต้น: เก็บร่างที่จ่ายแล้ว (error.quarantine จาก publishablePostText) ลงเคส workflow จริงก่อนโยน แล้วต่อท้ายผลการเก็บตามจริง
+      //   ใช้ตัวบันทึกสถานะรอตรวจตัวเดียวกับด่านข้อเท็จจริง (persistFactualReviewOrThrow → saveFactualReview: currentStep factual_review ·
+      //   versions: [] = ไม่มีฉบับโพสต์) · status 'length_review' บอกว่ากักเพราะความยาว · เส้นตายรวมระหว่างเก็บ → โยนเส้นตายตามเดิม
+      //   PUBLISH_QUARANTINE=0 = ไม่มี quarantine บน error → โยนต่อทันทีเหมือนเดิมทุกไบต์
+      if (lengthError?.errorType === 'TEXT_NEWS_LENGTH_REVIEW_REQUIRED' && lengthError.quarantine) {
+        const storedList = lengthError.quarantine.versions.map(item => `V${item.version}`).join(', ');
+        try {
+          await persistFactualReviewOrThrow({
+            workflowId: _autoWorkflowId,
+            diagnostic: {
+              status: 'length_review',
+              publishable: false,
+              lengthGate: lengthError.lengthGate,
+              quarantine: lengthError.quarantine,
+              factual: factualGateSummary || null,
+            },
+            save: saveFactualReview,
+          });
+          lengthError.lengthGate = { ...lengthError.lengthGate, quarantineStored: true };
+          lengthError.message = `${lengthError.message} · เก็บร่างที่ถูกกัก ${storedList} ไว้ในเคส workflow ${_autoWorkflowId} (สถานะ length_review) ให้พนักงานดู/กู้ได้`;
+        } catch (persistError) {
+          if (persistError?.errorType === 'PIPELINE_DEADLINE_EXCEEDED') throw persistError;
+          lengthError.lengthGate = { ...lengthError.lengthGate, quarantineStored: false };
+          lengthError.message = `${lengthError.message} · เก็บร่างที่ถูกกักไม่สำเร็จ (${persistError?.message || persistError}) — ร่างยังไม่ถูกเก็บ`;
+        }
+        addLog('LengthGate', `⛔ ${lengthError.message}`);
+      }
+      throw lengthError;
     }
   }
 
@@ -1147,6 +1237,8 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
       preset: 'library',
       contentLength: selectedLength,
       totalTimeSeconds: parseFloat(totalTime),
+      // ★ 30 ก.ย. 69 (PL-08): มีเฉพาะงานที่บางมุมล้มแล้วส่งมุมที่สำเร็จ (ไม่มีคีย์นี้ = ครบทุกมุม / PARTIAL_ANGLES=0)
+      ...(angleGate ? { angleGate } : {}),
       generationLog: {
         caseId: generationLogResult?.caseId || null,
         success: generationLogResult?.success === true,
@@ -1924,6 +2016,13 @@ export function groundingIssuesToWarnings(issues) {
 //   (สวิตช์แบบ ก + MULTI-ANGLE) เสี่ยงแก้ที่หนึ่งลืมอีกที่ · export เพื่อให้ข้อสอบหน่วยเรียกได้
 export function getGenAnglesCount() {
   return Math.max(1, Math.min(4, parseInt(process.env.GEN_ANGLES || '2', 10) || 2));
+}
+
+// ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — PL-08: สวิตช์รวมผลหลายมุมแบบรับบางส่วน (ตัวอ่าน env ตัวเดียว)
+//   ไม่ตั้ง/1/on/ค่าอื่น = ใหม่ (≥1 มุมสำเร็จส่งต่อได้) · 0/legacy/off/false/no (ทนช่องว่าง/อัญประกาศ/ตัวพิมพ์) = all-or-nothing เดิม
+export function isPartialAnglesEnabled(env = process.env) {
+  const raw = String(env?.PARTIAL_ANGLES ?? '').trim().replace(/^["']|["']$/g, '').trim().toLowerCase();
+  return !['0', 'legacy', 'off', 'false', 'no'].includes(raw);
 }
 
 // ★ 19 ส.ค. 69 (ANGLE2_BY_SCORE — สเปคเฟเบิ้ล-สุด): ตัวเลือกมุมแบบอิงคะแนนไวรัล
