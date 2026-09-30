@@ -965,6 +965,15 @@ export async function performSummarize({
       //   ผล primary ที่ผิดจำนวน/ชื่อซ้ำ/มุมหลักไม่ตรงอันดับแรกถือว่าผิดสัญญาและเข้าสู่ Terra fallback
       let result;
       let breakdownModelUsed = MODEL_BREAKDOWN;
+      // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — MC-05/PL-20/OV-14/CFG-09: ชั้น service นี้เป็นเจ้าของ fallback ชั้นเดียว
+      //   เดิม fallback ซ้อน 3 ชั้น: SDK retry ค่าเริ่มต้น 2 ครั้ง (ไม่ส่ง maxRetries) × callAI สลับรุ่นเอง (allowModelFallback ค่าเริ่มต้น true:
+      //   sol→[sol,terra] · terra→[terra,sol]) × catch ด้านล่างเรียก terra ซ้ำ → พรอมต์เดิมถูกยิงได้ sol→terra→terra→sol (4 นัด · HTTP 5xx ล้วน = 12 request)
+      //   และ log บอกแค่ว่า sol ล้ม (ผลผิดสัญญาอาจมาจาก terra ตัวใน)
+      //   ใหม่ (ค่าเริ่มต้น): ทั้ง sol และ terra ส่ง allowModelFallback:false + maxRetries:0 แบบ writer-sol ใน aiRouter → sol 1 นัด (200s) → terra 1 นัด (90s) จบ
+      //   ถอยกลับ: BREAKDOWN_SINGLE_FALLBACK=0 (0/off/false/no/legacy) = _bdCallGuard ว่าง = args เดิมทุกไบต์ (โซ่ใน callAI + SDK retry แบบเดิม)
+      //   อ่าน env ในกิ่งนี้โดยตั้งใจ (ตัวอ่านจุดเดียวของสวิตช์นี้): เทสตัดกิ่ง breakdown ไปรันแยกด้วย dependency ที่ฉีด (fact-source-policy-s9 · breakdown-single-fallback-mc05)
+      const _bdSingleFallback = !/^(?:0|off|false|no|legacy)$/i.test(String(process.env.BREAKDOWN_SINGLE_FALLBACK ?? '').trim().replace(/^["']|["']$/g, '').trim());
+      const _bdCallGuard = _bdSingleFallback ? { allowModelFallback: false, maxRetries: 0 } : {};
       try {
         // ★ 16 ก.ค. 69 (B4): เปลี่ยนเป็น withTimeoutSignal — เมื่อเปิด WITHTIMEOUT_ABORT=1 จะยกเลิก request
         //   จริงตอน timeout (เดิม gpt-5.5 วิ่งต่อจนจบโดนบิลแล้วผลถูกทิ้ง = จ่าย 2 โมเดลซ้อน); สวิตช์ปิด = เดิมเป๊ะ
@@ -972,8 +981,11 @@ export async function performSummarize({
         //   ไม่ผ่านตัวกรองคำเสี่ยง (ตัวกรองเคยทำคำประสม/ราชาศัพท์พังและพลิกข้อเท็จจริง) · ถอยกลับ: SANITIZE_LEGACY=1
         // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S8 · เจ้าของอนุมัติ) — OV-04: ...slimSystem(BREAKDOWN_SYSTEM_PROMPT) ทั้ง sol และ terra ถอย = system สั้นงานแตกประเด็น (บทบาท + กฎเหล็ก 1–4)
         //   เดิมไม่ส่ง systemPrompt = ได้ system สายเขียน ~5,958 ตัวอักษร (HUMAN WRITING DNA + "อย่างน้อย 180 คำ" + รายการคำเสี่ยง) · ถอยกลับ: SYSTEM_PROMPT_SLIM=0 = args เดิมทุกไบต์
+        // ★ 30 ก.ย. 69 (กลุ่ม 2 — MC-05): ..._bdCallGuard = sol นัดเดียว ไม่ถอย terra เองใน callAI / ไม่ให้ SDK retry (ถอย BREAKDOWN_SINGLE_FALLBACK=0 = {})
+        //   ของเดิม: args ชุดเดียวกันทุกตัวแต่ไม่มี spread _bdCallGuard (ทั้ง call ของ sol และ terra ด้านล่าง) · วางหลัง model โดยตั้งใจ:
+        //   ไม่แทรกกลางลำดับ maxTokens→signal→sanitizeScope→slimSystem ที่เทสเดิมล็อกไว้ และโหมดถอยได้ลำดับคีย์เดิมทุกตัว
         result = await withTimeoutSignal(
-          (requestSignal) => callAI({ prompt, model: MODEL_BREAKDOWN, temperature: 0.4, maxTokens: 24000, signal: requestSignal, sanitizeScope: 'facts', ...slimSystem(BREAKDOWN_SYSTEM_PROMPT) }),
+          (requestSignal) => callAI({ prompt, model: MODEL_BREAKDOWN, ..._bdCallGuard, temperature: 0.4, maxTokens: 24000, signal: requestSignal, sanitizeScope: 'facts', ...slimSystem(BREAKDOWN_SYSTEM_PROMPT) }),
           200000,
           'breakdown_primary_inner',
           signal,
@@ -984,7 +996,7 @@ export async function performSummarize({
         console.warn(`[Breakdown-Service] ⚠️ ${MODEL_BREAKDOWN} failed/timeout: "${primaryErr.message}" — retrying with ${MODEL_HEAVY_FALLBACK} fallback...`);
         breakdownModelUsed = MODEL_HEAVY_FALLBACK;
         result = await withTimeoutSignal(
-          (requestSignal) => callAI({ prompt, model: MODEL_HEAVY_FALLBACK, temperature: 0.4, maxTokens: 24000, signal: requestSignal, sanitizeScope: 'facts', ...slimSystem(BREAKDOWN_SYSTEM_PROMPT) }), // ★ 24 ก.ย. 69 (S1) · S8: system สั้นชุดเดียวกับ sol
+          (requestSignal) => callAI({ prompt, model: MODEL_HEAVY_FALLBACK, ..._bdCallGuard, temperature: 0.4, maxTokens: 24000, signal: requestSignal, sanitizeScope: 'facts', ...slimSystem(BREAKDOWN_SYSTEM_PROMPT) }), // ★ 24 ก.ย. 69 (S1) · S8: system สั้นชุดเดียวกับ sol · ★ 30 ก.ย. 69 (กลุ่ม 2 — MC-05): ..._bdCallGuard = terra นัดเดียวจบ ไม่ถอยกลับ sol ใน callAI / ไม่ให้ SDK retry (ถอย =0 = args เดิม)
           90000,
           'breakdown_fallback',
           signal,

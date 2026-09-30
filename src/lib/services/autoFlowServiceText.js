@@ -271,7 +271,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S9 · เจ้าของอนุมัติ) — PL-23: แตกประเด็นเคยเห็นแต่เนื้อที่ AI สกัด (text ด้านบน) แต่พรอมต์เรียกมันว่า RAW
     //   → ส่งข้อความดิบที่ผู้ใช้วาง (writerRawSourceText ชุดเดียวกับนักเขียน/ด่าน) ไปด้วย · สาย URL/คลิป = ไม่มี = {} · ถอย NARRATIVE_LEGACY=1 = {} = args เดิมทุกไบต์
     ...breakdownRawSourceArgs(writerRawSourceText),
-  }), 300000, 'breakdown'); // ★ 300s (10 ก.ค. 69) = inner gpt-5.5 200s + fallback gpt-4o 60s + เผื่อ 40s — ห้ามต่ำกว่าผลรวมชั้นใน ไม่งั้น job ตายทั้งงานทั้งที่ fallback กำลังจะรอด
+  }), 300000, 'breakdown'); // ★ 300s (10 ก.ค. 69) — ห้ามต่ำกว่าผลรวมชั้นใน ไม่งั้น job ตายทั้งงานทั้งที่ fallback กำลังจะรอด · ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) CFG-09: ชั้นในจริง = sol 200s (breakdown_primary_inner) + terra 90s (breakdown_fallback) = 290s → เผื่อเหลือแค่ ~10s และ 10s นี้ต้องครอบงาน DB ในขั้นเดียวกันด้วย (getWorkflow ก่อนเรียก AI + saveBreakdown/loadFromDB/saveMemoryToDB หลังได้ผล) · ค่าเริ่มต้น sol 1 นัด → terra 1 นัด จบ (ถอย BREAKDOWN_SINGLE_FALLBACK=0) · คอมเมนต์เดิม "inner gpt-5.5 200s + fallback gpt-4o 60s + เผื่อ 40s" ตกรุ่นตั้งแต่ ee64be89 เปลี่ยน fallback 60→90s
 
   if (!breakRes.success || !breakRes.data) {
     throwStep('auto_breakdown', `แตกประเด็นไม่สำเร็จ: ${breakRes.error || ''}`);
