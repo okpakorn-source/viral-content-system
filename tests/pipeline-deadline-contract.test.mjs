@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import {
   createPipelineDeadline,
   getActivePipelineDeadline,
+  isDeadlineReserveLegacy, // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — T1: ตัวแปรอิสระใหม่ของ assertCanStart (ดู deadlineFactoryFromSource)
+  stepStartRequirementMs,
   PipelineDeadlineError,
   preparePipelineSignal,
   resolvePipelineDeadlineAt,
@@ -313,9 +315,15 @@ function deadlineFactoryFromSource(source) {
   const end = source.indexOf('\nexport function runWithPipelineDeadline', start);
   assert.ok(start >= 0 && end > start);
   const fn = source.slice(start, end).replace('export function', 'function');
-  return new Function('AbortController', 'PipelineDeadlineError', `${fn}; return createPipelineDeadline;`)(
+  // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — T1: assertCanStart อ่านสวิตช์ DEADLINE_RESERVE_LEGACY + ตารางขั้นต่ำเพื่อเริ่ม
+  //   (ฟังก์ชันระดับโมดูลของ pipelineDeadline.js) → ส่งตัวจริงเข้า scope ของซอร์สที่ตัดมาด้วย
+  //   (ของเดิม: new Function('AbortController', 'PipelineDeadlineError', …)(AbortController, PipelineDeadlineError))
+  return new Function('AbortController', 'PipelineDeadlineError', 'isDeadlineReserveLegacy', 'stepStartRequirementMs',
+    `${fn}; return createPipelineDeadline;`)(
     AbortController,
     PipelineDeadlineError,
+    isDeadlineReserveLegacy,
+    stepStartRequirementMs,
   );
 }
 

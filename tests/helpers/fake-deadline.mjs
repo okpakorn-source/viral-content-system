@@ -52,12 +52,17 @@ export async function settleWithin(promise, label, ms = 2_000) {
  * ไม่พึ่ง timer จริงที่ unref หรือความเร็วเครื่อง CI · remainingMs() คงที่จนกว่าเทสจะ expire()
  * ใช้กับ runWithPipelineDeadline ตัวจริงได้ตรงๆ (withTimeoutSignal/preparePipelineSignal เห็นผ่าน AsyncLocalStorage เดียวกัน)
  * @param {number} remainingMs  เวลาที่เหลือของเส้นตาย (ms) ตามนาฬิกาหยุดนิ่ง
- * @returns {{ deadline: ReturnType<typeof createPipelineDeadline>, timers: Array<{at:number, callback:Function, cleared:boolean}>, expire(): void }}
+ * @returns {{ deadline: ReturnType<typeof createPipelineDeadline>, timers: Array<{at:number, callback:Function, cleared:boolean}>, expire(): void, advance(ms: number): number }}
+ * ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ — T1): เพิ่ม advance(ms) — เดินนาฬิกาหยุดนิ่งไปข้างหน้า (จำลองเวลาที่ขั้นก่อนหน้าใช้) ไม่ยิง timer ใดๆ
+ *   ห้ามข้ามเส้นตาย (ต้องการให้หมดเวลา = expire() เท่านั้น) · คืน remainingMs() ใหม่ · ของเดิม (deadline/timers/expire) ไม่เปลี่ยน
+ *   + options.createPipelineDeadline (ไม่ส่ง = ตัวจริงของ production เหมือนเดิม) — เทสกลายพันธุ์ที่โหลด pipelineDeadline.js ฉบับ patch
+ *   ต้องได้ deadline จากโมดูลฉบับเดียวกัน (assertCanStart ที่กลายพันธุ์ + AsyncLocalStorage เดียวกับ runWithPipelineDeadline ของฉบับนั้น)
+ * @param {{ createPipelineDeadline?: typeof createPipelineDeadline }} [options]
  */
-export function manualPipelineDeadline(remainingMs) {
+export function manualPipelineDeadline(remainingMs, { createPipelineDeadline: create = createPipelineDeadline } = {}) {
   let now = 1_000_000;
   const timers = [];
-  const deadline = createPipelineDeadline({
+  const deadline = create({
     deadlineAt: now + remainingMs,
     now: () => now,
     setTimer(callback, delay) {
@@ -78,6 +83,13 @@ export function manualPipelineDeadline(remainingMs) {
       assert.equal(timers[0].cleared, false, 'deadline ต้องยังไม่ถูก dispose ก่อนเทสยิง (งานที่ครอบต้องยังค้างอยู่)');
       now = deadline.deadlineAt;
       timers[0].callback();
+    },
+    advance(ms) {
+      const step = Number(ms);
+      assert.ok(Number.isFinite(step) && step >= 0, `advance ต้องรับ ms ที่ไม่ติดลบ (ได้ ${ms})`);
+      assert.ok(now + step < deadline.deadlineAt, `advance ${step}ms ข้ามเส้นตาย (เหลือ ${deadline.remainingMs()}ms) — ให้หมดเวลาใช้ expire()`);
+      now += step;
+      return deadline.remainingMs();
     },
   };
 }

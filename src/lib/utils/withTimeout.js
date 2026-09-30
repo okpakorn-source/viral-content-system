@@ -9,6 +9,7 @@ import {
   composeAbortSignals,
   getActivePipelineDeadline,
   PipelineDeadlineError,
+  reservePipelineStepMs, // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — T1: ขั้นต่ำเพื่อเริ่ม/เพดานที่ใช้จริง (ตารางอยู่ที่ pipelineDeadline.js)
 } from './pipelineDeadline.js';
 
 /**
@@ -44,7 +45,13 @@ export function withTimeout(promise, ms, stepName = 'unknown') {
  */
 export function withTimeoutSignal(factory, ms, stepName = 'unknown', parentSignal) {
   const pipelineDeadline = getActivePipelineDeadline();
-  pipelineDeadline?.assertCanStart(stepName, ms);
+  // ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) — T1 PL-03/MC-02/BUG-02: เดิม "จอง" งบรวมเต็มเพดาน ms ทุกขั้น
+  //   → generate_A (420s) ต้องเหลือ ≥420s = ขั้นก่อนเขียนช้า (แตกประเด็นถอย terra) แล้วงานตาย 504 ก่อนเรียกนักเขียน ทั้งที่เหลือ 6 นาที
+  //   ใหม่ (ตัดสินที่ ./pipelineDeadline.js ที่เดียว — reservePipelineStepMs): ต้องเหลือ "เวลาขั้นต่ำเพื่อเริ่ม" (ตาราง STEP_MIN_START_TABLE
+  //   · ค่าเริ่มต้น 60s · generate_A/write_inner 90s · raw_fact_* 45s · extract 30s) ถึงเริ่ม แล้วใช้เพดาน min(ms, เวลาที่เหลือ − 5s)
+  //   เส้นตายรวมยังตัดทุกขั้นผ่าน linkedSignal ด้านล่าง · ถอย DEADLINE_RESERVE_LEGACY=1 = จองเต็มเพดานแบบเดิม
+  //   (ของเดิม: pipelineDeadline?.assertCanStart(stepName, ms);)
+  if (pipelineDeadline) ms = reservePipelineStepMs(pipelineDeadline, stepName, ms);
   const abortOn = (pipelineDeadline || parentSignal || process.env.WITHTIMEOUT_ABORT === '1')
     && typeof AbortController !== 'undefined';
   if (!abortOn) {
