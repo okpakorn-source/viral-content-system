@@ -11,6 +11,12 @@
  * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 5 + สัญญา 8.3 · เลน W2): งานโหมด write (mode หรือ job.mode = 'write')
  *   ได้ย่อหน้า "ผลจะถูกเรียบเรียงเข้าเนื้อข่าวอัตโนมัติ" + ช่องใหม่ suggested_dimensions/quote พร้อมตัวอย่าง JSON (AGENT_RESULT_WRITE_TEMPLATE)
  *   วางต้นช่วงท้าย (หลัง stablePrefix) — prefix แคชเดิมทุกไบต์ทุกโหมด · โหมดอื่น/ไม่ระบุ = ใบงานเดิมทุกไบต์ · ข่าวดิบปิดท้ายเสมอ
+ * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 ชั้น 1 · W4): กันไฟล์ผลเข้ารหัสผิด (batch 1 ต.ค. 69 ไทยกลายเป็น ? 2/8 งาน)
+ *   ใบงานสมอง codex ทุกโหมดได้ย่อหน้า "เขียนไฟล์ผล" (resultFileSection — ข้อความคงที่): สร้าง out/result.json ด้วย apply_patch เท่านั้น ·
+ *   ห้าม Set-Content / Out-File / echo / > · ห้ามส่งข้อความ/สคริปต์ไทยผ่าน pipe ของ PowerShell · รัน tools/check-result.mjs ก่อนจบ
+ *   + รอบรันซ้ำเพราะไฟล์เสีย (encodingRetry) ได้ย่อหน้าเตือน (encodingRetrySection) · วางช่วงท้ายต่อจากย่อหน้าโหมดเขียน (ก่อนงบ) —
+ *   prefix แคชเดิมทุกไบต์ · สมอง api (ไม่มีไฟล์/เชลล์) = ใบงานเดิมทุกไบต์ · ข่าวดิบปิดท้ายเสมอ
+ *   (บรรทัด "เขียนผลลง out/result.json (UTF-8, JSON ล้วน)" เดิมอยู่ใน prefix แคช — ไม่แตะ เติมวิธีเขียนที่ปลอดภัยในช่วงท้ายแทน)
  */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -218,6 +224,44 @@ function writeModeSection() {
   ];
 }
 
+// ── ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 ชั้น 1 · W4): กันไฟล์ผลเข้ารหัสผิด (ไทยกลายเป็น ?) ──
+/** คำสั่งตรวจไฟล์ผลที่เอเจนต์ต้องรันก่อนจบ (เครื่องมือ scripts/research-tools/check-result.mjs · tools/ ในโฟลเดอร์งาน) */
+export const CHECK_RESULT_COMMAND = 'node tools/check-result.mjs out/result.json';
+/** ป้ายไฟล์ผลรอบที่เสีย ตอน worker รันซ้ำ (archiveRound → out/<ป้าย>-result.json) — ใบงานรอบซ้ำบอกเอเจนต์ตำแหน่งนี้ */
+export const ENCODING_RETRY_ARCHIVE_LABEL = 'round-encoding';
+/** หัวย่อหน้าเตือนรอบรันซ้ำ (ข้อความตามสเปกส่วน 10 ข้อ 3 ก) */
+export const ENCODING_RETRY_HEAD = '## ⚠️ รอบก่อนไฟล์ผลเข้ารหัสผิด (ไทยเป็น ?) — เขียน out/result.json ใหม่ด้วย apply_patch เท่านั้น และรัน check-result.mjs ก่อนจบ';
+
+/**
+ * ย่อหน้า "เขียนไฟล์ผล" ของสมอง codex ทุกโหมด — ข้อความคงที่ (ไม่มีข้อมูลเฉพาะงาน · แคชต่อได้)
+ * เหตุ: batch 1 ต.ค. 69 ไฟล์ผล 2/8 งานไทยกลายเป็น ? (ไฟล์ CRLF ไม่มี BOM · ไฟล์ input ที่เขียนด้วย -Encoding UTF8 ยังไทยครบ —
+ *   คาดว่าสร้างผลด้วยสคริปต์ที่ส่งผ่าน pipe ของ PowerShell 5.1 หรือ Set-Content/Out-File แบบ ANSI)
+ * @returns {string[]}
+ */
+export function resultFileSection() {
+  return [
+    '## เขียนไฟล์ผล out/result.json (กันภาษาไทยกลายเป็น ?)',
+    '- สร้าง/แก้ out/result.json ด้วยเครื่องมือแก้ไฟล์ของ Codex (apply_patch) เท่านั้น — ห้าม Set-Content / Out-File / Add-Content / echo / > / >> (PowerShell 5.1 บันทึก ANSI ทำไทยเป็น ? ทั้งไฟล์ แล้วรีเสิร์ชทั้งรอบใช้ไม่ได้)',
+    '- ห้ามส่งข้อความหรือสคริปต์ที่มีภาษาไทยผ่าน pipe ของ PowerShell เข้าโปรแกรมอื่น (เช่น ... | python - หรือ ... | node -) เพราะถูกแปลงเป็น ASCII ไทยเป็น ? เช่นกัน — สคริปต์ช่วยหรือไฟล์ --input ที่มีภาษาไทยให้สร้างเป็นไฟล์ด้วย apply_patch ก่อนแล้วค่อยรัน',
+    `- เขียนเสร็จแล้วรัน ${CHECK_RESULT_COMMAND} ก่อนจบงานทุกครั้ง — ต้องได้ "ok":true · ถ้าได้ "ok":false ให้ลบไฟล์แล้วเขียน out/result.json ใหม่ทั้งไฟล์ด้วย apply_patch แล้วรันตรวจซ้ำ (ใกล้หมดเวลา: เขียนด้วย apply_patch ก่อน แล้วตรวจถ้ายังมีเวลา)`,
+    '',
+  ];
+}
+
+/**
+ * ย่อหน้าเตือนรอบรันซ้ำเพราะไฟล์ผลรอบก่อนเข้ารหัสผิด (worker ส่ง encodingRetry) — ข้อความคงที่ · สมอง codex เท่านั้น
+ * @returns {string[]}
+ */
+export function encodingRetrySection() {
+  return [
+    ENCODING_RETRY_HEAD,
+    `- รอบที่แล้วภาษาไทยในไฟล์ผลกลายเป็น ? ทั้งไฟล์ (คาดว่าเขียนด้วย Set-Content/Out-File หรือส่งสคริปต์ผ่าน pipe ของ PowerShell) — ระบบย้ายไฟล์นั้นไปไว้ที่ out/${ENCODING_RETRY_ARCHIVE_LABEL}-result.json แล้ว (ข้อความไทยในนั้นเสียถาวร ใช้ได้เฉพาะลิงก์ ตัวเลข และคำภาษาอังกฤษ)`,
+    '- ไฟล์อื่นใน out/ ยังอยู่ ค้นต่อจากของเดิมได้ (เช่น เปิดลิงก์จากไฟล์เดิมอีกครั้งเพื่อคัดข้อความไทยที่ถูกต้อง) ไม่ต้องเริ่มค้นใหม่ทั้งหมด',
+    `- ก่อนจบต้องรัน ${CHECK_RESULT_COMMAND} แล้วได้ "ok":true เท่านั้น`,
+    '',
+  ];
+}
+
 /**
  * ประกอบใบงานเต็ม
  * @param {object} p
@@ -231,12 +275,16 @@ function writeModeSection() {
  * @param {number|null} [p.staleDays]  เกณฑ์ข่าวเก่า (env RESEARCH_AGENT_STALE_DAYS ผ่าน worker) — ไม่ส่ง = ไม่มีบรรทัดเกณฑ์
  * @param {'shadow'|'assist'|'write'|null} [p.mode]  ★ 1 ต.ค. 69 (SPEC-v3): โหมดของงาน — ไม่ส่ง = job.mode (lease ใส่ทุกใบ · worker sanitizeJob คงไว้)
  *                                     write เท่านั้นที่เติมย่อหน้าโหมดเขียน · อื่นๆ = ใบงานเดิมทุกไบต์
+ * @param {boolean} [p.encodingRetry]  ★ 1 ต.ค. 69 (SPEC-v3 ส่วน 10 · W4): รอบรันซ้ำเพราะไฟล์ผลรอบก่อนเข้ารหัสผิด (worker ส่ง) → ย่อหน้าเตือน
+ *                                     (สมอง codex ทุกงานได้ย่อหน้า "เขียนไฟล์ผล" อยู่แล้ว · api = ไม่มีทั้งสองย่อหน้า)
  * @returns {{text:string, stablePrefix:string, boundary:string}}
  */
 export function buildTask({
   // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3): + mode = null
   //   ของเดิม: job, budget, brainKind = 'codex', tools = null, browser = true, tasteExamples = [], previousRound = null, staleDays = null,
   job, budget, brainKind = 'codex', tools = null, browser = true, tasteExamples = [], previousRound = null, staleDays = null, mode = null,
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 · W4): + encodingRetry = false (บรรทัดบนคงเดิมทุกตัวอักษร)
+  encodingRetry = false,
 }) {
   const j = job || {};
   const jobId = cleanText(j.id, 80) || 'unknown';
@@ -251,6 +299,10 @@ export function buildTask({
   // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): ย่อหน้าโหมดเขียนวางต้นช่วงท้าย (หลัง prefix แคช — prefix เดิมทุกไบต์)
   //   ข้อความคงที่ทุกงาน write → แคชต่อจาก prefix ได้ · โหมดอื่น/ไม่ระบุ = ไม่มีย่อหน้านี้ = ใบงานเดิมทุกไบต์ · ข่าวดิบยังปิดท้ายเสมอ
   if ((mode || j.mode) === 'write') v.push(...writeModeSection());
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 ชั้น 1 · W4): วิธีเขียนไฟล์ผลที่ปลอดภัย (ทุกโหมดของสมอง codex · ข้อความคงที่)
+  //   ต่อจากย่อหน้าโหมดเขียน ก่อนงบ — prefix แคชเดิมทุกไบต์ · api ไม่มีไฟล์/เชลล์ = ไม่มีย่อหน้านี้ (ใบงานเดิมทุกไบต์)
+  if (brainKind !== 'api') v.push(...resultFileSection());
+  if (brainKind !== 'api' && encodingRetry) v.push(...encodingRetrySection());
   v.push(
     '## งบงานนี้',
     `- เรียกเครื่องมือไม่เกิน ${Number(budget && budget.maxCalls) || 24} ครั้ง · เวลารวมไม่เกิน ${Number(budget && budget.maxMinutes) || 6} นาที (ใช้ตามเหมาะสม ข่าวง่ายใช้น้อยกว่านี้)`,

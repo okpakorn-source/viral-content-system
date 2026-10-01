@@ -15,11 +15,15 @@
  *    เครื่องมือ web-agent อ่านคีย์จาก .env.local ของ repo เองผ่าน RESEARCH_TOOLS_REPO_ROOT)
  *   + CODEX_HOME เฉพาะบัญชีที่ไม่ใช่ main (main = โฟลเดอร์ปกติของ CLI · ค่า CODEX_HOME ที่ติดมากับ worker ถูกทิ้ง)
  * ไม่อ้างตำแหน่งไฟล์ตัวเอง — ทุกอย่างที่แตะระบบฉีดได้ (spawnImpl/killTreeImpl/setTimer/clearTimer/resolveExe/fs) เพื่อเทสด้วย child ปลอม
+ * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 · W4): readAgentResult ติดผลตรวจ "ไฟล์ผลเข้ารหัสผิด" (ไทยกลายเป็น ?)
+ *   เป็นช่อง encoding (encodingCheck.isEncodingBroken — กฎเดียวกับ tools/check-result.mjs) → runCodex ส่งต่อใน meta
+ *   (ตัดสินรันซ้ำ/ล้มที่ worker · ที่นี่แค่ตรวจ ไม่เปลี่ยน ok/json/ลำดับแหล่งผลเดิม)
  */
 import { spawn as nodeSpawn } from 'node:child_process';
 import nodeFs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { isEncodingBroken } from './encodingCheck.mjs'; // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 · W4)
 
 export const CODEX_MODEL = 'gpt-6-astra';
 export const RESULT_FILE = 'result.json';
@@ -201,17 +205,31 @@ export function readTextFile(file, fs = nodeFs) {
   return buf.toString('utf8').replace(/^\uFEFF/, '');
 }
 
-/** หาผลของเอเจนต์: out/result.json → ข้อความสุดท้าย (-o) → stdout */
+/**
+ * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 · W4): ผลตรวจไฟล์ผลเข้ารหัสผิดของ JSON ที่อ่านได้
+ *   ตัวตรวจพังเอง = null (fail-open: ผู้เรียกถือว่าไม่รู้ ไม่ใช่ "เสีย")
+ */
+function encodingOf(json) {
+  try { return isEncodingBroken(json); } catch { return null; }
+}
+
+/**
+ * หาผลของเอเจนต์: out/result.json → ข้อความสุดท้าย (-o) → stdout
+ * ★ 1 ต.ค. 69 (W4): ได้ JSON = มีช่อง encoding เพิ่ม ({broken, reason, thaiChars, questionMarks, badFields, …}) · ลำดับแหล่ง/json เดิมทุกอย่าง
+ */
 export function readAgentResult({ workdir, lastMessage = '', stdout = '', fs = nodeFs }) {
   const resultText = readTextFile(path.join(workdir, 'out', RESULT_FILE), fs);
   if (resultText) {
     const j = tryParse(resultText) || extractJson(resultText);
-    if (j) return { json: j, source: 'result.json' };
+    // ★ W4: + encoding · ของเดิม: if (j) return { json: j, source: 'result.json' };
+    if (j) return { json: j, source: 'result.json', encoding: encodingOf(j) };
   }
   const fromLast = extractJson(lastMessage);
-  if (fromLast) return { json: fromLast, source: 'last-message' };
+  // ★ W4: + encoding · ของเดิม: if (fromLast) return { json: fromLast, source: 'last-message' };
+  if (fromLast) return { json: fromLast, source: 'last-message', encoding: encodingOf(fromLast) };
   const fromOut = extractJson(stdout);
-  if (fromOut) return { json: fromOut, source: 'stdout' };
+  // ★ W4: + encoding · ของเดิม: if (fromOut) return { json: fromOut, source: 'stdout' };
+  if (fromOut) return { json: fromOut, source: 'stdout', encoding: encodingOf(fromOut) };
   return { json: null, source: resultText === null ? 'missing' : 'unparseable' };
 }
 
@@ -377,6 +395,8 @@ export async function runCodex(p, deps = {}) {
       resultSource: found.source,
       lastMessage: tail(lastMessage, 2000),
       truncated: !!r.outTrunc,
+      // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 · W4): ผลตรวจไฟล์ผลเข้ารหัสผิด (ไม่มี JSON = null) — worker ตัดสินรันซ้ำ/ล้ม
+      encoding: found.encoding || null,
     };
     // ผลที่เอเจนต์เขียนไว้แล้วใช้ได้เสมอ แม้หมดเวลา/ออกด้วยโค้ดไม่ใช่ 0 (fail-open · ผู้เรียกติดธง AGENT_TIMEOUT)
     if (found.json) {

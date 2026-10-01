@@ -44,6 +44,9 @@
 //   กันโพสต์ซ้ำ: bot-posted.editorMsgId (ผ่าน /api/bot/posted เดิม) · 👍/👎 → /api/research/feedback เดิม (ช่อง research-cards.feedback)
 //     ติดป้าย kind:'editor' · ใบแรก body/log/ผลเดิมทุกไบต์
 //   ไม่ใช่โหมด write (shadow/assist · ผลข่าวไม่มี editor · คำตอบ editor:null) = ไม่มีใบที่สอง ไม่ถามเพิ่ม = พฤติกรรมเดิมทุกไบต์ · สวิตช์ปิด = no-op
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 · W4): รู้จักธง ENCODING_BROKEN แบบ additive
+//   (worker ตั้งเมื่อไฟล์ผลเอเจนต์ภาษาไทยกลายเป็น ? ทั้งรอบ · ระเบียน failed + การ์ดทุกใบ dropped) → บัตรใบแรกขึ้น
+//   "⚠️ ไฟล์ผลเอเจนต์เข้ารหัสผิด — รีเสิร์ชรอบนี้ใช้ไม่ได้" (แทนป้าย 🏷️ ENCODING_BROKEN) · ใบที่สองแสดงธงเป็นคำไทย · ไม่มีธงนี้ = เดิมทุกไบต์
 // ============================================================
 
 const POLL_MS = 20 * 1000;              // ถามการ์ดทุก 20 วิ (สเปกส่วน 7)
@@ -77,6 +80,11 @@ const FEEDBACK_VOTES = Object.freeze({ '👍': 'up', '👎': 'down' });
 const TERMINAL_CARD_STATUSES = new Set(['done', 'failed', 'skipped']);
 const DEAD_REQUEST_STATUSES = new Set(['expired', 'failed']);
 const KNOWN_FLAGS = new Set(['ORIGIN_NOT_FOUND', 'STALE_NEWS', 'RAW_CONTRADICTION', 'BROWSER_WRONG_ACCOUNT', 'QUOTA_LOW']);
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 · W4): ธง ENCODING_BROKEN (worker ตั้งเมื่อไฟล์ผลเอเจนต์ภาษาไทยกลายเป็น ?
+//   ทั้งรอบ — ระเบียน failed + การ์ดทุกใบ dropped) → บัตรใบแรกขึ้นบรรทัดนี้แทนป้าย 🏷️ ดิบ · ไม่มีธงนี้ = บัตรเดิมทุกไบต์ (additive)
+const ENCODING_BROKEN_FLAG = 'ENCODING_BROKEN';
+const ENCODING_BROKEN_TEXT = '⚠️ ไฟล์ผลเอเจนต์เข้ารหัสผิด — รีเสิร์ชรอบนี้ใช้ไม่ได้';
+KNOWN_FLAGS.add(ENCODING_BROKEN_FLAG);
 const CASE_LINK_RE = /\/generation-logs\/([A-Za-z0-9_-]+)/u; // รูปเดียวกับ index.js (ลิงก์ 🔗 ดูผลลัพธ์เต็ม)
 const FOOTER_JOB_RE = /jobId:\s*([A-Za-z0-9_-]{1,200})/u;
 
@@ -108,6 +116,7 @@ const EDITOR_FLAG_LABELS = Object.freeze({
   RAW_CONTRADICTION: 'ต้นฉบับขัดกับแหล่ง',
   BROWSER_WRONG_ACCOUNT: 'เบราว์เซอร์ล็อกอินบัญชีอื่น',
   QUOTA_LOW: 'โควตาเอเจนต์ใกล้หมด',
+  ENCODING_BROKEN: 'ไฟล์ผลเอเจนต์เข้ารหัสผิด', // ★ 1 ต.ค. 69 (SPEC-v3 ส่วน 10 · W4): ใบที่สอง (skipped) พกธงจากแถวการ์ดมา
 });
 
 // ─── ตัวช่วยข้อความ ─────────────────────────────────────────────
@@ -350,6 +359,7 @@ function confidenceText(value) {
 
 function flagLines(card, flags) {
   const lines = [];
+  if (flags.has(ENCODING_BROKEN_FLAG)) lines.push(ENCODING_BROKEN_TEXT); // ★ 1 ต.ค. 69 (SPEC-v3 ส่วน 10 · W4)
   const origin = card.origin_post && typeof card.origin_post === 'object' ? card.origin_post : {};
   const originUrl = safeUrl(origin.url);
   if (flags.has('ORIGIN_NOT_FOUND')) {
@@ -1347,5 +1357,6 @@ module.exports = {
     POLL_MS, TAIL_MS, HARD_CAP_MS, STATUS_TTL_MS, MIN_TEXT_AFTER_URLS, MAX_SOURCE_URLS, MAX_RESULT_MSG_IDS,
     CARD_TITLE, SHADOW_TAG, SHADOW_LEAD, RESULT_POSTED_PREFIX, OFFLINE_TEXT, DEFAULT_QUOTA_ALERT_PCT,
     EDITOR_TITLES, EDITOR_MAIN_LINES, // ★ W2
+    ENCODING_BROKEN_TEXT, // ★ 1 ต.ค. 69 (SPEC-v3 ส่วน 10 · W4)
   }),
 };

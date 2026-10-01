@@ -9,7 +9,14 @@
 serper `{"q","type":"search|news|videos|images","num","tbs"}` · fetch-page `{"url","max","via"}` · apify `{"preset","url","q","limit","timeout"}` หรือ `{"actor","input":{…},"limit","timeout"}` ·
 web-agent `{"q"}` · transcribe `{"url","max"}` · gemini-video `{"url","question","start","end"}` · youtube-meta `{"url"}` · ocr `{"image":["…"]}` ·
 reverse-image `{"image-url","num"}` · wiki `{"q","lang"}` · rss-news `{"q","max-per-feed"}`
-ตัวอย่าง PowerShell: `Set-Content -Encoding UTF8 out/q.json '{"q":"ขาเทียม ราชบุรี","type":"news"}'` แล้ว `node tools/serper.mjs --input out/q.json`
+<!-- ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 · W4): ตัวอย่างสร้างไฟล์ input เปลี่ยนจากคำสั่ง PowerShell เป็น apply_patch
+     (ไฟล์นี้เอเจนต์อ่านทั้งไฟล์ — ไม่คัดลอกตัวอย่างเดิมไว้ในคอมเมนต์ · ของเดิมดูใน git history) -->
+สร้างไฟล์ input ด้วย **apply_patch** (เครื่องมือแก้ไฟล์ของ Codex) เช่น เพิ่มไฟล์ `out/q.json` เนื้อ `{"q":"ขาเทียม ราชบุรี","type":"news"}` แล้ว `node tools/serper.mjs --input out/q.json`
+
+## ไฟล์ที่มีภาษาไทย (รวม out/result.json) — กันไทยกลายเป็น `?`
+- สร้าง/แก้ด้วย **apply_patch เท่านั้น** — ห้าม `Set-Content` / `Out-File` / `Add-Content` / `echo` / `>` / `>>` (PowerShell 5.1 บันทึก ANSI → ภาษาไทยทุกตัวกลายเป็น `?` · รอบทดลอง 1 ต.ค. 69 ไฟล์ผลเสียแบบนี้ 2 ใน 8 งาน รีเสิร์ชทั้งรอบใช้ไม่ได้)
+- ห้ามส่งข้อความ/สคริปต์ที่มีภาษาไทยผ่าน pipe ของ PowerShell เข้าโปรแกรมอื่น (`… | python -` · `… | node -`) — ถูกแปลงเป็น ASCII ไทยเป็น `?` เช่นกัน · สคริปต์ช่วยให้สร้างเป็นไฟล์ด้วย apply_patch ก่อนแล้วค่อยรัน
+- เขียน `out/result.json` เสร็จแล้วรัน `node tools/check-result.mjs out/result.json` ทุกครั้งก่อนจบ — ต้องได้ `"ok":true` · ได้ `"ok":false` = ลบแล้วเขียนใหม่ทั้งไฟล์ด้วย apply_patch แล้วตรวจซ้ำ (ผลบอก `reason` · `fields_bad` · `missing_keys` · `hint`)
 
 | คำสั่ง | ใช้ทำอะไร | หมายเหตุ |
 |---|---|---|
@@ -25,6 +32,7 @@ reverse-image `{"image-url","num"}` · wiki `{"q","lang"}` · rss-news `{"q","ma
 | `node tools/wiki.mjs "ชื่อ"` | สรุป Wikipedia ไทย→อังกฤษ | ฟรี · บุคคลสาธารณะ/หน่วยงาน/สถานที่ |
 | `node tools/rss-news.mjs "คีย์เวิร์ด"` | หัวข่าวล่าสุดจาก RSS สำนักข่าวไทย 11 แห่ง | ฟรี · ได้หัวข้อ/สรุปสั้น → ยืนยันด้วย fetch-page |
 | `node tools/quota.mjs` | โควตา Codex ของบัญชีที่ใช้อยู่ | ฟรี · เหลือน้อย = ประหยัดการเรียก |
+| `node tools/check-result.mjs out/result.json` | ตรวจไฟล์ผลก่อนจบ: JSON ถูกรูป · ภาษาไทยไม่กลายเป็น `?` · มีคีย์บังคับครบ | ฟรี ไม่ใช้เน็ต ~1 วิ · **รันทุกครั้งก่อนจบงาน** · `exit 1` = ต้องเขียนใหม่ด้วย apply_patch แล้วตรวจซ้ำ |
 | `curl` / `Invoke-WebRequest` | endpoint สาธารณะอื่น (Wikipedia REST, YouTube oEmbed ฯลฯ) | ตามดุลยพินิจ |
 | เบราว์เซอร์ (ถ้ามีในเซสชัน **และใบงานบอก "เบราว์เซอร์: เปิด"**) | เปิดหน้าที่ fetch ไม่ได้ (ต้องรัน JS/ต้องล็อกอิน) เช่น ค้นเฟซบุ๊กตรงๆ | Edge "Profile 1" ล็อกอินเป็น **"เล่าเรื่อง ดารา"** เท่านั้น อ่านอย่างเดียว — บัญชีอื่น = หยุดใช้ + ธง `BROWSER_WRONG_ACCOUNT` · งานที่รันพร้อมกันใช้เบราว์เซอร์ได้ทีละงาน: ใบงานบอก "ปิด" = ห้ามเปิดเบราว์เซอร์ (ใช้ apify/fetch-page แทน) |
 

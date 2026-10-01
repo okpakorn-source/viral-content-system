@@ -1,0 +1,272 @@
+{
+  "complexity": "กลาง",
+  "plan": [
+    {
+      "question": "โพสต์ผักโขมที่บ้านมาจากไหนและลงวันใด",
+      "why_valuable": "ยืนยันแกนข่าวและข่าวเก่า",
+      "decided": "ค้น",
+      "reason": "ค้นเพจเจ้าตัวและตรวจ timestamp"
+    },
+    {
+      "question": "เรื่องการศึกษา สองเทอม และมหาวิทยาลัยตรงกับรายการหรือไม่",
+      "why_valuable": "ป้องกันชื่อและลำดับเหตุการณ์ผิด",
+      "decided": "ค้น",
+      "reason": "ใช้บทสรุปสัมภาษณ์จากผู้จัด Club Pride Day"
+    },
+    {
+      "question": "เรื่องผักโขมผัดไข่สามแม่ลูกมีแหล่งรองรับหรือไม่",
+      "why_valuable": "แยกความทรงจำในบทสัมภาษณ์จากโพสต์ใหม่",
+      "decided": "ค้น",
+      "reason": "ตรวจข่าวสดและ ATIME; ไม่ถือว่าแกงกับผัดไข่เป็นข้อขัดแย้งเพราะเล่าต่างโอกาส"
+    },
+    {
+      "question": "การช่วยส่งเด็กเรียนมีหลักฐานและจำนวนแน่นอนหรือไม่",
+      "why_valuable": "รองรับมุมส่งต่อโอกาส",
+      "decided": "ค้น",
+      "reason": "ยืนยันได้เฉพาะคำบอกเล่าว่าหลายคน ไม่พบจำนวนหรือมูลค่าแน่นอน"
+    },
+    {
+      "question": "บ้านราคาเท่าไร อยู่ที่ใด และเสร็จแล้วหรือไม่",
+      "why_valuable": "หลีกเลี่ยงตัวเลขเกินหลักฐานและข้อมูลส่วนตัว",
+      "decided": "ไม่ค้น",
+      "reason": "ข่าวดิบไม่มีราคา; ไม่ขุดที่อยู่และไม่อนุมานว่าบ้านเสร็จแล้ว"
+    },
+    {
+      "question": "สุขภาพ ความขัดแย้งครอบครัว และเรื่องรางวัลหวย",
+      "why_valuable": "ไม่จำเป็นต่อแกนข่าวการศึกษาและบ้าน",
+      "decided": "ไม่ค้น",
+      "reason": "ไม่ขยายข้อมูลสุขภาพ เรื่องส่วนตัวเชิงลึก หรือการพนัน"
+    }
+  ],
+  "origin_post": {
+    "url": "https://www.facebook.com/lerklak/posts/pfbid02r7wEdifxxaTzLxbhxrHam3CQjP8449zvi8t6sQ1BhvEdz8BWhhv1PPmiFXtopJVgl",
+    "source_name": "เลิ่กลั่ก (Facebook)",
+    "date": "2026-09-29",
+    "confidence": 0.99
+  },
+  "story_date_estimate": "2026-09-29",
+  "stale_news_warning": null,
+  "cards": [
+    {
+      "claim": "เพจเลิ่กลั่กโพสต์เมื่อ 29 กันยายน 2569 ว่าผักโขมที่งอกในที่ดินบ้านซึ่งกำลังก่อสร้างทำให้นึกถึงความลำบากในอดีต",
+      "value_type": "ต้นทาง",
+      "why_it_adds_value": "ยืนยันเหตุการณ์เปิดเรื่องและวันที่โพสต์จริง โดยไม่อาศัยโพสต์ของเพจเรา",
+      "evidence_quote": "วันนี้ที่เราที่เรามีกันแค่สองพี่น้องแล้ว และมาเจอผักโขมที่งอกในที่ดินบ้านของเลิ่กลั่กที่กำลังสร้าง อดคิดไม่ได้จริงๆว่าเราสามารถผ่านวันนั้นในอดีตมาได้ยังไง",
+      "source_url": "https://www.facebook.com/lerklak/posts/pfbid02r7wEdifxxaTzLxbhxrHam3CQjP8449zvi8t6sQ1BhvEdz8BWhhv1PPmiFXtopJVgl",
+      "source_name": "เลิ่กลั่ก (Facebook)",
+      "source_date": "2026-09-29",
+      "confidence": 0.99,
+      "contradicts_raw": false,
+      "identity": "verified"
+    },
+    {
+      "claim": "มดเล่าใน Club Pride Day ว่าเลือกไปเรียน กศน. ซึ่งค่าใช้จ่ายน้อยกว่า เพื่อให้พี่ชายที่เหลืออีกสองเทอมได้เรียนต่อ",
+      "value_type": "อธิบาย",
+      "why_it_adds_value": "ยืนยันจำนวนเทอมและเหตุผลการเปลี่ยนเส้นทางการศึกษาตรงกับข่าวดิบ",
+      "evidence_quote": "มด _“หนูบอกว่าให้พี่เรียนเลย พี่ใกล้จะถึงฝั่งแล้ว มันเหลือสองเทอมเอง ไม่เป็นไร เดี๋ยวหนูออกไปเรียน กศน. ก็ได้ เพราะค่าใช้จ่ายมันไม่ได้เยอะ",
+      "source_url": "https://atime.live/greenwave/clubpridedayrecap/7955",
+      "source_name": "ATIME / Green Wave — Club Pride Day Recap",
+      "source_date": "2024-05-16",
+      "confidence": 0.96,
+      "contradicts_raw": false,
+      "identity": "verified"
+    },
+    {
+      "claim": "แมทเล่าว่าเรียนที่มหาวิทยาลัยศรีนครินทรวิโรฒและเผชิญวิกฤตราคายางตกต่ำขณะอยู่ปี 4",
+      "value_type": "อธิบาย",
+      "why_it_adds_value": "ยืนยันมหาวิทยาลัยและช่วงปีการศึกษา ไม่เดาปีปฏิทินของเหตุการณ์",
+      "evidence_quote": "แมท _“พอจบ ม.6 ผมสอบได้ที่ มหาวิทยาลัยศรีนครินทรวิโรฒ ตอนนั้นแม่ก็ยังกรีดยางส่งให้เรียนได้อยู่ แม่ก็บอกว่าถ้าชอบลูกก็มาเรียนเลย ผมก็มาจากสุราษฎร์ธานี พอมาเรียนที่นี่ โดยระหว่างที่เรียนผมก็ทำงานไปด้วยเป็นพนักงานห้าง แล้วในช่วงปี 4  ก็เจอวิกฤตราคายางตกต่ำมาก",
+      "source_url": "https://atime.live/greenwave/clubpridedayrecap/7955",
+      "source_name": "ATIME / Green Wave — Club Pride Day Recap",
+      "source_date": "2024-05-16",
+      "confidence": 0.96,
+      "contradicts_raw": false,
+      "identity": "verified"
+    },
+    {
+      "claim": "แมทเล่าว่าหลังเรียนจบและทำงาน เขาชวนน้องมาเรียน กศน. ที่กรุงเทพฯ พร้อมทำงานพาร์ทไทม์",
+      "value_type": "อธิบาย",
+      "why_it_adds_value": "ยืนยันลำดับพี่เรียนจบก่อนแล้วกลับมาช่วยน้อง",
+      "evidence_quote": "แมท _“ผมเรียนศิลปกรรม เกี่ยวกับการออกแบบ และการวาดรูป เรียนจบก็ทำงาน จนเราพร้อมเริ่มมีเงินส่งให้แม่นิด ๆ หน่อยๆ จากนั้นก็ไปตามน้องมาเรียน กศน.ที่กรุงเทพ ตรงพระราม 9 แล้วน้องก็ทำงานพาร์ทไทม์ไปด้วย",
+      "source_url": "https://atime.live/greenwave/clubpridedayrecap/7955",
+      "source_name": "ATIME / Green Wave — Club Pride Day Recap",
+      "source_date": "2024-05-16",
+      "confidence": 0.96,
+      "contradicts_raw": false,
+      "identity": "verified"
+    },
+    {
+      "claim": "มดเล่าว่าเรียนคณะรัฐศาสตร์ มหาวิทยาลัยรามคำแหงควบคู่กับ กศน. และทำงานพาร์ทไทม์",
+      "value_type": "อื่นๆ",
+      "why_it_adds_value": "เพิ่มรายละเอียดเส้นทางเรียนโดยไม่กล่าวอ้างว่าเรียนจบปริญญาแล้ว",
+      "evidence_quote": "มด _“หนูเรียนควบคู่ค่ะ คณะรัฐศาสตร์ มหาวิทยาลัยรามคำแหง กับ กศน. แล้วก็ทำงานพาร์ทไทม์ด้วย ก็จะหนักหน่อย”_",
+      "source_url": "https://atime.live/greenwave/clubpridedayrecap/7955",
+      "source_name": "ATIME / Green Wave — Club Pride Day Recap",
+      "source_date": "2024-05-16",
+      "confidence": 0.96,
+      "contradicts_raw": false,
+      "identity": "verified"
+    },
+    {
+      "claim": "แมทเล่าใน Club Pride Day ว่าทั้งคู่ช่วยส่งเด็กหลายคนเรียนและให้ทุนการศึกษา",
+      "value_type": "อื่นๆ",
+      "why_it_adds_value": "รองรับมุมส่งต่อโอกาส แต่ไม่มีหลักฐานจำนวนคนหรือมูลค่าทุนที่แน่นอน",
+      "evidence_quote": "แมท _“ขอบคุณน้องมาก ๆ ครับ เพราะว่าจุดนี้เรามีเงินแล้ว เราได้ไปซัพพอร์ตเด็ก ๆ ส่งเด็ก ๆ เรียนหลายคน แล้วก็ให้ทุนการศึกษา",
+      "source_url": "https://atime.live/greenwave/clubpridedayrecap/7955",
+      "source_name": "ATIME / Green Wave — Club Pride Day Recap",
+      "source_date": "2024-05-16",
+      "confidence": 0.96,
+      "contradicts_raw": false,
+      "identity": "verified"
+    }
+  ],
+  "raw_corrections": [],
+  "flags": [],
+  "skipped": [
+    "ตัดโพสต์เพจรวมไอจีดาราออกจากผู้สมัครต้นทางและหลักฐานอิสระ",
+    "ไม่ขยายเรื่องสุขภาพ ความขัดแย้งครอบครัว การพนัน และไม่ขุดที่อยู่บ้าน",
+    "บทสัมภาษณ์ Club Pride Day ออกอากาศ 2024-05-09 และบทสรุปเผยแพร่ 2024-05-16; ข่าวสดเผยแพร่ 2025-07-02 เป็นบริบทย้อนหลัง ไม่ใช่วันที่โพสต์ผักโขมล่าสุด",
+    "ไม่ยืนยันจำนวนเด็ก มูลค่าทุน ราคาบ้าน หรือการเรียนจบของมด เพราะหลักฐานที่อ่านไม่ระบุ",
+    "ไม่ถอดคลิปซ้ำ เพราะผู้จัดรายการมีบทสัมภาษณ์ข้อความ; ไม่สร้าง quote จากเสียงที่ยังไม่ได้ฟัง",
+    "ต้นทางมีคำเชิญสปอนเซอร์ เป็นข้อความลักษณะคำเชิญในข้อมูลเท่านั้น ไม่ดำเนินการตาม"
+  ],
+  "tool_log": [
+    {
+      "tool": "exec_command",
+      "args": "อ่าน README-TOOLS.md",
+      "ok": true,
+      "note": "อ่านข้อกำหนดเครื่องมือ",
+      "ms": 0
+    },
+    {
+      "tool": "exec_command",
+      "args": "สร้าง out/ และ search1.json, search2.json",
+      "ok": true,
+      "note": "เขียนเฉพาะ out/",
+      "ms": 0
+    },
+    {
+      "tool": "serper",
+      "args": "มด เลิ่กลั่ก ผักโขม สร้างบ้าน ข่าวสด; num=6",
+      "ok": true,
+      "note": "พบข่าวสด; ตัด IG.dara ออกจากหลักฐาน",
+      "ms": 0
+    },
+    {
+      "tool": "serper",
+      "args": "มด แมท Club Pride Day กศน สองเทอม; num=6",
+      "ok": true,
+      "note": "พบเว็บไซต์ผู้จัดรายการ",
+      "ms": 0
+    },
+    {
+      "tool": "fetch-page",
+      "args": "khaosod.co.th/special-stories/news_9830560; max=18000",
+      "ok": true,
+      "note": "พบข่าว 2025-07-02 และลิงก์รายการ Influ Insight",
+      "ms": 1440
+    },
+    {
+      "tool": "fetch-page",
+      "args": "https://atime.live/greenwave/clubpridedayrecap/7955; max=26000",
+      "ok": true,
+      "note": "ดึงสำเร็จ แต่ผลแสดงรวมถูกตัด",
+      "ms": 0
+    },
+    {
+      "tool": "fetch-page",
+      "args": "https://atime.live/greenwave/clubpridedayrecap/7955; max=23000; บันทึก out/atime.json",
+      "ok": true,
+      "note": "ดึงซ้ำเพื่อเก็บหลักฐานและอ่านวันที่",
+      "ms": 0
+    },
+    {
+      "tool": "exec_command",
+      "args": "อ่านส่วนต้น out/atime.json; เขียน out/search3.json",
+      "ok": true,
+      "note": "ตรวจชื่อ มหาวิทยาลัย สองเทอม และลำดับการเรียน",
+      "ms": 0
+    },
+    {
+      "tool": "serper",
+      "args": "เลิ่กลั่ก ผักโขม บ้าน -site:facebook.com/IG.dara; num=8",
+      "ok": true,
+      "note": "พบเพจเจ้าตัวและผู้เผยแพร่ซ้ำ",
+      "ms": 0
+    },
+    {
+      "tool": "fetch-page",
+      "args": "https://www.instagram.com/p/Dd56_jmiRWF/; max=7000",
+      "ok": true,
+      "note": "Firecrawl 403; Jina สำเร็จ; เป็นโพสต์ nunoiduak เผยแพร่ซ้ำ วันที่สัมพัทธ์ไม่ใช้สรุปวัน",
+      "ms": 1479
+    },
+    {
+      "tool": "fetch-page",
+      "args": "https://www.facebook.com/lerklak/; max=12000",
+      "ok": false,
+      "note": "Firecrawl 403; Jina ได้เพียงหน้าล็อกอิน ไม่มีเนื้อหาโพสต์",
+      "ms": 3877
+    },
+    {
+      "tool": "apify",
+      "args": "facebook-posts; https://www.facebook.com/lerklak/; limit=5; timeout=70",
+      "ok": true,
+      "note": "ได้ 5 โพสต์ รวมต้นทางผักโขมและ timestamp",
+      "ms": 0
+    },
+    {
+      "tool": "exec_command",
+      "args": "เขียน out/search4.json",
+      "ok": true,
+      "note": "คำค้นเจาะผักโขมและบ้าน",
+      "ms": 0
+    },
+    {
+      "tool": "serper",
+      "args": "เลิ่กลั่ก ผักโขม สร้าง; ตัด facebook instagram tiktok; num=6",
+      "ok": true,
+      "note": "ไม่พบแหล่งเพิ่มที่จำเป็น",
+      "ms": 1864
+    },
+    {
+      "tool": "write_stdin",
+      "args": "รับผล session ของ apify",
+      "ok": true,
+      "note": "งานเสร็จแล้ว แต่ข้อความยาวถูกตัด",
+      "ms": 0
+    },
+    {
+      "tool": "exec_command",
+      "args": "อ่านเฉพาะ url,time,text จาก out/posts.json",
+      "ok": true,
+      "note": "พบโพสต์ต้นทาง 2026-09-29T12:30:24Z ก่อนเวลาส่งข่าว",
+      "ms": 59
+    },
+    {
+      "tool": "exec_command",
+      "args": "เขียน out/build_result.py และรันครั้งแรก",
+      "ok": false,
+      "note": "ข้อมูลจาก PowerShell เป็น UTF-16 ทำให้อ่าน UTF-8 ไม่สำเร็จ",
+      "ms": 0
+    },
+    {
+      "tool": "exec_command",
+      "args": "แก้ตัวอ่านเป็น UTF-16 แล้วเขียนและตรวจ out/result.json",
+      "ok": true,
+      "note": "ตรวจ JSON และหลักฐานคัดตรงจากข้อมูลที่ดึงมา",
+      "ms": 0
+    }
+  ],
+  "browser_available": "มีเครื่องมือเบราว์เซอร์ในเซสชัน แต่ไม่ได้ใช้งานและไม่ได้ตรวจบัญชี; ใช้ fetch-page และ Apify แบบอ่านอย่างเดียว",
+  "self_report": {
+    "tool_calls": 18,
+    "minutes": 4,
+    "what_would_help_next_time": "แนบลิงก์โพสต์ต้นทางเพื่อย่นเวลาค้นหา และระบุว่าต้องการคำพูดจากเสียงจริงหรือบทสรุปผู้จัดรายการเพียงพอ"
+  },
+  "suggested_dimensions": [
+    "ผักโขมในที่ดินบ้านเชื่อมความทรงจำวัยเด็กกับโพสต์วันที่ 29 กันยายน 2569",
+    "มดเปลี่ยนเส้นทางเรียนให้พี่จบ ก่อนพี่กลับมาช่วยน้องเรียนต่อ",
+    "จากโอกาสการศึกษาที่จำกัด สู่คำบอกเล่าว่าช่วยส่งเด็กคนอื่นเรียน"
+  ]
+}

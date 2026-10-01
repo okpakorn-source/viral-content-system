@@ -19,10 +19,16 @@
  *   - quote ในการ์ด (gateQuote): speaker_confidence นอกช่วง 0–1/อ่านไม่ได้ หรือมีคำต้องห้าม → ลบ quote ทิ้ง การ์ดคง gate เดิม
  *   - suggested_dimensions (gateDimensions): ผ่าน blacklist ชุดเดียวกับ claim → ตัดเฉพาะข้อที่ติด · ผลส่งต่อ buildCardRecord
  *   - ผลเก่า (ไม่มีฟิลด์ใหม่) = การ์ด/ธง/สถานะเดิมทุกไบต์ (suggested_dimensions = [] · stats เพิ่มตัวนับ)
+ * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 · W4): กันไฟล์ผลเอเจนต์เข้ารหัสผิด (ไทยกลายเป็น ?) "รายใบ"
+ *   - gateCard: claim หรือ evidence_quote มีอักษรเสีย (? / U+FFFD / mojibake) ≥ 50% ของอักษร (ไม่นับช่องว่าง/ตัวเลข/URL · ≥ 3 ตัว)
+ *     → dropped เหตุผล ENCODING_BROKEN (ไม่ส่งบรรณาธิการ/ไม่โชว์เป็นข้อเท็จจริง) — เหตุ: batch 1 ต.ค. 69 ด่านเดิมปล่อยการ์ด ? ผ่าน 4 ใบ
+ *   - gateQuote: quote.text เสีย → ลบ quote ทิ้ง (QUOTE_ENCODING) การ์ดคงเดิม (แนวเดียวกับ W2)
+ *   - ทั้งรอบเสีย (ไม่ใช่รายใบ) ตัดสินที่ worker (status failed + ธง ENCODING_BROKEN) · การ์ดไทยปกติ = ผลเดิมทุกไบต์
  */
 import { findBlacklist } from './blacklist.mjs';
 import { costFromToolLog } from './pricing.mjs';
 import { normalizeAgentResult, isHttpUrl, charCount, MAX_CARDS } from './schema.mjs';
+import { cardEncodingBroken, quoteEncodingBroken, ENCODING_FLAG } from './encodingCheck.mjs'; // ★ 1 ต.ค. 69 (SPEC-v3 ส่วน 10 · W4)
 
 export const GATE_RULES = Object.freeze({
   MIN_EVIDENCE_CHARS: 20,
@@ -155,6 +161,9 @@ export function gateCard(card, own = OWN_PAGE) {
   const reasons = [];
   let gate = 'pass';
   const lower = (g) => { if (GATE_RANK[g] > GATE_RANK[gate]) gate = g; };
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 · W4): ข้อความหลักเข้ารหัสผิด (ไทยกลายเป็น ? ≥ 50%) → dropped
+  //   (การ์ดไทยปกติไม่เข้าเงื่อนไข = เหตุผล/gate เดิมทุกไบต์)
+  if (cardEncodingBroken(card).broken) { lower('dropped'); reasons.push(ENCODING_FLAG); }
   if (!card.claim) { lower('dropped'); reasons.push('SCHEMA_CARD'); }
   if (!isHttpUrl(card.source_url)) { lower('dropped'); reasons.push('BAD_SOURCE_URL'); }
   if (findBlacklist(card.claim).length) { lower('dropped'); reasons.push('BLACKLIST_CLAIM'); }
@@ -175,8 +184,10 @@ export function gateCard(card, own = OWN_PAGE) {
  *   speaker_confidence ไม่ใช่ตัวเลขในช่วง 0–1 (null/ข้อความ/สเกล 0–100) → ลบ quote ทิ้ง การ์ดคงเดิมทุกช่อง (gate ไม่เปลี่ยน)
  *   คำต้องห้ามในคำพูด/ชื่อผู้พูด → ลบ quote เช่นกัน (คำพูดตรงไหลเข้าเนื้อข่าวได้ = ต้องสะอาดเท่า claim)
  *   การ์ดไม่มี quote = คืนใบเดิม (อ้างอิงเดิม) · ไม่โยน error
+ *   ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 · W4): + คำพูดเข้ารหัสผิด (ไทยกลายเป็น ? ≥ 50%) → ลบ quote (QUOTE_ENCODING)
  * @param {object} card  การ์ดหลัง gateCard
- * @returns {{card: object, dropped: null|'QUOTE_SCHEMA'|'QUOTE_SPEAKER_CONFIDENCE'|'QUOTE_BLACKLIST'}}
+ * @returns {{card: object, dropped: null|'QUOTE_SCHEMA'|'QUOTE_SPEAKER_CONFIDENCE'|'QUOTE_BLACKLIST'|'QUOTE_ENCODING'}}
+ *   (★ W4 ของเดิม: dropped: null|'QUOTE_SCHEMA'|'QUOTE_SPEAKER_CONFIDENCE'|'QUOTE_BLACKLIST')
  */
 export function gateQuote(card) {
   if (!card || typeof card !== 'object' || !('quote' in card)) return { card, dropped: null };
@@ -187,6 +198,7 @@ export function gateQuote(card) {
   else if (typeof sc !== 'number' || !Number.isFinite(sc)
     || sc < GATE_RULES.QUOTE_SPEAKER_CONFIDENCE_MIN || sc > GATE_RULES.QUOTE_SPEAKER_CONFIDENCE_MAX) dropped = 'QUOTE_SPEAKER_CONFIDENCE';
   else if (findBlacklist(q.text).length || findBlacklist(q.speaker).length) dropped = 'QUOTE_BLACKLIST';
+  else if (quoteEncodingBroken(q)) dropped = 'QUOTE_ENCODING'; // ★ 1 ต.ค. 69 (SPEC-v3 ส่วน 10 · W4): คำพูดไทยกลายเป็น ?
   if (!dropped) return { card, dropped: null };
   const rest = { ...card };
   delete rest.quote;

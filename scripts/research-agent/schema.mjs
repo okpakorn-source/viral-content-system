@@ -14,6 +14,8 @@
  *       speaker_confidence เก็บตามที่เอเจนต์ให้ (ไม่บีบ/ไม่แปลงสเกล) — ด่าน (gate.mjs gateQuote) ลบ quote ที่นอกช่วงทิ้งโดยไม่ลบการ์ด
  *   ระเบียน: OPTIONAL_RECORD_KEYS / OPTIONAL_CARD_KEYS (RECORD_KEYS/CARD_KEYS เดิมไม่เปลี่ยน) · ตัวอย่างผลโหมด write = AGENT_RESULT_WRITE_TEMPLATE
  *   (ท้ายใบงานเฉพาะงานโหมด write — AGENT_RESULT_TEMPLATE ที่อยู่ใน prefix แคชเดิมทุกไบต์)
+ * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 · W4): + ธงระบบ ENCODING_BROKEN (ไฟล์ผลเข้ารหัสผิดทั้งรอบ — worker ตั้ง)
+ *   ตัวตรวจอยู่ที่ encodingCheck.mjs · ระดับการ์ด = gate_reason ENCODING_BROKEN (gate.mjs) · สัญญาผล/ช่องอื่นไม่เปลี่ยน
  */
 
 export const VALUE_TYPES = Object.freeze(['ความคืบหน้า', 'ต้นทาง', 'ตัวตน', 'ตัวเลข-บริบท', 'อธิบาย', 'อื่นๆ']);
@@ -29,6 +31,9 @@ export const AGENT_FLAGS = Object.freeze(['ORIGIN_NOT_FOUND', 'STALE_NEWS', 'RAW
 export const SYSTEM_FLAGS = Object.freeze([
   'QUOTA_LOW', 'TOOL_BUDGET_MONTH', 'OVER_BUDGET', 'AGENT_TIMEOUT', 'API_FALLBACK', 'OWN_PAGE_ORIGIN',
   'DEADLINE_PASSED', 'EMPTY_RAW', 'BRAIN_UNAVAILABLE', 'AGENT_FAILED',
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 · W4): ไฟล์ผลเอเจนต์เข้ารหัสผิดทั้งรอบ (ไทยกลายเป็น ?)
+  //   worker ตั้งพร้อม status 'failed' + การ์ดทุกใบ dropped · เอเจนต์ตั้งเองไม่ได้ (ไม่อยู่ใน AGENT_FLAGS) · ค่าเดียวกับ encodingCheck.ENCODING_FLAG
+  'ENCODING_BROKEN',
 ]);
 export const KNOWN_FLAGS = Object.freeze([...AGENT_FLAGS, ...SYSTEM_FLAGS]);
 export const MAX_CARDS = 8;

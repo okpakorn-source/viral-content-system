@@ -317,12 +317,26 @@ node scripts/research-agent-report.mjs --env D:\อื่น\.env.local   # ใ�
 | โหมด write: บอทขึ้น "⏳ กำลังค้นคว้าก่อนเขียน" นานจนครบ 6 นาทีทุกข่าว | `/api/research/status` (worker หยิบงานไหม · ช่อง `queue.queued`) · log Vercel บรรทัด `[QueueService] ⏳ hold …` | worker ช้า/ค้าง → ดูแถว "ไม่มีการ์ดเลย" · ชั่วคราว: `RESEARCH_AGENT_HOLD_MS` ต่ำลง หรือ `0` = ปิดการชะลอ (ส่วน 8) |
 | บอทเตือนใน log ว่าตั้ง `RESEARCH_AGENT_SECRET` บน Railway | Railway → Variables | ลบ `RESEARCH_AGENT_SECRET` ออกจาก Railway (บอทไม่ใช้ · ส่วน 3) → restart |
 | ธง `BROWSER_WRONG_ACCOUNT` | Edge โปรไฟล์ไหนเปิดอยู่ · ล็อกอินเฟซบุ๊กเป็นใคร | สลับกลับ Profile 1 = เพจ "เล่าเรื่อง ดารา" |
+| บัตรขึ้น "⚠️ ไฟล์ผลเอเจนต์เข้ารหัสผิด — รีเสิร์ชรอบนี้ใช้ไม่ได้" (ธง `ENCODING_BROKEN` · ระเบียน `failed`) | `logs\research-agent\worker.log` บรรทัด `ไฟล์ผลเข้ารหัสผิด (ไทย 0 ตัว · อักษรเสีย …)` · โฟลเดอร์งาน `out\round-encoding-result.json` / `out\result.json` · `node tools\check-result.mjs out\result.json` ในโฟลเดอร์งาน | ข่าวเดินต่อจากต้นฉบับเอง (ไม่ต้องทำอะไรกับข่าวนั้น) · เกิดซ้ำบ่อย → ดูหัวข้อย่อยด้านล่าง |
 | ธง `QUOTA_LOW` / บอทเตือนโควตา | `quota.mjs --codex-only` | สลับ/เพิ่มบัญชี (ส่วน 7) |
 | ⚠️ ค่าเครื่องมือถึงเพดาน | รายงานส่วน "ค่าเครื่องมือ" | จำกัด `RESEARCH_AGENT_TOOLS` (ส่วน 8) หรือเจ้าของขยับเพดาน `RESEARCH_AGENT_TOOL_BUDGET_USD_MONTH` |
 | Codex "requires a newer version" | `codex --version` | `npm i -g @openai/codex@latest` (≥ 0.153) |
 | Codex บอก "execution policy blocked" | worker ส่ง `approvals_reviewer="auto_review"` ไหม 🔗 | ดูส่วน 7 กับดัก |
 | รายงาน HTTP 401/403 | ใช้คีย์ตัวไหน (รายงานบอกชื่อ) | ใช้ `SUPABASE_SERVICE_KEY` |
 | `node … --env-file x` ตาย exit 9 | — | ใช้ `--env` (ส่วน 10) |
+
+### 13.1 ไฟล์ผลเอเจนต์เข้ารหัสผิด — ภาษาไทยกลายเป็น `?` (W4 · SPEC-v3 ส่วน 10 · 1 ต.ค. 69)
+
+- **อาการที่เจอจริง:** batch 8 ข่าว 1 ต.ค. 69 20:30 — 2/8 งาน (`q_d764ba79bf9f9c4e` · `q_6c9c302018601b41`) `out/result.json` ที่ Codex เขียนเองบน Windows เป็นไฟล์ CRLF ไม่มี BOM ที่ไทยทุกตัวเป็น `?` (ตัวเลข/URL/อังกฤษครบ) · ไฟล์ input ในงานเดียวกันที่เขียนด้วย `-Encoding UTF8` ยังไทยครบ → ต้นเหตุน่าจะเป็นการสร้างผลผ่าน pipe ของ PowerShell 5.1 (`… | python -` — `$OutputEncoding` = ASCII) หรือ `Set-Content`/`Out-File` แบบ ANSI · ด่านเดิมปล่อยการ์ด `?` ผ่าน 4 ใบ (มั่นใจ 0.94–0.99) · บรรณาธิการอ่านไม่ออกเลยไม่ใช้ แต่เสียงานรีเสิร์ชทั้งรอบ
+- **กันไว้ 3 ชั้น (กฎเดียวกันทุกชั้น — `scripts/research-agent/encodingCheck.mjs`):**
+  1. **ใบงาน** (สมอง codex ทุกโหมด · ช่วงท้ายใบงาน ไม่แตะ prefix แคช): สร้าง/แก้ `out/result.json` ด้วย apply_patch เท่านั้น · ห้าม `Set-Content` / `Out-File` / `echo` / `>` · ห้ามส่งข้อความ/สคริปต์ไทยผ่าน pipe ของ PowerShell · รัน `node tools/check-result.mjs out/result.json` ก่อนจบ (README-TOOLS.md ในโฟลเดอร์งานบอกแบบเดียวกัน)
+  2. **เครื่องมือ `scripts/research-tools/check-result.mjs`** (เอเจนต์รันเอง · อ่านอย่างเดียว ไม่ใช้เน็ต): JSON ถูกรูป · ไทย ≥ 1 ตัว และอักษรเสีย (`?` · U+FFFD · mojibake `à¸`) ≤ 5% ของอักษรในช่องข้อความ (ไม่นับช่องว่าง/ตัวเลข/URL) · คีย์บังคับครบ → พิมพ์ JSON ASCII `{ok, reason, thaiChars, questionMarks, fields_bad[], missing_keys[], hint, …}` · `exit 0` ผ่าน / `1` ไม่ผ่าน / `2` ใช้ผิด
+  3. **worker** (`scripts/research-agent-worker.mjs` · `codexRunner.readAgentResult` ติดผลตรวจมาให้): ผลเสีย + เวลาถึงเส้นตายใบขอเหลือ ≥ 6 นาที → ย้ายไฟล์เสียไป `out/round-encoding-result.json` แล้ว **รัน Codex ซ้ำ 1 รอบในโฟลเดอร์งานเดิม** (ใบงาน `TASK-encoding-retry.txt` มีย่อหน้า "⚠️ รอบก่อนไฟล์ผลเข้ารหัสผิด …") · เวลาไม่พอ/รันซ้ำแล้วยังเสีย → ระเบียน `status: failed` + ธง `ENCODING_BROKEN` · การ์ดทุกใบ `gate=dropped` (`gate_reason` ขึ้นต้น `ENCODING_BROKEN`) · ไม่มีแผน/ต้นทาง/ข้อแก้จากเนื้อที่เสีย · ไม่ยก medium · ไม่สำรอง API
+  - **รายใบ** (`gate.mjs`): การ์ดที่ `claim` หรือ `evidence_quote` มีอักษรเสีย ≥ 50% (≥ 3 ตัว) → `dropped` เหตุผล `ENCODING_BROKEN` (กันกรณีเสียบางใบ) · `quote.text` เสีย → ตัด quote ทิ้ง การ์ดคงเดิม
+- **ผลต่อข่าว/พนักงาน:** ข่าวเดินต่อจากต้นฉบับ (โหมด write: ระเบียนการ์ด `failed` → ใบที่สองขึ้น "ℹ️ ไม่มีข้อมูลผ่านเกณฑ์ — ใช้ต้นฉบับ" + ธงเป็นคำไทย) · บัตรใบแรกขึ้น "⚠️ รีเสิร์ชข่าวนี้ไม่สำเร็จ …" + "⚠️ ไฟล์ผลเอเจนต์เข้ารหัสผิด — รีเสิร์ชรอบนี้ใช้ไม่ได้" (บอทรู้จักธงนี้แบบ additive)
+- **ตรวจเอง:** เปิดโฟลเดอร์งาน (`RESEARCH_AGENT_WORKDIR` ไม่ตั้ง = `%TEMP%\research-agent-work\<jobId>`) แล้วรัน `node tools\check-result.mjs out\result.json` หรือ `node tools\check-result.mjs out\round-encoding-result.json` · tool_log ของระเบียนมีบรรทัด `worker / encoding` บอกตัวเลข (ไทยกี่ตัว · อักษรเสียกี่ % · ช่องเสียกี่ช่อง) และผลรอบซ้ำ
+- **ถ้าเกิดซ้ำบ่อยหลังมีใบงานใหม่:** ดู `TASK.txt`/`TASK-encoding-retry.txt` ว่ามีย่อหน้า "เขียนไฟล์ผล out/result.json" · ดู tool_log ของงานว่าเอเจนต์เขียนไฟล์ด้วยคำสั่งอะไร · `codex --version` (apply_patch ต้องใช้ได้บน Windows) · รอบซ้ำกินเวลาเพิ่ม 3–5 นาที (โหมด write: การชะลอคิว `RESEARCH_AGENT_HOLD_MS` 6 นาทีอาจหมดก่อน → ข่าวเขียนจากต้นฉบับ บัตรตามมาทีหลัง)
+- **ไม่มีสวิตช์แยก:** ผลไทยปกติ = เส้นทางเดิมทุกอย่าง (ไม่รันซ้ำ ระเบียนเดิม) · ตัวตรวจพังเอง = ถือว่าไม่เสีย (fail-open) · ปิดทั้งระบบ = `RESEARCH_AGENT` (ส่วน 8)
 
 ## 14. เช็กลิสต์ตรวจสัญญาหลังรวมเลน (ผู้ตรวจ · สเปกข้อ 2 · หน้าที่เลน D)
 
@@ -355,6 +369,7 @@ node scripts/research-agent-report.mjs --env D:\อื่น\.env.local   # ใ�
 | `discord-bot/researchCard.js` · `src/app/api/bot/posted/route.js` 🔗 | C | การ์ด Discord · รีแอ็กชัน · เตือนโควตา |
 | `src/lib/research-agent/editorBrief.js` · `src/lib/research-agent/writeStage.js` · `tests/research-editor-brief.test.mjs` · `tests/research-write-pipeline.test.mjs` | W1 | โหมด write: บรรณาธิการเรียบเรียง + ด่านเชิงกล · ขั้นรอการ์ดหลังสกัด · store `research-editor` (ส่วน 16) |
 | `src/lib/research-agent/queueHold.js` · จุดเสียบใน `src/lib/services/queueService.js` (getNextPendingJobs) · `src/app/api/queue/status/route.js` (ช่อง `researchHold`) · `discord-bot/index.js` (ข้อความรอ) · `tests/research-queue-hold.test.mjs` | W3 | โหมด write: คิวชะลอหยิบงานจนรีเสิร์ชเสร็จ (ส่วน 16) |
+| `scripts/research-agent/encodingCheck.mjs` (กฎกลาง) · `scripts/research-tools/check-result.mjs` · ย่อหน้า "เขียนไฟล์ผล" ใน `taskBuilder.mjs` · รันซ้ำ/`ENCODING_BROKEN` ใน `scripts/research-agent-worker.mjs` · การ์ดเสียรายใบใน `gate.mjs` · บรรทัดเตือนใน `discord-bot/researchCard.js` · `tests/research-encoding-check.test.mjs` (fixture จริง `tests/fixtures/research-agent/encoding-*-result.json`) | W4 | กันไฟล์ผลเอเจนต์เข้ารหัสผิด — ไทยกลายเป็น `?` (ส่วน 13.1) |
 
 ## 16. โหมด write (เฟส 2 · SPEC-v3 · เจ้าของเคาะ 1 ต.ค. 69 "เปิดเลยได้ write พนักงานจะตรวจก่อนโพสต์")
 
@@ -368,3 +383,4 @@ node scripts/research-agent-report.mjs --env D:\อื่น\.env.local   # ใ�
   - **หยิบตามปกติ (ไม่ชะลอ) เมื่อ:** ใบขอ `done`/`failed`/`expired` · ไม่มีใบขอ · ใบขอเลย `deadlineAt` · ใบขอ `queued` แต่ไม่มีชีพจร worker ≤ 10 นาที (worker ออฟไลน์ — ข่าวไม่ช้าเพราะรอคนที่ไม่มา) · อ่านใบขอไม่ได้หรือเกิน 3 วิ (fail-open) · ปิดสวิตช์/`shadow`/`assist` (ไม่ import อะไร · ตัวหยิบงานเดิมทุกไบต์)
   - **บอท:** `/api/queue/status` ตอบเพิ่ม `researchHold: {heldMs, maxMs}` เฉพาะงานที่ถูกชะลอ → ข้อความรอเปลี่ยนเป็น "⏳ กำลังค้นคว้าก่อนเขียน (x/y นาที)" · ไม่ปลุก worker เปล่าระหว่างชะลอ · ยืดเวลารอผลของบอทเท่าเพดานที่เห็น (15 นาทีเดิม + ≤ 10 นาที) · ไม่มีช่องนี้ = ข้อความเดิม
   - **ข้อจำกัด:** หน้าเว็บ (`/content/new`) ยังโชว์ "รอคิว" และมีเพดาน poll 15 นาทีเดิม · self-heal ของ `/api/queue/status` ยังปลุก worker ทุก 20 วิระหว่างชะลอ (ปลุกแล้วถูกข้ามเอง · ปลุกนี้ทำให้หยิบได้ทันทีเมื่อการชะลอจบ)
+- **ไฟล์ผลเอเจนต์เข้ารหัสผิด (W4 · SPEC-v3 ส่วน 10):** ไฟล์ผลที่ไทยกลายเป็น `?` ถูกจับ 3 ชั้น (ใบงานสั่ง apply_patch + `tools/check-result.mjs` · worker รันซ้ำ 1 รอบเมื่อเหลือ ≥ 6 นาที · ไม่ทัน/ยังเสีย = `failed` + ธง `ENCODING_BROKEN` การ์ดทุกใบ `dropped`) → บรรณาธิการไม่ได้รับการ์ดเสีย ข่าวเขียนจากต้นฉบับ · รายละเอียด/วิธีตรวจ ส่วน 13.1

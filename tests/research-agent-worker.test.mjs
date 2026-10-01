@@ -580,7 +580,9 @@ test('12. โฟลเดอร์งาน: junction ไม่ทำลาย�
     assert.ok(existsSync(join(toolsDir, 'serper.mjs')), 'ลบโฟลเดอร์งานต้องไม่ลบเครื่องมือจริง');
     const b = worker.prepareWorkdir({ root: dir, jobId: 'q_b', toolsDir, tools: ['serper', 'wiki'], restricted: true, taskText: 'งาน' });
     assert.equal(b.toolsMode, 'copy');
-    assert.deepEqual(readdirSync(join(b.dir, 'tools')).sort(), ['.repo-root', '_alias-hooks.mjs', '_common.mjs', 'serper.mjs', 'wiki.mjs']);
+    // ★ 1 ต.ค. 69 (SPEC-v3 ส่วน 10 · W4): + check-result.mjs (ใบงานสั่งรันก่อนจบทุกงาน — สำเนาต้องมีเสมอ)
+    //   ของเดิม: ['.repo-root', '_alias-hooks.mjs', '_common.mjs', 'serper.mjs', 'wiki.mjs']
+    assert.deepEqual(readdirSync(join(b.dir, 'tools')).sort(), ['.repo-root', '_alias-hooks.mjs', '_common.mjs', 'check-result.mjs', 'serper.mjs', 'wiki.mjs']);
     assert.equal(readFileSync(join(b.dir, 'tools', '.repo-root'), 'utf8').replace(/\r\n/g, '\n'), REAL_ROOT.replace(/[\\/]+$/, ''), 'สำเนาบอกรากโปรเจกต์ให้เครื่องมือหา .env.local');
     assert.throws(() => worker.prepareWorkdir({ root: dir, jobId: '..\\x', toolsDir, taskText: '' }));
   } finally { rmSync(dir, { recursive: true, force: true }); }

@@ -242,14 +242,28 @@ function checkPrefixLocked(m) {
 
 test('W2-1. prefix แคชเดิมทุกไบต์ทุกโหมด (ล็อก sha256 เฟส 1) — ย่อหน้าโหมดเขียนไม่อยู่ใน prefix', () => checkPrefixLocked(tb));
 
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 · W4): ใบงานสมอง codex ทุกโหมดได้ย่อหน้า "เขียนไฟล์ผล" (ข้อความคงที่ ·
+//   resultFileSection) เพิ่มในช่วงท้าย — ถอดย่อหน้านั้นออกก่อนเทียบลายนิ้วมือเฟส 1 (codex ต้องเจอครั้งเดียว · api ต้องไม่มี)
+//   = พิสูจน์ต่อว่า W2/W4 ไม่แตะส่วนอื่นของใบงานโหมดอื่นเลยสักไบต์ · เนื้อย่อหน้า W4 ตรวจที่ tests/research-encoding-check.test.mjs
+function stripW4(text, kind, m) {
+  const chunk = `${m.resultFileSection().join('\n')}\n`;
+  const n = text.split(chunk).length - 1;
+  if (kind === 'api') { assert.equal(n, 0, 'api: ไม่มีย่อหน้าเขียนไฟล์ผล (ไม่มีไฟล์/เชลล์)'); return text; }
+  assert.equal(n, 1, `${kind}: ย่อหน้าเขียนไฟล์ผล (W4) ต้องมีครั้งเดียว`);
+  return text.replace(chunk, () => '');
+}
+
 function checkNonWriteUnchanged(m) {
   for (const kind of ['codex', 'api']) {
     for (const mode of [undefined, null, 'shadow', 'assist', 'WRITE', 'yolo']) {
-      assert.equal(sha(m.buildTask({ job: { ...JOB, mode }, budget: BUDGET, brainKind: kind }).text), PHASE1_TASK_SHA[`${kind}Text`], `${kind}/${mode}: ใบงานเดิมทุกไบต์`);
+      // ★ W4: ถอดย่อหน้า W4 ก่อนเทียบ · ของเดิม: assert.equal(sha(m.buildTask({ job: { ...JOB, mode }, budget: BUDGET, brainKind: kind }).text), PHASE1_TASK_SHA[`${kind}Text`], …);
+      assert.equal(sha(stripW4(m.buildTask({ job: { ...JOB, mode }, budget: BUDGET, brainKind: kind }).text, kind, m)), PHASE1_TASK_SHA[`${kind}Text`], `${kind}/${mode}: ใบงานเดิมทุกไบต์`);
     }
     const t = m.buildTask({ job: { ...JOB, mode: 'shadow' }, budget: BUDGET, brainKind: kind, tasteExamples: ['ตัวอย่าง A'], staleDays: 7 }).text;
-    assert.equal(sha(t), PHASE1_TASK_SHA[`${kind}ShadowTasteStale`], `${kind}: shadow + ตัวอย่างรสนิยม + เกณฑ์ข่าวเก่า = เดิมทุกไบต์`);
-    assert.equal(sha(m.buildTask({ job: { ...JOB, mode: 'write' }, budget: BUDGET, brainKind: kind, mode: 'shadow' }).text), PHASE1_TASK_SHA[`${kind}Text`],
+    // ★ W4 ของเดิม: assert.equal(sha(t), PHASE1_TASK_SHA[`${kind}ShadowTasteStale`], …);
+    assert.equal(sha(stripW4(t, kind, m)), PHASE1_TASK_SHA[`${kind}ShadowTasteStale`], `${kind}: shadow + ตัวอย่างรสนิยม + เกณฑ์ข่าวเก่า = เดิมทุกไบต์`);
+    // ★ W4 ของเดิม: assert.equal(sha(m.buildTask({ …, mode: 'shadow' }).text), PHASE1_TASK_SHA[`${kind}Text`], …);
+    assert.equal(sha(stripW4(m.buildTask({ job: { ...JOB, mode: 'write' }, budget: BUDGET, brainKind: kind, mode: 'shadow' }).text, kind, m)), PHASE1_TASK_SHA[`${kind}Text`],
       `${kind}: mode ที่ผู้เรียกส่ง (shadow) ชนะ job.mode`);
   }
 }

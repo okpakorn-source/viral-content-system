@@ -33,6 +33,14 @@
  *   RESEARCH_AGENT_IDLE_MS (ไม่ตั้ง = 10000 · ช่วงถามงานตอนว่าง 1–120 วิ — ทุก lease = 1 การเรียก Vercel) ·
  *   RESEARCH_AGENT_CONCURRENCY (ไม่ตั้ง = 2 · งานพร้อมกัน 1–4 · เบราว์เซอร์ทีละงานเสมอ) ·
  *   RESEARCH_AGENT_STALE_DAYS (ไม่ตั้ง = 7 · เรื่องเก่ากว่าวันส่งเกินกี่วัน = ธง STALE_NEWS — ธงอย่างเดียว ไม่หยุดงาน)
+ * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 ชั้น 3 · W4): กันไฟล์ผลเอเจนต์เข้ารหัสผิด (ไทยกลายเป็น ?)
+ *   ตรวจผลทุกรอบด้วยกฎกลาง (research-agent/encodingCheck.mjs · ช่อง encoding จาก codexRunner หรือคำนวณเอง) →
+ *   (ก) เสีย + สมอง codex + เวลาถึงเส้นตายใบขอ (deadlineAt − ตอนนี้ แบบเดียวกับ remaining()) เหลือ ≥ 6 นาที + ยังไม่เคยรันซ้ำ
+ *       → ย้ายไฟล์เสียไป out/round-encoding-result.json แล้วรัน Codex ซ้ำ 1 รอบในโฟลเดอร์งานเดิม (ใบงานมีย่อหน้าเตือน encodingRetry)
+ *   (ข) เวลาไม่พอ / รันซ้ำแล้วยังเสียหรือไม่ได้ผล → ระเบียน status 'failed' + ธง ENCODING_BROKEN · การ์ดทุกใบ gate=dropped
+ *       (ไม่มีแผน/ต้นทาง/ข้อแก้/ธงจากเนื้อที่เสีย — ไม่โชว์เป็นข้อเท็จจริง ไม่ส่งบรรณาธิการ) · ไม่ยก medium · ไม่สำรอง API
+ *   ผลไทยปกติ = เส้นทางเดิมทุกอย่าง (ไม่รันซ้ำ ระเบียนเดิม) · ตัวตรวจพัง = ถือว่าไม่เสีย (fail-open)
+ *   tools/ แบบสำเนา (RESEARCH_AGENT_TOOLS ตั้งไว้) คัด check-result.mjs ไปด้วยเสมอ (HELPER_FILES) — ใบงานสั่งให้เอเจนต์รันก่อนจบ
  */
 import nodeFs from 'node:fs';
 import os from 'node:os';
@@ -41,8 +49,10 @@ import util from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { runCodex as realRunCodex, RESULT_FILE, LAST_MESSAGE_FILE } from './research-agent/codexRunner.mjs';
 import { runApiFallback as realRunApi } from './research-agent/apiFallback.mjs';
-import { buildTask, loadTasteExamples, ALL_TOOLS } from './research-agent/taskBuilder.mjs';
+// ★ 1 ต.ค. 69 (SPEC-v3 ส่วน 10 · W4): + ENCODING_RETRY_ARCHIVE_LABEL · ของเดิม: import { buildTask, loadTasteExamples, ALL_TOOLS } from './research-agent/taskBuilder.mjs';
+import { buildTask, loadTasteExamples, ALL_TOOLS, ENCODING_RETRY_ARCHIVE_LABEL } from './research-agent/taskBuilder.mjs';
 import { runGate, resultValue, GATE_RULES } from './research-agent/gate.mjs';
+import { isEncodingBroken, summarizeEncoding, dropCardsForEncoding, ENCODING_FLAG } from './research-agent/encodingCheck.mjs'; // ★ W4
 import { buildCardRecord, validateCardRecord, redactSecrets, MODES, LIMITS } from './research-agent/schema.mjs';
 import { accountOrder, readQuota as realReadQuota, chooseAccount, DEFAULT_ALERT_PCT } from './research-agent/accounts.mjs';
 import { monthBudgetStatus } from './research-agent/pricing.mjs';
@@ -53,9 +63,16 @@ export const PROTOCOL = 'research-lease-v1';
 const SAFE_JOB_ID = /^[A-Za-z0-9_-]{1,80}$/;
 const SAFE_BIN = /^[\p{L}\p{M}\p{N}\\/:. _\-~()]{1,260}$/u; // ไฟล์โปรแกรมเดียว ไม่มีอาร์กิวเมนต์/อักขระ shell
 const SECRET_NAME = /KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|COOKIE|SERVICE_ROLE/i;
-const HELPER_FILES = ['_common.mjs', '_alias-hooks.mjs'];
+// ★ 1 ต.ค. 69 (SPEC-v3 ส่วน 10 · W4): + check-result.mjs (ใบงานสั่งรันก่อนจบทุกงาน — โหมดสำเนาต้องมีเสมอ)
+//   ของเดิม: const HELPER_FILES = ['_common.mjs', '_alias-hooks.mjs'];
+const HELPER_FILES = ['_common.mjs', '_alias-hooks.mjs', 'check-result.mjs'];
 /** เพดานงานพร้อมกัน (Codex หลายตัวพร้อมกัน = โควตา/เครื่องหนักตาม) */
 export const MAX_CONCURRENCY = 4;
+/**
+ * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 ข้อ 3 ก · W4): รันซ้ำเพราะไฟล์ผลเข้ารหัสผิดได้เมื่อเวลาถึงเส้นตายใบขอ
+ *   (deadlineAt − ตอนนี้ · วิธีเดียวกับ remaining() ใน processJob) เหลือ ≥ 6 นาที — ไม่พอ = failed + ENCODING_BROKEN ทันที
+ */
+export const ENCODING_RETRY_MIN_LEFT_MS = 6 * 60000;
 /** เส้นตายสำรองเมื่อใบขอไม่มี deadlineAt = เท่าค่าเริ่มต้นฝั่งเว็บ (createdAt + RESEARCH_AGENT_DEADLINE_MIN 15 นาที) */
 export const FALLBACK_DEADLINE_MIN = 15;
 
@@ -320,6 +337,20 @@ function sanitizeJob(job) {
 const workerNote = (args, ok, note) => ({ tool: 'worker', args: String(args).slice(0, LIMITS.text), ok: !!ok, note: String(note).slice(0, LIMITS.text), ms: null });
 
 /**
+ * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 · W4): ผลตรวจไฟล์ผลเข้ารหัสผิดของผลรอบหนึ่ง
+ *   ใช้ช่อง encoding ที่ codexRunner.readAgentResult ติดมา (รูปถูก) · ไม่มี (สมอง api/ตัวรันปลอม) = คำนวณเองด้วยกฎเดียวกัน
+ *   ไม่มี JSON / ตัวตรวจพัง = null (fail-open: ไม่ถือว่าเสีย)
+ * @param {object|null} res  ผลของ runCodex/runApi
+ * @returns {object|null}
+ */
+export function encodingOfResult(res) {
+  if (!res || !res.ok || !res.json) return null;
+  if (res.encoding && typeof res.encoding === 'object' && typeof res.encoding.broken === 'boolean') return res.encoding;
+  try { return isEncodingBroken(res.json); } catch { return null; }
+}
+const encodingBrokenRound = (r) => !!(r && r.encoding && r.encoding.broken === true);
+
+/**
  * ทำงานรีเสิร์ช 1 งาน → ระเบียนตามสัญญา 2.2 (ไม่ส่ง — ผู้เรียกส่งเอง) · ไม่โยน error
  * @param {object} rawJob  แถว research-requests จาก lease
  * @param {object} ctx { cfg, env, deps:{runCodex, runApi, readQuota, now, fs, log, heartbeat, every}, state, leaseMode }
@@ -431,8 +462,11 @@ export async function processJob(rawJob, ctx) {
         }
       }
       const tasteExamples = loadTasteExamples(cfg.essencesPath, job.id, 5);
-      const taskFor = (kind, effort, budget, previousRound = null) => buildTask({
+      // ★ 1 ต.ค. 69 (SPEC-v3 ส่วน 10 · W4): + encodingRetry (รอบรันซ้ำเพราะไฟล์ผลเข้ารหัสผิด → ใบงานมีย่อหน้าเตือน)
+      //   ของเดิม: const taskFor = (kind, effort, budget, previousRound = null) => buildTask({ …เดิม… });
+      const taskFor = (kind, effort, budget, previousRound = null, encodingRetry = false) => buildTask({
         job, budget: { ...budget, effort }, brainKind: kind, tools: cfg.tools, browser: browserOn, tasteExamples, previousRound, staleDays: cfg.staleDays,
+        encodingRetry,
       });
       const baseBudget = { maxCalls: cfg.maxCalls, maxMinutes: cfg.maxMinutes };
       const firstTask = taskFor(brainKind, cfg.effort, baseBudget);
@@ -449,7 +483,9 @@ export async function processJob(rawJob, ctx) {
         const gated = res && res.ok && res.json
           ? runGate(res.json, { jobCreatedAt: job.createdAt, minutes, maxCalls: cfg.maxCalls, maxMinutes: cfg.maxMinutes, staleDays: cfg.staleDays, secretValues })
           : null;
-        const round = { kind, effort, res: res || { ok: false, errorType: 'NO_RESULT' }, gated, minutes };
+        // ★ 1 ต.ค. 69 (SPEC-v3 ส่วน 10 · W4): + encoding (ผลตรวจไฟล์ผลเข้ารหัสผิด · ไม่มี JSON = null)
+        //   ของเดิม: const round = { kind, effort, res: res || { ok: false, errorType: 'NO_RESULT' }, gated, minutes };
+        const round = { kind, effort, res: res || { ok: false, errorType: 'NO_RESULT' }, gated, minutes, encoding: encodingOfResult(res) };
         rounds.push(round);
         log('INFO', `งาน ${job.id} รอบ ${kind}/${effort}: ${res && res.ok ? 'ได้ผล' : `ล้ม ${res && res.errorType}`}${gated ? ` · การ์ด ${gated.cards.length} (ผ่าน ${gated.stats.pass})` : ''} · ${minutes.toFixed(2)} นาที`);
         if (kind === 'codex' && res && ['CODEX_QUOTA', 'CODEX_AUTH'].includes(res.errorType || res.warning)) {
@@ -477,11 +513,50 @@ export async function processJob(rawJob, ctx) {
       }
       if (r1.res && (r1.res.timedOut || r1.res.warning === 'CODEX_TIMEOUT')) addFlag('AGENT_TIMEOUT');
 
+      // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 ข้อ 3 · W4): ไฟล์ผลเข้ารหัสผิด (ไทยกลายเป็น ?)
+      //   (ก) สมอง codex + เวลาถึงเส้นตายใบขอเหลือ ≥ 6 นาที + ยังไม่เคยรันซ้ำ → ย้ายไฟล์เสียไป out/round-encoding-result.json
+      //       แล้วรัน Codex ซ้ำ 1 รอบในโฟลเดอร์งานเดิม (ค้นต่อจากของเดิมได้) ด้วยใบงานที่มีย่อหน้าเตือน
+      //   (ข) เวลาไม่พอ / ไม่ใช่ codex / รันซ้ำแล้วยังเสียหรือไม่ได้ผล → encodingFailed (ระเบียน failed + ENCODING_BROKEN ด้านล่าง)
+      //   ผลไทยปกติไม่เข้าบล็อกนี้ = เส้นทางเดิมทุกอย่าง
+      let encodingFailed = false;
+      if (good(r1) && encodingBrokenRound(r1)) {
+        const leftMs = remaining();
+        const canRetry = r1.kind === 'codex' && leftMs >= ENCODING_RETRY_MIN_LEFT_MS;
+        const what = `ไฟล์ผลเข้ารหัสผิด (${summarizeEncoding(r1.encoding)})`;
+        log('WARN', `งาน ${job.id} ${what} · เหลือเวลาถึงเส้นตาย ${Math.round(leftMs / 1000)} วิ → ${canRetry ? 'รันซ้ำ 1 รอบ' : 'ไม่รันซ้ำ'}`);
+        if (canRetry) {
+          archiveRound(wd.outDir, ENCODING_RETRY_ARCHIVE_LABEL, fs);
+          const tRetry = taskFor('codex', r1.effort, {
+            maxCalls: cfg.maxCalls, maxMinutes: Math.max(1, Math.min(cfg.maxMinutes, Math.floor((leftMs - 5000) / 60000))),
+          }, null, true);
+          try { fs.writeFileSync(path.join(wd.dir, 'TASK-encoding-retry.txt'), tRetry.text, 'utf8'); } catch { /* เก็บไว้ดูเท่านั้น */ }
+          const rr = await runRound('codex', r1.effort, tRetry, Math.min(fullMs, remaining() - 5000));
+          const fixed = good(rr) && !encodingBrokenRound(rr);
+          const how = fixed
+            ? 'รอบซ้ำไทยครบ → ใช้ผลรอบซ้ำ'
+            : `รอบซ้ำ${good(rr) ? `ยังเสีย (${summarizeEncoding(rr.encoding)})` : `ไม่ได้ผล (${(rr.res && rr.res.errorType) || 'ผลผิดสัญญา'})`} → failed + ${ENCODING_FLAG}`;
+          toolLogExtra.push(workerNote('encoding', fixed, `${what} → รันซ้ำ 1 รอบ: ${how}`));
+          log(fixed ? 'INFO' : 'WARN', `งาน ${job.id} ${how}`);
+          if (fixed) {
+            r1 = rr;
+            if (rr.res && (rr.res.timedOut || rr.res.warning === 'CODEX_TIMEOUT')) addFlag('AGENT_TIMEOUT');
+          } else {
+            encodingFailed = true;
+          }
+        } else {
+          encodingFailed = true;
+          const why = r1.kind !== 'codex' ? `สมอง ${r1.kind}` : `เหลือเวลา ${Math.round(leftMs / 1000)} วิ < ${ENCODING_RETRY_MIN_LEFT_MS / 1000} วิ`;
+          toolLogExtra.push(workerNote('encoding', false, `${what} → ไม่รันซ้ำ (${why}) → failed + ${ENCODING_FLAG}`));
+        }
+      }
+
       // ยก medium (สเปกส่วน 4 / ข้อ 17)
       let final = r1;
       let escalated = false;
       const g1 = r1.gated;
-      if (cfg.allowMedium && cfg.effort === 'low' && r1.kind === 'codex' && good(r1) && g1.complexity === 'high') {
+      // ★ W4: + !encodingFailed (ผลเข้ารหัสผิดไม่ยก medium) · ของเดิม: เงื่อนไขเดียวกันทุกข้อ ไม่มี !encodingFailed
+      //   (ไม่คัดลอกบรรทัดเดิมมาทั้งดุ้น — เทสกลายพันธุ์ M2 ของ worker แทนที่ข้อความแรกที่เจอในซอร์ส)
+      if (cfg.allowMedium && cfg.effort === 'low' && r1.kind === 'codex' && good(r1) && !encodingFailed && g1.complexity === 'high') {
         const usable = g1.cards.filter((c) => c.gate !== 'dropped').length;
         const originMissing = !g1.origin_post.url;
         const left = remaining() - 5000;
@@ -495,7 +570,9 @@ export async function processJob(rawJob, ctx) {
           try { fs.writeFileSync(path.join(wd.dir, 'TASK-medium.txt'), t2.text, 'utf8'); } catch { /* เก็บไว้ดูเท่านั้น */ }
           const r2 = await runRound('codex', 'medium', t2, Math.min(fullMs, left));
           escalated = true;
-          const better = good(r2) && resultValue(r2.gated) >= resultValue(g1);
+          // ★ W4: รอบ medium ที่ไฟล์ผลเข้ารหัสผิดไม่นับว่าดีกว่า · ของเดิม: const better = good(r2) && resultValue(r2.gated) >= resultValue(g1);
+          const better = good(r2) && !encodingBrokenRound(r2) && resultValue(r2.gated) >= resultValue(g1);
+          if (good(r2) && encodingBrokenRound(r2)) toolLogExtra.push(workerNote('encoding', false, `รอบ medium ไฟล์ผลเข้ารหัสผิด (${summarizeEncoding(r2.encoding)}) → คงผลรอบ low`));
           if (better) final = r2;
           toolLogExtra.push(workerNote('effort low→medium', good(r2), `${reason} → ${better ? 'ใช้ผลรอบ medium' : `คงผลรอบ low (${good(r2) ? 'medium ไม่ดีกว่า' : (r2.res.errorType || 'ผลผิดสัญญา')})`}`));
           if (r2.res && (r2.res.timedOut || r2.res.warning === 'CODEX_TIMEOUT') && better) addFlag('AGENT_TIMEOUT');
@@ -532,6 +609,16 @@ export async function processJob(rawJob, ctx) {
       if (!good(final)) {
         addFlag('AGENT_FAILED');
         return finish(buildCardRecord({ jobId: job.id, status: 'failed', mode, brain, flags, usage, toolLog, nowIso: new Date(now()).toISOString() }));
+      }
+      // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 ข้อ 3 ข · W4): ไฟล์ผลเข้ารหัสผิดทั้งรอบ (เวลาไม่พอรันซ้ำ / รันซ้ำแล้วยังเสีย)
+      //   → status 'failed' + ธง ENCODING_BROKEN · การ์ดทุกใบ gate=dropped (ไม่ส่งบรรณาธิการ/ไม่โชว์เป็นข้อเท็จจริง) ·
+      //   ไม่ใส่แผน/ต้นทาง/ข้อแก้/มุมเสนอ/ธงของเอเจนต์ (ข้อความเสีย อ่านไม่ได้) · tool_log/usage จริงคงไว้ตรวจย้อนหลัง
+      if (encodingFailed) {
+        addFlag(ENCODING_FLAG);
+        return finish(buildCardRecord({
+          jobId: job.id, status: 'failed', mode, brain, gated: { cards: dropCardsForEncoding(final.gated.cards) }, flags, usage, toolLog,
+          nowIso: new Date(now()).toISOString(),
+        }));
       }
       if (final.gated.stats && final.gated.stats.browser) log('INFO', `งาน ${job.id} เบราว์เซอร์: ${String(final.gated.stats.browser).slice(0, 120)}`);
       return finish(buildCardRecord({
