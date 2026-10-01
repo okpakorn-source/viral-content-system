@@ -323,7 +323,7 @@ async function assertDone(mod) {
   assert.equal(args.promptBlocks[0].text, mod.EDITOR_RULES_BLOCK);
   assert.equal(args.systemPrompt, mod.EDITOR_SYSTEM_PROMPT);
   assert.equal(timers.list.length, 1);
-  assert.equal(timers.list[0].ms, 60_000, 'เพดานบรรณาธิการ 60 วิ');
+  assert.equal(timers.list[0].ms, 100_000, 'เพดานบรรณาธิการ 100 วิ (ขยายจาก 60 หลัง e2e 1 ต.ค. 69)');
   assert.equal(timers.pending(), 0, 'timer ต้องถูก clear เมื่อได้คำตอบ');
   assert.ok(result.enriched.includes('18 ล้านบาท'));
   assert.deepEqual(result.used_cards, ['R1', 'R2'], 'การ์ดนอกเกณฑ์ (R9) ไม่นับ');

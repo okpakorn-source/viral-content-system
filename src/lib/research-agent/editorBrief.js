@@ -30,7 +30,7 @@ import { PLACE_PREFIXES, STOP_WORDS as PLACE_STOP_WORDS } from '@/lib/correction
 
 export const EDITOR_MODEL = 'claude-opus-5-5';
 export const EDITOR_EFFORT = 'medium';
-export const EDITOR_TIMEOUT_MS = 60_000;
+export const EDITOR_TIMEOUT_MS = 100_000; // ★ 1 ต.ค. 69 18:56 ผู้คุมงาน: ของเดิม 60_000 — e2e ข่าวเนย-แจม ใช้ 57.9 วิ ชนเพดาน (opus-5-5 medium · ฉบับเสริม 1.5 เท่า) → 100 วิ · กันชนหลังบรรณาธิการ = 480−100 = 380 วิ ยังพอสำหรับแตกประเด็น→นักเขียน (ฐาน ~150 วิ)
 /** เพดาน non-streaming ของ @anthropic-ai/sdk ≈ 21,333 โทเคน (เกิน = SDK โยนก่อนยิง) — 20000 พอสำหรับฉบับเสริม ≤ 2 เท่า + ช่องคิด */
 export const EDITOR_MAX_TOKENS = 20_000;
 export const EDITOR_MODEL_LABEL = `${EDITOR_MODEL}/${EDITOR_EFFORT}`;

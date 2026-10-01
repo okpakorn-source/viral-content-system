@@ -434,15 +434,15 @@ async function assertStageNotDone(mod) {
 }
 
 async function assertStageBudget(mod) {
-  const short = await runStage(mod, { remaining: 430_000 });
+  const short = await runStage(mod, { remaining: 390_000 }); // < 395 วิ (380 กันชน + 15 ขั้นต่ำ)
   assert.equal(short.res.status, 'failed');
   assert.match(short.res.record.reason, /งบเวลาท่อเหลือไม่พอ/);
   assert.equal(short.invokes.length, 0, 'งบไม่พอ = ไม่เรียกบรรณาธิการ (ไม่กินงบแตกประเด็น/นักเขียน)');
-  const enough = await runStage(mod, { remaining: 470_000 });
+  const enough = await runStage(mod, { remaining: 470_000 }); // กันชนหลังบรรณาธิการ 380 วิ (480−100)
   assert.equal(enough.res.status, 'done');
-  assert.equal(enough.timers.list[0].ms, 50_000, 'งบบรรณาธิการ = เวลาที่เหลือ − 420 วิ (ไม่เกิน 60 วิ)');
+  assert.equal(enough.timers.list[0].ms, 90_000, 'งบบรรณาธิการ = เวลาที่เหลือ − 380 วิ (ไม่เกิน 100 วิ)');
   const plenty = await runStage(mod, { remaining: 600_000 });
-  assert.equal(plenty.timers.list[0].ms, 60_000);
+  assert.equal(plenty.timers.list[0].ms, 100_000);
 }
 
 async function assertStageFailOpen(mod) {
@@ -462,7 +462,7 @@ async function assertStageFailOpen(mod) {
 
 test('B1 writeStage done: รอ 300 วิจากเริ่มท่อ → บรรณาธิการ → ระเบียน 8.1 ลง store (ไม่เก็บฉบับเสริมเต็ม) · มุมเสนอ/ข้อเท็จจริงการ์ด · analysis/pipelineInfo.editor · log research-editor', () => assertStageDone(writeStage));
 test('B2 writeStage not_ready/skipped/failed: เขียนจากต้นฉบับ · บันทึกทุกสถานะ · ไม่มีการ์ดผ่านเกณฑ์ไม่เรียกโมเดล · ไม่รั่วข้อความ error', () => assertStageNotDone(writeStage));
-test('B3 writeStage งบเวลา: เหลือ < 435 วิ = ไม่เรียกบรรณาธิการ · งบ = min(60 วิ, เหลือ − 420 วิ)', () => assertStageBudget(writeStage));
+test('B3 writeStage งบเวลา: เหลือ < 395 วิ = ไม่เรียกบรรณาธิการ · งบ = min(100 วิ, เหลือ − 380 วิ)', () => assertStageBudget(writeStage));
 test('B4 writeStage fail-open: บันทึกล้มยังได้ผล · โหมดอื่น/ไม่มี jobId/พังกลางทาง = null', () => assertStageFailOpen(writeStage));
 
 // ── C. processAutoFlowText ตัวจริง ─────────────────────────────────
