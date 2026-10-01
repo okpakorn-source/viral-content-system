@@ -23,6 +23,7 @@ import {
   getResearchAgentMode,
   getResearchAgentWaitMs,
   isResearchAgentOn,
+  isResearchLeaseStale, // ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): readWriteOutcome — ใบขอ leased ที่ชีพจรขาด = offline
   RESEARCH_AGENT_OFFLINE_AFTER_MS,
 } from '@/lib/research-agent/modes';
 // ★ 1 ต.ค. 69 (โหมด write · SPEC-v3): + RESEARCH_JOB_ID_RE (waitResearchCards รับ jobId ตรง) · ของเดิม: import 2 ตัวแรก
@@ -352,6 +353,9 @@ async function readWriteOutcome(storage, jobId, { now, offlineAfterMs, workerSta
   if ((request.status === 'leased' || request.status === 'queued') && Date.parse(request.deadlineAt || '') <= now()) {
     return { final: true, status: 'expired', request };
   }
+  // ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): leased แต่ชีพจรขาด > 150 วิ (heartbeatAt ?? leasedAt) = worker ตายกลางงาน
+  //   → offline: ท่อเลิกรอทันที เขียนจากต้นฉบับ (fail-open · เดิมรอจนครบ WAIT_MS เพราะ store ไม่ lease ใบนั้นซ้ำ) · เฉพาะโหมด write
+  if (isResearchLeaseStale(request, now())) return { final: true, status: 'offline', request };
   if (request.status === 'queued' && workerState.online === null && typeof storage.listWorkers === 'function') {
     const workers = await storage.listWorkers({ limit: 5 });
     const seen = (Array.isArray(workers) ? workers : []).map((w) => Date.parse(w?.lastSeenAt || '')).filter(Number.isFinite);

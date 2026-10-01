@@ -52,6 +52,8 @@ const REQUIRED_ENV = Object.freeze([
   'RESEARCH_AGENT_CODEX_BIN', 'RESEARCH_AGENT_IDLE_MS',
   // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 9 · W3): คิวชะลอหยิบงาน (src/lib/research-agent/queueHold.js อ่าน)
   'RESEARCH_AGENT_HOLD_MS',
+  // ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): ทางสำรอง OpenAI API ของ worker (ค่าเริ่มต้นปิด · scripts/research-agent-worker.mjs อ่าน)
+  'RESEARCH_AGENT_API_FALLBACK',
 ]);
 /**
  * ที่ตั้ง (ป้ายใน .env.example) = ทุกที่ที่ต้องตั้งให้ค่านั้นมีผล · Vercel = เลน B · Railway = บอทเลน C · เครื่อง = worker เลน A
@@ -70,6 +72,7 @@ const ENV_PLACES = Object.freeze({
   RESEARCH_AGENT_ALLOW_MEDIUM: ['เครื่อง'],
   RESEARCH_AGENT_TOOLS: ['เครื่อง'],
   RESEARCH_AGENT_BRAIN: ['เครื่อง'],
+  RESEARCH_AGENT_API_FALLBACK: ['เครื่อง'], // ★ 1 ต.ค. 69 (W5): worker เท่านั้น (ทางสำรอง API ค่าเริ่มต้นปิด)
   RESEARCH_AGENT_CONCURRENCY: ['เครื่อง'],
   RESEARCH_AGENT_STALE_DAYS: ['เครื่อง'],
   RESEARCH_AGENT_QUOTA_ALERT_PCT: ['Vercel', 'Railway', 'เครื่อง'],

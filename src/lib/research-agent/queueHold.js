@@ -13,6 +13,11 @@
 //     · ใบขอ queued แต่ไม่มีชีพจร worker ≤ RESEARCH_AGENT_OFFLINE_AFTER_MS (10 นาที) = ไม่ hold (offline — worker ดับต้อง
 //     ไม่ทำให้ข่าวทุกชิ้นช้า 6 นาที · เจ้าของ#4)
 //   ใบขอ done/failed/expired · ไม่มีแถว · แถวผิดรูป · อายุเกิน hold = หยิบตามปกติ (ท่อได้การ์ดทันทีหรือเขียนจากต้นฉบับ)
+// ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5) — ข้อเสริม 2 ข้อ (ไม่ hold · fail-open):
+//   · ใบขอ leased แต่ชีพจรขาด > 150 วิ (now − (heartbeatAt ?? leasedAt) · modes.isResearchLeaseStale) = worker ตายกลางงาน
+//     (เดิม hold เต็ม HOLD_MS 6 นาที เพราะ store ไม่ lease ซ้ำ)
+//   · งานที่ input ไม่เข้าสายข้อความ — ตัวตรวจเดียวกับท่อ (input-engine/detector.detectInputType · /api/auto/process แยกสาย):
+//     มีลิงก์ (รวม URL ล้วน = ลิงก์ + ข้อความอื่น ≤ 20 ตัวอักษร) หรือมีรูป = สาย URL/รูป ซึ่งโหมด write ไม่ใช้ฉบับเสริม → ชะลอไปก็เปล่า
 // เวลาอ่านรวมต่อรอบ ≤ 3 วิ (เกิน = ไม่ hold ทั้งรอบ) · ไม่ import store เมื่อสวิตช์ปิด/โหมดอื่น (dynamic import เฉพาะตอนต้องอ่าน)
 // ไม่แก้ลำดับ: คืนรายการเดิมที่กรองงาน hold ออก (ไม่ sort ใหม่) — ผู้เรียก slice เติมสล็อกจากงานที่เหลือ (งานถัดไปไม่ถูกบล็อก)
 // นาฬิกา/timer/ที่เก็บ/ตัว log ฉีดได้ทั้งหมด (tests/research-queue-hold.test.mjs) · timer ไม่ unref (ผู้เรียกรออยู่จริง · clear ทุกทาง)
@@ -23,8 +28,11 @@ import {
   getResearchAgentMode,
   getResearchAgentWaitMs,
   isResearchAgentOn,
+  isResearchLeaseStale, // ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): ใบขอ leased ที่ชีพจรขาด = ไม่ hold
   RESEARCH_AGENT_OFFLINE_AFTER_MS,
 } from '@/lib/research-agent/modes';
+// ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): ตัวแยกชนิด input ตัวเดียวกับ /api/auto/process (ไฟล์ pure ไม่มี import)
+import { detectInputType } from '@/lib/input-engine/detector';
 
 /** ค่าเริ่มต้นของ hold = WAIT_MS ของโหมด write + ค่านี้ (ไม่ตั้ง WAIT_MS = 300000 + 60000 = 360000) */
 export const RESEARCH_HOLD_EXTRA_MS = 60_000;
@@ -72,11 +80,30 @@ export function isResearchHoldOn(env = process.env) {
   return isResearchAgentOn(env) && getResearchAgentMode(env) === 'write' && getResearchHoldMs(env) > 0;
 }
 
+/**
+ * ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): งานนี้จะวิ่ง "สายข้อความ" ไหม — โหมด write ใช้ฉบับเสริมเฉพาะสายข้อความ
+ * ตัวตรวจเดียวกับ /api/auto/process: detectInputType(input, images) โดย input = payload.input ?? url ?? text (ลำดับเดียวกับ route)
+ * สายข้อความ (processAutoFlowText) ต้องไม่มีลิงก์และไม่มีรูป (router.useEnhancedPipeline ของ text_pipeline: urls.length === 0 && !hasImage)
+ * → มีลิงก์ (รวม "URL ล้วน" = ลิงก์ + ข้อความอื่น ≤ 20 ตัวอักษร) หรือมีรูป = false · ไม่มี payload/input ว่าง = true (กติกาเดิม)
+ * · ตรวจพัง = false (ไม่ hold = fail-open)
+ */
+export function isTextPathInput(payload) {
+  try {
+    const p = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+    const raw = p.input ?? p.url ?? p.text ?? '';
+    const detection = detectInputType(typeof raw === 'string' ? raw : String(raw), Array.isArray(p.images) ? p.images : []);
+    return !detection.hasUrls && !detection.hasImage;
+  } catch {
+    return false;
+  }
+}
+
 /** งานที่ตรวจ hold ได้: งานข่าว (ไม่ใช่ cover/mineclip — กติกาเดียวกับ isNewsJob ของ queueService) + jobId รูปแบบใบขอ */
 function isHoldCandidate(job) {
   if (!job || typeof job !== 'object' || Array.isArray(job)) return false;
   const type = job.payload?.jobType;
   if (type === 'cover' || type === 'mineclip') return false;
+  if (!isTextPathInput(job.payload)) return false; // ★ 1 ต.ค. 69 (W5): สาย URL/รูป ไม่ใช้ฉบับเสริม = ไม่ชะลอ (หยิบตามปกติ)
   return RESEARCH_HOLD_JOB_ID_RE.test(String(job.id ?? ''));
 }
 
@@ -147,6 +174,8 @@ function heldAgeMs(row, nowMs, holdMs, workerSeen, offlineAfterMs) {
   if (ageMs >= holdMs) return null; // ครบเวลา hold แล้ว
   const deadlineMs = Date.parse(typeof row.deadlineAt === 'string' ? row.deadlineAt : '');
   if (Number.isFinite(deadlineMs) && deadlineMs <= nowMs) return null; // เลยเส้นตายใบขอ = expired (ท่อก็เลิกรอ)
+  // ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): leased แต่ชีพจรขาด > 150 วิ = worker ตายกลางงาน → ไม่ hold (ท่อก็เลิกรอ)
+  if (isResearchLeaseStale(row, nowMs)) return null;
   if (row.status === 'queued') {
     if (!Array.isArray(workerSeen)) return null; // อ่านชีพจร worker ไม่ได้ = ไม่ hold
     if (!workerSeen.some((t) => nowMs - t <= offlineAfterMs)) return null; // worker ออฟไลน์ = ไม่มีใครค้น (ท่อก็ไม่รอ)

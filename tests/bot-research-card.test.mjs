@@ -1333,6 +1333,118 @@ test('เตือนโควตา ≤ 15%: mention เจ้าของเ�
   assert.equal(w2.channel.sends.length, 1, 'ส่งล้มครั้งแรก → งานถัดไปเตือนได้');
 });
 
+// ── ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): ธงระบบที่เจ้าของต้องรู้ ─────────────────────────────────
+//   BRAIN_UNAVAILABLE · CODEX_AUTH · API_FALLBACK · TOOL_BUDGET_MONTH (worker ตั้ง · ทางสำรอง OpenAI API ปิดเป็นค่าเริ่มต้น):
+//   บรรทัดภาษาคนบนบัตร (ไม่ขึ้น 🏷️ ชื่อธงดิบ) + mention เจ้าของวันละครั้งต่อธง (วันตามเวลาไทย · แบบเตือนโควตา) · ข้อความเดียวต่อบัตร
+//   · ส่งล้ม = บัตรถัดไปลองใหม่ · บัตรไม่มีธงเหล่านี้ = ไม่ส่งอะไรเพิ่ม (ลายนิ้วมือ shadow/assist ข้อ 6.6 เฝ้าว่าทางเดิมไม่เปลี่ยน)
+const W5_LINES = Object.freeze({
+  BRAIN_UNAVAILABLE: '🧠 เอเจนต์ใช้สมอง Codex ไม่ได้รอบนี้ — ไม่ได้ใช้ทางสำรอง API (เจ้าของตรวจเครื่อง worker)',
+  CODEX_AUTH: '🔑 Codex หลุดล็อกอิน — เจ้าของล็อกอินใหม่ที่เครื่อง worker',
+  API_FALLBACK: '💸 รอบนี้ใช้ทางสำรอง OpenAI API (เสียเงินจริง)',
+  TOOL_BUDGET_MONTH: '💰 งบเดือนนี้ถึงเพดานแล้ว — ทาง API หยุด (Codex ยังทำต่อ)',
+});
+const W5_ALERT_HEAD = Object.freeze({
+  BRAIN_UNAVAILABLE: '🧠 เอเจนต์ค้นคว้าใช้สมอง Codex ไม่ได้',
+  CODEX_AUTH: '🔑 Codex หลุดล็อกอิน — ล็อกอินใหม่ที่เครื่อง worker',
+  API_FALLBACK: '💸 เอเจนต์ใช้ทางสำรอง OpenAI API',
+  TOOL_BUDGET_MONTH: '💰 ค่าเครื่องมือ/API เดือนนี้ถึงเพดาน',
+});
+const cardBrainDown = (flags, jobId = JOB) => ({ ...cardDone(), id: jobId, status: 'failed', cards: [], plan: [], flags });
+
+function checkW5FlagLines(mod = RC) {
+  const failed = mod.buildCardView(cardBrainDown(['BRAIN_UNAVAILABLE', 'CODEX_AUTH', 'QUOTA_LOW', 'AGENT_FAILED']), JOB);
+  const lines = failed.description.split('\n');
+  assert.ok(lines.includes(W5_LINES.BRAIN_UNAVAILABLE), 'BRAIN_UNAVAILABLE = บรรทัดภาษาคน');
+  assert.ok(lines.includes(W5_LINES.CODEX_AUTH), 'CODEX_AUTH = บรรทัดภาษาคน');
+  assert.ok(lines.includes('🔋 โควตาเอเจนต์ใกล้หมด'), 'ธงเดิมคงบรรทัดเดิม');
+  const tagLine = lines.find((l) => l.startsWith('🏷️ ')) || '';
+  for (const raw of ['BRAIN', 'CODEX', 'QUOTA']) assert.ok(!tagLine.includes(raw), `${raw}… ห้ามขึ้น 🏷️ ชื่อธงดิบ`);
+  assert.equal(tagLine, '🏷️ AGENT\\_FAILED', 'ธงที่บอทไม่รู้จักยังขึ้น 🏷️ ตามเดิม');
+  const done = mod.buildCardView({ ...cardDone(), flags: ['API_FALLBACK', 'TOOL_BUDGET_MONTH'] }, JOB);
+  assert.ok(done.description.includes(W5_LINES.API_FALLBACK));
+  assert.ok(done.description.includes(W5_LINES.TOOL_BUDGET_MONTH));
+  assert.ok(!done.description.includes('🏷️'), 'ธงระบบที่รู้จักครบ = ไม่มีบรรทัด 🏷️');
+  const plain = mod.buildCardView(cardDone(), JOB);
+  for (const line of Object.values(W5_LINES)) assert.ok(!plain.description.includes(line), 'ไม่มีธง = ไม่มีบรรทัด');
+}
+
+/** งานต่อเนื่องหลายงาน (นาฬิกาเสมือน) — ธงในบัตรเปลี่ยนได้ทีละงาน · คืนจำนวนข้อความในห้องหลังแต่ละงาน */
+async function scenarioW5Alerts({ mod = RC, env = {}, failFirstSend = false } = {}) {
+  const world = makeWorld();
+  const sched = makeScheduler();
+  let flags = ['BRAIN_UNAVAILABLE', 'CODEX_AUTH'];
+  const api = makeApi({ now: sched.now, cards: (jobId) => ({ success: true, card: cardBrainDown(flags, jobId) }) });
+  const { ctl, logs } = makeCtl({ api, sched, mod, env });
+  if (failFirstSend) {
+    let fail = true;
+    const realSend = world.channel.send;
+    world.channel.send = async (p) => { if (fail) { fail = false; throw new Error('Missing Permissions'); } return realSend(p); };
+  }
+  const sendsAfter = [];
+  const runJob = async (jobId, nextFlags) => {
+    flags = nextFlags;
+    const { source, ack } = setupJob(world);
+    const done = ctl.watch({ jobId, message: source, processingMsg: ack });
+    await settleWithin(sched.step(), `รอบแรก ${jobId}`);
+    await settleWithin(ctl.jobEnded(jobId, { handedOff: true }), `ปิด ${jobId}`);
+    await settleWithin(done, `จบ ${jobId}`);
+    sendsAfter.push(world.channel.sends.length);
+  };
+  await runJob('q_w5a', ['BRAIN_UNAVAILABLE', 'CODEX_AUTH']); // ข้อความเดียว 2 บรรทัด
+  sched.advance(2 * MIN);
+  await runJob('q_w5b', ['BRAIN_UNAVAILABLE', 'CODEX_AUTH']); // วันเดียวกัน ธงเดิม = ไม่เตือนซ้ำ
+  await runJob('q_w5c', ['BRAIN_UNAVAILABLE', 'TOOL_BUDGET_MONTH']); // ธงใหม่ = เตือนเฉพาะธงใหม่
+  sched.advance(15 * 60 * MIN); // ข้ามเที่ยงคืนเวลาไทย
+  await runJob('q_w5d', ['BRAIN_UNAVAILABLE', 'API_FALLBACK']); // วันใหม่ = เตือนได้อีก
+  await runJob('q_w5e', ['ORIGIN_NOT_FOUND', 'STALE_NEWS']); // ไม่มีธงระบบ = ไม่ส่งอะไรเพิ่ม
+  return { world, sendsAfter, logs, api };
+}
+
+function checkW5Alerts(r, ownerId = OWNER_ID) {
+  assert.deepEqual(r.sendsAfter, [1, 1, 2, 3, 3], 'วันละครั้งต่อธง: ธงเดิมวันเดียวกันไม่ซ้ำ · ธงใหม่เตือน · วันใหม่เตือนอีก · ไม่มีธงระบบ = ไม่ส่ง');
+  const [first, second, third] = r.world.channel.sends;
+  const head = `<@${ownerId}> ⚠️ เอเจนต์ค้นคว้าต้องให้เจ้าของดู`;
+  assert.ok(first.content.startsWith(`${head} (job q_w5a)\n`), first.content);
+  const firstLines = first.content.split('\n').slice(1);
+  assert.equal(firstLines.length, 2, 'ข้อความเดียวรวม 2 ธง');
+  assert.ok(firstLines[0].startsWith(W5_ALERT_HEAD.BRAIN_UNAVAILABLE) && firstLines[1].startsWith(W5_ALERT_HEAD.CODEX_AUTH));
+  assert.deepEqual(first.allowedMentions, { parse: [], users: [ownerId] }, 'mention ได้เฉพาะเจ้าของ');
+  assert.ok(second.content.startsWith(`${head} (job q_w5c)\n${W5_ALERT_HEAD.TOOL_BUDGET_MONTH}`), 'วันเดียวกันเตือนเฉพาะธงที่ยังไม่เตือน');
+  assert.equal(second.content.split('\n').length, 2, 'BRAIN_UNAVAILABLE เตือนไปแล้ววันนี้ = ไม่ซ้ำ');
+  assert.ok(third.content.includes(W5_ALERT_HEAD.BRAIN_UNAVAILABLE) && third.content.includes(W5_ALERT_HEAD.API_FALLBACK), 'วันใหม่เตือนอีก');
+  assert.ok(!JSON.stringify(r.world.channel.sends).includes('S3CRET'), 'ไม่มีกุญแจในข้อความ');
+}
+
+test('W5 ธงระบบบนบัตร: BRAIN_UNAVAILABLE/CODEX_AUTH/API_FALLBACK/TOOL_BUDGET_MONTH = บรรทัดภาษาคน (ไม่ขึ้น 🏷️ ชื่อดิบ) · ไม่มีธง = บัตรเดิม', () => {
+  checkW5FlagLines();
+});
+
+test('W5 เตือนเจ้าของตามธงระบบ: mention วันละครั้งต่อธง (เวลาไทย) · ข้อความเดียวต่อบัตร · env RESEARCH_AGENT_OWNER_DISCORD_ID ชนะ · ส่งล้มลองใหม่ได้ · ไม่มีธง = ไม่ส่ง', async () => {
+  checkW5Alerts(await scenarioW5Alerts());
+  const custom = '500000000000000077';
+  checkW5Alerts(await scenarioW5Alerts({ env: { RESEARCH_AGENT_OWNER_DISCORD_ID: custom } }), custom);
+  // ส่งครั้งแรกล้ม → ยังไม่นับว่าเตือน → งานถัดไป (ธงเดิม วันเดียวกัน) เตือนได้
+  const retry = await scenarioW5Alerts({ failFirstSend: true });
+  assert.equal(retry.sendsAfter[0], 0, 'ส่งล้ม = ไม่มีข้อความ');
+  assert.equal(retry.sendsAfter[1], 1, 'งานถัดไปลองเตือนใหม่');
+  assert.ok(retry.world.channel.sends[0].content.includes(W5_ALERT_HEAD.CODEX_AUTH));
+  assert.ok(retry.logs.some((l) => l.includes('โพสต์เตือนเจ้าของ (BRAIN_UNAVAILABLE,CODEX_AUTH) ไม่สำเร็จ')));
+});
+
+test('W5 mutation (ต้องแดง): ไม่จำวันที่เตือนต่อธง → เตือนซ้ำ · ไม่เรียกเตือนตอนโพสต์บัตร → เจ้าของไม่รู้ · KNOWN_FLAGS ไม่ได้เติม → ขึ้น 🏷️ ชื่อดิบ', async () => {
+  const noDedupe = loadCardModule(mutate(CARD_SRC, "flags.has(flag) && lastFlagAlertDay.get(flag) !== day", 'flags.has(flag)'));
+  const r1 = await scenarioW5Alerts({ mod: noDedupe });
+  assert.notDeepEqual(r1.sendsAfter, [1, 1, 2, 3, 3], 'กลายพันธุ์ต้องเปลี่ยนพฤติกรรมจริง');
+  assert.throws(() => checkW5Alerts(r1), /วันละครั้งต่อธง/u);
+  const noCall = loadCardModule(mutate(CARD_SRC,
+    '    if (Object.keys(OWNER_ALERT_FLAGS).some((flag) => normalizeFlags(card).has(flag))) await maybeFlagAlerts(state, card);\n', ''));
+  const r2 = await scenarioW5Alerts({ mod: noCall });
+  assert.deepEqual(r2.sendsAfter, [0, 0, 0, 0, 0], 'กลายพันธุ์ต้องทำให้ไม่มีการเตือนจริง');
+  assert.throws(() => checkW5Alerts(r2));
+  const notKnown = loadCardModule(mutate(CARD_SRC, 'for (const flag of Object.keys(OWNER_ALERT_FLAGS)) KNOWN_FLAGS.add(flag);', ''));
+  assert.throws(() => checkW5FlagLines(notKnown), /🏷️|ชื่อธงดิบ/u);
+});
+
 test('บัตรสถานะ failed/skipped → โพสต์บัตรสีเทาบอกเหตุ ไม่ติด 👍👎', async () => {
   const failedView = RC.buildCardView({ ...cardDone(), status: 'failed', cards: [], plan: [] }, JOB);
   assert.equal(failedView.color, '#6b7280');

@@ -88,6 +88,29 @@ KNOWN_FLAGS.add(ENCODING_BROKEN_FLAG);
 const CASE_LINK_RE = /\/generation-logs\/([A-Za-z0-9_-]+)/u; // รูปเดียวกับ index.js (ลิงก์ 🔗 ดูผลลัพธ์เต็ม)
 const FOOTER_JOB_RE = /jobId:\s*([A-Za-z0-9_-]{1,200})/u;
 
+// ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): ธงระบบที่เจ้าของต้องรู้ (worker ตั้ง · scripts/research-agent-worker.mjs apiPathBlock)
+//   → บรรทัดภาษาคนบนบัตร (เดิมขึ้นเป็น 🏷️ ชื่อธงดิบ) + mention เจ้าของวันละครั้งต่อธง (วันตามเวลาไทย · แบบเตือนโควตา · maybeFlagAlerts)
+//   เติมเข้า KNOWN_FLAGS เป็นบล็อกแยก (ไม่แก้บรรทัด KNOWN_FLAGS เดิม — รวมกับเลนอื่นไม่ชน) · บัตรที่ไม่มีธงเหล่านี้ = หน้าตา/บันทึก/HTTP เดิมทุกไบต์
+const OWNER_ALERT_FLAGS = Object.freeze({
+  BRAIN_UNAVAILABLE: Object.freeze({
+    line: '🧠 เอเจนต์ใช้สมอง Codex ไม่ได้รอบนี้ — ไม่ได้ใช้ทางสำรอง API (เจ้าของตรวจเครื่อง worker)',
+    alert: '🧠 เอเจนต์ค้นคว้าใช้สมอง Codex ไม่ได้ — รีเสิร์ชงานนี้ล้ม (ทางสำรอง OpenAI API ปิดอยู่หรือถูกกั้นด้วยงบ) · ตรวจ: node scripts/research-agent-worker.mjs --check',
+  }),
+  CODEX_AUTH: Object.freeze({
+    line: '🔑 Codex หลุดล็อกอิน — เจ้าของล็อกอินใหม่ที่เครื่อง worker',
+    alert: '🔑 Codex หลุดล็อกอิน — ล็อกอินใหม่ที่เครื่อง worker (ช่อง main: codex login · ช่องอื่น: scripts/research-agent-account.cmd add <ตัวอักษร>)',
+  }),
+  API_FALLBACK: Object.freeze({
+    line: '💸 รอบนี้ใช้ทางสำรอง OpenAI API (เสียเงินจริง)',
+    alert: '💸 เอเจนต์ใช้ทางสำรอง OpenAI API (เสียเงินจริง $10/$50 ต่อ 1M โทเคน) — ปิดได้โดยลบ RESEARCH_AGENT_API_FALLBACK ที่ .env.local เครื่อง worker',
+  }),
+  TOOL_BUDGET_MONTH: Object.freeze({
+    line: '💰 งบเดือนนี้ถึงเพดานแล้ว — ทาง API หยุด (Codex ยังทำต่อ)',
+    alert: '💰 ค่าเครื่องมือ/API เดือนนี้ถึงเพดาน RESEARCH_AGENT_TOOL_BUDGET_USD_MONTH — ทาง API หยุดแล้ว (Codex ยังทำต่อ) · ขยายเพดานได้ที่ .env.local เครื่อง worker',
+  }),
+});
+for (const flag of Object.keys(OWNER_ALERT_FLAGS)) KNOWN_FLAGS.add(flag);
+
 // เพดาน embed ของ Discord: title 256 · description 4096 · field name 256 / value 1024 · footer 2048 · รวมทั้งก้อน 6000
 const EMBED_TOTAL_BUDGET = 5800;
 const DESCRIPTION_BUDGET = 2400;
@@ -385,6 +408,8 @@ function flagLines(card, flags) {
   }
   if (corrections.length > 5) lines.push(`❗ (+${corrections.length - 5} จุด)`);
   if (flags.has('RAW_CONTRADICTION') && corrections.length === 0) lines.push('❗ ขัดต้นฉบับ — ดูการ์ดที่ติด ❗ ด้านล่าง');
+  // ★ 1 ต.ค. 69 (W5): ธงระบบที่เจ้าของต้องรู้ — บรรทัดภาษาคน (เดิมขึ้นเป็น 🏷️ ชื่อธงดิบ) · ไม่มีธง = ไม่มีบรรทัด
+  for (const [flag, info] of Object.entries(OWNER_ALERT_FLAGS)) if (flags.has(flag)) lines.push(info.line);
   if (flags.has('BROWSER_WRONG_ACCOUNT')) lines.push('🛑 เบราว์เซอร์ล็อกอินบัญชีอื่น — เอเจนต์หยุดใช้เบราว์เซอร์แล้ว (เจ้าของตรวจเครื่อง)');
   if (flags.has('QUOTA_LOW')) lines.push('🔋 โควตาเอเจนต์ใกล้หมด');
   const others = [...flags].filter((f) => !KNOWN_FLAGS.has(f)).slice(0, 6);
@@ -752,6 +777,7 @@ function createResearchCards(options = {}) {
   const feedbackChains = new Map();   // messageId → promise (กด 👍 แล้ว 👎 เร็วๆ = บันทึกเรียงตามลำดับกด)
   let statusCache = null;             // { at, value }
   let lastQuotaAlertDay = null;
+  const lastFlagAlertDay = new Map();  // ★ 1 ต.ค. 69 (W5): ธง → วัน (เวลาไทย) ที่เตือนเจ้าของแล้ว — วันละครั้งต่อธง
 
   // สเปก 2.4: /api/research/* ฝั่งบอทใช้ x-api-key เดิม (API_KEY = DISCORD_API_SECRET ของ Vercel) อย่างเดียว — เลน B ตรวจแค่ x-bot-secret/x-api-key
   //   ★ r3 1 ต.ค. 69 (ข้อตัดสินผู้คุมงาน · mismatch #7): เลิกส่ง x-research-secret — เป็นความลับของ worker ที่บอทไม่ต้องรู้
@@ -923,6 +949,31 @@ function createResearchCards(options = {}) {
     }
   }
 
+  // ── ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): ธงระบบในบัตร (OWNER_ALERT_FLAGS) → mention เจ้าของวันละครั้งต่อธง ──
+  //   แบบเตือนโควตา: วันตามเวลาไทย · ห้องเดิม · mention ได้เฉพาะเจ้าของ (RESEARCH_AGENT_OWNER_DISCORD_ID ไม่งั้นเจ้าของเซิร์ฟเวอร์)
+  //   · ข้อความเดียวต่อบัตร (รวมธงที่วันนี้ยังไม่เตือน) · ส่งไม่สำเร็จ = ยังไม่นับว่าเตือนแล้ว (บัตรถัดไปลองใหม่)
+  async function maybeFlagAlerts(state, card) {
+    const flags = normalizeFlags(card);
+    const day = bangkokDay(now());
+    const due = Object.keys(OWNER_ALERT_FLAGS).filter((flag) => flags.has(flag) && lastFlagAlertDay.get(flag) !== day);
+    if (due.length === 0) return false;
+    const channel = state.message?.channel || state.processingMsg?.channel || null;
+    if (!channel || typeof channel.send !== 'function') return false;
+    const ownerId = ownerOverride || readSnowflake(state.message?.guild?.ownerId);
+    for (const flag of due) lastFlagAlertDay.set(flag, day);
+    const content = `${ownerId ? `<@${ownerId}> ` : ''}⚠️ เอเจนต์ค้นคว้าต้องให้เจ้าของดู (job ${shortId(state.jobId)})\n`
+      + due.map((flag) => OWNER_ALERT_FLAGS[flag].alert).join('\n');
+    try {
+      await channel.send({ content, allowedMentions: ownerId ? { parse: [], users: [ownerId] } : { parse: [] } });
+      info(`[Research] ⚠️ เตือนเจ้าของแล้ว (${due.join(',')})`);
+      return true;
+    } catch (err) {
+      for (const flag of due) if (lastFlagAlertDay.get(flag) === day) lastFlagAlertDay.delete(flag);
+      warn(`[Research] 🩹 โพสต์เตือนเจ้าของ (${due.join(',')}) ไม่สำเร็จ: ${errText(err)}`);
+      return false;
+    }
+  }
+
   // ── ส่งข้อความใต้ข้อความพนักงาน · ข้อความต้นทางถูกลบ → ใต้ข้อความ ack ของบอทแทน ──
   async function replyUnderSource(state, payload) {
     const targets = [state.message, state.processingMsg].filter((m) => m && typeof m.reply === 'function');
@@ -976,6 +1027,9 @@ function createResearchCards(options = {}) {
       low: normalizeFlags(card).has('QUOTA_LOW'),
       account: str(brain.account) || null,
     });
+    // ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): ธงระบบที่เจ้าของต้องรู้ → mention วันละครั้งต่อธง
+    //   ไม่มีธงเหล่านี้ = ไม่เรียก ไม่ await เพิ่ม (ลำดับงาน/บันทึก/HTTP เดิมทุกไบต์)
+    if (Object.keys(OWNER_ALERT_FLAGS).some((flag) => normalizeFlags(card).has(flag))) await maybeFlagAlerts(state, card);
     return true;
   }
 

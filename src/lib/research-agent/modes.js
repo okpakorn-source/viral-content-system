@@ -35,6 +35,24 @@ export const RESEARCH_AGENT_WRITE_WAIT_MAX_MS = 300_000;
 export const RESEARCH_AGENT_DEFAULT_QUOTA_ALERT_PCT = 15;
 /** ไม่มีชีพจร worker นานกว่านี้ = ออฟไลน์ (สเปกส่วน 8 แผนสำรองข้อ 3) */
 export const RESEARCH_AGENT_OFFLINE_AFTER_MS = 10 * 60 * 1000;
+// ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): worker ตายกลางงาน — ใบขอค้าง status leased (store ไม่ lease ซ้ำ) ทำให้
+//   คิวชะลอ (queueHold.js) และท่อโหมด write (readCards.waitResearchCards) รอจนเต็มเพดานทั้งที่ไม่มีใครค้นอยู่แล้ว
+//   worker ส่งชีพจรทุก 30 วิ (scripts/research-agent-worker.mjs heartbeatMs) · store เขียน heartbeatAt ตอน lease และทุก heartbeat
+//   (store.js leaseNext/heartbeat) → ชีพจรขาดเกินค่านี้ (≈ 5 รอบ) = ถือว่า worker หายกลางงาน: ไม่ hold · ท่อเลิกรอ (fail-open เขียนจากต้นฉบับ)
+export const RESEARCH_AGENT_LEASE_STALE_MS = 150_000;
+
+/**
+ * ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): ใบขอ leased ที่ชีพจรขาดเกิน staleMs ไหม
+ * นับจาก heartbeatAt (ไม่มี = leasedAt) · ไม่ใช่ leased / ไม่มีเวลา / อ่านเวลาไม่ได้ = false (ไม่ตัดสินแทน — คงพฤติกรรมเดิม)
+ * @param {object|null} request แถว research-requests
+ * @param {number} nowMs
+ * @param {number} [staleMs]
+ */
+export function isResearchLeaseStale(request, nowMs, staleMs = RESEARCH_AGENT_LEASE_STALE_MS) {
+  if (!request || typeof request !== 'object' || Array.isArray(request) || request.status !== 'leased') return false;
+  const beatMs = Date.parse(String(request.heartbeatAt ?? request.leasedAt ?? ''));
+  return Number.isFinite(beatMs) && Number.isFinite(nowMs) && nowMs - beatMs > staleMs;
+}
 
 const cleanEnv = (raw) => String(raw ?? '').trim().replace(/^["']|["']$/g, '').trim();
 

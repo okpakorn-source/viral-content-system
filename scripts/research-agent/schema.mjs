@@ -35,7 +35,11 @@ export const SYSTEM_FLAGS = Object.freeze([
   //   worker ตั้งพร้อม status 'failed' + การ์ดทุกใบ dropped · เอเจนต์ตั้งเองไม่ได้ (ไม่อยู่ใน AGENT_FLAGS) · ค่าเดียวกับ encodingCheck.ENCODING_FLAG
   'ENCODING_BROKEN',
 ]);
-export const KNOWN_FLAGS = Object.freeze([...AGENT_FLAGS, ...SYSTEM_FLAGS]);
+// ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): ธงเหตุผลที่ worker ตั้งเมื่อ Codex ใช้ไม่ได้และไม่เรียกทางสำรอง API
+//   (CODEX_AUTH = บัญชี Codex หลุดล็อกอิน · คู่กับ BRAIN_UNAVAILABLE) — แยกบรรทัดจาก SYSTEM_FLAGS ให้รวมกับเลนอื่นได้ไม่ชน · เอเจนต์ตั้งเองไม่ได้
+export const WORKER_REASON_FLAGS = Object.freeze(['CODEX_AUTH']);
+// ของเดิม: export const KNOWN_FLAGS = Object.freeze([...AGENT_FLAGS, ...SYSTEM_FLAGS]);
+export const KNOWN_FLAGS = Object.freeze([...AGENT_FLAGS, ...SYSTEM_FLAGS, ...WORKER_REASON_FLAGS]);
 export const MAX_CARDS = 8;
 /** คีย์ที่ผลของเอเจนต์ต้องมี (หลังแปลงชื่อพ้อง) — ขาด/ผิดชนิด = งาน failed (ด่าน 1) */
 export const REQUIRED_AGENT_KEYS = Object.freeze(['plan', 'origin_post', 'cards', 'tool_log']);

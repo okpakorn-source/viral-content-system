@@ -41,6 +41,10 @@
  *       (ไม่มีแผน/ต้นทาง/ข้อแก้/ธงจากเนื้อที่เสีย — ไม่โชว์เป็นข้อเท็จจริง ไม่ส่งบรรณาธิการ) · ไม่ยก medium · ไม่สำรอง API
  *   ผลไทยปกติ = เส้นทางเดิมทุกอย่าง (ไม่รันซ้ำ ระเบียนเดิม) · ตัวตรวจพัง = ถือว่าไม่เสีย (fail-open)
  *   tools/ แบบสำเนา (RESEARCH_AGENT_TOOLS ตั้งไว้) คัด check-result.mjs ไปด้วยเสมอ (HELPER_FILES) — ใบงานสั่งให้เอเจนต์รันก่อนจบ
+ * ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): RESEARCH_AGENT_API_FALLBACK (ไม่ตั้ง/ค่าอื่น = ปิด · '1' = เปิดทางสำรอง
+ *   OpenAI API gpt-6-astra เมื่อ Codex ใช้ไม่ได้/โควตาหมดทุกบัญชี — เสียเงินจริง $10/$50 ต่อ 1M โทเคน) · ปิดอยู่ = งานนั้น failed +
+ *   ธง BRAIN_UNAVAILABLE (+ CODEX_AUTH/QUOTA_LOW) · งบ RESEARCH_AGENT_TOOL_BUDGET_USD_MONTH ถึงเพดาน = หยุดทาง API จริง (ธง TOOL_BUDGET_MONTH)
+ *   ข้อความบรรทัด "→ ล้ม = สำรอง API (ถ้ามีคีย์+เวลา)" ด้านบน = เฉพาะเมื่อเปิดสวิตช์นี้และงบยังไม่ถึงเพดาน
  */
 import nodeFs from 'node:fs';
 import os from 'node:os';
@@ -317,6 +321,49 @@ export function addMonthSpend({ logDir, costUsd, capUsd, now = Date.now, fs = no
   return st;
 }
 
+// ── ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): ทาง OpenAI API ห้ามวิ่งเอง (เงินรั่ว) ──────────────────────
+//   สมอง gpt-6-astra ผ่าน Responses API = เสียเงินจริง $10/1M input · $50/1M output (+ web search $10/1,000) ไม่ใช่โควตา subscription
+//   1) ทางสำรอง 2 จุด (โควตา Codex หมดทุกบัญชี · Codex ล้ม/ผลผิดสัญญา) เปิดเฉพาะ RESEARCH_AGENT_API_FALLBACK=1 — ไม่ตั้ง/ค่าอื่น = ปิด:
+//      งานนั้น failed + ธง BRAIN_UNAVAILABLE (+ CODEX_AUTH เมื่อหลุดล็อกอิน · QUOTA_LOW เมื่อโควตาหมด) + เหตุผลใน tool_log · ไม่เรียก API
+//   2) งบเดือนนี้ (บัญชี tool-spend ของ addMonthSpend) ถึงเพดานแล้ว = หยุดทาง API จริงทุกทาง (รวม RESEARCH_AGENT_BRAIN=api) →
+//      failed + ธง TOOL_BUDGET_MONTH · รอบ Codex ยังทำต่อพร้อมธงเตือนเดิม (เจ้าของ#18 "เตือนเมื่อถึง ไม่หยุด" ใช้กับเครื่องมือของ Codex)
+/** ทางสำรอง API เปิดไหม (รับ '1' ตรงตัวเท่านั้น แบบสวิตช์อื่นของระบบ) */
+export function apiFallbackEnabled(env = process.env) {
+  return String((env && env.RESEARCH_AGENT_API_FALLBACK) || '').trim() === '1';
+}
+
+/** งบเดือนนี้ถึงเพดานหรือยัง — อ่านบัญชีเดียวกับ addMonthSpend (ไม่เขียน) · ไม่มีบัญชี/อ่านไม่ได้ = ยังไม่ใช้ (แบบ addMonthSpend) */
+export function monthSpendReached({ logDir, capUsd, now = Date.now, fs = nodeFs }) {
+  const month = new Date(now()).toISOString().slice(0, 7);
+  let spent = 0;
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(logDir, `tool-spend-${month}.json`), 'utf8'));
+    if (j && j.month === month) spent = Number(j.costUsd) || 0;
+  } catch { /* ยังไม่มีบัญชีเดือนนี้ */ }
+  return monthBudgetStatus({ spentUsd: spent, addUsd: 0, capUsd }).reached;
+}
+
+/**
+ * ทาง API ของงานนี้ถูกกั้นไหม → null = เรียกได้ · {flags, note} = ห้ามเรียก (ผู้เรียกติดธง + บันทึก → งานจบ failed)
+ * @param {{env:object, cfg:object, now?:Function, fs?:object, viaFallback:boolean, reason?:string}} p
+ *   viaFallback = มาจากทางสำรอง (ต้องเปิด RESEARCH_AGENT_API_FALLBACK=1 ก่อน) · false = ตั้ง RESEARCH_AGENT_BRAIN=api เอง (ดูแค่งบ)
+ *   reason = เหตุที่ Codex ใช้ไม่ได้ (errorType ของรอบ Codex · 'QUOTA' เมื่อโควตาหมดทุกบัญชี) → ธงเหตุผล CODEX_AUTH / QUOTA_LOW
+ */
+export function apiPathBlock({ env, cfg, now = Date.now, fs = nodeFs, viaFallback, reason = '' }) {
+  const off = !!viaFallback && !apiFallbackEnabled(env);
+  const budget = !off && monthSpendReached({ logDir: cfg.logDir, capUsd: cfg.toolBudgetUsdMonth, now, fs });
+  if (!off && !budget) return null;
+  const why = String(reason || '-').slice(0, 80);
+  const flags = viaFallback ? ['BRAIN_UNAVAILABLE'] : [];
+  if (why === 'CODEX_AUTH') flags.push('CODEX_AUTH');
+  if (why === 'CODEX_QUOTA' || why === 'QUOTA') flags.push('QUOTA_LOW');
+  if (budget) flags.push('TOOL_BUDGET_MONTH');
+  const note = off
+    ? `${why} → ไม่ใช้ทางสำรอง OpenAI API (ปิดอยู่ · เปิดด้วย RESEARCH_AGENT_API_FALLBACK=1 เมื่อเจ้าของยอมจ่าย $10/$50 ต่อ 1M โทเคน)`
+    : `${why} → งบเดือนนี้ถึงเพดาน $${cfg.toolBudgetUsdMonth} แล้ว — หยุดทาง API (ขยาย RESEARCH_AGENT_TOOL_BUDGET_USD_MONTH ได้ถ้าจำเป็น)`;
+  return { flags, note: workerNote('api-path', false, note) };
+}
+
 // ── งานหนึ่งชิ้น ────────────────────────────────────────────────────────────
 /**
  * ช่องที่ worker ใช้จากใบขอ — job.limits (lease เลน B อาจส่ง RESEARCH_AGENT_MAX_CALLS/EFFORT/TOOLS/BRAIN ฝั่ง Vercel มา)
@@ -404,6 +451,19 @@ export async function processJob(rawJob, ctx) {
     let account = 'api';
     let quotaInfo = null;
     const toolLogExtra = [];
+    // ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): ทาง API ถูกกั้น (ทางสำรองปิด/งบเดือนถึงเพดาน) ก่อนเริ่มงาน = จบ failed ทันที
+    //   (ไม่สร้างโฟลเดอร์งาน · ไม่ heartbeat · ไม่เรียก Codex/API) · ธงจาก apiPathBlock + AGENT_FAILED · เหตุผลใน tool_log
+    const failApiBlocked = (block) => {
+      for (const f of [...block.flags, 'AGENT_FAILED']) addFlag(f);
+      return finish(buildCardRecord({
+        jobId: job.id, status: 'failed', mode, brain: { kind: cfg.brain, effort: cfg.effort, account: 'none' }, flags,
+        toolLog: [...toolLogExtra, block.note], nowIso: new Date(now()).toISOString(),
+      }));
+    };
+    if (brainKind === 'api') { // ★ W5: ตั้ง RESEARCH_AGENT_BRAIN=api เอง (ไม่ใช่ทางสำรอง) — ดูแค่งบเดือน
+      const explicitBlock = apiPathBlock({ env, cfg, now, fs, viaFallback: false, reason: 'RESEARCH_AGENT_BRAIN=api' });
+      if (explicitBlock) return failApiBlocked(explicitBlock);
+    }
     if (brainKind === 'codex') {
       const quotas = {};
       for (const name of cfg.accounts) {
@@ -413,6 +473,12 @@ export async function processJob(rawJob, ctx) {
       }
       const pick = chooseAccount(cfg.accounts, quotas, { alertPct: cfg.quotaAlertPct });
       if (pick.quotaLow) addFlag('QUOTA_LOW');
+      // ★ 1 ต.ค. 69 (W5): โควตาหมดทุกบัญชี — ทางสำรอง API ปิดอยู่ (ค่าเริ่มต้น) หรืองบเดือนถึงเพดาน = failed ไม่เรียก API
+      const quotaBlock = pick.useApi ? apiPathBlock({ env, cfg, now, fs, viaFallback: true, reason: 'QUOTA' }) : null;
+      if (quotaBlock) {
+        toolLogExtra.push(workerNote('quota', false, pick.reason));
+        return failApiBlocked(quotaBlock);
+      }
       if (pick.useApi) {
         brainKind = 'api';
         addFlag('API_FALLBACK');
@@ -502,7 +568,12 @@ export async function processJob(rawJob, ctx) {
       // Codex ล้มทั้งรอบ/ผลผิดสัญญา → สำรอง API (ถ้ามีคีย์และเวลา)
       if (brainKind === 'codex' && !good(r1)) {
         if (r1.res.errorType === 'CODEX_UNAVAILABLE') addFlag('BRAIN_UNAVAILABLE');
-        if (env.OPENAI_API_KEY && remaining() >= 60000) {
+        // ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): ทางสำรอง API ปิดอยู่ (ค่าเริ่มต้น) หรืองบเดือนถึงเพดาน = ไม่เรียก API
+        //   → ธง BRAIN_UNAVAILABLE (+ CODEX_AUTH/QUOTA_LOW/TOOL_BUDGET_MONTH ตามเหตุ) + เหตุผลใน tool_log · งานจบ failed (AGENT_FAILED ด้านล่าง)
+        const r1Block = apiPathBlock({ env, cfg, now, fs, viaFallback: true, reason: r1.res.errorType || 'ผลผิดสัญญา 2.2' });
+        if (r1Block) { for (const f of r1Block.flags) addFlag(f); toolLogExtra.push(r1Block.note); }
+        // ของเดิม: if (env.OPENAI_API_KEY && remaining() >= 60000) {
+        if (!r1Block && env.OPENAI_API_KEY && remaining() >= 60000) {
           addFlag('API_FALLBACK');
           toolLogExtra.push(workerNote('fallback', true, `Codex ล้ม (${r1.res.errorType || 'ผลผิดสัญญา'}) → สำรอง API`));
           releaseBrowser(); // โหมด API ไม่มีเบราว์เซอร์ — คืนล็อกให้งานอื่นทันที
@@ -594,7 +665,9 @@ export async function processJob(rawJob, ctx) {
       const spend = addMonthSpend({ logDir: cfg.logDir, costUsd: usage.costUsd, capUsd: cfg.toolBudgetUsdMonth, now, fs });
       if (spend.reached) {
         addFlag('TOOL_BUDGET_MONTH');
-        log('WARN', `ค่าเครื่องมือเดือนนี้ $${spend.spentAfter} ถึงเพดาน $${spend.capUsd} แล้ว (เตือนเท่านั้น ไม่หยุด)`);
+        // ★ 1 ต.ค. 69 (W5): ถึงเพดานแล้ว = ทาง API หยุดจริงตั้งแต่งานถัดไป (apiPathBlock) · รอบ Codex ทำต่อพร้อมธงเตือน (เจ้าของ#18)
+        //   ของเดิม: log('WARN', `ค่าเครื่องมือเดือนนี้ $${spend.spentAfter} ถึงเพดาน $${spend.capUsd} แล้ว (เตือนเท่านั้น ไม่หยุด)`);
+        log('WARN', `ค่าเครื่องมือเดือนนี้ $${spend.spentAfter} ถึงเพดาน $${spend.capUsd} แล้ว (ทาง API หยุดตั้งแต่งานถัดไป · Codex ทำต่อพร้อมธงเตือน)`);
       }
       // tool_log รวมทุกรอบตามลำดับเวลา (ไม่เกินเพดาน)
       const mergedLog = [];
@@ -753,6 +826,9 @@ async function main(argv) {
         + ` · เครื่องมือ web-agent (อ่าน .env.local เอง — worker ไม่ส่งคีย์นี้ให้ Codex): ${envLocalHas('OPENAI_API_KEY', { repoRoot: cfg.repoRoot }) ? 'มีคีย์' : 'ไม่มีคีย์ใน .env.local'}`,
       `ทำพร้อมกัน: ${cfg.concurrency} งาน (เบราว์เซอร์ทีละงาน · ล็อก ${cfg.browserLockFile}: ${(() => { const h = readBrowserLock(cfg.browserLockFile); return h ? `ถือโดยงาน ${String(h.jobId || '?').slice(0, 80)} pid ${h.pid}` : 'ว่าง'; })()}) · เกณฑ์ข่าวเก่า: ${cfg.staleDays} วัน (ธงอย่างเดียว)`,
     ];
+    // ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): สถานะทาง API (เงินจริง) — ทางสำรองปิดเป็นค่าเริ่มต้น · งบเดือนถึงเพดาน = ทาง API หยุด
+    lines.push(`ทางสำรอง OpenAI API: ${apiFallbackEnabled(process.env) ? 'เปิด (RESEARCH_AGENT_API_FALLBACK=1 · เสียเงินจริง $10/$50 ต่อ 1M)' : 'ปิด (ค่าเริ่มต้น — Codex ใช้ไม่ได้ = งานนั้นล้ม + ธง BRAIN_UNAVAILABLE)'}`
+      + ` · งบเดือนนี้ (เพดาน $${cfg.toolBudgetUsdMonth}): ${monthSpendReached({ logDir: cfg.logDir, capUsd: cfg.toolBudgetUsdMonth }) ? 'ถึงเพดานแล้ว — ทาง API หยุด' : 'ยังไม่ถึง'}`);
     for (const name of cfg.accounts) {
       const q = await realReadQuota(name); // eslint-disable-line no-await-in-loop -- ทีละบัญชี
       lines.push(`บัญชี ${name}: ${q.status} · เหลือ ${q.remainingPct === null ? '-' : `${q.remainingPct}%`}${q.note ? ` · ${q.note}` : ''}`);

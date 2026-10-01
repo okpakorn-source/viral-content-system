@@ -417,6 +417,15 @@ async function checkHoldCases(m) {
   await yes('queued สด + worker ออนไลน์', researchRequest('q_case01'));
   await yes('leased สด', researchRequest('q_case01', { status: 'leased' }));
   await yes('leased ไม่ต้องดูชีพจร (มี worker หยิบแล้ว)', researchRequest('q_case01', { status: 'leased' }), { workers: [] });
+  // ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): worker ตายกลางงาน — leased ที่ชีพจรขาด > 150 วิ = ไม่ hold
+  //   (now − (heartbeatAt ?? leasedAt) · อายุใบขอ 4 นาที < HOLD_MS 6 นาที = ถ้าไม่ดูชีพจรจะ hold)
+  const beat = (agoMs, extra = {}) => researchRequest('q_case01', {
+    status: 'leased', ageMs: 4 * MIN, leasedAt: iso(NOW - 4 * MIN), heartbeatAt: iso(NOW - agoMs), ...extra,
+  });
+  await no('leased ชีพจรขาด 151 วิ (worker ตายกลางงาน)', beat(151 * SEC));
+  await yes('leased ชีพจรขาด 150 วิพอดี = ยัง hold', beat(150 * SEC));
+  await yes('leased ชีพจรสด 20 วิ แม้ leasedAt เก่า 4 นาที (heartbeatAt ชนะ)', beat(20 * SEC));
+  await no('leased ไม่มี heartbeatAt + leasedAt เก่า 4 นาที (นับจาก leasedAt)', beat(0, { heartbeatAt: undefined }));
   for (const status of ['done', 'failed', 'expired', 'weird']) await no(`status ${status}`, researchRequest('q_case01', { status }));
   await no('ไม่มีแถว', undefined);
   await no('อายุครบ hold พอดี (360 วิ)', researchRequest('q_case01', { ageMs: 360 * SEC }));
@@ -579,7 +588,8 @@ test('A1 getResearchHoldMs/isResearchHoldOn — ค่าเริ่มต้�
   assert.equal(holdMod.RESEARCH_HOLD_MAX_MS, 600_000);
 });
 
-test('A2 filterResearchHeld: ตารางกรณี hold/ไม่ hold (queued/leased · done/failed/expired · ไม่มีแถว · อายุ · deadline · worker ออฟไลน์ · แถวผิดรูป · เวลาเพี้ยน)', async () => {
+// ★ 1 ต.ค. 69 (W5): + leased ชีพจรขาด > 150 วิ · ของเดิมชื่อข้อ: 'A2 filterResearchHeld: ตารางกรณี hold/ไม่ hold (queued/leased · done/failed/expired · ไม่มีแถว · อายุ · deadline · worker ออฟไลน์ · แถวผิดรูป · เวลาเพี้ยน)'
+test('A2 filterResearchHeld: ตารางกรณี hold/ไม่ hold (queued/leased · done/failed/expired · ไม่มีแถว · อายุ · deadline · worker ออฟไลน์ · แถวผิดรูป · เวลาเพี้ยน · leased ชีพจรขาด > 150 วิ (W5))', async () => {
   await checkHoldCases(holdMod);
 });
 
@@ -626,6 +636,63 @@ test('A8 สัญญาร่วม: regex jobId = store.RESEARCH_JOB_ID_RE · 
   assert.equal(modesMod.RESEARCH_AGENT_OFFLINE_AFTER_MS, 10 * MIN);
   assert.ok(!/^import[^;]*research-agent\/store/m.test(SRC.hold), 'store ต้องเป็น dynamic import เท่านั้น');
   assert.ok(!/\bunref\b/.test(SRC.hold.replace(/^\s*\/\/.*$/gm, '')), 'timer ของตัวช่วยต้องไม่ unref');
+});
+
+// ============================================================
+// ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5) — ข้อเสริม 2 ข้อของคิวชะลอ
+//   A9 worker ตายกลางงาน: modes.isResearchLeaseStale (ตัวช่วยร่วมกับท่อโหมด write · readCards.readWriteOutcome)
+//   A10 hold เฉพาะสายข้อความ: งานที่ input มีลิงก์ (URL ล้วน = ลิงก์ + ข้อความอื่น ≤ 20 ตัวอักษร) หรือรูป = ไม่ hold
+// ============================================================
+const MODES_SRC = read('src/lib/research-agent/modes.js');
+const URL_ONLY = 'https://www.facebook.com/somepage/posts/1649392430310047/';
+const TEXT_INPUT = 'ชาวสวีเดนสวมขาเทียมช่วยชาวบ้านราชบุรีตักทรายใส่กระสอบรับมือน้ำขึ้น';
+const urlJob = (id, input, extra = {}) => ({ ...newsJob(id, 2), payload: { input, jobType: 'news', ...extra } });
+
+function checkLeaseStaleUnit(m) {
+  const req = (extra) => ({ status: 'leased', leasedAt: iso(NOW - 4 * MIN), ...extra });
+  assert.equal(m.RESEARCH_AGENT_LEASE_STALE_MS, 150_000);
+  assert.equal(m.isResearchLeaseStale(req({ heartbeatAt: iso(NOW - 151 * SEC) }), NOW), true, 'ชีพจรขาด 151 วิ');
+  assert.equal(m.isResearchLeaseStale(req({ heartbeatAt: iso(NOW - 150 * SEC) }), NOW), false, '150 วิพอดี = ยังไม่ขาด');
+  assert.equal(m.isResearchLeaseStale(req({ heartbeatAt: iso(NOW - 20 * SEC) }), NOW), false, 'heartbeatAt ชนะ leasedAt');
+  assert.equal(m.isResearchLeaseStale(req({}), NOW), true, 'ไม่มี heartbeatAt = นับจาก leasedAt');
+  assert.equal(m.isResearchLeaseStale({ status: 'queued', leasedAt: iso(NOW - 9 * MIN) }, NOW), false, 'ไม่ใช่ leased = ไม่ตัดสิน');
+  assert.equal(m.isResearchLeaseStale({ status: 'leased' }, NOW), false, 'ไม่มีเวลา = ไม่ตัดสินแทน (คงพฤติกรรมเดิม)');
+  assert.equal(m.isResearchLeaseStale({ status: 'leased', heartbeatAt: 'เมื่อวาน' }, NOW), false, 'เวลาอ่านไม่ได้ = ไม่ตัดสิน');
+  assert.equal(m.isResearchLeaseStale(null, NOW), false);
+  assert.equal(m.isResearchLeaseStale([], NOW), false);
+  assert.equal(m.isResearchLeaseStale(req({}), Number.NaN), false, 'นาฬิกาเสีย = ไม่ตัดสิน');
+  assert.equal(m.isResearchLeaseStale(req({ heartbeatAt: iso(NOW - 61 * SEC) }), NOW, 60_000), true, 'staleMs ฉีดได้');
+}
+
+async function checkTextPathOnly(m) {
+  // ตัวตรวจ = กติกา /api/auto/process (detectInputType · สายข้อความต้องไม่มีลิงก์และไม่มีรูป)
+  assert.equal(m.isTextPathInput({ input: TEXT_INPUT }), true, 'ข้อความล้วน = สายข้อความ');
+  assert.equal(m.isTextPathInput({ input: URL_ONLY }), false, 'URL ล้วน');
+  assert.equal(m.isTextPathInput({ input: `ดูนี่ ${URL_ONLY}` }), false, 'ลิงก์ + ข้อความ ≤ 20 ตัวอักษร = URL ล้วน');
+  assert.equal(m.isTextPathInput({ input: `${TEXT_INPUT} ${URL_ONLY}` }), false, 'ลิงก์ + ข้อความยาว = ท่อส่งสาย URL ไม่ใช่สายข้อความ');
+  assert.equal(m.isTextPathInput({ input: TEXT_INPUT, images: ['data:image/png;base64,AAAA'] }), false, 'มีรูป = สายรูป');
+  assert.equal(m.isTextPathInput({ url: URL_ONLY }), false, 'ไม่มี input ใช้ url (ลำดับเดียวกับ route)');
+  assert.equal(m.isTextPathInput({ input: TEXT_INPUT, sourceUrls: [URL_ONLY] }), true, 'ลิงก์ที่บอทแยกไป sourceUrls ไม่นับ (input เป็นข้อความ)');
+  assert.equal(m.isTextPathInput(undefined), true, 'ไม่มี payload = กติกาเดิม (ตรวจต่อ)');
+  assert.equal(m.isTextPathInput({ input: '' }), true);
+  // ผลจริงของ filterResearchHeld: ใบขอ leased สดเหมือนกันทุกงาน — งานข้อความ hold · งาน URL ล้วน/ลิงก์+ข้อความสั้น หยิบตามปกติ
+  const jobs = [newsJob('q_text01', 4), urlJob('q_url01', URL_ONLY), urlJob('q_url02', `ดูนี่ ${URL_ONLY}`)];
+  const storage = fakeStorage({ requests: Object.fromEntries(jobs.map((j) => [j.id, researchRequest(j.id, { status: 'leased' })])) });
+  const out = await m.filterResearchHeld(jobs, { env: WRITE, now: () => NOW, loadStorage: async () => storage, log: null, timers: fakeTimers() });
+  assert.deepEqual(out.held.map((h) => h.jobId), ['q_text01'], 'hold เฉพาะงานสายข้อความ');
+  assert.deepEqual(out.ready.map((j) => j.id), ['q_url01', 'q_url02'], 'งาน URL ล้วน = หยิบตามปกติ (ไม่ชะลอเปล่า)');
+  assert.deepEqual(storage.calls.filter(([fn]) => fn === 'getRequest').map(([, id]) => id), ['q_text01'], 'งาน URL ไม่ต้องอ่านใบขอ');
+  const info = await m.getResearchHoldInfo(urlJob('q_url01', URL_ONLY), { env: WRITE, now: () => NOW, loadStorage: async () => storage, timers: fakeTimers() });
+  assert.equal(info, null, '/api/queue/status ไม่ขึ้น researchHold ให้งาน URL');
+}
+
+test('A9 (W5) worker ตายกลางงาน: modes.isResearchLeaseStale — leased + ชีพจรขาด > 150 วิ (heartbeatAt ?? leasedAt) · ไม่ใช่ leased/ไม่มีเวลา = ไม่ตัดสิน · queueHold/readCards ใช้ตัวช่วยเดียวกัน', () => {
+  checkLeaseStaleUnit(modesMod);
+  assert.match(SRC.hold, /^ {2}if \(isResearchLeaseStale\(row, nowMs\)\) return null;$/m, 'queueHold ใช้ตัวช่วยร่วม');
+});
+
+test('A10 (W5) hold เฉพาะสายข้อความ: input URL ล้วน (ลิงก์ + ข้อความ ≤ 20 ตัวอักษร) / ลิงก์ + ข้อความยาว / มีรูป = ไม่ hold · ข้อความล้วน = hold ตามเดิม · ตัวตรวจเดียวกับ /api/auto/process', async () => {
+  await checkTextPathOnly(holdMod);
 });
 
 // ============================================================
@@ -1143,5 +1210,20 @@ test('E. mutation 15 แบบ — ข้อสอบต้องแดงทุ
   await t.test('M15 บอท: กลับเข้า hold ไม่แก้ข้อความกลับ (ค้าง "รอคิว")', async () => {
     const src = replaceOnce(SRC.bot, "          if (lastStatus !== 'research_hold' || holdText !== lastHoldText) {", '          if (holdText !== lastHoldText) {', 'M15');
     await assert.rejects(checkBotReentry(src));
+  });
+});
+
+// ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): กลายพันธุ์ข้อเสริม — ข้อสอบต้องแดงทุกแบบ (ของจริงเขียวใน A2/A9/A10)
+test('E2 (W5) mutation 3 แบบ — ข้อสอบต้องแดงทุกแบบ', async (t) => {
+  await t.test('MW5-1 queueHold: ไม่ดูชีพจรใบ leased → worker ตายกลางงานยัง hold เต็ม 6 นาที', async () => {
+    await assert.rejects(checkHoldCases(await holdMutant('  if (isResearchLeaseStale(row, nowMs)) return null;\n', '', 'MW5-1')), /ชีพจรขาด 151 วิ|ไม่มี heartbeatAt/u);
+  });
+  await t.test('MW5-2 queueHold: ไม่กรองสาย URL → งาน URL ล้วนถูกชะลอเปล่า', async () => {
+    const from = '  if (!isTextPathInput(job.payload)) return false; // ★ 1 ต.ค. 69 (W5): สาย URL/รูป ไม่ใช้ฉบับเสริม = ไม่ชะลอ (หยิบตามปกติ)\n';
+    await assert.rejects(checkTextPathOnly(await holdMutant(from, '', 'MW5-2')), /hold เฉพาะงานสายข้อความ/u);
+  });
+  await t.test('MW5-3 modes: นับชีพจรจาก leasedAt อย่างเดียว (ไม่ดู heartbeatAt) → worker ที่ยังส่งชีพจรถูกตัดว่าตาย', async () => {
+    const m = await importSource(replaceOnce(MODES_SRC, 'request.heartbeatAt ?? request.leasedAt ??', 'request.leasedAt ??', 'MW5-3'), tag('modes-MW5-3'));
+    assert.throws(() => checkLeaseStaleUnit(m), /150 วิพอดี|heartbeatAt ชนะ/u);
   });
 });

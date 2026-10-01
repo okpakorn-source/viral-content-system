@@ -48,7 +48,8 @@ const hooks = installResearchHooks({
     '@/lib/logger': fnStub(['createLogger']),
     '@/lib/correction/correctionPipeline': fnStub(['runCorrectionPipeline']),
     '@/lib/services/rawFactCompletenessGate': fnStub(['enforceRawFactCompleteness', 'isRawFactCompletenessGateEnabled', 'persistFactualReviewOrThrow']),
-    '@/lib/workflow/workflowEngine': fnStub(['saveAnalysis', 'saveFactualReview']),
+    // ★ 1 ต.ค. 69 (W5): + saveExtraction (writeStage เขียนฉบับเสริมลง workflow DB) · ของเดิม: fnStub(['saveAnalysis', 'saveFactualReview'])
+    '@/lib/workflow/workflowEngine': fnStub(['saveAnalysis', 'saveFactualReview', 'saveExtraction']),
     '@/lib/ai/builtinFallbackPrompt': fnStub(['getBuiltinFallbackPrompt']),
     '@/lib/ai/legacyLengthRules': `${fnStub(['isLegacyLengthOn'])}\nexport const NEW_LENGTH_CFG = Object.freeze({ min: 146 });`,
     '@/lib/input-engine/narrativePayloadText': fnStub(['assignAngleClosings', 'closingTailMatches']),
@@ -269,6 +270,30 @@ async function assertWaitAbortAndFinals(mod) {
   assert.equal((await doneNow(none.promise, 'no_request')).summary.status, 'no_request');
   const noJob = startWait({ mod, workflowId: 'auto_123' });
   assert.equal((await doneNow(noJob.promise, 'no_job')).summary.status, 'no_job');
+  // ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): worker ตายกลางงาน — ใบขอ leased ที่ชีพจรขาด > 150 วิ = offline (เลิกรอทันที)
+  //   นับจาก heartbeatAt (ไม่มี = leasedAt) · 150 วิพอดี = ยังรอ · ชีพจรขาดระหว่างรอ = เลิกรอรอบถัดไป · ชีพจรสด (leasedAt เก่า) = รอต่อ
+  const t0 = Date.parse('2026-10-01T06:00:00.000Z');
+  const leased = (extra) => fakeStorage({ request: { id: JOB, status: 'leased', deadlineAt: FAR, leasedAt: '2026-10-01T05:55:00.000Z', ...extra } });
+  const dead = startWait({ mod, clock: fakeClock(t0), storage: leased({ heartbeatAt: '2026-10-01T05:57:29.999Z' }) });
+  assert.equal((await doneNow(dead.promise, 'leased ชีพจรขาด 150.001 วิ')).summary.status, 'offline');
+  const deadNoBeat = startWait({ mod, clock: fakeClock(t0), storage: leased({}) });
+  assert.equal((await doneNow(deadNoBeat.promise, 'leased ไม่มี heartbeatAt = นับจาก leasedAt 5 นาที')).summary.status, 'offline');
+  const edgeClock = fakeClock(t0);
+  const edge = startWait({ mod, clock: edgeClock, storage: leased({ heartbeatAt: '2026-10-01T05:57:30.000Z' }) });
+  await flush();
+  assert.equal(await Promise.race([edge.promise.then(() => 'done'), flush().then(() => 'waiting')]), 'waiting', 'ชีพจรขาด 150 วิพอดี = ยังรอ');
+  await edgeClock.advance(5_000);
+  const edgeRun = await settleWithin(edge.promise, 'ชีพจรขาดเกินระหว่างรอ = เลิกรอรอบถัดไป');
+  assert.equal(edgeRun.summary.status, 'offline');
+  assert.equal(edgeRun.summary.waitedMs, 5_000);
+  assert.equal(edgeClock.pending(), 0, 'ต้องไม่มี timer ค้าง');
+  const aliveClock = fakeClock(t0);
+  const alive = startWait({ mod, clock: aliveClock, storage: leased({ heartbeatAt: '2026-10-01T05:59:40.000Z' }) });
+  await flush();
+  assert.equal(await Promise.race([alive.promise.then(() => 'done'), flush().then(() => 'waiting')]), 'waiting', 'ชีพจรสด (heartbeatAt ชนะ leasedAt เก่า) = รอต่อ');
+  alive.storage.st.card = cardDoc();
+  await aliveClock.advance(5_000);
+  assert.equal((await settleWithin(alive.promise, 'การ์ดมาระหว่างรอ')).summary.status, 'done');
 }
 
 async function assertWaitFailOpen(mod) {
@@ -294,7 +319,8 @@ test('A1 waitResearchCards: ปิดสวิตช์ = null ไม่แต�
 test('A2 waitResearchCards: การ์ดมาแล้ว = จบทันที (1 รอบ · log research-agent) · มาระหว่างรอ = poll ทุก 5 วิ · timer ไม่ขอ unref · ไม่มี timer ค้าง', () => assertWaitArrives(readCards));
 test('A3 waitResearchCards: หน้าต่างรอนับจากเริ่มท่อ (startedAt) · ไม่ส่ง maxWaitMs = 300000 ของโหมด write', () => assertWaitFromPipelineStart(readCards));
 test('A4 waitResearchCards: เส้นตายรวม — รอเฉพาะส่วนที่เกินกันชน 480 วิ · เหลือน้อยกว่า = อ่านรอบเดียว (การ์ดมาแล้วยังได้ใช้)', () => assertWaitReserve(readCards));
-test('A5 waitResearchCards: abort ปล่อยทันที · offline/expired/failed/no_request/no_job = เลิกรอทันที', () => assertWaitAbortAndFinals(readCards));
+// ★ 1 ต.ค. 69 (W5): + leased ชีพจรขาด > 150 วิ = offline · ของเดิมชื่อข้อ: 'A5 waitResearchCards: abort ปล่อยทันที · offline/expired/failed/no_request/no_job = เลิกรอทันที'
+test('A5 waitResearchCards: abort ปล่อยทันที · offline/expired/failed/no_request/no_job = เลิกรอทันที · leased ชีพจรขาด > 150 วิ (worker ตายกลางงาน · W5) = offline', () => assertWaitAbortAndFinals(readCards));
 test('A6 waitResearchCards fail-open: ฐานล้ม = unavailable · อ่านล้ม 3 ครั้ง = error · ตัวอ่านฉีดได้ · log ล้มไม่กระทบ · ไม่โยน', () => assertWaitFailOpen(readCards));
 
 test('A7 waitResearchCards: ไม่ใช้ withTimeoutSignal/assertCanStart (ไม่จองงบเส้นตาย) · buildResearchAgentRun ไม่ส่ง editor = รูปเดิม', () => {
@@ -465,6 +491,65 @@ test('B2 writeStage not_ready/skipped/failed: เขียนจากต้น�
 test('B3 writeStage งบเวลา: เหลือ < 395 วิ = ไม่เรียกบรรณาธิการ · งบ = min(100 วิ, เหลือ − 380 วิ)', () => assertStageBudget(writeStage));
 test('B4 writeStage fail-open: บันทึกล้มยังได้ผล · โหมดอื่น/ไม่มี jobId/พังกลางทาง = null', () => assertStageFailOpen(writeStage));
 
+// ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): done = เขียนฉบับเสริมลง workflow DB ด้วยตัวบันทึกของขั้นสกัด
+//   (saveExtraction · ช่องเดิมจาก newsData + rawInput ต้นฉบับ) · ไม่ใช่ done = ไม่เขียน · ล้ม/ไม่มีแถว/ค้างเกิน 4 วิ = ข่าวเดินต่อ
+//   (newsBodySaved=false + log ⚠️) · timer ฉีดได้ ไม่ค้าง
+async function assertStageSavesNewsBody(mod) {
+  const saves = [];
+  const saveNewsBody = async (id, fields) => { saves.push({ id, fields }); return { id }; };
+  const ok = await runStage(mod, { extra: { saveNewsBody } });
+  assert.equal(ok.res.status, 'done');
+  assert.equal(ok.res.newsBodySaved, true);
+  assert.deepEqual(saves, [{ id: WF, fields: {
+    newsTitle: 'ชาวสวีเดนขาเทียม', newsBody: ENRICHED_PROSE, newsSource: undefined, newsDate: undefined, newsCategory: undefined, rawInput: RAW_TEXT,
+  } }], 'บันทึกครั้งเดียว: newsBody = ฉบับเสริม · rawInput = ต้นฉบับ (ensureWorkflow ไม่ชน) · ช่องอื่น = ค่าเดิมของขั้นสกัด');
+  assert.equal(ok.logs.find((l) => l.step === 'research-editor').metadata.newsBodySaved, true);
+  assert.doesNotMatch(ok.res.logLine, /บันทึกฉบับเสริมลง workflow ไม่สำเร็จ/u);
+  assert.equal(ok.timers.pending(), 0, 'timer บันทึกต้องถูก clear');
+  for (const outcome of [{ final: false, status: 'pending', request: { status: 'leased' } }, { final: true, status: 'offline' }]) {
+    const r = await runStage(mod, { outcome, extra: { saveNewsBody } }); // eslint-disable-line no-await-in-loop -- ทีละกรณี
+    assert.equal(r.res.status, 'not_ready');
+    assert.equal(r.res.newsBodySaved, false);
+    assert.equal(r.logs.find((l) => l.step === 'research-editor').metadata.newsBodySaved, false);
+  }
+  const failedEditor = await runStage(mod, { reply: () => { throw new Error('SECRET 529'); }, extra: { saveNewsBody } });
+  assert.equal(failedEditor.res.status, 'failed');
+  assert.equal(saves.length, 1, 'ไม่ใช่ done (not_ready/failed) = ไม่แตะ workflow DB');
+  const broken = await runStage(mod, { extra: { saveNewsBody: async () => { throw new Error('SECRET db down'); } } });
+  assert.equal(broken.res.status, 'done', 'บันทึกล้ม = ข่าวยังได้ฉบับเสริม (fail-open)');
+  assert.equal(broken.res.enrichedSource, ENRICHED_PROSE);
+  assert.equal(broken.res.newsBodySaved, false);
+  assert.match(broken.res.logLine, /^✍️ write: ฉบับเสริมแทนต้นฉบับ.* · ⚠️ บันทึกฉบับเสริมลง workflow ไม่สำเร็จ/u);
+  assert.doesNotMatch(`${JSON.stringify(broken.res.record)}${broken.res.logLine}`, /SECRET/u);
+  assert.equal((await runStage(mod, { extra: { saveNewsBody: async () => null } })).res.newsBodySaved, false, 'db.js คืน null (ไม่มีแถว/ล้ม) = ไม่สำเร็จ');
+  // ค้าง → เพดาน 4 วิ (timer ฉีด · เทสยิงเอง) → ข่าวเดินต่อ
+  const timers = manualTimers();
+  const sb = createFakeSupabase();
+  const storage = storeMod.createResearchStorage({ sb, now: () => NOW_MS });
+  const outcome = { final: true, card: cardDoc() };
+  const hang = mod.runResearchWriteStage({
+    workflowId: WF, rawText: RAW_TEXT, newsData: { newsTitle: 'ชาวสวีเดนขาเทียม', newsBody: RAW_TEXT }, pipelineStartedAt: NOW_MS - 30_000,
+    env: WRITE_ENV, now: () => NOW_MS, timers,
+    wait: async () => ({ ...readCards.buildResearchAgentRun({ outcome, mode: 'write', jobId: JOB, workflowId: WF, ms: 1, waitedMs: 1, polls: 1 }), outcome }),
+    invoke: async (args) => claudeReplyOk(args),
+    loadStorage: async () => storage,
+    logPipeline: async () => {},
+    saveNewsBody: () => new Promise(() => {}),
+  });
+  const liveSaveTimers = () => timers.list.filter((t) => !t.cleared && t.ms === 4_000);
+  for (let i = 0; i < 40 && !(sb.doc(`redit_${JOB}`) && liveSaveTimers().length === 1); i += 1) await flush(); // eslint-disable-line no-await-in-loop -- รอจนถึงจุดบันทึก
+  assert.ok(sb.doc(`redit_${JOB}`), 'บันทึกระเบียน editor เสร็จแม้ workflow DB ค้าง (ขนานกัน)');
+  assert.equal(liveSaveTimers().length, 1, 'เหลือ timer เพดาน 4 วิของการบันทึกที่ค้างตัวเดียว');
+  liveSaveTimers()[0].fn();
+  const hung = await settleWithin(hang, 'บันทึกค้างต้องหลุดด้วยเพดาน 4 วิ');
+  assert.equal(hung.status, 'done');
+  assert.equal(hung.enrichedSource, ENRICHED_PROSE);
+  assert.equal(hung.newsBodySaved, false);
+  assert.equal(timers.pending(), 0);
+}
+
+test('B5 (W5) writeStage done: เขียนฉบับเสริมลง workflow DB (saveExtraction · ช่องเดิม + rawInput ต้นฉบับ) · ไม่ใช่ done ไม่เขียน · ล้ม/ค้าง 4 วิ = เดินต่อ + log ⚠️', () => assertStageSavesNewsBody(writeStage));
+
 // ── C. processAutoFlowText ตัวจริง ─────────────────────────────────
 const THAI_BODY = 'ชาวสวีเดนสวมขาเทียม 1 ข้าง ช่วยชาวบ้านราชบุรีตักทรายใส่กระสอบรับมือน้ำขึ้นสูงอย่างไม่ย่อท้อ สาวรายหนึ่งเล่าว่าเขาทำงานเคียงข้างคนในพื้นที่ทั้งวัน และบอกว่าเราทุกคนทำอะไรบางอย่างได้ ';
 const LONG_CONTENT = (tag) => Array.from({ length: 3 }, (_, i) => `ย่อหน้า ${i + 1} ของ ${tag}: ${THAI_BODY}${THAI_BODY}`).join('\n\n');
@@ -491,6 +576,9 @@ function freshState() {
     },
     persistFactualReviewOrThrow: async () => ({}), saveFactualReview: async () => ({}),
     saveAnalysis: async (id, analysisResult, presetId) => { S.saved.push(clone({ id, analysisResult, presetId })); return { id }; },
+    // ★ 1 ต.ค. 69 (W5): ตัวบันทึกขั้นสกัด (workflowEngine.saveExtraction) ปลอม — จดทุกครั้ง · คืนแถว (= บันทึกสำเร็จ)
+    extractionSaves: [],
+    saveExtraction: async (id, fields) => { S.extractionSaves.push(clone({ id, fields })); return { id }; },
     getBuiltinFallbackPrompt: () => ({ id: 'fallback_builtin', promptName: 'Built-in' }),
     isLegacyLengthOn: () => false, assignAngleClosings: () => [], closingTailMatches: () => false,
     isCardAuthorityR6Enabled: () => false, cleanScrapedText: (s) => s,
@@ -705,6 +793,67 @@ test('C4 autoFlow ปิดสวิตช์/shadow/assist: เหมือน�
   await assertLaneBParity(await import(AUTO_FLOW_URL), laneBOnly);
 });
 
+// ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): ข่าวผิดมุม — summarizeServiceText โหลด newsBody จาก workflow DB ทับข้อความที่ท่อส่ง
+//   (แตกประเด็น: เมื่อ DB ยาวกว่า · นักเขียน: ทุกครั้ง · บรรทัด ~931/~1074 ของ summarizeServiceText.js) → ตัวปลอมเลียนกติกานั้นจาก "DB" ในหน่วยความจำ
+//   DB เริ่มด้วยผลสกัดเดิมที่ยาวกว่าฉบับเสริม → หลังจุดเสียบต้องถูกแทนด้วยฉบับเสริม (saveExtraction ปลอม) ก่อนแตกประเด็น
+const LONG_DB_BODY = `${EXTRACTED_BODY} ${'รายละเอียดจากผลสกัดเดิมที่ยาวกว่าฉบับเสริม '.repeat(10)}`.trim();
+function emulateWorkflowDb(S) {
+  S.wf = { newsTitle: 'ชาวสวีเดนขาเทียมช่วยชาวบ้านราชบุรี', newsBody: LONG_DB_BODY, rawInput: RAW_TEXT };
+  S.order = [];
+  S.dbReads = [];
+  S.saveExtraction = async (id, fields) => {
+    S.order.push('saveExtraction');
+    S.extractionSaves.push(clone({ id, fields }));
+    for (const [key, value] of Object.entries(fields)) if (value !== undefined) S.wf[key] = value;
+    return { id };
+  };
+  const base = S.performSummarize;
+  S.performSummarize = async (input) => {
+    S.order.push(input.mode);
+    if (input.mode === 'breakdown') S.dbReads.push(['breakdown', S.wf.newsBody.length > input.text.length ? S.wf.newsBody : input.text]);
+    if (input.mode === 'analyze') S.dbReads.push(['analyze', S.wf.newsBody || input.text]);
+    return base(input);
+  };
+}
+
+async function assertEnrichedSavedToWorkflow(mod) {
+  assert.ok(LONG_DB_BODY.length > ENRICHED_PROSE.length, 'เงื่อนไขเทส: newsBody ใน DB ยาวกว่าฉบับเสริม');
+  const run = await runPipeline(mod, { env: WRITE_ENV, seed: seedDone(), configure: emulateWorkflowDb });
+  assert.equal(run.res.success, true);
+  const S = run.S;
+  assert.equal(S.extractionSaves.length, 1, 'บันทึกฉบับเสริมลง workflow ครั้งเดียว');
+  const { id, fields } = S.extractionSaves[0];
+  assert.equal(id, WF);
+  assert.equal(fields.newsBody, ENRICHED_PROSE);
+  assert.equal(fields.rawInput, RAW_TEXT, 'rawInput คงต้นฉบับ (ensureWorkflow ไม่ชน WORKFLOW_CONTEXT_CONFLICT)');
+  assert.equal(fields.newsTitle, 'ชาวสวีเดนขาเทียมช่วยชาวบ้านราชบุรี', 'ช่องอื่น = ค่าเดิมของขั้นสกัด');
+  const at = (step) => S.order.indexOf(step);
+  assert.ok(at('extract') < at('saveExtraction') && at('saveExtraction') < at('breakdown'), `ลำดับ: สกัด → บันทึกฉบับเสริม → แตกประเด็น (${S.order.join(',')})`);
+  assert.equal(S.wf.newsBody, ENRICHED_PROSE, 'DB เดิมยาวกว่าก็ถูกแทนด้วยฉบับเสริม');
+  assert.ok(S.dbReads.some(([mode]) => mode === 'breakdown') && S.dbReads.some(([mode]) => mode === 'analyze'));
+  for (const [mode, body] of S.dbReads) assert.equal(body, ENRICHED_PROSE, `${mode} ที่อ่าน newsBody จาก DB ต้องเห็นฉบับเสริมชุดเดียวกัน`);
+  assert.equal(S.pipelineLogs.find((l) => l.step === 'research-editor').metadata.newsBodySaved, true);
+  assert.ok(run.res.data.log.some((line) => line.includes('ResearchWrite: ✍️ write: ฉบับเสริมแทนต้นฉบับ') && !line.includes('⚠️')));
+  // ไม่ใช่ done (not_ready) = ไม่แตะ workflow DB — DB ยังเป็นผลสกัดเดิม
+  const notReady = await runPipeline(mod, { env: { ...WRITE_ENV, RESEARCH_AGENT_WAIT_MS: '0' }, seed: seedPending, configure: emulateWorkflowDb });
+  assert.equal(notReady.res.success, true);
+  assert.equal(notReady.S.extractionSaves.length, 0, 'not_ready = ไม่เขียน workflow DB');
+  assert.equal(notReady.S.wf.newsBody, LONG_DB_BODY);
+}
+
+test('C1b (W5) autoFlow write done: ฉบับเสริมลง workflow DB (saveExtraction ปลอม) ก่อนแตกประเด็น — DB เดิมยาวกว่าก็ถูกแทน · แตกประเด็น/นักเขียนที่อ่าน DB เห็นฉบับเสริมชุดเดียวกัน · not_ready ไม่เขียน · กลายพันธุ์ (ไม่เขียน DB) ต้องแดง', async () => {
+  await assertEnrichedSavedToWorkflow(await import(AUTO_FLOW_URL));
+  // กลายพันธุ์: writeStage ไม่เขียนฉบับเสริมลง DB → แตกประเด็น/นักเขียนอ่านผลสกัดเดิมที่ยาวกว่า (ข่าวผิดมุม) → ข้อสอบต้องแดง
+  const noSave = replaceOnce(SRC.writeStage, "    const newsBodySave = status === 'done'\n", '    const newsBodySave = false\n', 'w5-no-db-save');
+  hooks.overrides.set('@/lib/research-agent/writeStage', `data:text/javascript;base64,${Buffer.from(`${noSave}\n//# sourceURL=w5-no-db-save.mjs`, 'utf8').toString('base64')}`);
+  try {
+    const mutatedFlow = await importSource(SRC.autoFlow, 'autoflow-w5-no-db-save');
+    await assert.rejects(Promise.resolve().then(() => assertEnrichedSavedToWorkflow(mutatedFlow)), /บันทึกฉบับเสริมลง workflow ครั้งเดียว/u);
+  } finally {
+    hooks.overrides.delete('@/lib/research-agent/writeStage');
+  }
+});
+
 // ── D. store · route · cardsSchema · generationLogger · modes ──────────
 async function assertEditorStore(mod) {
   const sb = createFakeSupabase();
@@ -916,4 +1065,14 @@ test('E mutation: ทุบสายไฟโหมด write แล้วข้�
   assertModesWrite(modes);
   await assertSchemaFields(schema, schemaBefore);
   assertGenLogEditor(genLog);
+});
+
+// ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): กลายพันธุ์ข้อเสริม — ข้อสอบต้องแดง (และของจริงเขียว)
+test('E2 (W5) mutation: worker ตายกลางงานแล้วท่อยังรอ · ไม่เขียนฉบับเสริมลง workflow DB → ข้อสอบต้องแดง', async () => {
+  const staleOff = await importSource(replaceOnce(SRC.readCards, "  if (isResearchLeaseStale(request, now())) return { final: true, status: 'offline', request };\n", '', 'w5-stale-off'), 'w5-unit-mut-stale');
+  await assert.rejects(Promise.resolve().then(() => assertWaitAbortAndFinals(staleOff)), /leased/u, 'readCards ไม่ดูชีพจรใบ leased: ข้อสอบต้องแดง');
+  const saveOff = await importSource(replaceOnce(SRC.writeStage, "    const newsBodySave = status === 'done'\n", '    const newsBodySave = false\n', 'w5-save-off'), 'w5-unit-mut-save');
+  await assert.rejects(Promise.resolve().then(() => assertStageSavesNewsBody(saveOff)), 'writeStage ไม่เขียน workflow DB: ข้อสอบต้องแดง');
+  await assertWaitAbortAndFinals(readCards);
+  await assertStageSavesNewsBody(writeStage);
 });

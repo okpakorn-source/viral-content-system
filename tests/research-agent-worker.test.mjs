@@ -381,7 +381,7 @@ test('5. โควตา: ≤5% สลับบัญชี · ≤15% ธง QUO
     assert.ok(record.flags.includes('QUOTA_LOW'));
     assert.equal(record.brain.quotaPctAfter, 12);
   } finally { s.cleanup(); }
-  const s2 = setup(worker, { RESEARCH_AGENT_CODEX_ACCOUNTS: 'main,b' });
+  const s2 = setup(worker, { RESEARCH_AGENT_CODEX_ACCOUNTS: 'main,b', RESEARCH_AGENT_API_FALLBACK: '1' }); // ★ 1 ต.ค. 69 (W5): ทางสำรอง API ต้องเปิดเอง (ค่าเริ่มต้นปิด) · ของเดิม: setup(worker, { RESEARCH_AGENT_CODEX_ACCOUNTS: 'main,b' })
   try {
     const c = clock();
     const runCodex = codexStub([okCodex(FIX('lab-out-result.json'))], c);
@@ -404,7 +404,7 @@ test('5. โควตา: ≤5% สลับบัญชี · ≤15% ธง QUO
 });
 
 test('6. Codex ล้ม → สำรอง API (มีคีย์) · ไม่มีคีย์ = failed + AGENT_FAILED · โควตาหมดกลางงาน = พักบัญชี', async () => {
-  const s = setup();
+  const s = setup(worker, { RESEARCH_AGENT_API_FALLBACK: '1' }); // ★ 1 ต.ค. 69 (W5): ทางสำรอง API ต้องเปิดเอง (ค่าเริ่มต้นปิด) · ของเดิม: setup()
   try {
     const c = clock();
     const runCodex = codexStub([{ ok: false, errorType: 'CODEX_UNAVAILABLE', error: 'ไม่พบ codex', json: null }], c);
@@ -440,7 +440,7 @@ test('6b. ผลผิดสัญญา 2.2 (ขาด plan/origin_post) = fail
     assert.ok(record.tool_log.some((t) => t.tool === 'worker' && /ผลผิดสัญญา 2\.2/.test(t.note)));
     assert.deepEqual(validateCardRecord(record), []);
   } finally { s.cleanup(); }
-  const s2 = setup();
+  const s2 = setup(worker, { RESEARCH_AGENT_API_FALLBACK: '1' }); // ★ 1 ต.ค. 69 (W5): ทางสำรอง API ต้องเปิดเอง (ค่าเริ่มต้นปิด) · ของเดิม: setup()
   try {
     const c = clock();
     const apiCalls = [];
@@ -450,6 +450,156 @@ test('6b. ผลผิดสัญญา 2.2 (ขาด plan/origin_post) = fail
     assert.equal(record.status, 'done');
     assert.equal(record.brain.kind, 'api');
   } finally { s2.cleanup(); }
+});
+
+// ── ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): ทาง OpenAI API ห้ามวิ่งเอง (เงินรั่ว) ─────────────────────
+//   1) RESEARCH_AGENT_API_FALLBACK ไม่ตั้ง/≠'1' = ปิดทางสำรองทั้ง 2 จุด (โควตาหมดทุกบัญชี · Codex ล้ม) → failed + BRAIN_UNAVAILABLE
+//      (+ CODEX_AUTH/QUOTA_LOW ตามเหตุ) + เหตุผลใน tool_log · ไม่เรียก API
+//   2) งบเดือนถึงเพดาน = หยุดทาง API จริง (ทางสำรองที่เปิด + RESEARCH_AGENT_BRAIN=api) → failed + TOOL_BUDGET_MONTH · รอบ Codex ทำต่อ
+/** ตัวจดการเรียก OpenAI API (ข้อที่กั้นต้องไม่ถูกเรียกเลย) */
+function apiSpy(c) {
+  const calls = [];
+  const fn = async (p) => {
+    calls.push(p);
+    if (c) c.advance(60_000);
+    return { ok: true, brain: 'api', effort: 'low', account: 'api', json: FIX('lab-out-result.json'), costUsd: 0.12, tokensUsed: 9000 };
+  };
+  fn.calls = calls;
+  return fn;
+}
+const ALL_QUOTA_GONE = Object.freeze({ main: { account: 'main', status: 'FULL', remainingPct: 0 }, b: { account: 'b', status: 'OK', remainingPct: 2 } });
+const apiNote = (record) => record.tool_log.find((t) => t.tool === 'worker' && t.args === 'api-path');
+
+async function checkApiFallbackOff(mod) {
+  // ก) โควตาหมดทุกบัญชี (ไม่ตั้งสวิตช์ = ค่าเริ่มต้นปิด) → failed ทันที · ไม่เรียก Codex/API · ไม่สร้างโฟลเดอร์งาน · ไม่ heartbeat
+  const s = setup(mod, { RESEARCH_AGENT_CODEX_ACCOUNTS: 'main,b' });
+  try {
+    const c = clock();
+    const runCodex = codexStub([okCodex(FIX('lab-out-result.json'))], c);
+    const runApi = apiSpy(c);
+    const beats = [];
+    const { record } = await settleWithin(mod.processJob(JOB, processCtx(s, {
+      runCodex, runApi, now: c.now, readQuota: quotaStub(ALL_QUOTA_GONE), heartbeat: async (id) => { beats.push(id); return {}; },
+    })), 'quota-off');
+    assert.equal(runApi.calls.length, 0, 'ทางสำรองปิด = ห้ามเรียก OpenAI API');
+    assert.equal(runCodex.calls.length, 0);
+    assert.equal(record.status, 'failed');
+    for (const f of ['BRAIN_UNAVAILABLE', 'QUOTA_LOW', 'AGENT_FAILED']) assert.ok(record.flags.includes(f), `ต้องมีธง ${f}`);
+    assert.ok(!record.flags.includes('API_FALLBACK'), 'ไม่ได้ใช้ API = ห้ามติดธง API_FALLBACK');
+    assert.match(apiNote(record).note, /^QUOTA → ไม่ใช้ทางสำรอง OpenAI API \(ปิดอยู่ · เปิดด้วย RESEARCH_AGENT_API_FALLBACK=1/);
+    assert.ok(record.tool_log.some((t) => t.args === 'quota' && /ทุกบัญชีใช้ไม่ได้/.test(t.note)), 'เหตุผลโควตาอยู่ใน tool_log');
+    assert.deepEqual(beats, [], 'จบก่อนเริ่มงาน = ไม่ heartbeat');
+    assert.ok(!existsSync(join(s.cfg.workdirRoot, JOB.id)), 'ไม่สร้างโฟลเดอร์งาน');
+    assert.deepEqual(validateCardRecord(record), []);
+  } finally { s.cleanup(); }
+  // ข) Codex ล้มรอบแรก (มีคีย์ + เวลาเหลือ) → ไม่เรียก API · ธงเหตุผลตาม errorType · ค่าอื่นของสวิตช์ (0/true/yes) = ปิด
+  const cases = [
+    ['CODEX_AUTH', { ok: false, errorType: 'CODEX_AUTH', error: 'not logged in', json: null }, ['CODEX_AUTH'], undefined],
+    ['CODEX_QUOTA', { ok: false, errorType: 'CODEX_QUOTA', error: 'usage limit', json: null }, ['QUOTA_LOW'], '0'],
+    ['CODEX_TIMEOUT', { ok: false, errorType: 'CODEX_TIMEOUT', error: 'x', json: null, timedOut: true }, ['AGENT_TIMEOUT'], 'true'],
+    ['ผลผิดสัญญา 2.2', okCodex({ cards: [] }), [], ' yes '],
+  ];
+  for (const [reason, codexRes, extraFlags, envValue] of cases) {
+    const s2 = setup(mod, envValue === undefined ? {} : { RESEARCH_AGENT_API_FALLBACK: envValue });
+    try {
+      const c = clock();
+      const runApi = apiSpy(c);
+      const ctx = processCtx(s2, { runCodex: codexStub([codexRes], c), runApi, readQuota: quotaStub(), now: c.now });
+      const { record } = await settleWithin(mod.processJob(JOB, ctx), `r1-${reason}`); // eslint-disable-line no-await-in-loop -- ทีละกรณี
+      assert.equal(runApi.calls.length, 0, `${reason}: ห้ามเรียก OpenAI API`);
+      assert.equal(record.status, 'failed', reason);
+      assert.equal(record.brain.kind, 'codex', reason);
+      for (const f of ['BRAIN_UNAVAILABLE', 'AGENT_FAILED', ...extraFlags]) assert.ok(record.flags.includes(f), `${reason}: ต้องมีธง ${f} (ได้ ${record.flags})`);
+      assert.ok(!record.flags.includes('API_FALLBACK'), reason);
+      if (reason !== 'CODEX_AUTH') assert.ok(!record.flags.includes('CODEX_AUTH'), `${reason}: CODEX_AUTH เฉพาะหลุดล็อกอิน`);
+      assert.ok(apiNote(record).note.startsWith(`${reason} → ไม่ใช้ทางสำรอง OpenAI API`), `${reason}: เหตุผลใน tool_log`);
+      assert.deepEqual(validateCardRecord(record), [], reason);
+    } finally { s2.cleanup(); }
+  }
+}
+
+/** เขียนบัญชีงบเดือนนี้ให้ถึงเพดาน (ไฟล์เดียวกับที่ worker บวกค่าใช้จ่ายจริง) */
+function fillMonthBudget(mod, s, c) {
+  const st = mod.addMonthSpend({ logDir: s.cfg.logDir, costUsd: s.cfg.toolBudgetUsdMonth, capUsd: s.cfg.toolBudgetUsdMonth, now: c.now });
+  assert.equal(st.reached, true, 'เตรียมบัญชีงบให้ถึงเพดาน');
+}
+
+async function checkApiBudgetStop(mod) {
+  // ก) เปิดทางสำรองแล้ว แต่งบเดือนถึงเพดาน → Codex ล้มก็ไม่เรียก API · ธง TOOL_BUDGET_MONTH + BRAIN_UNAVAILABLE
+  const s = setup(mod, { RESEARCH_AGENT_API_FALLBACK: '1' });
+  try {
+    const c = clock();
+    assert.equal(mod.monthSpendReached({ logDir: s.cfg.logDir, capUsd: s.cfg.toolBudgetUsdMonth, now: c.now }), false, 'ยังไม่มีบัญชี = ยังไม่ถึง');
+    fillMonthBudget(mod, s, c);
+    assert.equal(mod.monthSpendReached({ logDir: s.cfg.logDir, capUsd: s.cfg.toolBudgetUsdMonth, now: c.now }), true);
+    const runApi = apiSpy(c);
+    const ctx = processCtx(s, { runCodex: codexStub([{ ok: false, errorType: 'CODEX_EXIT', error: 'x', json: null }], c), runApi, readQuota: quotaStub(), now: c.now });
+    const { record } = await settleWithin(mod.processJob(JOB, ctx), 'budget-r1');
+    assert.equal(runApi.calls.length, 0, 'งบเดือนถึงเพดาน = หยุดทาง API จริง');
+    assert.equal(record.status, 'failed');
+    for (const f of ['TOOL_BUDGET_MONTH', 'BRAIN_UNAVAILABLE', 'AGENT_FAILED']) assert.ok(record.flags.includes(f), `ต้องมีธง ${f}`);
+    assert.ok(!record.flags.includes('API_FALLBACK'));
+    assert.match(apiNote(record).note, /^CODEX_EXIT → งบเดือนนี้ถึงเพดาน \$10 แล้ว — หยุดทาง API/);
+  } finally { s.cleanup(); }
+  // ข) เปิดทางสำรอง + โควตาหมดทุกบัญชี + งบถึงเพดาน → failed ทันที ไม่เรียกอะไร
+  const s2 = setup(mod, { RESEARCH_AGENT_API_FALLBACK: '1', RESEARCH_AGENT_CODEX_ACCOUNTS: 'main,b' });
+  try {
+    const c = clock();
+    fillMonthBudget(mod, s2, c);
+    const runCodex = codexStub([okCodex(FIX('lab-out-result.json'))], c);
+    const runApi = apiSpy(c);
+    const { record } = await settleWithin(mod.processJob(JOB, processCtx(s2, { runCodex, runApi, now: c.now, readQuota: quotaStub(ALL_QUOTA_GONE) })), 'budget-quota');
+    assert.equal(runApi.calls.length + runCodex.calls.length, 0);
+    assert.equal(record.status, 'failed');
+    for (const f of ['TOOL_BUDGET_MONTH', 'BRAIN_UNAVAILABLE', 'QUOTA_LOW', 'AGENT_FAILED']) assert.ok(record.flags.includes(f), `ต้องมีธง ${f}`);
+  } finally { s2.cleanup(); }
+  // ค) ตั้ง RESEARCH_AGENT_BRAIN=api เอง: งบยังไม่ถึง = เรียก API ตามเดิม · ถึงเพดาน = failed (ธงงบ ไม่ใช่ BRAIN_UNAVAILABLE)
+  const s3 = setup(mod, { RESEARCH_AGENT_BRAIN: 'api' });
+  try {
+    const c = clock();
+    const runApi = apiSpy(c);
+    const before = await settleWithin(mod.processJob(JOB, processCtx(s3, { runApi, readQuota: quotaStub(), now: c.now })), 'brain-api-ok');
+    assert.equal(runApi.calls.length, 1, 'งบยังไม่ถึง = สมอง api ทำงานตามเดิม');
+    assert.equal(before.record.status, 'done');
+    fillMonthBudget(mod, s3, c);
+    const { record } = await settleWithin(mod.processJob(JOB, processCtx(s3, { runApi, readQuota: quotaStub(), now: c.now })), 'brain-api-stop');
+    assert.equal(runApi.calls.length, 1, 'ถึงเพดาน = ไม่เรียก API อีก');
+    assert.equal(record.status, 'failed');
+    assert.deepEqual([...record.flags].sort(), ['AGENT_FAILED', 'TOOL_BUDGET_MONTH']);
+    assert.match(apiNote(record).note, /^RESEARCH_AGENT_BRAIN=api → งบเดือนนี้ถึงเพดาน/);
+    assert.deepEqual(validateCardRecord(record), []);
+  } finally { s3.cleanup(); }
+  // ง) งบถึงเพดานแต่รอบ Codex สำเร็จ = ทำต่อ (ธงเตือนเดิม · เจ้าของ#18)
+  const s4 = setup(mod, { RESEARCH_AGENT_API_FALLBACK: '1' });
+  try {
+    const c = clock();
+    fillMonthBudget(mod, s4, c);
+    const ctx = processCtx(s4, { runCodex: codexStub([okCodex(FIX('lab-out-result.json'))], c), readQuota: quotaStub(), now: c.now });
+    const { record } = await settleWithin(mod.processJob(JOB, ctx), 'budget-codex-ok');
+    assert.equal(record.status, 'done', 'Codex ไม่ถูกหยุดด้วยงบ (เตือนอย่างเดียว)');
+    assert.ok(record.flags.includes('TOOL_BUDGET_MONTH'));
+  } finally { s4.cleanup(); }
+}
+
+test('W5-1 ทางสำรอง OpenAI API ปิดเป็นค่าเริ่มต้น (RESEARCH_AGENT_API_FALLBACK≠1): โควตาหมด/Codex ล้ม → failed + BRAIN_UNAVAILABLE (+ CODEX_AUTH/QUOTA_LOW) + เหตุผล · ไม่เรียก API', async () => {
+  assert.equal(worker.apiFallbackEnabled({}), false);
+  assert.equal(worker.apiFallbackEnabled({ RESEARCH_AGENT_API_FALLBACK: '1' }), true);
+  assert.equal(worker.apiFallbackEnabled({ RESEARCH_AGENT_API_FALLBACK: ' 1 ' }), true);
+  for (const v of ['0', 'true', 'yes', '', 'on']) assert.equal(worker.apiFallbackEnabled({ RESEARCH_AGENT_API_FALLBACK: v }), false, v);
+  await checkApiFallbackOff(worker);
+});
+
+test('W5-2 งบเดือนถึงเพดาน = หยุดทาง API จริง (ทางสำรองที่เปิด + RESEARCH_AGENT_BRAIN=api) → failed + TOOL_BUDGET_MONTH · Codex ทำต่อ', async () => {
+  await checkApiBudgetStop(worker);
+});
+
+test('W5-M กลายพันธุ์ (ต้องแดง): สวิตช์ไม่มีผล · ไม่ดูงบเดือน · จุด Codex ล้มไม่ดูตัวกั้น', async () => {
+  const alwaysOn = await mutant("return String((env && env.RESEARCH_AGENT_API_FALLBACK) || '').trim() === '1';", 'return true;', 'w5-fallback-always-on');
+  await assert.rejects(() => checkApiFallbackOff(alwaysOn));
+  const noBudget = await mutant('  return monthBudgetStatus({ spentUsd: spent, addUsd: 0, capUsd }).reached;', '  return false;', 'w5-no-budget');
+  await assert.rejects(() => checkApiBudgetStop(noBudget));
+  const r1Ungated = await mutant('        if (!r1Block && env.OPENAI_API_KEY && remaining() >= 60000) {', '        if (env.OPENAI_API_KEY && remaining() >= 60000) {', 'w5-r1-ungated');
+  await assert.rejects(() => checkApiFallbackOff(r1Ungated));
 });
 
 test('7. ข้ามงาน: ข่าวดิบว่าง → skipped EMPTY_RAW · เลยเส้นตาย → skipped DEADLINE_PASSED · jobId ผิดรูป → ไม่รายงาน', async () => {
@@ -730,7 +880,7 @@ test('14. ล็อกเบราว์เซอร์: ได้/ไม่ไ�
 });
 
 test('14b. ล็อกเบราว์เซอร์ในงานจริง: Codex ล้ม → คืนล็อกก่อนรอบ API · ปิดเบราว์เซอร์ใน TOOLS / สมอง api = ไม่แตะล็อก', async () => {
-  const s = setup();
+  const s = setup(worker, { RESEARCH_AGENT_API_FALLBACK: '1' }); // ★ 1 ต.ค. 69 (W5): ทางสำรอง API ต้องเปิดเอง (ค่าเริ่มต้นปิด) · ของเดิม: setup()
   try {
     const c = clock();
     const seen = {};

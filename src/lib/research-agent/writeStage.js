@@ -14,6 +14,11 @@
 //      poll (ช่อง PRE-GENERATE ใช้ผลนี้ซ้ำ ไม่ poll/ไม่รอซ้ำ) · logLine
 // fail-open: ไม่โยนเลย — ปิดสวิตช์/โหมดอื่น/ไม่มี jobId/พังกลางทาง = null (ท่อเดินต้นฉบับ + ช่อง PRE-GENERATE เดิม) ·
 //   ไม่ทัน/ล้ม/ไม่ผ่านเกณฑ์ = ผลสถานะ not_ready/failed/skipped (ข่าวเขียนจากต้นฉบับ · บอทแจ้งพนักงาน)
+// ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5) — 5) done = บันทึกฉบับเสริมลง workflow DB ด้วยตัวบันทึกของขั้นสกัด
+//   (workflowEngine.saveExtraction · ช่องเดิมจาก newsData + rawInput ต้นฉบับ · newsBody = ฉบับเสริม) ก่อนคืนผลให้ท่อ
+//   เหตุ: summarizeServiceText โหลด newsBody จาก DB ทับข้อความที่ท่อส่ง — แตกประเด็น (เมื่อ DB ยาวกว่า) · นักเขียน/การ์ด (ทุกครั้ง)
+//   → เดิมเห็นผลสกัดเก่าแทนฉบับเสริม (ข่าวผิดมุม) · เพดาน 4 วิ (ขนานกับบันทึกระเบียน editor) · ล้ม/ช้า = เดินต่อ (fail-open)
+//   ทำที่นี่ (ไม่ใช่ในไฟล์ล็อก) ตามหลักไฟล์นี้ "รวมทุกอย่างไว้ให้ไฟล์ล็อกแก้น้อยที่สุด" — ท่อแทนค่าเมื่อได้ enrichedSource เสมอ ผลเท่ากัน
 // ============================================================
 
 import { capText, normalizeSuggestedDimensions } from '@/lib/research-agent/cardsSchema';
@@ -50,6 +55,13 @@ const defaultTimers = {
 async function defaultLogPipeline(entry) {
   const { logPipeline } = await import('@/lib/pipelineLogger');
   return logPipeline(entry);
+}
+
+// ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): ตัวบันทึกเดียวกับขั้นสกัด (summarizeServiceText → saveExtraction)
+//   import ตอนใช้ (โหมด write + done เท่านั้น) · คืนแถวที่บันทึก (ล้ม/ไม่มีแถว = null — db.js ไม่โยน)
+async function defaultSaveNewsBody(workflowId, fields) {
+  const { saveExtraction } = await import('@/lib/workflow/workflowEngine');
+  return saveExtraction(workflowId, fields);
 }
 
 /** รอ promise ไม่เกิน ms (timer ถูก clear ทุกทาง) · หมดเวลา = fallback · โยน = fallback */
@@ -136,10 +148,11 @@ function logLineOf(status, record) {
  * ขั้นรีเสิร์ชเข้าเนื้อ (โหมด write) — ไม่โยนเลย
  * @param {{ workflowId: string, rawText: string, newsData?: {newsTitle?: string, newsBody?: string}|null, pipelineStartedAt?: number,
  *   deadline?: object|null, env?: object, now?: () => number, timers?: object, wait?: Function, editor?: Function,
- *   invoke?: Function, loadStorage?: Function, logPipeline?: Function }} input
+ *   invoke?: Function, loadStorage?: Function, logPipeline?: Function, saveNewsBody?: Function }} input
  * @returns {Promise<null | { status: 'done'|'not_ready'|'failed'|'skipped', reason: string|null, enrichedSource: string|null,
  *   originalRawText: string, breakdownArgs: {customPrompt: string}|null, researchFacts: string[], record: object, run: object,
- *   poll: { jobId: string, mode: string, settle: () => Promise<object> }, saved: boolean, logLine: string }>}
+ *   poll: { jobId: string, mode: string, settle: () => Promise<object> }, saved: boolean, newsBodySaved: boolean, logLine: string }>}
+ *   ★ 1 ต.ค. 69 (W5): + saveNewsBody (ไม่ส่ง = saveExtraction ของ workflowEngine) · + newsBodySaved
  */
 export async function runResearchWriteStage({
   workflowId,
@@ -155,6 +168,7 @@ export async function runResearchWriteStage({
   invoke,
   loadStorage = loadResearchStorage,
   logPipeline = defaultLogPipeline,
+  saveNewsBody = defaultSaveNewsBody, // ★ 1 ต.ค. 69 (W5): บันทึกฉบับเสริมลง workflow DB (เทสฉีดตัวปลอม)
 } = {}) {
   try {
     if (!isResearchAgentOn(env) || getResearchAgentMode(env) !== 'write') return null;
@@ -220,6 +234,18 @@ export async function runResearchWriteStage({
 
     const rawRecord = editorRecordOf({ jobId, status, reason, editorResult, doc, original, waitedMs });
     let record = buildEditorResultDoc(jobId, rawRecord, { nowIso: new Date(now()).toISOString() });
+    // ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): done = เขียน newsBody ฉบับเสริมลง workflow DB (ขนานกับบันทึกด้านล่าง · ≤ 4 วิ)
+    //   ช่องอื่นส่งค่าเดิมของขั้นสกัด (newsData + rawInput ต้นฉบับ = ค่าที่ extract/ensureWorkflow เขียนไว้ — ไม่ชน WORKFLOW_CONTEXT_CONFLICT)
+    const newsBodySave = status === 'done'
+      ? bounded(() => saveNewsBody(workflowId, {
+        newsTitle: newsData?.newsTitle,
+        newsBody: editorResult.enriched,
+        newsSource: newsData?.newsSource,
+        newsDate: newsData?.newsDate,
+        newsCategory: newsData?.newsCategory,
+        rawInput: original,
+      }), EDITOR_SAVE_TIMEOUT_MS, clock, null).then((row) => Boolean(row))
+      : Promise.resolve(false);
     let saved = false;
     const stored = await bounded(async () => {
       const storage = await loadStorage();
@@ -229,6 +255,7 @@ export async function runResearchWriteStage({
       record = stored;
       saved = true;
     }
+    const newsBodySaved = await newsBodySave; // ★ W5: ไม่โยน (bounded คืน null เมื่อล้ม/ช้า)
     try {
       Promise.resolve(logPipeline({
         workflowId,
@@ -247,6 +274,7 @@ export async function runResearchWriteStage({
           editorMs: record.editorMs,
           ms: record.editorMs,
           saved,
+          newsBodySaved, // ★ 1 ต.ค. 69 (W5): ฉบับเสริมลง workflow DB แล้วไหม (ไม่ใช่ done = false)
         },
       })).catch(() => {});
     } catch { /* บันทึกล้มไม่กระทบข่าว */ }
@@ -275,7 +303,10 @@ export async function runResearchWriteStage({
       run,
       poll: { jobId, mode: 'write', settle: () => Promise.resolve(run) },
       saved,
-      logLine: logLineOf(status, record),
+      newsBodySaved, // ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5)
+      // ★ W5: บันทึกฉบับเสริมลง DB ไม่สำเร็จ = เตือนในบันทึกท่อ (ข่าวเดินต่อ) · ของเดิม: logLine: logLineOf(status, record),
+      logLine: logLineOf(status, record)
+        + (done && !newsBodySaved ? ' · ⚠️ บันทึกฉบับเสริมลง workflow ไม่สำเร็จ — แตกประเด็น/นักเขียนอาจอ่านผลสกัดเดิมจาก DB' : ''),
     };
   } catch {
     return null;
