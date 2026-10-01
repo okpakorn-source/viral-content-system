@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { enqueueJob } from '@/lib/services/queueService';
 import { createStore } from '@/lib/persistStore';
 import { createLogger } from '@/lib/logger';
@@ -208,6 +208,22 @@ export async function POST(req) {
     const queueData = await enqueueJob(payload, sourceUserId);
     
     logger.info(`[Queue] Job added: ${queueData.jobId} (Position: ${queueData.position})`);
+
+    // ★ 1 ต.ค. 69 (Research Agent v2 · เลน B · SPEC-v2 ส่วน 1/2.1 · ไฟล์ล็อก — commit ต้องมีรหัส NEWS-LOCK-APPROVED):
+    //   สร้างใบขอค้นคว้า research-requests[jobId] หลังเข้าคิว · รับ payload.sourceUrls[] (ลิงก์ที่บอทแยกจากข้อความพนักงาน)
+    //   เฉพาะงานข่าว + ตั้ง RESEARCH_AGENT เท่านั้น (ไม่ตั้ง = ไม่ import ไม่เขียน ไม่รอ = เดิมทุกไบต์)
+    //   fire-and-forget: เริ่มทันทีแต่ไม่รอ — ล้ม/ช้าไม่เปลี่ยนคำตอบคิว · after() ให้ฟังก์ชันอยู่จนเขียนเสร็จหลังตอบ (Vercel waitUntil)
+    const researchRequestTask = (process.env.RESEARCH_AGENT && _isNewsGenJob)
+      ? import('@/lib/research-agent/store')
+        .then((m) => m.queueResearchRequestFromPayload({ jobId: queueData.jobId, payload, userId: sourceUserId }))
+        .catch((e) => {
+          logger.warn(`[Queue] research request skipped (non-fatal): ${String(e?.errorType || e?.name || 'error').slice(0, 60)}`);
+          return null;
+        })
+      : null;
+    if (researchRequestTask) {
+      try { after(() => researchRequestTask); } catch { /* นอก request scope — งานยังวิ่งต่อแบบ fire-and-forget */ }
+    }
     
     // 4. Trigger the worker — Use waitUntil pattern to prevent Vercel kill
     // We don't await the full response (worker takes 5 min), just initiate it

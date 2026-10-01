@@ -21,6 +21,15 @@ const PRICING = {
   //   ของท่อปกตั้งแต่ 26 ก.ค. (aiClient.js default) → /cost รายงาน $0 ทั้งท่อ ราคาชั่วคราว = ชั้นเดียวกับ claude-opus-4-8
   //   เดิม (grandfathered) รอยืนยันราคาทางการจาก Anthropic จริงภายหลัง
   'claude-opus-5': { input: 5.0, output: 25.0 },
+  // ★ 1 ต.ค. 69 (Research Agent v2 · เลน B · SPEC-v2 ส่วน 4/11-B): ตระกูล GPT-6 — สมองเอเจนต์ค้นคว้า gpt-6-astra (ทางหลัก Codex CLI
+  //   ใช้โควตา subscription ไม่ผ่านตารางนี้ · มีผลเฉพาะทางสำรอง OpenAI API RESEARCH_AGENT_BRAIN=api และงานอื่นที่เรียก gpt-6-* ผ่าน API)
+  //   astra = ราคาทางการ $10/$50 ต่อ 1M token (ประกาศ 1 ต.ค. 69 · ข้อตัดสินผู้คุมงาน — ค่าเดียวกับ scripts/research-agent/pricing.mjs เลน A)
+  //   ⚠️ TODO(ยืนยันราคาจริงจาก OpenAI): sol/luna ยังไม่มีราคาประกาศ — เป็น "ค่าประมาณ" ชั้นเดียวกับ gpt-5.6-sol / gpt-5.6-luna
+  //   (ประมาณไว้ก่อนดีกว่าบันทึก $0 เงียบๆ แบบ COST-AUDIT ข้อ 2-A) · ถ้าเลน A เพิ่มแถว sol/luna ต้องใช้ค่าเดียวกับที่นี่
+  //   ต้องมีแถวตรงตัว — ตัวหา partial-match ด้านล่างไม่มีแถวไหนจับชื่อ gpt-6-* ได้ (ไม่มีแถว = $0)
+  'gpt-6-astra': { input: 10.0, output: 50.0 },
+  'gpt-6-sol': { input: 5.0, output: 30.0 },
+  'gpt-6-luna': { input: 1.0, output: 6.0 },
   // ★ 29 ก.ค. 69 (lane2 cost-audit A1 — COST-AUDIT.md ข้อ 2-B): gemini-3.6-flash ไม่มีราคาประกาศในตารางไหนของ repo เลย
   //   (coverVisionModel.js ยกจาก 2.5→3.6 ทั้งสายปกตั้งแต่ 26 ก.ค.) ยืมราคาชั้น gemini-3.5-flash ไปก่อน (สมมติฐาน "ราคาใกล้ 3.5")
   //   ⚠️ ต้องยืนยันราคาจริงจาก Google — ถ้าต่างจากนี้ ตัวเลข /cost ของงานที่ใช้ Gemini จะคลาดเคลื่อนตาม

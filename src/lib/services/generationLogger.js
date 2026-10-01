@@ -214,6 +214,38 @@ export function validateGenerationWriterProvenance({ sourceType, versions, pipel
   return { ok: true, error: '', models };
 }
 
+// ★ 1 ต.ค. 69 (Research Agent v2 · เลน B · SPEC-v2 ส่วน 9/10): คีย์รีเสิร์ชใน pipeline_info — ส่งมาเฉพาะเมื่อเปิด RESEARCH_AGENT
+//   (autoFlowServiceText แนบ {researchAgent, jobId, workflowId} เฉพาะงานที่ hook PRE-GENERATE ทำงาน) · ไม่ส่ง = {} =
+//   pipeline_info เดิมทุกไบต์ · researchAgent ถูกย่อเหลือช่องสรุป (ไม่มีเนื้อการ์ด — เนื้อเต็มอยู่ store research-cards[jobId])
+//   jobId/workflowId ไว้ join generation_logs กับการ์ด/คิว (เดิม generation_logs ไม่มีทั้งสองช่อง)
+export function compactResearchAgentPipelineInfo(info) {
+  const out = {};
+  const source = info && typeof info === 'object' ? info : {};
+  const str = (value, max) => (typeof value === 'string' ? value.slice(0, max) : null);
+  const num = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : null);
+  const ra = source.researchAgent;
+  if (ra && typeof ra === 'object' && !Array.isArray(ra)) {
+    out.researchAgent = {
+      status: str(ra.status, 30),
+      mode: str(ra.mode, 10),
+      cardsCount: num(ra.cardsCount),
+      passCount: num(ra.passCount),
+      flags: Array.isArray(ra.flags) ? ra.flags.filter(flag => typeof flag === 'string').slice(0, 20).map(flag => flag.slice(0, 48)) : [],
+      requestStatus: str(ra.requestStatus, 20),
+      revision: num(ra.revision),
+      brain: ra.brain && typeof ra.brain === 'object'
+        ? { kind: str(ra.brain.kind, 10), model: str(ra.brain.model, 60), effort: str(ra.brain.effort, 20) }
+        : null,
+      ms: num(ra.ms),
+      waitedMs: num(ra.waitedMs),
+      polls: num(ra.polls),
+    };
+  }
+  if (typeof source.jobId === 'string' && source.jobId) out.jobId = source.jobId.slice(0, 120);
+  if (typeof source.workflowId === 'string' && source.workflowId) out.workflowId = source.workflowId.slice(0, 160);
+  return out;
+}
+
 // ─── Main Log Function ────────────────────────────────────────
 
 /**
@@ -333,6 +365,7 @@ export async function logGeneration({
         writerModels: Array.isArray(pipelineInfo.writerModels) ? pipelineInfo.writerModels : [],
         stepTimings: pipelineInfo.stepTimings || {},
         desk: pipelineInfo.desk || null, // ★ ป้ายโต๊ะข่าว {newsId, lane, category, editor, editorIcon}
+        ...compactResearchAgentPipelineInfo(pipelineInfo), // ★ 1 ต.ค. 69 (Research Agent v2): ไม่ส่งมา = ไม่มีคีย์ = ไบต์เดิม
       },
       userId: userId || 'anonymous',
       status: 'unreviewed', // unreviewed | good | bad

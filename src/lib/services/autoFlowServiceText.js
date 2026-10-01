@@ -351,6 +351,15 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
       })
       .finally(() => { _taskElapsed.blueprint = Date.now() - _bpT0; })
     : null;
+  // ★ 1 ต.ค. 69 (Research Agent v2 · เลน B · SPEC-v2 ส่วน 9 · ไฟล์ล็อก — hook เดียวช่อง PRE-GENERATE · shadow/assist เท่านั้น):
+  //   เริ่มอ่านการ์ดเอเจนต์ค้นคว้า research-cards[jobId] (poll ทุก 5 วิ) ขนานกับ Blueprint/SmartResearch — ไม่ใช้ withTimeoutSignal/
+  //   assertCanStart (ไม่จองงบเส้นตาย) · ไม่ตั้ง RESEARCH_AGENT = ไม่ import ไม่อ่าน ไม่รอ = เดิมทุกไบต์ · ล้ม/ช้า/ออฟไลน์ = fail-open
+  //   ไม่แตะนักเขียน/ด่าน/correction (ข้อ 24 — เฟส write ค่อยต่อ researchData/ด่าน RAW หลังเจ้าของอนุมัติไฟล์ล็อก)
+  const _researchAgentPoll = process.env.RESEARCH_AGENT
+    ? import('@/lib/research-agent/readCards')
+      .then((m) => m.startResearchAgentPoll({ workflowId: _autoWorkflowId, deadline: getActivePipelineDeadline() }))
+      .catch(() => null)
+    : null;
   const [bpSettled, srSettled] = await Promise.allSettled([
     // Task 1: Blueprint
     _perAngleBlueprintTask ||
@@ -415,6 +424,15 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   }
   
   addLog('Parallel', `⏱️ Blueprint+Research เสร็จใน ${((Date.now() - stepParallelStart) / 1000).toFixed(1)}s (แทนที่จะ ~90s sequential)`);
+  // ★ 1 ต.ค. 69 (Research Agent v2): ปิดรอบอ่านการ์ด — shadow ไม่รอเกิน Blueprint · assist/write รอได้ ≤ RESEARCH_AGENT_WAIT_MS
+  //   และต้องเหลือเส้นตายรวม ≥ 480s หลังรอ (src/lib/research-agent/readCards.js) · settle ไม่โยน error (ล้ม = null = ข่าวเดินต่อ)
+  const _researchAgentRun = _researchAgentPoll
+    ? await _researchAgentPoll.then((poll) => (poll ? poll.settle() : null)).catch(() => null)
+    : null;
+  if (_researchAgentRun) {
+    const _ra = _researchAgentRun.summary;
+    addLog('ResearchAgent', `🔎 ${_ra.mode}: ${_ra.status} · การ์ด ${_ra.cardsCount} ใบ${_ra.flags.length ? ` · ธง ${_ra.flags.join(', ')}` : ''} (รอเพิ่ม ${(_ra.waitedMs / 1000).toFixed(1)}s)`);
+  }
   const stepGenStart = Date.now(); // ★ จุดเริ่ม generate จริง — แยก timing blueprint/research ออกจาก generate
 
   // ===================================================================
@@ -1156,6 +1174,9 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   addLog('Workflow', `💾 บันทึกผลสุดท้ายครบ ${finalVersions.length} เวอร์ชัน`);
 
   // === GENERATION LOG: บันทึกทุก case เข้าระบบ ===
+  // ★ 1 ต.ค. 69 (Research Agent v2 · เลน B · SPEC-v2 ส่วน 3/9): แนบสรุปรีเสิร์ชให้ผลที่ส่งกลับ/คิว/บอท (ปิดสวิตช์ = null = ไม่มีคีย์)
+  //   แนบ "หลัง" บันทึก workflow โดยตั้งใจ: snapshot ที่ผ่านด่านแล้วคงไบต์เดิม · ข้อมูลถาวรอยู่ที่ pipeline_info + store research-cards
+  if (_researchAgentRun) analysisResult.researchAgent = _researchAgentRun.analysis;
   const generationLogAttempt = await settleTelemetryWithinReserve(() => logGeneration({
       newsTitle: newsData.newsTitle,
       sourceType: detectedType,
@@ -1193,6 +1214,8 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
           research: _taskElapsed.research != null ? (_taskElapsed.research / 1000).toFixed(1) : null,
           generate: ((Date.now() - stepGenStart) / 1000).toFixed(1),
         },
+        // ★ 1 ต.ค. 69 (Research Agent v2): {researchAgent, jobId, workflowId} — ปิดสวิตช์ = ไม่มีคีย์ = pipeline_info เดิมทุกไบต์
+        ...(_researchAgentRun ? _researchAgentRun.pipelineInfo : {}),
       },
       userId: _user.userId,
     }));
