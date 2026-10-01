@@ -115,6 +115,8 @@
     "tests/raw-first-prompt-authority.test.mjs",
     "tests/research-agent-codex-runner.test.mjs",
     "tests/research-agent-gate.test.mjs",
+    "tests/research-agent-ops.test.mjs",
+    "tests/research-agent-report.test.mjs",
     "tests/research-agent-schema.test.mjs",
     "tests/research-agent-task-builder.test.mjs",
     "tests/research-agent-tools.test.mjs",
