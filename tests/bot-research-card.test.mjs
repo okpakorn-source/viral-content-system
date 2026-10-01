@@ -47,9 +47,9 @@ import { settleWithin } from './helpers/fake-deadline.mjs';
 const botUrl = new URL('../discord-bot/index.js', import.meta.url);
 const cardUrl = new URL('../discord-bot/researchCard.js', import.meta.url);
 const routeUrl = new URL('../src/app/api/bot/posted/route.js', import.meta.url);
-const BOT_SRC = readFileSync(botUrl, 'utf8');
-const CARD_SRC = readFileSync(cardUrl, 'utf8');
-const ROUTE_SRC = readFileSync(routeUrl, 'utf8');
+const BOT_SRC = readFileSync(botUrl, 'utf8').replace(/\r\n/g, '\n');
+const CARD_SRC = readFileSync(cardUrl, 'utf8').replace(/\r\n/g, '\n');
+const ROUTE_SRC = readFileSync(routeUrl, 'utf8').replace(/\r\n/g, '\n');
 const realRequire = createRequire(botUrl);
 
 const API = 'http://api.test';

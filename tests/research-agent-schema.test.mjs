@@ -12,7 +12,7 @@ import * as schema from '../scripts/research-agent/schema.mjs';
 
 const FIX = (name) => JSON.parse(readFileSync(new URL(`./fixtures/research-agent/${name}`, import.meta.url), 'utf8').replace(/^\uFEFF/, ''));
 const SRC_URL = new URL('../scripts/research-agent/schema.mjs', import.meta.url);
-const SRC = readFileSync(SRC_URL, 'utf8');
+const SRC = readFileSync(SRC_URL, 'utf8').replace(/\r\n/g, '\n');
 
 async function mutant(find, replace, name) {
   assert.ok(SRC.includes(find), `ไม่พบจุดกลายพันธุ์ ${name} ในซอร์ส (ซอร์สเปลี่ยน → แก้เทสด้วย)`);

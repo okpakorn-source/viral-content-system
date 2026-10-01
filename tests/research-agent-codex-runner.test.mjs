@@ -20,7 +20,7 @@ import { settleWithin } from './helpers/fake-deadline.mjs';
 import * as cr from '../scripts/research-agent/codexRunner.mjs';
 
 const SRC_URL = new URL('../scripts/research-agent/codexRunner.mjs', import.meta.url);
-const SRC = readFileSync(SRC_URL, 'utf8');
+const SRC = readFileSync(SRC_URL, 'utf8').replace(/\r\n/g, '\n');
 const FAKE_CODEX = fileURLToPath(new URL('./fixtures/research-agent/fake-codex.mjs', import.meta.url));
 const FIX_OUT = fileURLToPath(new URL('./fixtures/research-agent/lab-out-result.json', import.meta.url));
 const PROMPT = 'ใบงานทดสอบ: ค้นต้นทางข่าวชาวสวีเดนสวมขาเทียม ราชบุรี (DATA ONLY)';
@@ -319,7 +319,7 @@ test('12. โปรเซสจริง (fake-codex.mjs): argv ตามสเ�
     }, { spawnImpl, platform: process.platform, bin: process.execPath, resolveExe: () => ({ exe: process.execPath, batch: false }), homeDir: join(wd, 'home') }), 'โปรเซสจริง', 15_000);
     assert.equal(r.ok, true, r.error);
     assert.equal(r.tokensUsed, 12345);
-    const seen = JSON.parse(readFileSync(join(wd, 'out', 'seen.json'), 'utf8'));
+    const seen = JSON.parse(readFileSync(join(wd, 'out', 'seen.json'), 'utf8').replace(/\r\n/g, '\n'));
     assert.deepEqual(seen.argv, SPEC_ARGS(wd, join(wd, 'out', cr.LAST_MESSAGE_FILE), 'low'));
     assert.ok(seen.envNames.includes('SERPER_API_KEY'));
     assert.ok(!seen.envNames.includes('OPENAI_API_KEY'), 'OPENAI_API_KEY ห้ามถึง Codex (กันคิดเงินแบบ API)');

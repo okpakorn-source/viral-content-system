@@ -21,7 +21,7 @@ import { validateCardRecord } from '../scripts/research-agent/schema.mjs';
 
 const REAL_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SRC_URL = new URL('../scripts/research-agent-worker.mjs', import.meta.url);
-const SRC = readFileSync(SRC_URL, 'utf8');
+const SRC = readFileSync(SRC_URL, 'utf8').replace(/\r\n/g, '\n');
 const FIX = (name) => JSON.parse(readFileSync(new URL(`./fixtures/research-agent/${name}`, import.meta.url), 'utf8').replace(/^\uFEFF/, ''));
 const SECRET = 'test-secret-value-123456';
 const OPENAI = 'sk-test-openai-key-0123456789';
@@ -38,7 +38,7 @@ async function mutant(find, replace, name) {
   return importPatchedModule(patched, SRC_URL, `ra-worker-${name}`);
 }
 const LOCK_URL = new URL('../scripts/research-agent/browserLock.mjs', import.meta.url);
-const LOCK_SRC = readFileSync(LOCK_URL, 'utf8');
+const LOCK_SRC = readFileSync(LOCK_URL, 'utf8').replace(/\r\n/g, '\n');
 async function lockMutant(find, replace, name) {
   assert.ok(LOCK_SRC.includes(find), `ไม่พบจุดกลายพันธุ์ ${name}`);
   return importPatchedModule(LOCK_SRC.replace(find, replace), LOCK_URL, `ra-lock-${name}`);
@@ -303,7 +303,7 @@ test('2. งานปกติ (fixture out): ระเบียนตรงส�
     assert.ok(call.prompt.includes(RAW));
     assert.ok(call.prompt.includes('https://www.facebook.com/x/posts/1'));
     assert.ok(!call.prompt.includes('javascript:alert'), 'ลิงก์ที่ไม่ใช่ http(s) ถูกกรอง');
-    assert.equal(readFileSync(join(wd, 'TASK.txt'), 'utf8'), call.prompt);
+    assert.equal(readFileSync(join(wd, 'TASK.txt'), 'utf8').replace(/\r\n/g, '\n'), call.prompt);
     assert.ok(existsSync(join(wd, 'README-TOOLS.md')));
     assert.ok(existsSync(join(wd, 'out')));
     assert.ok(existsSync(join(wd, 'tools', 'serper.mjs')), 'tools/ ใช้งานได้ (junction หรือสำเนา)');
@@ -545,7 +545,7 @@ test('11. log หมุนเวียน (ขนาดเพดาน × จำ
     for (let i = 0; i < 40; i++) log('INFO', `บรรทัด ${i} ${SECRET}`);
     const files = readdirSync(join(dir, 'logs')).sort();
     assert.deepEqual(files, ['worker.log', 'worker.log.1', 'worker.log.2']);
-    const all = files.map((f) => readFileSync(join(dir, 'logs', f), 'utf8')).join('');
+    const all = files.map((f) => readFileSync(join(dir, 'logs', f), 'utf8').replace(/\r\n/g, '\n')).join('');
     assert.ok(!all.includes(SECRET));
     assert.match(all, /\[REDACTED\]/);
     const root = join(dir, 'work');
@@ -581,7 +581,7 @@ test('12. โฟลเดอร์งาน: junction ไม่ทำลาย�
     const b = worker.prepareWorkdir({ root: dir, jobId: 'q_b', toolsDir, tools: ['serper', 'wiki'], restricted: true, taskText: 'งาน' });
     assert.equal(b.toolsMode, 'copy');
     assert.deepEqual(readdirSync(join(b.dir, 'tools')).sort(), ['.repo-root', '_alias-hooks.mjs', '_common.mjs', 'serper.mjs', 'wiki.mjs']);
-    assert.equal(readFileSync(join(b.dir, 'tools', '.repo-root'), 'utf8'), REAL_ROOT.replace(/[\\/]+$/, ''), 'สำเนาบอกรากโปรเจกต์ให้เครื่องมือหา .env.local');
+    assert.equal(readFileSync(join(b.dir, 'tools', '.repo-root'), 'utf8').replace(/\r\n/g, '\n'), REAL_ROOT.replace(/[\\/]+$/, ''), 'สำเนาบอกรากโปรเจกต์ให้เครื่องมือหา .env.local');
     assert.throws(() => worker.prepareWorkdir({ root: dir, jobId: '..\\x', toolsDir, taskText: '' }));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
