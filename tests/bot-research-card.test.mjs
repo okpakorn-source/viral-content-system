@@ -2842,7 +2842,7 @@ async function scenarioBotWrite({ botSrc = BOT_SRC, cardSrc = CARD_SRC, routeSrc
 function checkBotWrite(r) {
   const titles = r.source.replies.map((p) => (typeof p === 'string' ? 'ack' : String(p.embeds?.[0]?.data?.title || '')));
   assert.deepEqual(titles, [
-    'ack', LIVE_CARD_TITLE, '[[A1] เรื่องเล่าอบอุ่น] ลุงสามล้อ', '[[A2] ช่วยเหลือกัน] ลุงสามล้อ', '📄 เขียนจากเนื้อต้นฉบับอย่างเดียว', EDITOR_TITLES.done,
+    'ack', LIVE_CARD_TITLE, '[[A1] เรื่องเล่าอบอุ่น] ลุงสามล้อ', '[[A2] ช่วยเหลือกัน] ลุงสามล้อ', '🔎 เขียนจากต้นฉบับ + ข้อมูลที่ค้นคว้าแล้ว', EDITOR_TITLES.done,
   ], 'โหมด write: บัตรใบแรก (ไม่มีป้ายทดลอง) ระหว่างรองาน → ผลข่าวครบ → ใบที่สองต่อท้าย');
   const editorMsg = messageTitled(r.world, r.source.id, EDITOR_TITLES.done);
   assert.ok(editorMsg, 'ต้องมีใบที่สองใต้ข้อความพนักงาน');

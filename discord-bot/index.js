@@ -609,15 +609,34 @@ async function pollJobUntilDone({ jobId, processingMsg, message, headers, queueU
     //   (ผู้ตรวจอิสระท้วง: ป้ายแบบนี้ทำให้คนเลิกเชื่อป้ายเตือน แล้ววันที่ล่มจริงจะไม่มีใครสังเกต)
     //   → เขียนตามความจริงแบบเป็นกลาง ไม่ตีตราว่าล้มเหลว
     const _hasResearch = researchItems.length > 0;
+    // ★ 1 ต.ค. 69 (เอเจนต์ค้นคว้า v2 โหมด write · หลังข่าวจริงชิ้นแรก 22:03): ป้ายสรุปนี้เป็นของระบบค้นข้อมูลเสริมเดิม (v1 ปิดตั้งแต่ 16 ส.ค.)
+    //   แต่เมื่อเอเจนต์ค้นคว้า v2 เรียบเรียงเข้าเนื้อแล้ว ป้าย "ต้นฉบับ 100% / ระบบค้นข้อมูลเสริมปิดอยู่" ขัดกับการ์ดใบที่สอง
+    //   → อ่านผลจาก analysisResult.researchAgent (มีเฉพาะเมื่อเปิดระบบใหม่) · ไม่มี = ข้อความเดิมทุกไบต์
+    const _agentRun = (data.analysisResult && data.analysisResult.researchAgent) || (data.data && data.data.analysisResult && data.data.analysisResult.researchAgent) || null;
+    const _agentWrite = !!(_agentRun && (_agentRun.mode === 'write' || (_agentRun.editor && typeof _agentRun.editor === 'object' && _agentRun.editor.mode === 'write'))); // เฉพาะโหมด write (ระเบียน editor สัญญา 8.1 มี mode) — shadow/assist ข้อความเดิมทุกไบต์
+    const _agentEditor = _agentWrite && _agentRun.editor && typeof _agentRun.editor === 'object' ? _agentRun.editor : null;
+    const _agentEnriched = !!(_agentEditor && _agentEditor.status === 'done');
+    const _agentTriedButNot = !!(_agentWrite && !_agentEnriched);
+    const _agentReasonText = _agentEditor
+      ? ({ not_ready: 'ค้นคว้าไม่ทันเวลา', skipped: 'ไม่มีข้อมูลผ่านเกณฑ์', failed: 'บรรณาธิการเรียบเรียงไม่สำเร็จ' }[_agentEditor.status] || String(_agentEditor.status || ''))
+      : (_agentRun && _agentRun.status ? `สถานะค้นคว้า: ${_agentRun.status}` : 'ไม่ได้ใช้ข้อมูลเพิ่ม');
     const researchSummaryEmbed = new EmbedBuilder()
-      .setColor(_hasResearch ? '#3b82f6' : '#6b7280')
-      .setTitle(_hasResearch ? '📚 แหล่งอ้างอิง Research' : '📄 เขียนจากเนื้อต้นฉบับอย่างเดียว')
-      .setDescription(_hasResearch
-        ? `${researchText}\n\n_ใช้ข้อมูลจาก ${researchItems.length} แหล่ง เพื่อเสริมข้อเท็จจริงในเนื้อหา_`
-        : '_ระบบค้นข้อมูลเสริมปิดอยู่ — ข่าวนี้เขียนจากเนื้อที่วางเข้ามาเท่านั้น ไม่มีข้อมูลจากภายนอกปน (ไม่ใช่ข้อผิดพลาด)_')
-      .setFooter({ text: _hasResearch
-        ? `Research Grade: ${researchItems.length >= 3 ? '✅ Strong' : '⚠️ Partial'}`
-        : 'แหล่งข้อมูล: ต้นฉบับ 100%' });
+      .setColor(_agentEnriched ? '#0e6b5c' : (_hasResearch ? '#3b82f6' : '#6b7280'))
+      .setTitle(_agentEnriched ? '🔎 เขียนจากต้นฉบับ + ข้อมูลที่ค้นคว้าแล้ว' : (_hasResearch ? '📚 แหล่งอ้างอิง Research' : '📄 เขียนจากเนื้อต้นฉบับอย่างเดียว'))
+      .setDescription(_agentEnriched
+        ? `_เอเจนต์ค้นคว้าพบการ์ด ${Number(_agentRun.cardsCount) || 0} ใบ · บรรณาธิการใช้ ${(Array.isArray(_agentEditor.used_cards) ? _agentEditor.used_cards.length : 0)} ใบ · แก้ ${(Array.isArray(_agentEditor.corrections) ? _agentEditor.corrections.length : 0)} · เพิ่ม ${(Array.isArray(_agentEditor.additions) ? _agentEditor.additions.length : 0)} — รายละเอียดอยู่ในการ์ด "สิ่งที่เพิ่ม/แก้จากต้นฉบับ" ด้านบน กรุณาตรวจก่อนโพสต์_`
+        : _agentTriedButNot
+          ? `_ระบบค้นคว้าทำงานแล้วแต่ข่าวนี้เขียนจากเนื้อที่วางเข้ามาเท่านั้น (${_agentReasonText}) — ดูเหตุผลในการ์ดใบที่สอง (ไม่ใช่ข้อผิดพลาด)_`
+          : _hasResearch
+            ? `${researchText}
+
+_ใช้ข้อมูลจาก ${researchItems.length} แหล่ง เพื่อเสริมข้อเท็จจริงในเนื้อหา_`
+            : '_ระบบค้นข้อมูลเสริมปิดอยู่ — ข่าวนี้เขียนจากเนื้อที่วางเข้ามาเท่านั้น ไม่มีข้อมูลจากภายนอกปน (ไม่ใช่ข้อผิดพลาด)_')
+      .setFooter({ text: _agentEnriched
+        ? 'แหล่งข้อมูล: ต้นฉบับ + รีเสิร์ชที่ตรวจแล้ว (พนักงานตรวจก่อนโพสต์)'
+        : _hasResearch
+          ? `Research Grade: ${researchItems.length >= 3 ? '✅ Strong' : '⚠️ Partial'}`
+          : 'แหล่งข้อมูล: ต้นฉบับ 100%' });
 
     await message.reply({ embeds: [researchSummaryEmbed] });
 
