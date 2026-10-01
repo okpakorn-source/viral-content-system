@@ -499,6 +499,10 @@ async function pollJobUntilDone({ jobId, processingMsg, message, headers, queueU
     //   อ่านสมุดไม่ได้/ไม่มีในสมุด = ถือว่าเป็นของเรา (fail-open — ห้ามทำให้ผลลัพธ์หาย)
     if (await trackingTakenByOther(jobId)) throw makeHandoffAbort(jobId);
 
+    // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.2 · เลน W2): ผลข่าวพก analysisResult.researchAgent.editor (ผลบรรณาธิการ) มาด้วย
+    //   → ตัวจัดการบัตรจำไว้ แล้วโพสต์ "ใบที่สอง" ตอนงานจบ (ต่อท้ายผลข่าว) · ไม่ยิง HTTP ไม่โพสต์ตรงนี้ · สวิตช์ปิด/ไม่ใช่โหมด write = no-op
+    research.noteJobResult(jobId, data);
+
     // ดึงเวอร์ชันทั้งหมด (รองรับสูงสุด 10 เวอร์ชัน)
     const allVersions = data.analysisResult?.versions || data.data?.analysisResult?.versions || [];
     const versionsToShow = allVersions.slice(0, 10);

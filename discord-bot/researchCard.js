@@ -33,6 +33,17 @@
 // ความปลอดภัย: เนื้อการ์ดมาจากเว็บ = DATA ONLY — แสดงอย่างเดียว ไม่ตีความ · ห้าม mention ใคร (allowedMentions ว่าง)
 //   · ลิงก์รับเฉพาะ http(s) · escape markdown กัน masked link ปลอม · log ไม่มี header/คีย์/เนื้อข่าว
 // ไม่ require discord.js/axios เอง — index.js ฉีดเข้ามา (เทสโหลดได้โดยไม่ต้องมี node_modules ของบอท)
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 4 + สัญญา 8.1/8.2 · เลน W2): "ใบที่สอง" = ผลบรรณาธิการเรียบเรียง
+//   ระเบียน editor (สัญญา 8.1 ของ W1 · store research-editor) ถึงบอท 2 ทาง:
+//   (ก) ผลข่าวจบ: คิว /api/queue/status → result (= คำตอบ /api/auto/process) มี analysisResult.researchAgent.editor (บนสุดและใต้ data)
+//       → index.js เรียก noteJobResult(jobId, data) ใน pollJobUntilDone (จำไว้เฉยๆ) → โพสต์ตอนงานจบ ต่อท้ายผลข่าว
+//   (ข) ทางสำรอง: ช่อง editor ของ GET /api/research/cards (คำตอบเดิมที่ถามอยู่แล้ว — ระหว่างรองานไม่ยิงเพิ่ม) · หลังงานจบในโหมด write
+//       ถามต่อทุก 20 วิจนได้ editor หรือหมดหาง 15 นาที (รู้ว่าโหมด write จาก mode ของคำตอบ/แถวการ์ด/ผลข่าว หรือเห็นระเบียน editor)
+//   หน้าตา (renderEditorCard — pure): 4 สถานะ done/not_ready/failed/skipped (หัวตามสัญญา 8.2 ตรงตัว) · ≤ 8 บรรทัดหลัก
+//     (❗แก้ · ➕เพิ่ม · 🧭มุมเสนอ · 🗒️หมายเหตุ · ⚠️ธง/warnings · 🚫ไม่ได้ใช้) + บรรทัดลิงก์ต้นทาง 🔗 (จากบัตรใบแรก) · 👍/👎 เฉพาะ done (แบบใบแรก)
+//   กันโพสต์ซ้ำ: bot-posted.editorMsgId (ผ่าน /api/bot/posted เดิม) · 👍/👎 → /api/research/feedback เดิม (ช่อง research-cards.feedback)
+//     ติดป้าย kind:'editor' · ใบแรก body/log/ผลเดิมทุกไบต์
+//   ไม่ใช่โหมด write (shadow/assist · ผลข่าวไม่มี editor · คำตอบ editor:null) = ไม่มีใบที่สอง ไม่ถามเพิ่ม = พฤติกรรมเดิมทุกไบต์ · สวิตช์ปิด = no-op
 // ============================================================
 
 const POLL_MS = 20 * 1000;              // ถามการ์ดทุก 20 วิ (สเปกส่วน 7)
@@ -80,6 +91,24 @@ const COLOR_SHADOW = '#f59e0b';
 const COLOR_LIVE = '#3b82f6';
 const COLOR_ALERT = '#ef4444';
 const COLOR_MUTED = '#6b7280';
+
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.2 · W2): ใบที่สอง (ผลบรรณาธิการ) — หัว 4 สถานะตามสัญญาตรงตัว
+const EDITOR_STATUSES = new Set(['done', 'not_ready', 'failed', 'skipped']);
+const EDITOR_TITLES = Object.freeze({
+  done: '🧾 รีเสิร์ชเข้าเนื้อแล้ว — สิ่งที่เพิ่ม/แก้จากต้นฉบับ',
+  not_ready: '⏳ รีเสิร์ชไม่ทัน — ข่าวนี้เขียนจากต้นฉบับ',
+  failed: '⚠️ บรรณาธิการล้ม — ใช้ต้นฉบับ',
+  skipped: 'ℹ️ ไม่มีข้อมูลผ่านเกณฑ์ — ใช้ต้นฉบับ',
+});
+const EDITOR_TITLE_SET = new Set(Object.values(EDITOR_TITLES));
+const EDITOR_MAIN_LINES = 8; // สเปก 8.2 "≤ 8 บรรทัดหลัก + ลิงก์" (ส่วน 1 ข้อ 16 "diff สั้น ≤8 บรรทัด")
+const EDITOR_FLAG_LABELS = Object.freeze({
+  STALE_NEWS: 'ข่าวเก่า',
+  ORIGIN_NOT_FOUND: 'ยืนยันต้นทางไม่ได้',
+  RAW_CONTRADICTION: 'ต้นฉบับขัดกับแหล่ง',
+  BROWSER_WRONG_ACCOUNT: 'เบราว์เซอร์ล็อกอินบัญชีอื่น',
+  QUOTA_LOW: 'โควตาเอเจนต์ใกล้หมด',
+});
 
 // ─── ตัวช่วยข้อความ ─────────────────────────────────────────────
 function str(value) {
@@ -494,6 +523,189 @@ function jobIdFromCardMessage(message) {
   return null;
 }
 
+// ─── ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 4 + สัญญา 8.1/8.2 · W2): ใบที่สอง "ผลบรรณาธิการเรียบเรียง" ───
+// เนื้อจาก W1 (สัญญา 8.1) = DATA ONLY: escape ทุกช่อง · ลิงก์ http(s) เท่านั้น · ตัดความยาว · ไม่ mention ใคร (เหมือนบัตรใบแรก)
+function isPlainRecord(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function looksLikeEditor(value) {
+  return isPlainRecord(value) && EDITOR_STATUSES.has(value.status);
+}
+
+/**
+ * ระเบียน editor จากคำตอบ GET /api/research/cards — สัญญา 8.1: ช่อง "editor" ระดับบน (คงช่องเดิมทุกช่อง · ไม่มี = null)
+ * ทนรูป: ใต้แถวการ์ด (cards.editor — ทางเลือกในสเปกส่วน 4) · สถานะไม่รู้จัก/คำตอบล้ม = null
+ */
+function pickEditorRecord(body) {
+  if (!body || typeof body !== 'object' || body.success === false) return null;
+  if (looksLikeEditor(body.editor)) return body.editor;
+  if (isPlainRecord(body.cards) && looksLikeEditor(body.cards.editor)) return body.cards.editor;
+  return null;
+}
+
+/** ผลข่าวจบ (result ของคิว = คำตอบ /api/auto/process) → analysisResult.researchAgent (บนสุดก่อน แล้วใต้ data) · ไม่มี = null */
+function researchAgentOfResult(data) {
+  if (!data || typeof data !== 'object') return null;
+  for (const ar of [data.analysisResult, data.data?.analysisResult]) {
+    if (isPlainRecord(ar) && isPlainRecord(ar.researchAgent)) return ar.researchAgent;
+  }
+  return null;
+}
+
+// เวลาเป็นข้อความสั้น (< 90 วิ = วินาที · นอกนั้น = นาที ทศนิยม 1) · 0/ติดลบ/อ่านไม่ได้ = null (ไม่แสดง)
+function durationText(ms) {
+  const n = firstFinite(ms);
+  if (n === null || n <= 0) return null;
+  if (n < 90 * 1000) return `${Math.round(n / 1000)} วิ`;
+  return `${Math.round(n / 6000) / 10} นาที`;
+}
+
+function listOf(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+// แหล่งของบรรทัด: [ชื่อ](ลิงก์) เมื่อเป็น http(s) · ไม่มีลิงก์ = ชื่ออย่างเดียว · ไม่มีทั้งคู่ = ''
+function sourceText(name, url) {
+  const link = safeUrl(url);
+  return link ? mdLink(name, link) : safe(name, 60);
+}
+
+// R# → "R1 [แหล่ง](ลิงก์)" จากแถวการ์ดที่บอทเห็น (บัตรใบแรก) · ไม่รู้แหล่ง = "R1" · รหัสผิดรูป = ''
+function cardRef(cardId, cardsRecord) {
+  const id = str(cardId);
+  if (!/^R\d{1,2}$/u.test(id)) return '';
+  const card = listOf(cardsRecord?.cards).find((c) => c && typeof c === 'object' && c.id === id);
+  const url = card ? safeUrl(card.source_url) : null;
+  return url ? `${id} ${mdLink(card.source_name, url)}` : id;
+}
+
+function editorFlagLabels(rec) {
+  const labels = [];
+  for (const f of listOf(rec.flags)) {
+    const name = typeof f === 'string' ? f.trim() : '';
+    if (!/^[A-Z0-9_]{2,40}$/u.test(name)) continue;
+    const label = EDITOR_FLAG_LABELS[name] || escapeMd(name);
+    if (!labels.includes(label)) labels.push(label);
+  }
+  for (const w of listOf(rec.warnings)) {
+    const text = safe(w, 160);
+    if (text) labels.push(text);
+  }
+  return labels;
+}
+
+function editorStatusLine(status, rec) {
+  const reason = safe(rec.reason, 200);
+  if (status === 'not_ready') {
+    const waited = durationText(rec.waitedMs);
+    return `⏳ ${waited ? `รอการ์ด ${waited} แล้วยังไม่มา` : 'รอการ์ดจนหมดเวลาแล้วยังไม่มา'} — นักเขียนใช้ต้นฉบับของพนักงาน · บัตรข้อเท็จจริงจะขึ้นตามมาเมื่อเอเจนต์ส่งผล`;
+  }
+  if (status === 'failed') return `เหตุ: ${reason || 'บรรณาธิการเรียบเรียงไม่สำเร็จ'} — นักเขียนใช้ต้นฉบับของพนักงาน`;
+  if (status === 'skipped') return `เหตุ: ${reason || 'ไม่มีการ์ดที่ผ่านเกณฑ์เข้าเนื้อข่าว'} — นักเขียนใช้ต้นฉบับของพนักงาน`;
+  return null;
+}
+
+/**
+ * ระเบียน editor (สัญญา 8.1) → ข้อมูล embed ล้วนของ "ใบที่สอง" (pure — เทสได้โดยไม่ต้องมี discord.js)
+ * @param {object} record  ระเบียน editor {status: done|not_ready|failed|skipped, corrections, additions, not_used, …}
+ * @param {{jobId?: string, cards?: object|null}} [ctx]  cards = แถว research-cards ล่าสุดที่บอทเห็น (ลิงก์แหล่งของ R# + ลิงก์ต้นทาง)
+ * @returns {{title:string, color:string, description:string, footer:string, reactable:boolean, status:string, mainLines:number, kind:'editor'}}
+ *   บรรทัดหลัก ≤ 8 (สเปก 8.2) เรียง: สถานะ (ไม่ใช่ done) · ❗แก้ · ➕เพิ่ม · 🧭มุมเสนอ · 🗒️หมายเหตุ · ⚠️ธง/warnings · 🚫ไม่ได้ใช้
+ *   ❗/➕ เกินที่เหลือ = บรรทัดสุดท้ายของกลุ่มสรุป "… (+N รายการ)" · + บรรทัดลิงก์ต้นทาง 🔗 (ไม่นับ) · ท้ายใบมี jobId เสมอ
+ */
+function renderEditorCard(record, ctx = {}) {
+  const rec = isPlainRecord(record) ? record : {};
+  const context = isPlainRecord(ctx) ? ctx : {};
+  const status = EDITOR_STATUSES.has(rec.status) ? rec.status : 'failed';
+  const jobId = isJobId(context.jobId) ? context.jobId : (isJobId(rec.id) ? rec.id : 'unknown');
+  const cards = isPlainRecord(context.cards) ? context.cards : null;
+  const corrections = listOf(rec.corrections).filter(isPlainRecord);
+  const items = [];
+  for (const c of corrections) {
+    const field = safe(c.field, 40);
+    const src = sourceText(c.source_name, c.source_url) || cardRef(c.card, cards);
+    items.push(`❗ แก้: ${field ? `${field}: ` : ''}${safe(c.from, 100) || '?'} → ${safe(c.to, 100) || '?'}${src ? ` · ${src}` : ''}`);
+  }
+  for (const a of listOf(rec.additions).filter(isPlainRecord)) {
+    const text = safe(a.text, 200);
+    if (!text) continue;
+    const ref = cardRef(a.card, cards);
+    items.push(`➕ เพิ่ม: ${text}${ref ? ` (${ref})` : ''}`);
+  }
+  const fixed = [];
+  const dims = listOf(rec.suggested_dimensions).map((d) => safe(d, 120)).filter(Boolean).slice(0, 3);
+  if (dims.length > 0) fixed.push(`🧭 มุมเสนอ: ${dims.join(' · ')}`);
+  const notes = listOf(rec.staff_notes).map((n) => safe(n, 160)).filter(Boolean);
+  if (notes.length > 0) fixed.push(`🗒️ หมายเหตุ: ${notes.slice(0, 3).join(' · ')}${notes.length > 3 ? ` (+${notes.length - 3})` : ''}`);
+  const flags = editorFlagLabels(rec);
+  if (flags.length > 0) fixed.push(`⚠️ ธง: ${flags.slice(0, 4).join(' · ')}${flags.length > 4 ? ` (+${flags.length - 4})` : ''}`);
+  const notUsed = listOf(rec.not_used).filter(isPlainRecord).map((n) => {
+    const id = /^R\d{1,2}$/u.test(str(n.card)) ? str(n.card) : safe(n.card, 12);
+    const why = safe(n.why, 80);
+    return id || why ? `${id || '?'}${why ? ` (${why})` : ''}` : '';
+  }).filter(Boolean);
+  if (notUsed.length > 0) fixed.push(`🚫 ไม่ได้ใช้: ${notUsed.slice(0, 3).join(' · ')}${notUsed.length > 3 ? ` (+${notUsed.length - 3})` : ''}`);
+  const head = editorStatusLine(status, rec);
+  // บรรทัดคงที่มีได้สูงสุด 4 + สถานะ 1 → ❗/➕ เหลืออย่างน้อย 3 บรรทัดเสมอ
+  const budget = EDITOR_MAIN_LINES - fixed.length - (head ? 1 : 0);
+  const shown = items.length > budget ? [...items.slice(0, budget - 1), `… (+${items.length - (budget - 1)} รายการ)`] : items;
+  const main = [...(head ? [head] : []), ...shown, ...fixed];
+  if (status === 'done' && main.length === 0) main.push('_ไม่มีรายการเพิ่ม/แก้ที่บันทึกไว้ — ดูเนื้อข่าวด้านบน_');
+  const origin = cards && isPlainRecord(cards.origin_post) ? cards.origin_post : null;
+  const originUrl = origin ? safeUrl(origin.url) : null;
+  const originDate = origin ? safe(origin.date, 60) : '';
+  const linkLines = originUrl ? [`🔗 ต้นทาง: ${mdLink(origin.source_name, originUrl)}${originDate ? ` · ${originDate}` : ''}`] : [];
+  const description = fitLines([...main, ...linkLines], DESCRIPTION_BUDGET) || '_ไม่มีรายละเอียด_';
+
+  const footerParts = [`jobId: ${jobId}`];
+  const used = listOf(rec.used_cards).map(str).filter((id) => /^R\d{1,2}$/u.test(id)).slice(0, 8);
+  if (used.length > 0) footerParts.push(`ใช้การ์ด ${used.join(' ')}`);
+  const ratio = firstFinite(rec.ratio);
+  if (status === 'done' && ratio !== null && ratio > 0) footerParts.push(`ยาว ${Math.round(ratio * 100) / 100} เท่าของต้นฉบับ`);
+  const waited = status === 'not_ready' ? null : durationText(rec.waitedMs); // not_ready บอกเวลารอในบรรทัดสถานะแล้ว
+  if (waited) footerParts.push(`รอการ์ด ${waited}`);
+  const editorTime = durationText(rec.editorMs);
+  if (editorTime) footerParts.push(`เรียบเรียง ${editorTime}`);
+  const model = safe(rec.model, 40);
+  if (model) footerParts.push(model);
+  if (status === 'done') footerParts.push('กด 👍/👎 ให้คะแนนใบนี้');
+  const color = status === 'done' ? (corrections.length > 0 ? COLOR_ALERT : COLOR_LIVE) : (status === 'not_ready' ? COLOR_SHADOW : COLOR_MUTED);
+  return {
+    title: EDITOR_TITLES[status],
+    color,
+    description,
+    footer: clip(footerParts.join(' · '), FOOTER_MAX),
+    reactable: status === 'done',
+    status,
+    mainLines: main.length,
+    kind: 'editor',
+  };
+}
+
+function buildEditorEmbed(EmbedBuilder, record, ctx = {}) {
+  const view = renderEditorCard(record, ctx);
+  const embed = new EmbedBuilder()
+    .setColor(view.color)
+    .setTitle(view.title)
+    .setDescription(view.description);
+  embed.setFooter({ text: view.footer });
+  return { embed, view };
+}
+
+// ใบที่สองที่บอทโพสต์ไว้ก่อนรีสตาร์ต: หัวต้องเป็นหัวใบที่สองตรงตัว (4 แบบ) + ท้ายใบมี jobId
+function editorJobIdFromMessage(message) {
+  const embeds = Array.isArray(message?.embeds) ? message.embeds : [];
+  for (const embed of embeds) {
+    const title = String(embed?.title ?? embed?.data?.title ?? '');
+    const footer = String(embed?.footer?.text ?? embed?.data?.footer?.text ?? '');
+    if (!EDITOR_TITLE_SET.has(title)) continue;
+    const match = footer.match(FOOTER_JOB_RE);
+    if (match) return match[1];
+  }
+  return null;
+}
+
 // ─── ตัวควบคุม ───────────────────────────────────────────────────
 /**
  * @param {object} options
@@ -526,6 +738,7 @@ function createResearchCards(options = {}) {
 
   const watches = new Map();          // jobId → state
   const cardJobByMessage = new Map(); // messageId ของบัตร → jobId
+  const editorJobByMessage = new Map(); // ★ 1 ต.ค. 69 (SPEC-v3 · W2): messageId ของใบที่สอง → jobId (หลังรีสตาร์ตอ่านจากหัว+ท้ายใบแทน)
   const feedbackChains = new Map();   // messageId → promise (กด 👍 แล้ว 👎 เร็วๆ = บันทึกเรียงตามลำดับกด)
   let statusCache = null;             // { at, value }
   let lastQuotaAlertDay = null;
@@ -573,6 +786,12 @@ function createResearchCards(options = {}) {
 
   function schedule(state, ms) {
     if (state.ended) return;
+    // ★ 1 ต.ค. 69 (SPEC-v3 · W2): กัน timer ซ้อน — pollAgain (หลังงานจบ) อาจตั้ง timer ขณะรอบถามที่ timer เดิมยิงแล้วยังต่อคิวอยู่
+    //   แล้วรอบนั้นตั้งอีกตัว = ถามสองสาย · โค้ดเดิมเรียก schedule ตอน timer ว่างเสมอ (watch / tick / parkOrEnd) = ผลเท่าเดิมทุกไบต์
+    if (state.timer) {
+      try { clearTimer(state.timer); } catch { /* timer หายไปแล้ว */ }
+      state.timer = null;
+    }
     state.timer = setTimer(() => {
       state.timer = null;
       return enqueue(state, () => tick(state));
@@ -606,11 +825,15 @@ function createResearchCards(options = {}) {
     //   (request/cards = null) = ใบขอ/การ์ดใหม่ไม่มีวันมา → เลิกถามทันที ไม่วนทุก 20 วิจนหมดหาง
     //   ตัดสินก่อนอ่านการ์ด: สวิตช์เว็บเป็นตัวหลัก (เจ้าของปิดฝั่งเว็บ = ถอยทั้งระบบ — การ์ดค้างจากก่อนปิดก็ไม่โพสต์)
     if (body && body.enabled === false) return { kind: 'stop', reason: 'disabled' };
+    // ★ 1 ต.ค. 69 (SPEC-v3 สัญญา 8.1 · W2): ผลบรรณาธิการ (ช่อง editor) + โหมดของเว็บ อ่านจากคำตอบเดียวกัน (ไม่ยิงเพิ่ม)
+    //   shadow/assist: editor null · writeMode false → ขั้นถัดไปไม่เปลี่ยน (พฤติกรรมเดิมทุกไบต์)
+    //   ของเดิม 3 บรรทัด return: { kind: 'card', card: record } · { kind: 'stop', reason: `request_${…}` } · { kind: 'wait' } (ตอนนี้ + ...write)
+    const write = { editor: pickEditorRecord(body), writeMode: str(body?.mode) === 'write' };
     const record = pickCardRecord(body);
-    if (record && TERMINAL_CARD_STATUSES.has(record.status)) return { kind: 'card', card: record };
+    if (record && TERMINAL_CARD_STATUSES.has(record.status)) return { kind: 'card', card: record, ...write };
     const requestStatus = String(body?.request?.status ?? body?.requestStatus ?? '');
-    if (!record && DEAD_REQUEST_STATUSES.has(requestStatus)) return { kind: 'stop', reason: `request_${requestStatus}` };
-    return { kind: 'wait' };
+    if (!record && DEAD_REQUEST_STATUSES.has(requestStatus)) return { kind: 'stop', reason: `request_${requestStatus}`, ...write };
+    return { kind: 'wait', ...write };
   }
 
   async function readStatus(maxAgeMs) {
@@ -652,6 +875,7 @@ function createResearchCards(options = {}) {
       if (state.result.caseId) body.caseId = state.result.caseId;
     }
     if (state.cardMsgId) body.researchCardMsgId = state.cardMsgId;
+    if (state.editorMsgId) body.editorMsgId = state.editorMsgId; // ★ 1 ต.ค. 69 (SPEC-v3 สัญญา 8.2 · W2): ใบที่สอง — กันโพสต์ซ้ำหลังรีสตาร์ต
     try {
       const res = await http.post(apiUrl('/api/bot/posted'), body, { headers: botHeaders(), timeout: HTTP_TIMEOUT_MS });
       if (res?.data?.success !== true) {
@@ -745,6 +969,74 @@ function createResearchCards(options = {}) {
     return true;
   }
 
+  // ── ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.2 · W2): ใบที่สอง (ผลบรรณาธิการ) ──
+  // โหมด write ของงานนี้: รู้จากคำตอบการ์ด (mode ของเว็บ/ของแถวการ์ด) · เห็นระเบียน editor · หรือผลข่าว (noteJobResult)
+  function noteWrite(state, outcome) {
+    if (!outcome) return;
+    if (outcome.card) state.lastCard = outcome.card;
+    if (outcome.writeMode === true || outcome.editor || (outcome.card && str(outcome.card.mode) === 'write')) state.writeMode = true;
+  }
+
+  // ยังรอใบที่สองไหม: โหมด write และยังไม่มี id ข้อความใบที่สอง (ของเราเอง หรือของ instance อื่นจาก bot-posted)
+  function wantsEditor(state) {
+    return state.writeMode === true && !state.editorMsgId;
+  }
+
+  // ยังต้องถามการ์ดต่อไหม: ยังไม่มีบัตรใบแรก (เงื่อนไขเดิม) · หรือ (งานจบแล้ว + ยังรอใบที่สอง = ทางสำรอง ข ภายในหาง 15 นาที)
+  //   ระหว่างรองานหลังบัตรใบแรกขึ้น = จอดเหมือนเดิม (ใบที่สองมากับผลข่าวทาง ก) · ไม่ใช่โหมด write = !cardMsgId = เงื่อนไขเดิมทุกตัว
+  function needsPoll(state) {
+    return !state.cardMsgId || (state.jobEndedAt !== null && wantsEditor(state));
+  }
+
+  // เปลี่ยน timer จอด (เพดาน HARD_CAP) เป็นรอบถามทุก 20 วิ — งานจบแล้วแต่ยังรอใบที่สอง (schedule ล้าง timer เดิมให้เอง · ไม่ซ้อน)
+  function pollAgain(state) {
+    schedule(state, POLL_MS);
+  }
+
+  // ใบที่สองที่โพสต์ได้ในรอบนี้: จากคำตอบการ์ด (ทาง ข) ก่อน · จากผลข่าว (ทาง ก) เฉพาะหลังงานจบ (ไม่แทรกกลางข้อความผลข่าว)
+  //   เว็บปิดสวิตช์ (enabled:false) = ไม่โพสต์อะไรเพิ่ม (สวิตช์เว็บเป็นตัวหลัก เหมือนบัตรใบแรก)
+  function editorFor(state, outcome) {
+    if (state.editorMsgId) return null;
+    if (outcome && outcome.kind === 'stop' && outcome.reason === 'disabled') return null;
+    if (outcome && outcome.editor) return outcome.editor;
+    return state.jobEndedAt !== null ? state.jobEditor : null;
+  }
+
+  async function deliverEditor(state, record) {
+    if (!record || state.editorMsgId || state.ended || isShuttingDown()) return false;
+    state.writeMode = true;
+    // กันโพสต์ซ้ำข้าม instance (redeploy ทับกัน / งานที่กู้หลังรีสตาร์ต): bot-posted มี editorMsgId แล้ว = ไม่โพสต์ (อ่านไม่ได้ = โพสต์ · fail-open)
+    const prior = await readPosted(state.jobId);
+    const priorEditor = idOf(prior?.editorMsgId);
+    if (priorEditor) {
+      state.editorMsgId = priorEditor;
+      info(`[Research] ⏭️ ใบที่สอง (ผลบรรณาธิการ) ของ job ${shortId(state.jobId)} โพสต์ไว้แล้ว (msg ${priorEditor}) — ไม่โพสต์ซ้ำ`);
+      return false;
+    }
+    if (state.ended || isShuttingDown()) return false;
+    const { embed, view } = buildEditorEmbed(EmbedBuilder, record, { jobId: state.jobId, cards: state.lastCard });
+    const sent = await replyUnderSource(state, { embeds: [embed], allowedMentions: { parse: [], repliedUser: false } });
+    if (!sent) return false;
+    state.editorMsgId = String(sent.id);
+    editorJobByMessage.set(state.editorMsgId, state.jobId);
+    if (editorJobByMessage.size > CARD_MAP_MAX) {
+      for (const key of [...editorJobByMessage.keys()].slice(0, editorJobByMessage.size - CARD_MAP_MAX)) editorJobByMessage.delete(key);
+    }
+    if (view.reactable && typeof sent.react === 'function') {
+      for (const emoji of Object.keys(FEEDBACK_VOTES)) {
+        try {
+          // eslint-disable-next-line no-await-in-loop -- ติดตามลำดับ 👍 แล้ว 👎
+          await sent.react(emoji);
+        } catch (err) {
+          warn(`[Research] 🩹 ติด ${emoji} บนใบที่สองไม่สำเร็จ: ${errText(err)}`);
+        }
+      }
+    }
+    info(`[Research] 🧾 โพสต์ใบที่สอง (ผลบรรณาธิการ) job ${shortId(state.jobId)} · ${view.status} · ${view.mainLines} บรรทัด`);
+    await writePosted(state);
+    return true;
+  }
+
   // บัตรโพสต์แล้ว:
   //   · งานยังไม่จบ → เลิกถามแต่ "จอด" ไว้รอจบงาน (ต้องจด caseId/ข้อความผลลง bot-posted ตอนโพสต์ผล) ไม่เกินเพดาน HARD_CAP_MS
   //   · งานจบและเช็คผลแล้ว → เลิกตามทันที
@@ -760,7 +1052,8 @@ function createResearchCards(options = {}) {
     if (isShuttingDown()) { endWatch(state, 'shutdown'); return; }
     const t = now();
     if (t - state.startedAt >= HARD_CAP_MS) { endWatch(state, 'hard_cap'); return; }
-    if (state.cardMsgId) { parkOrEnd(state); return; }
+    // ★ 1 ต.ค. 69 (W2): ของเดิม: if (state.cardMsgId) { parkOrEnd(state); return; } — ไม่ใช่โหมด write ผลเท่าเดิม (needsPoll = !cardMsgId)
+    if (!needsPoll(state)) { parkOrEnd(state); return; }
     if (state.tailUntil !== null && t >= state.tailUntil) { endWatch(state, 'tail_done'); return; }
     state.polls++;
     if (state.polls === 1) {
@@ -769,12 +1062,17 @@ function createResearchCards(options = {}) {
     }
     const outcome = await fetchCard(state.jobId);
     if (state.ended) return;
+    noteWrite(state, outcome); // ★ 1 ต.ค. 69 (W2)
+    const editor = editorFor(state, outcome); // ★ W2: ใบที่สองของรอบนี้ (ไม่ใช่โหมด write = null)
     if (outcome.kind === 'card') {
       await deliverCard(state, outcome.card);
-      if (state.cardMsgId) { parkOrEnd(state); return; }
+      if (editor) await deliverEditor(state, editor); // ★ W2: ใบที่สองต่อท้ายบัตรใบแรกเสมอ
+      // ★ W2 ของเดิม: if (state.cardMsgId) { parkOrEnd(state); return; }
+      if (!needsPoll(state)) { parkOrEnd(state); return; }
       schedule(state, POLL_MS); // โพสต์ไม่ได้ชั่วคราว (Discord ล้ม) → ลองใหม่รอบหน้า (ยังอยู่ใต้เพดานหาง/HARD_CAP)
       return;
     }
+    if (editor) await deliverEditor(state, editor); // ★ W2: เช่น not_ready ขึ้นก่อนบัตรใบแรกมา
     if (outcome.kind === 'stop') {
       info(`[Research] ⏹️ เลิกตามบัตร job ${shortId(state.jobId)} (${outcome.reason})`);
       endWatch(state, outcome.reason);
@@ -823,16 +1121,35 @@ function createResearchCards(options = {}) {
     state.resultChecked = true;
     if (state.result) await writePosted(state); // มีบัตรแล้ว (จอดรออยู่) = แถวนี้มีทั้งผลข่าวและบัตรครบ
     if (state.ended) return;
-    if (state.cardMsgId) { endWatch(state, 'card'); return; }
+    // ★ 1 ต.ค. 69 (W2): ของเดิม: if (state.cardMsgId) { endWatch(state, 'card'); return; }
+    //   บัตรใบแรกขึ้นแล้ว → ใบที่สองจากผลข่าว (ทาง ก) ต่อท้ายผลข่าวทันที · ไม่ต้องรอใบที่สอง (ไม่ใช่โหมด write) = จบเหมือนเดิม
+    if (state.cardMsgId) {
+      const fromResult = editorFor(state, null);
+      if (fromResult) await deliverEditor(state, fromResult);
+      if (state.ended) return;
+      if (!needsPoll(state)) { endWatch(state, 'card'); return; }
+    }
     // ถามทันที 1 ครั้งตอนจบงาน (ไม่ต้องรอรอบ 20 วิ) — การ์ดมาก่อนผลข่าวจะได้ขึ้นต่อท้ายทันที
     const outcome = await fetchCard(state.jobId);
     if (state.ended) return;
+    noteWrite(state, outcome); // ★ W2
+    const editor = editorFor(state, outcome); // ★ W2: คำตอบรอบนี้ (ทาง ข) ไม่งั้นผลข่าว (ทาง ก) — โพสต์หลังบัตรใบแรกเสมอ
     if (outcome.kind === 'card') {
       await deliverCard(state, outcome.card);
-      if (state.cardMsgId) endWatch(state, 'card'); // โพสต์ไม่สำเร็จ = timer รอบถามเดิมยังอยู่ ลองใหม่รอบหน้า
+      if (editor) await deliverEditor(state, editor); // ★ W2
+      // ★ W2 ของเดิม: if (state.cardMsgId) endWatch(state, 'card'); // โพสต์ไม่สำเร็จ = timer รอบถามเดิมยังอยู่ ลองใหม่รอบหน้า
+      if (!needsPoll(state)) endWatch(state, 'card');
+      else if (state.cardMsgId) pollAgain(state); // ★ W2: บัตรใบแรกขึ้นแล้วแต่ยังรอใบที่สอง → ถามทุก 20 วิในหาง (แทน timer จอด)
       return;
     }
+    if (editor) await deliverEditor(state, editor); // ★ W2
     if (outcome.kind === 'stop') { endWatch(state, outcome.reason); return; }
+    // ★ W2: บัตรใบแรกขึ้นแล้ว (โหมด write รอใบที่สอง) — ป้ายออฟไลน์มีไว้บอก "ไม่มีบัตร" จึงไม่ติด · ได้ใบที่สองแล้ว = จบ ไม่งั้นถามต่อในหาง
+    if (state.cardMsgId) {
+      if (needsPoll(state)) pollAgain(state);
+      else endWatch(state, 'card');
+      return;
+    }
     // สเปก 8(3): เครื่องค้นคว้าออฟไลน์ (heartbeat เงียบ > 10 นาที) → ติดป้ายบอกพนักงาน แล้วเลิกตาม (การ์ดจะไม่มาแล้ว)
     const st = await readStatus(0);
     if (st?.offline === true && !state.ended && !state.cardMsgId && !isShuttingDown()) {
@@ -865,23 +1182,31 @@ function createResearchCards(options = {}) {
     if (!message) return { ok: false, skipped: 'no_message' };
     if (botId && idOf(message.author?.id) !== botId) return { ok: false, skipped: 'not_ours' };
     const messageId = idOf(message.id);
-    const jobId = (messageId && cardJobByMessage.get(messageId)) || jobIdFromCardMessage(message);
+    // ★ 1 ต.ค. 69 (SPEC-v3 สัญญา 8.2 · W2): ใบที่สอง (ผลบรรณาธิการ) → feedback เดิม (/api/research/feedback → research-cards.feedback)
+    //   ติดป้าย kind:'editor' (โหวตใบที่สองไม่ทับโหวตใบแรกของคนเดิม) · ใบแรก body/log/ผลลัพธ์เดิมทุกไบต์
+    //   ของเดิม: const jobId = (messageId && cardJobByMessage.get(messageId)) || jobIdFromCardMessage(message);
+    const editorJobId = (messageId && editorJobByMessage.get(messageId)) || editorJobIdFromMessage(message);
+    const jobId = editorJobId || (messageId && cardJobByMessage.get(messageId)) || jobIdFromCardMessage(message);
     if (!jobId) return { ok: false, skipped: 'not_card' };
     const userId = idOf(user.id);
     if (!userId) return { ok: false, skipped: 'no_user' };
     const body = { jobId, cardId: 'all', vote, userId: `discord-${userId}` };
+    if (editorJobId) body.kind = 'editor';
+    const what = editorJobId ? 'ใบที่สอง (ผลบรรณาธิการ)' : 'บัตร';
+    const tag = editorJobId ? { kind: 'editor' } : {};
+    // ★ W2 ของเดิม: ข้อความ log "คะแนนบัตร" ตรงตัว (ใบแรก what = 'บัตร' = เดิม) · ผลลัพธ์ใบแรกไม่มีคีย์ kind
     const run = async () => {
       try {
         const res = await http.post(apiUrl('/api/research/feedback'), body, { headers: apiHeaders(), timeout: HTTP_TIMEOUT_MS });
         if (res?.data?.success !== true) {
-          warn(`[Research] 🩹 บันทึกคะแนนบัตร job ${shortId(jobId)} ไม่สำเร็จ (เซิร์ฟเวอร์ตอบไม่รับ): ${String(res?.data?.error || 'unknown').slice(0, 80)}`);
-          return { ok: false, jobId, vote, error: String(res?.data?.error || 'unknown') };
+          warn(`[Research] 🩹 บันทึกคะแนน${what} job ${shortId(jobId)} ไม่สำเร็จ (เซิร์ฟเวอร์ตอบไม่รับ): ${String(res?.data?.error || 'unknown').slice(0, 80)}`);
+          return { ok: false, jobId, vote, error: String(res?.data?.error || 'unknown'), ...tag };
         }
-        info(`[Research] ✅ คะแนนบัตร job ${shortId(jobId)} → ${vote} โดย ${userId}`);
-        return { ok: true, jobId, vote, userId: body.userId };
+        info(`[Research] ✅ คะแนน${what} job ${shortId(jobId)} → ${vote} โดย ${userId}`);
+        return { ok: true, jobId, vote, userId: body.userId, ...tag };
       } catch (err) {
-        warn(`[Research] 🩹 บันทึกคะแนนบัตร job ${shortId(jobId)} ไม่สำเร็จ: ${errText(err)}`);
-        return { ok: false, jobId, vote, error: errText(err) };
+        warn(`[Research] 🩹 บันทึกคะแนน${what} job ${shortId(jobId)} ไม่สำเร็จ: ${errText(err)}`);
+        return { ok: false, jobId, vote, error: errText(err), ...tag };
       }
     };
     const key = messageId || jobId;
@@ -938,6 +1263,12 @@ function createResearchCards(options = {}) {
           cardMsgId: null,
           result: null,
           chain: Promise.resolve(),
+          // ★ 1 ต.ค. 69 (SPEC-v3 · W2): ใบที่สอง — โหมด write ของงาน · id ข้อความใบที่สอง · ระเบียน editor จากผลข่าว (ทาง ก)
+          //   · แถวการ์ดล่าสุดที่เห็น (ลิงก์แหล่งของ R# + ลิงก์ต้นทางในใบที่สอง)
+          writeMode: false,
+          editorMsgId: null,
+          jobEditor: null,
+          lastCard: null,
         };
         state.done = new Promise((resolve) => { state.resolveDone = resolve; });
         watches.set(jobId, state);
@@ -967,6 +1298,30 @@ function createResearchCards(options = {}) {
       }
     },
 
+    /**
+     * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.1/8.2 · W2): ผลข่าวจบ (pollJobUntilDone ส่ง data ของคิวมา)
+     *   → จำ analysisResult.researchAgent.editor ไว้โพสต์ "ใบที่สอง" ตอนงานจบ (ทาง ก) · mode 'write' แต่ไม่มี editor = รอทางสำรองในหาง
+     *   ไม่ยิง HTTP ไม่โพสต์ ไม่ log ตรงนี้ · สวิตช์ปิด / ไม่มีงานที่ตามอยู่ / ไม่ใช่โหมด write = ไม่ทำอะไร · ห้ามโยน error
+     *   คืนสถานะของ editor ที่จำไว้ (เทสใช้) หรือ null
+     */
+    noteJobResult(jobId, data) {
+      if (!enabled) return null;
+      try {
+        const state = typeof jobId === 'string' ? watches.get(jobId) : null;
+        if (!state || state.ended) return null;
+        const ra = researchAgentOfResult(data);
+        if (!ra) return null;
+        if (str(ra.mode) === 'write') state.writeMode = true;
+        if (!looksLikeEditor(ra.editor)) return null;
+        state.jobEditor = ra.editor;
+        state.writeMode = true;
+        return ra.editor.status;
+      } catch (err) {
+        warn(`[Research] 🩹 อ่านผลบรรณาธิการจากผลข่าวไม่สำเร็จ (ไม่กระทบข่าว): ${errText(err)}`);
+        return null;
+      }
+    },
+
     handleReaction,
 
     // สำหรับเทส/ดีบัก
@@ -982,8 +1337,15 @@ module.exports = {
   buildCardView,
   buildCardEmbed,
   jobIdFromCardMessage,
+  // ★ 1 ต.ค. 69 (SPEC-v3 สัญญา 8.2 · W2): ใบที่สอง (ผลบรรณาธิการ)
+  renderEditorCard,
+  buildEditorEmbed,
+  pickEditorRecord,
+  researchAgentOfResult,
+  editorJobIdFromMessage,
   constants: Object.freeze({
     POLL_MS, TAIL_MS, HARD_CAP_MS, STATUS_TTL_MS, MIN_TEXT_AFTER_URLS, MAX_SOURCE_URLS, MAX_RESULT_MSG_IDS,
     CARD_TITLE, SHADOW_TAG, SHADOW_LEAD, RESULT_POSTED_PREFIX, OFFLINE_TEXT, DEFAULT_QUOTA_ALERT_PCT,
+    EDITOR_TITLES, EDITOR_MAIN_LINES, // ★ W2
   }),
 };

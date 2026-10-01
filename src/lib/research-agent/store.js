@@ -417,8 +417,14 @@ export function createResearchStorage({ sb, now = () => Date.now() } = {}) {
       };
     },
 
-    /** โหวต 👍/👎 ต่อการ์ด (หรือ 'all') — ผู้ใช้เดิมโหวตการ์ดเดิมซ้ำ = แทนที่ของเก่า */
-    async addFeedback({ jobId, cardId, vote, userId }) {
+    /**
+     * โหวต 👍/👎 ต่อการ์ด (หรือ 'all') — ผู้ใช้เดิมโหวตการ์ดเดิมซ้ำ = แทนที่ของเก่า
+     * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.2 · เลน W2): kind 'editor' = โหวตใบที่สอง (ผลบรรณาธิการ)
+     *   ลงช่อง feedback เดิมติดป้าย kind:'editor' · แทนที่เฉพาะโหวตชนิดเดียวกัน (ไม่ทับโหวตใบแรกของคนเดิม) · ไม่ส่ง kind = เดิมทุกไบต์
+     *   ของเดิม: async addFeedback({ jobId, cardId, vote, userId }) {
+     */
+    async addFeedback({ jobId, cardId, vote, userId, kind }) {
+      const editorVote = kind === 'editor';
       for (let attempt = 0; attempt < CAS_RETRIES; attempt++) {
         // eslint-disable-next-line no-await-in-loop -- cas retry ต้องอ่านค่าล่าสุดก่อนเขียนทุกรอบ
         const doc = await getCards(jobId);
@@ -428,9 +434,10 @@ export function createResearchStorage({ sb, now = () => Date.now() } = {}) {
           return { outcome: 'unknown_card' };
         }
         const at = isoNow();
+        // ★ W2 ของเดิม: .filter((f) => !(f.userId === userId && f.cardId === cardId)); · feedback.push({ userId, cardId, vote, at });
         const feedback = normalizeFeedbackList(doc.feedback)
-          .filter((f) => !(f.userId === userId && f.cardId === cardId));
-        feedback.push({ userId, cardId, vote, at });
+          .filter((f) => !(f.userId === userId && f.cardId === cardId && (f.kind === 'editor') === editorVote));
+        feedback.push(editorVote ? { userId, cardId, vote, at, kind: 'editor' } : { userId, cardId, vote, at });
         const next = { ...doc, feedback: normalizeFeedbackList(feedback), revision: doc.revision + 1, updatedAt: at };
         // eslint-disable-next-line no-await-in-loop -- เขียนแบบ cas ทีละรอบ
         if (await casDoc(RESEARCH_CARDS_STORE, researchCardsRowId(jobId), doc.revision, next)) {

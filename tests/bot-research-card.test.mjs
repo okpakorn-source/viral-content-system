@@ -34,6 +34,11 @@
 //   · store เลน B ตัวจริง (เทสของเลน B + tests/research-xlane-gate.test.mjs ดูแล — ไฟล์นี้ห้าม import ข้าม worktree)
 //   · /api/research/status ใช้รูปย่อ (status/quota.pct/quota.account — คีย์เดียวกับเลน B) · node 22 ของจริง (CI เป็นผู้ตัดสิน)
 // รัน: node --test tests/bot-research-card.test.mjs (ไม่ต้องตั้ง env · ไม่ยิงเน็ต · ไม่มีค่าใช้จ่าย)
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 4 + สัญญา 8.1/8.2 · เลน W2): ส่วนที่ 6 ท้ายไฟล์ = "ใบที่สอง" (ผลบรรณาธิการ)
+//   renderEditorCard 4 สถานะ (pure) · ทาง ก (ผลข่าวพก editor → noteJobResult) · ทาง ข (ช่อง editor ของคำตอบการ์ด/ถามต่อในหาง)
+//   · กันโพสต์ซ้ำ (bot-posted.editorMsgId) · 👍/👎 → feedback เดิมติด kind:'editor' · ต่อสายจริง index.js + route
+//   · byte-parity โหมดอื่น: ลายนิ้วมือที่จับจากโค้ดเฟส 1 (827336d7 ก่อนแก้ W2) + ฉบับถอดจุดเรียก W2 · mutation MW1–MW9
+//   stripLaneC ถอดบล็อก W2 (LANE_W2_INSERTS) ด้วย = ฉบับก่อนมีรีเสิร์ช · store ปลอมเก็บ editorMsgId ตาม store จริงที่แก้คู่กัน
 // ============================================================
 /* eslint-disable no-await-in-loop -- เทสเดินนาฬิกาเสมือนทีละก้าว/ทีละสถานการณ์โดยตั้งใจ (ลำดับเวลาต้องเรียง ห้ามขนาน) */
 import test from 'node:test';
@@ -42,6 +47,7 @@ import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto'; // ★ 1 ต.ค. 69 (SPEC-v3 · W2): ลายนิ้วมือ byte-parity โหมด shadow/assist (ส่วนที่ 6)
 import { settleWithin } from './helpers/fake-deadline.mjs';
 
 const botUrl = new URL('../discord-bot/index.js', import.meta.url);
@@ -1434,9 +1440,30 @@ const LANE_C_REPLACES = [
   ['  ...(BOT_REVIEW_REACTIONS ? { partials: [Partials.Message, Partials.Reaction] } : {}),']],
 ];
 
-function stripLaneC(src) {
+// ★ 1 ต.ค. 69 (SPEC-v3 · เลน W2): บล็อกที่ W2 เติมใน index.js (ตรงทุกไบต์) — ถอดคู่กับเลน C = ฉบับก่อนมีรีเสิร์ช (byte-parity ปิดสวิตช์)
+//   ถอดเฉพาะ W2 (stripW2) = ฉบับเฟส 1 — ใช้พิสูจน์ว่าจุดเรียกใหม่ไม่เปลี่ยนอะไรเลยเมื่อไม่ใช่โหมด write
+const LANE_W2_INSERTS = [
+  ['',
+    '    // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.2 · เลน W2): ผลข่าวพก analysisResult.researchAgent.editor (ผลบรรณาธิการ) มาด้วย',
+    '    //   → ตัวจัดการบัตรจำไว้ แล้วโพสต์ "ใบที่สอง" ตอนงานจบ (ต่อท้ายผลข่าว) · ไม่ยิง HTTP ไม่โพสต์ตรงนี้ · สวิตช์ปิด/ไม่ใช่โหมด write = no-op',
+    '    research.noteJobResult(jobId, data);'],
+];
+
+function stripW2(src) {
   const eol = src.includes('\r\n') ? '\r\n' : '\n';
   let out = src;
+  for (const block of LANE_W2_INSERTS) {
+    const chunk = block.join(eol) + eol;
+    assert.equal(out.split(chunk).length, 2, `บล็อก W2 ต้องเจอครั้งเดียว: ${block.find((l) => l.trim()).slice(0, 60)}`);
+    out = out.replace(chunk, () => '');
+  }
+  assert.ok(!/noteJobResult/u.test(out), 'ถอดแล้วต้องไม่เหลือจุดเรียก W2');
+  return out;
+}
+
+function stripLaneC(src) {
+  const eol = src.includes('\r\n') ? '\r\n' : '\n';
+  let out = stripW2(src); // ★ W2 ของเดิม: let out = src; — ถอดจุดเรียก W2 ก่อน แล้วถอดเลน C ตามเดิมทุกบรรทัด
   for (const block of LANE_C_INSERTS) {
     const chunk = block.join(eol) + eol;
     assert.equal(out.split(chunk).length, 2, `บล็อกเลน C ต้องเจอครั้งเดียว: ${block.find((l) => l.trim()).slice(0, 60)}`);
@@ -1784,7 +1811,8 @@ function makeBotPostedStorage({ now = () => START } = {}) {
       const jobId = String(input?.jobId ?? input?.id ?? '');
       if (!B_ID_RE.test(jobId)) throw Object.assign(new TypeError('jobId ไม่ถูกต้อง'), { code: 'RESEARCH_INVALID_INPUT' });
       const patch = {};
-      for (const key of ['channelId', 'sourceMessageId', 'processingMsgId', 'researchCardMsgId']) {
+      // ★ 1 ต.ค. 69 (SPEC-v3 สัญญา 8.2 · W2): store จริงเก็บ editorMsgId เพิ่ม (แก้คู่กันใน src/lib/research-agent/store.js) — ตัวปลอมตามให้ตรง
+      for (const key of ['channelId', 'sourceMessageId', 'processingMsgId', 'researchCardMsgId', 'editorMsgId']) {
         const value = bId(input?.[key]);
         if (value) patch[key] = value;
       }
@@ -2237,4 +2265,666 @@ test('mutation M23 (r3): route ไม่แยกที่เก็บล่ม 
 test('mutation M24 (r3): route ไม่ fail-closed ตอนไม่ตั้ง DISCORD_API_SECRET → เทสยืนยันตัวตนแดง', async () => {
   const src = mutate(ROUTE_SRC, '  if (!expected) {\n    return fail(403,', '  if (false) {\n    return fail(403,');
   await assert.rejects(checkRouteAuth(src), /fail-closed/u);
+});
+
+// ============================================================
+// 6) ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 4 + สัญญา 8.1/8.2 · เลน W2) — ใบที่สอง "ผลบรรณาธิการเรียบเรียง"
+// ------------------------------------------------------------
+// ระเบียน editor = สัญญา 8.1 (W1 เป็นเจ้าของ: store research-editor · ช่อง editor ใน GET /api/research/cards · analysisResult.researchAgent.editor)
+//   ฟิกซ์เจอร์ = ตัวอย่างในสัญญา 8.1 ตรงตัว (+ลิงก์จริงรูปแบบเดียวกัน) · คำตอบการ์ด = คำตอบจริงของเลน B (LANE_B_CARDS) + mode:'write' + ช่อง editor
+//   ยังไม่ได้จับจาก handler ของ W1 (คนละ worktree · ห้าม import ข้าม) → รวมเลนแล้วต้องจับคำตอบจริงมาแทน (แบบ r2 ของเลน B)
+// ผลข่าวจากคิว = รูปจริงที่จับจาก C:\tmp\research-agent-lab\e2e\hook-response.json (1 ต.ค. 69 · /api/auto/process ตัวจริง โหมด shadow):
+//   analysisResult อยู่ทั้งบนสุดและใต้ data · researchAgent = {status, mode, cardsCount, flags} (+ editor เฉพาะโหมด write ตามสัญญา 8.1)
+// byte-parity ของโหมดอื่น (สวิตช์เปิด · shadow/assist): ลายนิ้วมือ sha256 ของบันทึกการกระทำทั้งหมดต้องตรงกับที่จับจากโค้ดเฟส 1
+//   (827336d7 ก่อนแก้ W2 · 1 ต.ค. 69) ทุกไบต์ — ทางปกติ + ทางกู้หลังรีสตาร์ต + การ์ดมาช้าในหาง · และตรงกับฉบับถอดจุดเรียก W2 ใน index.js
+//   (เปลี่ยนตัวช่วยเทส makeWorld/makeApi/runBotScenario = ต้องจับลายนิ้วมือใหม่จากโค้ดเฟส 1 — ไม่ใช่แก้ให้ตรงโค้ดใหม่)
+// ============================================================
+const EDITOR_TITLES = RC.constants.EDITOR_TITLES;
+const LIVE_CARD_TITLE = RC.constants.CARD_TITLE;
+
+function resultWithResearch(researchAgent) {
+  const r = RESULT();
+  r.data.analysisResult.researchAgent = clone(researchAgent);
+  r.analysisResult = clone(r.data.analysisResult);
+  return r;
+}
+const jobWithResearch = (researchAgent) => [
+  ...Array.from({ length: 15 }, PROCESSING),
+  { success: true, status: 'completed', result: resultWithResearch(researchAgent) },
+];
+
+// แถว research-cards โหมด write (สัญญา 2.2 + 8.3) — ต้นทางพบ · R1–R3 มีแหล่ง (ใบที่สองทำลิงก์ R# จากตรงนี้) · R3 มี quote
+function cardWrite() {
+  const base = cardDone();
+  return {
+    ...base,
+    mode: 'write',
+    origin_post: { url: 'https://www.youtube.com/watch?v=tthk2709', source_name: 'ตีท้ายครัว', date: '2026-09-27', confidence: 0.92 },
+    stale_news_warning: 'คลิปออกอากาศ 27 ก.ย. 69 ก่อนวันส่งข่าว 4 วัน',
+    flags: ['STALE_NEWS'],
+    cards: [
+      { id: 'R1', claim: 'สามพี่น้องชื่อจริง สมชาย สมหญิง สมศรี ตามที่ออกรายการ', value_type: 'ตัวตน', why_it_adds_value: 'ชื่อจริงจากแหล่ง',
+        evidence_quote: 'สามพี่น้อง สมชาย สมหญิง และสมศรี ออกรายการตีท้ายครัว', source_url: 'https://www.thairath.co.th/entertain/news/2800001',
+        source_name: 'ไทยรัฐ', source_date: '2026-09-28', confidence: 0.92, contradicts_raw: false, identity: 'verified', gate: 'pass' },
+      { id: 'R2', claim: 'บ้านราคา 18 ล้านบาท ตกแต่งเพิ่ม 3 ล้านบาท', value_type: 'ตัวเลข-บริบท', why_it_adds_value: 'ตัวเลขจริงแทนตัวเลขกลม',
+        evidence_quote: 'บ้านหลังนี้ราคา 18 ล้าน ตกแต่งเพิ่มอีก 3 ล้าน', source_url: 'https://www.kapook.com/news/123', source_name: 'kapook',
+        source_date: '2026-09-28', confidence: 0.9, contradicts_raw: true, identity: 'generic', gate: 'pass' },
+      { id: 'R3', claim: 'ครอบครัวอยู่บ้านหลังนี้มา 5 ปีแล้ว', value_type: 'อื่นๆ', why_it_adds_value: 'แก้น้ำเสียง "ซื้อใหม่" ให้ตรงความจริง',
+        evidence_quote: 'อยู่บ้านหลังนี้มาได้ 5 ปีแล้วค่ะ', source_url: 'https://www.youtube.com/watch?v=tthk2709', source_name: 'ตีท้ายครัว',
+        source_date: '2026-09-27', confidence: 0.88, contradicts_raw: false, identity: 'generic', gate: 'pass',
+        quote: { text: 'อยู่บ้านหลังนี้มาได้ 5 ปีแล้วค่ะ', speaker: 'สมหญิง', speaker_confidence: 0.93 } },
+    ],
+    raw_corrections: [{ field: 'ราคาบ้าน', raw_value: '20 ล้าน', source_value: '18+3 ล้าน', source_url: 'https://www.kapook.com/news/123', confidence: 0.9 }],
+    suggested_dimensions: ['มุมพี่น้องช่วยกันผ่อนบ้าน'],
+  };
+}
+
+// ระเบียน editor = ตัวอย่างในสัญญา 8.1 ตรงตัว (ลิงก์จริงรูปแบบเดียวกัน)
+function editorDone() {
+  return {
+    id: JOB, status: 'done', mode: 'write',
+    used_cards: ['R1', 'R3'],
+    corrections: [{ field: 'ราคาบ้าน', from: '20 ล้าน', to: '18+3 ล้าน', source_url: 'https://www.kapook.com/news/123', source_name: 'kapook', card: 'R2' }],
+    additions: [{ text: 'ชื่อจริงสามพี่น้อง สมชาย สมหญิง สมศรี', card: 'R1' }, { text: 'อยู่บ้านหลังนี้มา 5 ปี', card: 'R3' }],
+    not_used: [{ card: 'R4', why: 'มั่นใจ 0.7 ต่ำกว่าเกณฑ์' }],
+    suggested_dimensions: ['มุมพี่น้องช่วยกันผ่อนบ้าน'],
+    staff_notes: ['วันจริงของคลิป: 27 ก.ย. 69 (ตีท้ายครัว)'],
+    warnings: ['ตัดประโยคที่ตัวเลขไม่พบในแหล่ง 1 ประโยค'],
+    flags: ['STALE_NEWS'],
+    original_chars: 812, enriched_chars: 1310, ratio: 1.61,
+    waitedMs: 48000, editorMs: 21000, model: 'claude-opus-5-5/medium',
+    reason: '', updatedAt: '2026-10-01T03:05:00.000Z',
+  };
+}
+const editorOf = (status, extra = {}) => ({
+  id: JOB, status, mode: 'write', used_cards: [], corrections: [], additions: [], not_used: [], suggested_dimensions: [], staff_notes: [],
+  warnings: [], flags: [], original_chars: 812, enriched_chars: 812, ratio: 1, waitedMs: 0, editorMs: 0, model: 'claude-opus-5-5/medium',
+  reason: '', updatedAt: '2026-10-01T03:05:00.000Z', ...extra,
+});
+
+// คำตอบ GET /api/research/cards ตามสัญญา 8.1 — คำตอบจริงของเลน B + mode:'write' + ช่อง editor (null = ยังไม่มี)
+function laneW1(name, editor = null) {
+  const body = laneB(name);
+  body.mode = 'write';
+  if (body.cards) body.cards = cardWrite();
+  body.editor = editor ? clone(editor) : null;
+  return body;
+}
+
+const repliesTitled = (msg, title) => msg.replies.filter((p) => p && typeof p === 'object' && (p.embeds || []).some((e) => e.data?.title === title));
+const messageTitled = (world, sourceId, title) => [...world.messages.values()]
+  .find((m) => m.reference?.messageId === sourceId && m.embeds.some((e) => e.title === title));
+const replyTitles = (msg) => msg.replies.map((p) => (typeof p === 'string' ? 'text' : String(p?.embeds?.[0]?.data?.title ?? p?.content ?? '')));
+const descLines = (view) => view.description.split('\n');
+
+// ── 6.1 หน้าตาใบที่สอง (pure) ──
+function checkEditorDoneView(v) {
+  assert.equal(v.title, '🧾 รีเสิร์ชเข้าเนื้อแล้ว — สิ่งที่เพิ่ม/แก้จากต้นฉบับ', 'หัว done ตามสัญญา 8.2 ตรงตัว');
+  assert.deepEqual(descLines(v), [
+    '❗ แก้: ราคาบ้าน: 20 ล้าน → 18+3 ล้าน · [kapook](https://www.kapook.com/news/123)',
+    '➕ เพิ่ม: ชื่อจริงสามพี่น้อง สมชาย สมหญิง สมศรี (R1 [ไทยรัฐ](https://www.thairath.co.th/entertain/news/2800001))',
+    '➕ เพิ่ม: อยู่บ้านหลังนี้มา 5 ปี (R3 [ตีท้ายครัว](https://www.youtube.com/watch?v=tthk2709))',
+    '🧭 มุมเสนอ: มุมพี่น้องช่วยกันผ่อนบ้าน',
+    '🗒️ หมายเหตุ: วันจริงของคลิป: 27 ก.ย. 69 (ตีท้ายครัว)',
+    '⚠️ ธง: ข่าวเก่า · ตัดประโยคที่ตัวเลขไม่พบในแหล่ง 1 ประโยค',
+    '🚫 ไม่ได้ใช้: R4 (มั่นใจ 0.7 ต่ำกว่าเกณฑ์)',
+    '🔗 ต้นทาง: [ตีท้ายครัว](https://www.youtube.com/watch?v=tthk2709) · 2026-09-27',
+  ], 'ลำดับตามสัญญา 8.2: ❗แก้ · ➕เพิ่ม · 🧭มุมเสนอ · 🗒️หมายเหตุ · ⚠️ธง/warnings · 🚫ไม่ได้ใช้ + ลิงก์ต้นทาง');
+  assert.equal(v.footer, `jobId: ${JOB} · ใช้การ์ด R1 R3 · ยาว 1.61 เท่าของต้นฉบับ · รอการ์ด 48 วิ · เรียบเรียง 21 วิ · claude-opus-5-5/medium · กด 👍/👎 ให้คะแนนใบนี้`);
+  assert.equal(v.color, '#ef4444', 'มีจุดแก้ตามแหล่ง = สีแดง');
+  assert.equal(v.reactable, true);
+  assert.equal(v.mainLines, 7);
+}
+
+test('ใบที่สอง (W2) renderEditorCard done: หัวตามสัญญา · ❗แก้ (field: from → to · แหล่ง) · ➕เพิ่ม + ลิงก์ R# จากบัตรใบแรก · 🧭 · 🗒️ · ⚠️ · 🚫 · 🔗 ต้นทาง · 👍/👎 · pure', () => {
+  const record = editorDone();
+  const ctx = { jobId: JOB, cards: cardWrite() };
+  const before = clone(record);
+  const v = RC.renderEditorCard(record, ctx);
+  checkEditorDoneView(v);
+  assert.equal(v.kind, 'editor');
+  assert.equal(v.status, 'done');
+  assert.deepEqual(record, before, 'ไม่แก้ระเบียนที่รับมา');
+  assert.deepEqual(RC.renderEditorCard(record, ctx), v, 'pure: ข้อมูลเดิม = ผลเดิม');
+  const noCtx = RC.renderEditorCard(record, { jobId: JOB });
+  assert.ok(descLines(noCtx).includes('➕ เพิ่ม: ชื่อจริงสามพี่น้อง สมชาย สมหญิง สมศรี (R1)'), 'ไม่รู้แถวการ์ด = แสดงรหัส R# ไม่มีลิงก์');
+  assert.ok(!noCtx.description.includes('🔗'), 'ไม่รู้ต้นทาง = ไม่มีบรรทัดลิงก์ต้นทาง');
+  const { embed, view } = RC.buildEditorEmbed(FakeEmbed, record, ctx);
+  assert.deepEqual(embed.data, { color: view.color, title: view.title, description: view.description, footer: { text: view.footer } });
+  assert.equal(RC.renderEditorCard({ ...record, corrections: [] }, ctx).color, '#3b82f6', 'ไม่มีจุดแก้ = สีน้ำเงิน');
+  assert.deepEqual(descLines(RC.renderEditorCard(editorOf('done'), ctx)), [
+    '_ไม่มีรายการเพิ่ม/แก้ที่บันทึกไว้ — ดูเนื้อข่าวด้านบน_',
+    '🔗 ต้นทาง: [ตีท้ายครัว](https://www.youtube.com/watch?v=tthk2709) · 2026-09-27',
+  ]);
+});
+
+test('ใบที่สอง (W2) renderEditorCard not_ready/failed/skipped: หัวตามสัญญา 8.2 ตรงตัว · บรรทัดสถานะ/เหตุ · ⚠️ ธง · สีเหลือง/เทา · ไม่ติด 👍/👎', () => {
+  assert.deepEqual({ ...EDITOR_TITLES }, {
+    done: '🧾 รีเสิร์ชเข้าเนื้อแล้ว — สิ่งที่เพิ่ม/แก้จากต้นฉบับ',
+    not_ready: '⏳ รีเสิร์ชไม่ทัน — ข่าวนี้เขียนจากต้นฉบับ',
+    failed: '⚠️ บรรณาธิการล้ม — ใช้ต้นฉบับ',
+    skipped: 'ℹ️ ไม่มีข้อมูลผ่านเกณฑ์ — ใช้ต้นฉบับ',
+  });
+  const nr = RC.renderEditorCard(editorOf('not_ready', { waitedMs: 300000 }), { jobId: JOB });
+  assert.equal(nr.title, EDITOR_TITLES.not_ready);
+  assert.deepEqual(descLines(nr), ['⏳ รอการ์ด 5 นาที แล้วยังไม่มา — นักเขียนใช้ต้นฉบับของพนักงาน · บัตรข้อเท็จจริงจะขึ้นตามมาเมื่อเอเจนต์ส่งผล']);
+  assert.equal(nr.footer, `jobId: ${JOB} · claude-opus-5-5/medium`);
+  assert.deepEqual([nr.color, nr.reactable], ['#f59e0b', false]);
+  const failed = RC.renderEditorCard(editorOf('failed', { reason: 'ด่านเชิงกลตัดเกิน 30% ของส่วนเพิ่ม', warnings: ['ตัดประโยค 4 ใน 10'], waitedMs: 52000, editorMs: 31000 }), { jobId: JOB });
+  assert.equal(failed.title, EDITOR_TITLES.failed);
+  assert.deepEqual(descLines(failed), ['เหตุ: ด่านเชิงกลตัดเกิน 30% ของส่วนเพิ่ม — นักเขียนใช้ต้นฉบับของพนักงาน', '⚠️ ธง: ตัดประโยค 4 ใน 10']);
+  assert.equal(failed.footer, `jobId: ${JOB} · รอการ์ด 52 วิ · เรียบเรียง 31 วิ · claude-opus-5-5/medium`);
+  assert.deepEqual([failed.color, failed.reactable], ['#6b7280', false]);
+  const skipped = RC.renderEditorCard(editorOf('skipped', { flags: ['ORIGIN_NOT_FOUND'] }), { jobId: JOB });
+  assert.equal(skipped.title, EDITOR_TITLES.skipped);
+  assert.deepEqual(descLines(skipped), ['เหตุ: ไม่มีการ์ดที่ผ่านเกณฑ์เข้าเนื้อข่าว — นักเขียนใช้ต้นฉบับของพนักงาน', '⚠️ ธง: ยืนยันต้นทางไม่ได้']);
+  assert.deepEqual([skipped.color, skipped.reactable], ['#6b7280', false]);
+  assert.equal(RC.renderEditorCard({ status: 'weird' }, { jobId: JOB }).title, EDITOR_TITLES.failed, 'สถานะไม่รู้จัก = แสดงแบบล้ม (ปลอดภัยไว้ก่อน)');
+  assert.ok(RC.renderEditorCard(null, {}).footer.startsWith('jobId: unknown'));
+});
+
+function checkEditorCap(mod = RC) {
+  const rec = editorOf('done', {
+    corrections: Array.from({ length: 10 }, (_, i) => ({ field: `ช่อง${i}`, from: `${i}`, to: `${i + 1}`, source_url: `https://n.example/${i}`, source_name: `แหล่ง${i}` })),
+    additions: Array.from({ length: 10 }, (_, i) => ({ text: `เพิ่ม${i}`, card: 'R1' })),
+    suggested_dimensions: ['มุม 1', 'มุม 2', 'มุม 3'],
+    staff_notes: ['โน้ต 1', 'โน้ต 2', 'โน้ต 3', 'โน้ต 4', 'โน้ต 5'],
+    warnings: ['เตือน 1', 'เตือน 2'],
+    flags: ['STALE_NEWS', 'ORIGIN_NOT_FOUND', 'RAW_CONTRADICTION'],
+    not_used: Array.from({ length: 6 }, (_, i) => ({ card: `R${i + 4}`, why: 'ต่ำกว่าเกณฑ์' })),
+  });
+  const v = mod.renderEditorCard(rec, { jobId: JOB, cards: cardWrite() });
+  const main = descLines(v).filter((l) => !l.startsWith('🔗 '));
+  assert.equal(main.length, 8, `บรรทัดหลักต้องไม่เกิน 8 (ได้ ${main.length})`);
+  assert.equal(v.mainLines, 8);
+  assert.deepEqual(main, [
+    '❗ แก้: ช่อง0: 0 → 1 · [แหล่ง0](https://n.example/0)',
+    '❗ แก้: ช่อง1: 1 → 2 · [แหล่ง1](https://n.example/1)',
+    '❗ แก้: ช่อง2: 2 → 3 · [แหล่ง2](https://n.example/2)',
+    '… (+17 รายการ)',
+    '🧭 มุมเสนอ: มุม 1 · มุม 2 · มุม 3',
+    '🗒️ หมายเหตุ: โน้ต 1 · โน้ต 2 · โน้ต 3 (+2)',
+    '⚠️ ธง: ข่าวเก่า · ยืนยันต้นทางไม่ได้ · ต้นฉบับขัดกับแหล่ง · เตือน 1 (+1)',
+    '🚫 ไม่ได้ใช้: R4 (ต่ำกว่าเกณฑ์) · R5 (ต่ำกว่าเกณฑ์) · R6 (ต่ำกว่าเกณฑ์) (+3)',
+  ], '❗ ก่อน ➕ · เกินที่เหลือสรุปบรรทัดเดียว · บรรทัดคงที่ครบ');
+  const withHead = mod.renderEditorCard({ ...rec, status: 'not_ready', waitedMs: 300000 }, { jobId: JOB });
+  assert.equal(withHead.mainLines, 8, 'มีบรรทัดสถานะ = ❗/➕ เหลือน้อยลง แต่รวมยังไม่เกิน 8');
+  assert.equal(descLines(withHead)[3], '… (+18 รายการ)');
+}
+
+test('ใบที่สอง (W2): ≤ 8 บรรทัดหลัก (สเปก 8.2) — รายการเกิน = สรุป "… (+N รายการ)" · บรรทัดคงที่ไม่หาย · + ลิงก์ต้นทางไม่นับ', () => checkEditorCap());
+
+function evilEditor() {
+  return editorOf('done', {
+    corrections: [{ field: '**ด่วน**', from: '[คลิกเลย](https://evil.example/phish)', to: '<@123456789012345678>', source_url: 'javascript:alert(1)', source_name: 'แหล่ง](https://evil.example)' }],
+    additions: [{ text: '||สปอยล์|| @everyone', card: 'R1](https://evil.example)' }],
+    suggested_dimensions: ['[x](https://evil.example)'],
+    staff_notes: ['`โค้ด` ~~ขีด~~'],
+    warnings: ['<#123456789012345678>'],
+    flags: ['bad flag!', 'NEW_FLAG_X'],
+    not_used: [{ card: '**R9**', why: '[y](https://evil.example)' }],
+    model: '[m](https://evil.example)',
+  });
+}
+
+function checkEditorIsData(v) {
+  const all = `${v.description}\n${v.footer}`;
+  assert.ok(!/(^|[^\\])\[คลิกเลย\]\(https:\/\/evil/u.test(all), 'masked link จากเนื้อ editor ต้องถูก escape');
+  assert.ok(all.includes('\\[คลิกเลย\\](https://evil.example/phish)'));
+  assert.ok(all.includes('\\*\\*ด่วน\\*\\*'));
+  assert.ok(all.includes('\\<@123456789012345678\\>'));
+  assert.ok(all.includes('\\|\\|สปอยล์\\|\\|'));
+  assert.ok(all.includes('\\<#123456789012345678\\>'));
+  assert.ok(!all.includes('javascript:'), 'ลิงก์ที่ไม่ใช่ http(s) ห้ามโผล่');
+  assert.ok(all.includes('· แหล่ง\\](https://evil.example)'), 'ชื่อแหล่งที่พยายามปิดวงเล็บต้องถูก escape และไม่มีลิงก์');
+  assert.ok(!all.includes('bad flag'), 'ธงรูปแปลกไม่แสดง');
+  assert.ok(all.includes('NEW\\_FLAG\\_X'));
+  assert.ok(all.includes('\\[m\\](https://evil.example)'), 'ชื่อโมเดลท้ายใบก็เป็น DATA');
+}
+
+test('ใบที่สอง (W2) = DATA: escape markdown/mention/masked link ทุกช่อง · ลิงก์ javascript: ไม่ทำลิงก์ · ข้อมูลยาวผิดปกติอยู่ในเพดาน embed ของ Discord', () => {
+  checkEditorIsData(RC.renderEditorCard(evilEditor(), { jobId: JOB }));
+  const huge = editorOf('done', {
+    corrections: Array.from({ length: 8 }, () => ({ field: 'ฟ'.repeat(500), from: 'ก'.repeat(3000), to: 'ข'.repeat(3000), source_url: `https://e.example/${'p'.repeat(1500)}`, source_name: 'ง'.repeat(400) })),
+    suggested_dimensions: Array.from({ length: 9 }, () => 'ม'.repeat(900)),
+    staff_notes: ['น'.repeat(5000)], warnings: ['ว'.repeat(5000)], not_used: [{ card: 'R1', why: 'ย'.repeat(5000) }],
+    model: 'm'.repeat(500), used_cards: Array.from({ length: 30 }, (_, i) => `R${i}`),
+  });
+  const hv = RC.renderEditorCard(huge, { jobId: JOB, cards: cardWrite() });
+  assert.ok(hv.title.length <= 256);
+  assert.ok(hv.description.length >= 1 && hv.description.length <= 4096, `description ${hv.description.length}`);
+  assert.ok(hv.footer.length >= 1 && hv.footer.length <= 2048);
+  assert.ok(hv.footer.startsWith(`jobId: ${JOB}`), 'ท้ายใบต้องมี jobId เสมอ (กด 👍👎 หลังรีสตาร์ต)');
+  assert.ok(hv.title.length + hv.description.length + hv.footer.length <= 6000);
+  assert.ok(!/\]\(https:\/\/e\.example\/p{600}/u.test(hv.description), 'ลิงก์ยาวเกินห้ามทำเป็น markdown link');
+  assert.ok(hv.mainLines <= 8);
+});
+
+test('ใบที่สอง (W2): pickEditorRecord (ช่อง editor ระดับบน · ทนรูปใต้ cards) · researchAgentOfResult (บนสุด/ใต้ data) · editorJobIdFromMessage (หัว 4 แบบ + jobId ท้ายใบ)', () => {
+  const ed = editorDone();
+  assert.equal(RC.pickEditorRecord({ success: true, editor: ed }), ed);
+  assert.equal(RC.pickEditorRecord({ success: true, cards: { status: 'done', editor: ed } }), ed);
+  assert.equal(RC.pickEditorRecord(laneW1('done', ed))?.status, 'done');
+  for (const body of [laneW1('done'), laneB('done'), { success: true, editor: { status: 'weird' } }, { success: false, editor: ed }, { success: true, editor: [ed] }, null, 'x']) {
+    assert.equal(RC.pickEditorRecord(body), null, JSON.stringify(body)?.slice(0, 60));
+  }
+  const ra = { status: 'done', mode: 'write', editor: ed };
+  assert.equal(RC.researchAgentOfResult({ analysisResult: { researchAgent: ra } }), ra);
+  assert.equal(RC.researchAgentOfResult({ data: { analysisResult: { researchAgent: ra } } }), ra);
+  assert.equal(RC.researchAgentOfResult(resultWithResearch(ra)).editor.status, 'done');
+  for (const data of [RESULT(), {}, null, { analysisResult: { researchAgent: 'x' } }]) assert.equal(RC.researchAgentOfResult(data), null);
+  for (const title of Object.values(EDITOR_TITLES)) {
+    assert.equal(RC.editorJobIdFromMessage({ embeds: [{ title, footer: { text: `jobId: ${JOB} · ใช้การ์ด R1` } }] }), JOB, title);
+  }
+  assert.equal(RC.editorJobIdFromMessage({ embeds: [{ title: LIVE_CARD_TITLE, footer: { text: `jobId: ${JOB}` } }] }), null, 'บัตรใบแรกไม่ใช่ใบที่สอง');
+  assert.equal(RC.jobIdFromCardMessage({ embeds: [{ title: EDITOR_TITLES.done, footer: { text: `jobId: ${JOB}` } }] }), null, 'ใบที่สองไม่ถูกนับเป็นบัตรใบแรก');
+  assert.equal(RC.editorJobIdFromMessage({ embeds: [{ title: `${EDITOR_TITLES.done} ปลอม`, footer: { text: `jobId: ${JOB}` } }] }), null);
+});
+
+// ── 6.2 ตัวควบคุม: ทาง ก (ผลข่าวพก editor) ──
+async function scenarioEditorFromResult({ mod = RC, note = true } = {}) {
+  const world = makeWorld();
+  const sched = makeScheduler();
+  const api = makeApi({ now: sched.now, cards: (jobId, n) => laneW1(n >= 1 ? 'done' : 'pendingLeased') });
+  const { ctl, logs } = makeCtl({ api, sched, mod });
+  const { source, ack } = setupJob(world);
+  const done = ctl.watch({ jobId: JOB, message: source, processingMsg: ack });
+  for (let i = 0; i < 2; i++) await settleWithin(sched.step(), `รอบถามที่ ${i + 1}`);
+  const midJob = {
+    cardGets: api.cardGets().length,
+    factCards: repliesTitled(source, LIVE_CARD_TITLE).length,
+    editorCards: repliesTitled(source, EDITOR_TITLES.done).length,
+    pending: sched.pending(),
+  };
+  sched.advance(5 * SEC);
+  const noted = note
+    ? ctl.noteJobResult(JOB, resultWithResearch({ status: 'done', mode: 'write', cardsCount: 3, flags: ['STALE_NEWS'], editor: editorDone() }))
+    : null;
+  const resultIds = await postResultLikeBot(world, source, ack);
+  const endedAt = sched.now();
+  await settleWithin(ctl.jobEnded(JOB, {}), 'jobEnded');
+  await drain(sched, 'หลังจบงาน');
+  const reason = await settleWithin(done, 'การตามบัตรจบ');
+  return { world, api, sched, ctl, source, ack, logs, noted, resultIds, endedAt, midJob, reason };
+}
+
+function checkEditorFromResult(r) {
+  assert.equal(r.noted, 'done', 'noteJobResult จำ editor จากผลข่าว (ทาง ก)');
+  assert.deepEqual(r.midJob, { cardGets: 2, factCards: 1, editorCards: 0, pending: 1 }, 'ระหว่างรองาน: บัตรใบแรกขึ้นตามเดิมแล้วจอด (ไม่ถามเพิ่ม)');
+  assert.deepEqual(replyTitles(r.source), [LIVE_CARD_TITLE, '[A1] ลุงสามล้อ', '[A2] ลุงสามล้อ', '📄 เขียนจากเนื้อต้นฉบับอย่างเดียว', EDITOR_TITLES.done],
+    'ใบที่สองขึ้นต่อท้ายผลข่าว (ใต้ข้อความพนักงานเดิม)');
+  const editorReply = r.source.replies.at(-1);
+  assert.deepEqual(editorReply.allowedMentions, { parse: [], repliedUser: false }, 'ใบที่สองห้าม mention ใคร');
+  const data = editorReply.embeds[0].data;
+  checkEditorDoneView({ ...data, footer: data.footer.text, reactable: true, mainLines: 7 });
+  const editorMsg = messageTitled(r.world, r.source.id, EDITOR_TITLES.done);
+  const cardMsg = messageTitled(r.world, r.source.id, LIVE_CARD_TITLE);
+  assert.deepEqual(editorMsg.reactions, ['👍', '👎'], 'done = ติด 👍/👎 แบบใบแรก');
+  const writes = r.api.postedWrites();
+  assert.equal(writes.length, 3, 'จดบัตร → จดผลข่าว → จดใบที่สอง');
+  assert.deepEqual(writes[2].body, {
+    jobId: JOB, channelId: 'CH1', sourceMessageId: r.source.id, processingMsgId: r.ack.id, resultMsgIds: r.resultIds,
+    postedAt: new Date(r.endedAt).toISOString(), caseId: '05268', researchCardMsgId: cardMsg.id, editorMsgId: editorMsg.id,
+  }, 'bot-posted มี editorMsgId (กันโพสต์ซ้ำหลังรีสตาร์ต) + ช่องเดิมครบ');
+  const postedGets = r.api.calls.filter((c) => c.method === 'get' && c.url === `${API}/api/bot/posted?jobId=${JOB}`);
+  assert.equal(postedGets.length, 2, 'เช็ค bot-posted ก่อนโพสต์ทั้งสองใบ');
+  assert.ok(r.api.calls.indexOf(postedGets[1]) < r.api.calls.indexOf(writes[2]));
+  assert.equal(r.api.cardGets().length, 2, 'ทาง ก: ได้ใบที่สองจากผลข่าว — หลังจบงานไม่ต้องถามการ์ดเพิ่ม');
+  assert.equal(r.reason, 'card');
+  assert.equal(r.sched.pending(), 0, 'จบแล้วไม่ทิ้ง timer');
+  assert.ok(r.logs.some((l) => l.includes(`โพสต์ใบที่สอง (ผลบรรณาธิการ) job ${JOB.slice(0, 12)} · done · 7 บรรทัด`)));
+}
+
+test('ใบที่สอง (W2) ทาง ก: ผลข่าวพก analysisResult.researchAgent.editor → noteJobResult → งานจบโพสต์ใบที่สองต่อท้ายผลข่าว + 👍👎 + bot-posted.editorMsgId · ไม่ถามการ์ดเพิ่ม', async () => {
+  checkEditorFromResult(await scenarioEditorFromResult());
+});
+
+// ── 6.3 ตัวควบคุม: ทาง ข (ช่อง editor ของคำตอบการ์ด · ถามต่อในหาง) ──
+async function scenarioEditorByPolling({ mod = RC, editorAt = 4 } = {}) {
+  const world = makeWorld();
+  const sched = makeScheduler();
+  const api = makeApi({ now: sched.now, cards: (jobId, n) => laneW1(n >= 1 ? 'done' : 'pendingLeased', n >= editorAt ? editorDone() : null) });
+  const { ctl } = makeCtl({ api, sched, mod });
+  const { source, ack } = setupJob(world);
+  const done = ctl.watch({ jobId: JOB, message: source, processingMsg: ack });
+  for (let i = 0; i < 2; i++) await settleWithin(sched.step(), `รอบถามที่ ${i + 1}`);
+  sched.advance(5 * SEC);
+  const noted = ctl.noteJobResult(JOB, resultWithResearch({ status: 'done', mode: 'write', cardsCount: 3, flags: [] }));
+  await postResultLikeBot(world, source, ack);
+  const endedAt = sched.now();
+  await settleWithin(ctl.jobEnded(JOB, {}), 'jobEnded');
+  await drain(sched, 'หาง');
+  return { world, api, sched, source, noted, endedAt, reason: await settleWithin(done, 'การตามบัตรจบ') };
+}
+
+function checkEditorByPolling(r) {
+  assert.equal(r.noted, null, 'ผลข่าวโหมด write ที่ไม่มี editor = ไม่มีอะไรจำ (ไปทางสำรอง)');
+  const after = r.api.cardGets().map((c) => c.at - r.endedAt).filter((d) => d >= 0);
+  assert.deepEqual(after, [0, 20 * SEC, 40 * SEC], 'ทาง ข: ถามทันทีตอนจบงาน แล้วทุก 20 วิจนช่อง editor มา (คำตอบที่ 5)');
+  assert.equal(repliesTitled(r.source, EDITOR_TITLES.done).length, 1, 'ใบที่สองขึ้น 1 ครั้ง');
+  assert.equal(repliesTitled(r.source, LIVE_CARD_TITLE).length, 1, 'บัตรใบแรกไม่ซ้ำ');
+  assert.equal(r.reason, 'card');
+  assert.equal(r.sched.pending(), 0);
+}
+
+test('ใบที่สอง (W2) ทาง ข: ผลข่าวไม่มี editor (โหมด write) → ถามการ์ดต่อทุก 20 วิหลังจบงานจนช่อง editor มา → โพสต์ใบที่สองแล้วเลิกตาม', async () => {
+  checkEditorByPolling(await scenarioEditorByPolling());
+});
+
+test('ใบที่สอง (W2) ทาง ข หมดหาง: โหมด write แต่ editor ไม่มาเลย → ถามไม่เกิน 15 นาทีหลังจบงานแล้วเลิกเงียบ · บัตรใบแรกยังอยู่ ไม่มีใบที่สอง', async () => {
+  const r = await scenarioEditorByPolling({ editorAt: Infinity });
+  const after = r.api.cardGets().map((c) => c.at - r.endedAt).filter((d) => d >= 0);
+  assert.equal(after[0], 0);
+  assert.ok(after.every((d) => d < 15 * MIN), 'ถามได้ไม่เกิน 15 นาทีหลังจบงาน');
+  assert.ok(after.at(-1) > 14 * MIN, 'ถามจนเกือบหมดหางจริง');
+  assert.equal(after.length, 45, 'ถามทันที 1 + ทุก 20 วิอีก 44 รอบ (20s…880s)');
+  assert.equal(r.reason, 'tail_done');
+  assert.equal(repliesTitled(r.source, EDITOR_TITLES.done).length, 0);
+  assert.equal(repliesTitled(r.source, LIVE_CARD_TITLE).length, 1);
+  assert.equal(r.sched.pending(), 0);
+});
+
+test('ใบที่สอง (W2) not_ready ก่อนบัตรมา: ช่อง editor ระหว่างรองาน → ⏳ ขึ้นทันที (ไม่มี 👍👎) · ถามต่อจนบัตรใบแรกมา (การ์ดบัตรแบบเดิมเมื่อมา) · งานจบไม่โพสต์ซ้ำ', async () => {
+  const notReady = editorOf('not_ready', { waitedMs: 300000, reason: 'รอการ์ดครบ 5 นาที' });
+  const world = makeWorld();
+  const sched = makeScheduler();
+  const api = makeApi({ now: sched.now, cards: (jobId, n) => laneW1(n >= 3 ? 'done' : 'pendingLeased', n >= 1 ? notReady : null) });
+  const { ctl } = makeCtl({ api, sched });
+  const { source, ack } = setupJob(world);
+  const done = ctl.watch({ jobId: JOB, message: source, processingMsg: ack });
+  await settleWithin(sched.step(), 'รอบ 1');
+  await settleWithin(sched.step(), 'รอบ 2 (editor not_ready)');
+  const afterNotReady = replyTitles(source);
+  await settleWithin(sched.step(), 'รอบ 3');
+  await settleWithin(sched.step(), 'รอบ 4 (บัตรมา)');
+  sched.advance(5 * SEC);
+  assert.equal(ctl.noteJobResult(JOB, resultWithResearch({ status: 'not_ready', mode: 'write', cardsCount: 0, flags: [], editor: notReady })), 'not_ready');
+  await postResultLikeBot(world, source, ack);
+  await settleWithin(ctl.jobEnded(JOB, {}), 'jobEnded');
+  await drain(sched, 'หาง');
+  assert.equal(await settleWithin(done, 'จบ'), 'card');
+  assert.deepEqual(afterNotReady, [EDITOR_TITLES.not_ready], '⏳ ขึ้นทันทีที่เห็นช่อง editor (ก่อนบัตรใบแรก)');
+  assert.deepEqual(replyTitles(source), [EDITOR_TITLES.not_ready, LIVE_CARD_TITLE, '[A1] ลุงสามล้อ', '[A2] ลุงสามล้อ', '📄 เขียนจากเนื้อต้นฉบับอย่างเดียว']);
+  assert.deepEqual(messageTitled(world, source.id, EDITOR_TITLES.not_ready).reactions, [], 'not_ready ไม่มีอะไรให้คะแนน');
+  assert.equal(api.cardGets().length, 4, 'ได้ครบทั้งสองใบแล้ว งานจบไม่ถามเพิ่ม');
+  assert.equal(sched.pending(), 0);
+});
+
+async function scenarioEditorDedupe({ mod = RC } = {}) {
+  const world = makeWorld();
+  const sched = makeScheduler();
+  const api = makeApi({ now: sched.now, cards: (jobId, n) => laneW1(n >= 1 ? 'done' : 'pendingLeased') });
+  api.posted.set(JOB, { jobId: JOB, channelId: 'CH1', editorMsgId: '1999999999999999998' });
+  const { ctl, logs } = makeCtl({ api, sched, mod });
+  const { source, ack } = setupJob(world);
+  const done = ctl.watch({ jobId: JOB, message: source, processingMsg: ack });
+  for (let i = 0; i < 2; i++) await settleWithin(sched.step(), `รอบ ${i + 1}`);
+  ctl.noteJobResult(JOB, resultWithResearch({ status: 'done', mode: 'write', cardsCount: 3, flags: [], editor: editorDone() }));
+  await postResultLikeBot(world, source, ack);
+  await settleWithin(ctl.jobEnded(JOB, {}), 'jobEnded');
+  await drain(sched, 'หาง');
+  return { world, api, sched, source, logs, reason: await settleWithin(done, 'จบ') };
+}
+
+function checkEditorDedupe(r) {
+  assert.equal(repliesTitled(r.source, EDITOR_TITLES.done).length, 0, 'bot-posted มี editorMsgId แล้ว (instance อื่น/ก่อนรีสตาร์ต) → ห้ามโพสต์ใบที่สองซ้ำ');
+  assert.equal(r.api.posted.get(JOB).editorMsgId, '1999999999999999998');
+  assert.ok(r.logs.some((l) => l.includes('ใบที่สอง (ผลบรรณาธิการ) ของ job') && l.includes('โพสต์ไว้แล้ว')));
+  assert.equal(r.api.cardGets().length, 2, 'รู้ว่าโพสต์แล้ว = เลิกตาม ไม่ถามต่อในหาง');
+  assert.equal(r.reason, 'card');
+  assert.equal(r.sched.pending(), 0);
+}
+
+test('ใบที่สอง (W2) กันโพสต์ซ้ำ: bot-posted.editorMsgId มีแล้ว → ไม่โพสต์ซ้ำ ไม่ถามต่อ · เว็บปิดสวิตช์ (enabled:false) แม้มีช่อง editor ค้าง → ไม่โพสต์', async () => {
+  checkEditorDedupe(await scenarioEditorDedupe());
+  const world = makeWorld();
+  const sched = makeScheduler();
+  const api = makeApi({ now: sched.now, cards: () => ({ ...laneW1('done', editorDone()), enabled: false }) });
+  const { ctl } = makeCtl({ api, sched });
+  const { source, ack } = setupJob(world);
+  const done = ctl.watch({ jobId: JOB, message: source, processingMsg: ack });
+  await settleWithin(sched.step(), 'รอบแรก (เว็บปิด)');
+  assert.equal(await settleWithin(done, 'จบ'), 'disabled');
+  assert.equal(source.replies.length, 0, 'สวิตช์เว็บเป็นตัวหลัก — ไม่โพสต์ทั้งสองใบ');
+});
+
+// ── 6.4 👍/👎 บนใบที่สอง → feedback เดิมติด kind:'editor' ──
+async function scenarioEditorReactions({ mod = RC } = {}) {
+  const r = await scenarioEditorFromResult({ mod });
+  const editorMsg = messageTitled(r.world, r.source.id, EDITOR_TITLES.done);
+  const cardMsg = messageTitled(r.world, r.source.id, LIVE_CARD_TITLE);
+  const human = { id: STAFF_ID, bot: false };
+  const react = (ctl, emoji, message, label) => settleWithin(ctl.handleReaction({ emoji: { name: emoji }, message }, human), label);
+  const onEditor = await react(r.ctl, '👍', editorMsg, '👍 ใบที่สอง');
+  const onCard = await react(r.ctl, '👎', cardMsg, '👎 ใบแรก');
+  const fresh = makeCtl({ api: makeApi(), mod });
+  const partialMsg = { id: editorMsg.id, partial: true, fetch: async () => editorMsg };
+  const restarted = await settleWithin(fresh.ctl.handleReaction({ emoji: { name: '👎' }, partial: true, message: partialMsg, fetch: async () => ({ message: partialMsg }) }, human), 'หลังรีสตาร์ต');
+  return { onEditor, onCard, restarted, bodies: r.api.feedbackPosts().map((c) => c.body), freshBodies: fresh.api.feedbackPosts().map((c) => c.body) };
+}
+
+function checkEditorReactions(x) {
+  assert.deepEqual(x.onEditor, { ok: true, jobId: JOB, vote: 'up', userId: `discord-${STAFF_ID}`, kind: 'editor' });
+  assert.deepEqual(x.onCard, { ok: true, jobId: JOB, vote: 'down', userId: `discord-${STAFF_ID}` }, 'ใบแรกผลเดิมทุกช่อง (ไม่มี kind)');
+  assert.deepEqual(x.bodies, [
+    { jobId: JOB, cardId: 'all', vote: 'up', userId: `discord-${STAFF_ID}`, kind: 'editor' },
+    { jobId: JOB, cardId: 'all', vote: 'down', userId: `discord-${STAFF_ID}` },
+  ], 'feedback ของใบที่สองลง /api/research/feedback เดิม (ช่อง research-cards.feedback) ติดป้าย kind:editor · ใบแรก body เดิม');
+  assert.deepEqual(x.restarted, { ok: true, jobId: JOB, vote: 'down', userId: `discord-${STAFF_ID}`, kind: 'editor' }, 'หลังรีสตาร์ต: อ่านหัว+ท้ายใบที่สองได้');
+  assert.deepEqual(x.freshBodies, [{ jobId: JOB, cardId: 'all', vote: 'down', userId: `discord-${STAFF_ID}`, kind: 'editor' }]);
+}
+
+test('ใบที่สอง (W2) 👍/👎 → /api/research/feedback เดิม ติด kind:"editor" (ไม่ทับคะแนนใบแรก) · ใบแรก body เดิม · หลังรีสตาร์ตรู้จากหัว+ท้ายใบ', async () => {
+  checkEditorReactions(await scenarioEditorReactions());
+});
+
+// ── 6.5 ต่อสายจริง index.js (+ route /api/bot/posted ตัวจริง) ──
+async function scenarioBotWrite({ botSrc = BOT_SRC, cardSrc = CARD_SRC, routeSrc = null } = {}) {
+  return runBotScenario({
+    botSrc, cardSrc, routeSrc, env: ON,
+    cards: (jobId, n) => laneW1(n >= 1 ? 'done' : 'pendingQueued'),
+    statuses: jobWithResearch({ status: 'done', mode: 'write', cardsCount: 3, flags: ['STALE_NEWS'], editor: editorDone() }),
+  });
+}
+
+function checkBotWrite(r) {
+  const titles = r.source.replies.map((p) => (typeof p === 'string' ? 'ack' : String(p.embeds?.[0]?.data?.title || '')));
+  assert.deepEqual(titles, [
+    'ack', LIVE_CARD_TITLE, '[[A1] เรื่องเล่าอบอุ่น] ลุงสามล้อ', '[[A2] ช่วยเหลือกัน] ลุงสามล้อ', '📄 เขียนจากเนื้อต้นฉบับอย่างเดียว', EDITOR_TITLES.done,
+  ], 'โหมด write: บัตรใบแรก (ไม่มีป้ายทดลอง) ระหว่างรองาน → ผลข่าวครบ → ใบที่สองต่อท้าย');
+  const editorMsg = messageTitled(r.world, r.source.id, EDITOR_TITLES.done);
+  assert.ok(editorMsg, 'ต้องมีใบที่สองใต้ข้อความพนักงาน');
+  assert.deepEqual(editorMsg.reactions, ['👍', '👎']);
+  const row = r.store ? r.store.doc(JOB) : r.api.posted.get(JOB);
+  assert.equal(row.editorMsgId, editorMsg.id, 'bot-posted ต้องมี editorMsgId');
+  assert.equal(row.caseId, '05268');
+  assert.equal(row.resultMsgIds.length, 3, 'ข้อความผลไม่รวมใบที่สอง');
+  assert.ok(!row.resultMsgIds.includes(editorMsg.id));
+  assert.equal(r.api.cardGets().length, 2, 'ทาง ก ผ่าน index.js จริง — ไม่ถามการ์ดหลังจบงาน');
+  assert.equal(r.pending, 0, 'จบแล้วไม่ทิ้ง timer');
+}
+
+test('ใบที่สอง (W2) เส้นทางจริง index.js: pollJobUntilDone → noteJobResult(ผลข่าวจากคิว) → งานจบโพสต์ใบที่สอง · bot-posted.editorMsgId', async () => {
+  checkBotWrite(await scenarioBotWrite());
+});
+
+test('ใบที่สอง (W2) ต่อสายถึง route /api/bot/posted ตัวจริง: editorMsgId ผ่าน route → store เลน B (ปลอม) · route ตอบ 200 ทุกครั้ง', async () => {
+  const r = await scenarioBotWrite({ routeSrc: ROUTE_SRC });
+  checkBotWrite(r);
+  assert.deepEqual(r.api.routeResponses.map((x) => [x.method, x.status]), [['get', 200], ['post', 200], ['post', 200], ['get', 200], ['post', 200]],
+    'บัตร: เช็ค→จด · ผลข่าว: จด · ใบที่สอง: เช็ค→จด');
+  assert.equal(r.store.doc(JOB).revision, 3);
+});
+
+test('route /api/bot/posted (W2): editorMsgId ผ่านด่าน id เดียวกับช่องอื่น (trim) แล้วส่งต่อ saveBotPosted · ผิดรูป = 400 ไม่โหลด store · ไม่ส่ง = คำขอเดิม', async () => {
+  const r = loadRoute();
+  const ok = await r.POST(routeReq({ botSecret: 'S3CRET', body: { jobId: JOB, channelId: 'CH1', editorMsgId: ' E1 ' } }));
+  assert.equal(ok.status, 200);
+  assert.deepEqual(r.store.calls, [['load'], ['save', { jobId: JOB, channelId: 'CH1', editorMsgId: 'E1' }]]);
+  assert.equal(ok.body.item.editorMsgId, 'E1');
+  const r2 = loadRoute();
+  for (const bad of [{ x: 1 }, '', 'bad id!', 'x'.repeat(101), null, 5]) {
+    const res = await r2.POST(routeReq({ botSecret: 'S3CRET', body: { jobId: JOB, channelId: 'CH1', editorMsgId: bad } }));
+    assert.equal(res.status, 400, JSON.stringify(bad));
+    assert.equal(res.body.errorType, 'VALIDATION_ERROR');
+  }
+  assert.deepEqual(r2.store.calls, [], 'ผิดรูป = ไม่แตะ store');
+});
+
+// ── 6.6 byte-parity โหมดอื่น (สวิตช์เปิด · shadow/assist) ──
+// ลายนิ้วมือจับจากโค้ดเฟส 1 (827336d7 · ก่อนแก้ W2 · 1 ต.ค. 69) ด้วยตัวช่วยชุดนี้ทุกตัว — รันซ้ำ 2 รอบได้ค่าเดิม (นาฬิกา/id เสมือน)
+const PHASE1_FINGERPRINTS = Object.freeze({
+  'shadow normal': '73fb985ae366796c3af12f35a917f5dba4978bd0d6f26f56bc1fa5999741a10f',
+  'shadow resume': '59888fe0340ba6b8e3a7d0c8d6b45d41b697241e7ac24aa90537abb8219c2fc9',
+  'shadow late': '8b2efb2e9b16c49138ef370e0a17b220626eb8047a645d9755c8422c0fe2c658',
+  'assist normal': 'a88590c8cc1592d30c56b4f003b3b505b329554ecd0cbba4a63776bd99826dee',
+  'assist resume': 'f31ff9764647f85d44d2c1217871018e30b03bac7ff36acdd9925145ae4a02fb',
+  'assist late': '8af62d45527afc22da2bcbffdaafa3a11e38655f25b37e0b0baefc6eaddd062b',
+});
+
+function botFingerprint(r) {
+  return createHash('sha256').update(JSON.stringify({
+    transcript: r.transcript, logs: r.logs, delays: r.delays, clientOpts: r.clientOpts, handlerCounts: r.handlerCounts, pending: r.pending,
+  })).digest('hex');
+}
+
+// คำตอบจริงของเลน B ในโหมด shadow/assist (mode ทั้งคำตอบและแถวการ์ด) · ผลข่าวมี researchAgent ของโหมดนั้น (ไม่มี editor)
+const laneBMode = (mode, doneAt = 1, waiting = 'pendingQueued') => (jobId, n) => {
+  const body = laneB(n >= doneAt ? 'done' : waiting);
+  body.mode = mode;
+  if (body.cards) body.cards.mode = mode;
+  return body;
+};
+
+function nonWriteScenarios() {
+  const out = [];
+  for (const mode of ['shadow', 'assist']) {
+    for (const run of ['normal', 'resume']) {
+      out.push([`${mode} ${run}`, { env: ON, mode: run, cards: laneBMode(mode), statuses: jobWithResearch({ status: 'done', mode, cardsCount: 1, flags: ['ORIGIN_NOT_FOUND'] }) }]);
+    }
+    out.push([`${mode} late`, { env: ON, cards: laneBMode(mode, 4, 'pendingLeased'), statuses: jobWithResearch({ status: 'not_ready', mode, cardsCount: 0, flags: [] }) }]);
+  }
+  return out;
+}
+
+async function nonWriteFingerprints({ cardSrc = CARD_SRC, botSrc = BOT_SRC } = {}) {
+  const out = {};
+  for (const [name, opts] of nonWriteScenarios()) out[name] = botFingerprint(await runBotScenario({ ...opts, cardSrc, botSrc }));
+  return out;
+}
+
+test('byte-parity (W2 · สวิตช์เปิด · ไม่ใช่โหมด write): ลายนิ้วมือบอทโหมด shadow/assist ตรงกับโค้ดเฟส 1 ทุกไบต์ — ทางปกติ/กู้หลังรีสตาร์ต/การ์ดมาช้า', async () => {
+  const current = await nonWriteFingerprints();
+  assert.deepEqual(current, { ...PHASE1_FINGERPRINTS }, 'โหมดอื่นต้องเหมือนเฟส 1 ทุกไบต์ (ข้อความ · HTTP · timer · log)');
+});
+
+test('byte-parity (W2): จุดเรียก noteJobResult ใน index.js ไม่เปลี่ยนอะไรเลยเมื่อไม่ใช่โหมด write — บันทึกเท่ากับฉบับถอดจุดเรียก W2 ทุกไบต์', async () => {
+  for (const [name, opts] of nonWriteScenarios()) {
+    const current = await runBotScenario(opts);
+    const legacy = await runBotScenario({ ...opts, botSrc: stripW2(BOT_SRC) });
+    checkParity(current, legacy, name);
+    assert.equal(repliesTitled(current.source, EDITOR_TITLES.done).length, 0, `${name}: ไม่มีใบที่สอง`);
+  }
+});
+
+// ── 6.7 กลายพันธุ์ของ W2 (ต้องแดงจริง · ข้อยืนยันชุดเดียวกับเทสหลัก) ──
+test('mutation MW1: noteJobResult ไม่จำ editor จากผลข่าว → ทาง ก แดง (ต้องถามจนหมดหาง ไม่มีใบที่สอง)', async () => {
+  const mod = cardMutant('    noteJobResult(jobId, data) {\n      if (!enabled) return null;', '    noteJobResult(jobId, data) {\n      return null;');
+  const r = await scenarioEditorFromResult({ mod });
+  assert.equal(r.reason, 'tail_done', 'กลายพันธุ์ต้องทำให้ถามจนหมดหางจริง');
+  assert.throws(() => checkEditorFromResult(r));
+});
+
+test('mutation MW2: เลิกถามทันทีหลังงานจบแม้ยังรอใบที่สอง (needsPoll ไม่ดู editor) → ทาง ข แดง', async () => {
+  const mod = cardMutant('    return !state.cardMsgId || (state.jobEndedAt !== null && wantsEditor(state));', '    return !state.cardMsgId;');
+  const r = await scenarioEditorByPolling({ mod });
+  assert.equal(repliesTitled(r.source, EDITOR_TITLES.done).length, 0, 'กลายพันธุ์ต้องทำให้ไม่มีใบที่สองจริง');
+  assert.throws(() => checkEditorByPolling(r), /ทาง ข/u);
+});
+
+test('mutation MW3: ไม่เช็ค bot-posted.editorMsgId ก่อนโพสต์ใบที่สอง → โพสต์ซ้ำข้าม instance → เทสกันซ้ำแดง', async () => {
+  const mod = cardMutant('    if (priorEditor) {', '    if (false) {');
+  const r = await scenarioEditorDedupe({ mod });
+  assert.throws(() => checkEditorDedupe(r), /ซ้ำ/u);
+});
+
+test('mutation MW4: 👍/👎 บนใบที่สองไม่ติด kind:"editor" → คะแนนใบที่สองทับใบแรก → เทส feedback แดง', async () => {
+  const mod = cardMutant("    if (editorJobId) body.kind = 'editor';\n", '');
+  const x = await scenarioEditorReactions({ mod });
+  assert.throws(() => checkEditorReactions(x), /kind/u);
+});
+
+test('mutation MW5: เพดานบรรทัดหลักของใบที่สอง 8 → 20 → เทส ≤ 8 บรรทัดแดง', () => {
+  const mod = cardMutant('const EDITOR_MAIN_LINES = 8;', 'const EDITOR_MAIN_LINES = 20;');
+  assert.throws(() => checkEditorCap(mod), /ไม่เกิน 8/u);
+});
+
+test('mutation MW6: ใบที่สองไม่ปิด mention → เทสทาง ก แดง', async () => {
+  const from = '    const sent = await replyUnderSource(state, { embeds: [embed], allowedMentions: { parse: [], repliedUser: false } });\n    if (!sent) return false;\n    state.editorMsgId = String(sent.id);';
+  const mod = cardMutant(from, '    const sent = await replyUnderSource(state, { embeds: [embed] });\n    if (!sent) return false;\n    state.editorMsgId = String(sent.id);');
+  const r = await scenarioEditorFromResult({ mod });
+  assert.throws(() => checkEditorFromResult(r), /mention/u);
+});
+
+test('mutation MW7: index.js ไม่ส่งผลข่าวให้ noteJobResult → เส้นทางจริงโหมด write แดง (ไม่มีใบที่สอง)', async () => {
+  const botSrc = mutate(BOT_SRC, '    research.noteJobResult(jobId, data);', '');
+  const r = await scenarioBotWrite({ botSrc });
+  assert.throws(() => checkBotWrite(r));
+});
+
+test('mutation MW8: route /api/bot/posted ไม่ส่ง editorMsgId ต่อ → แถว bot-posted ไม่มีใบที่สอง → เทสต่อสายถึง route แดง', async () => {
+  const routeSrc = mutate(ROUTE_SRC, "const EDITOR_ID_KEYS = ['editorMsgId'];", 'const EDITOR_ID_KEYS = [];');
+  const r = await scenarioBotWrite({ routeSrc });
+  assert.equal(r.store.doc(JOB).editorMsgId, undefined, 'กลายพันธุ์ต้องทำให้แถวไม่มี editorMsgId จริง');
+  assert.throws(() => checkBotWrite(r), /editorMsgId/u);
+});
+
+test('mutation MW9: ถือว่าทุกคำตอบเป็นโหมด write → shadow/assist ถามต่อในหางหาใบที่สอง → ลายนิ้วมือเฟส 1 แดง', async () => {
+  const cardSrc = mutate(CARD_SRC, "writeMode: str(body?.mode) === 'write' }", 'writeMode: true }');
+  const current = await nonWriteFingerprints({ cardSrc });
+  assert.notDeepEqual(current, { ...PHASE1_FINGERPRINTS }, 'กลายพันธุ์ต้องเปลี่ยนพฤติกรรมโหมดอื่นจริง');
+  assert.throws(() => assert.deepEqual(current, { ...PHASE1_FINGERPRINTS }));
+});
+
+// ── 6.8 กันถามสองสาย (W2): pollAgain หลังงานจบ + รอบถามที่ timer ยิงแล้วแต่ยังต่อคิวหลัง afterJob ──
+//   afterJob ค้างรอคำตอบการ์ด → timer รอบถามยิง (รอบนั้นต่อคิวหลัง afterJob) → afterJob ได้บัตร (โหมด write ยังรอใบที่สอง) → pollAgain
+//   → รอบที่ต่อคิวรันแล้ว schedule อีก → ต้องเหลือ timer ตัวเดียว (schedule ล้าง timer เดิม) ไม่ใช่ถามสองสายจนหมดหาง
+async function scenarioQueuedTickRace({ mod = RC } = {}) {
+  const world = makeWorld();
+  const sched = makeScheduler();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const api = makeApi({ now: sched.now, cards: (jobId, n) => (n === 0 ? gate.then(() => ({ data: laneW1('done') })) : laneW1('done')) });
+  const { ctl } = makeCtl({ api, sched, mod });
+  const { source, ack } = setupJob(world);
+  const done = ctl.watch({ jobId: JOB, message: source, processingMsg: ack });
+  await postResultLikeBot(world, source, ack);
+  const ended = ctl.jobEnded(JOB, {});
+  for (let i = 0; i < 10; i++) await flush();
+  await settleWithin(sched.step(), 'timer รอบถามยิงระหว่าง afterJob ค้าง');
+  release();
+  await settleWithin(ended, 'afterJob');
+  for (let i = 0; i < 20; i++) await flush();
+  const pendingAfterRace = sched.pending();
+  await drain(sched, 'หาง');
+  return { api, source, pendingAfterRace, reason: await settleWithin(done, 'จบ') };
+}
+
+function checkSingleChain(r) {
+  assert.equal(r.pendingAfterRace, 1, 'หลัง race ต้องมี timer รอบถามตัวเดียว');
+  assert.ok(r.api.cardGets().length <= 47, `ถามสายเดียวจนหมดหาง (ได้ ${r.api.cardGets().length} ครั้ง — สองสายจะราว 90)`);
+  assert.equal(r.reason, 'tail_done');
+  assert.equal(repliesTitled(r.source, LIVE_CARD_TITLE).length, 1, 'บัตรใบแรกขึ้นครั้งเดียว');
+}
+
+test('ใบที่สอง (W2) กันถามสองสาย: รอบถามที่ต่อคิวหลัง afterJob + pollAgain → timer เหลือตัวเดียว (schedule ล้าง timer เดิม)', async () => {
+  checkSingleChain(await scenarioQueuedTickRace());
+});
+
+test('mutation MW10: schedule ไม่ล้าง timer เดิม → ถามสองสายหลัง race → เทสกันถามสองสายแดง', async () => {
+  const from = '    if (state.timer) {\n      try { clearTimer(state.timer); } catch { /* timer หายไปแล้ว */ }\n      state.timer = null;\n    }\n    state.timer = setTimer(() => {';
+  const mod = cardMutant(from, '    state.timer = setTimer(() => {');
+  const r = await scenarioQueuedTickRace({ mod });
+  assert.equal(r.pendingAfterRace, 2, 'กลายพันธุ์ต้องทำให้มี timer ซ้อนจริง');
+  assert.throws(() => checkSingleChain(r), /ตัวเดียว/u);
 });

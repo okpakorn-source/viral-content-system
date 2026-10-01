@@ -94,7 +94,13 @@ function assertLanesAgree(bMod, records) {
     const { doc, schemaErrors, gateChanges } = bMod.buildResearchCardsDoc(structuredClone(rec), { jobId: JOB, mode: rec.mode, nowIso: NOW_ISO });
     assert.deepEqual(schemaErrors, [], `${label}: B ต้องรับระเบียน A โดยไม่มี schema error`);
     assert.deepEqual(gateChanges, [], `${label}: B ต้องไม่บีบ/ตัดสิ่งที่ A ตัดสินแล้ว ${JSON.stringify(gateChanges)}`);
-    assert.deepEqual(Object.keys(doc).sort(), [...RECORD_KEYS].sort(), `${label}: เอกสาร B มีช่องตรงสัญญา 2.2 ของ A`);
+    // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3 · เลน W2): ช่อง optional ของ A (OPTIONAL_RECORD_KEYS = suggested_dimensions)
+    //   B ที่คงช่องนี้ (หลัง W1 แก้ cardsSchema.js) ต้องเก็บค่าตรงกับ A · B รุ่นเฟส 1 ที่ยังไม่มีช่องนี้ = ยังผ่าน (validator ของ A รับระเบียนที่ไม่มี)
+    //   → ข้อสอบเดียวใช้ได้ทั้งก่อนและหลังรวมเลน · ช่องสัญญา 2.2 เดิมยังเข้มเท่าเดิมทุกช่อง
+    //   ของเดิม: assert.deepEqual(Object.keys(doc).sort(), [...RECORD_KEYS].sort(), `${label}: เอกสาร B มีช่องตรงสัญญา 2.2 ของ A`);
+    const optional = Array.isArray(laneA.schema.OPTIONAL_RECORD_KEYS) ? laneA.schema.OPTIONAL_RECORD_KEYS : [];
+    assert.deepEqual(Object.keys(doc).filter((k) => !optional.includes(k)).sort(), [...RECORD_KEYS].sort(), `${label}: เอกสาร B มีช่องตรงสัญญา 2.2 ของ A`);
+    for (const key of optional) if (key in doc) assert.deepEqual(doc[key], rec[key], `${label}: ช่อง optional ${key} ต้องตรงกัน`);
     for (const key of RECORD_KEYS) {
       if (key === 'flags') assert.deepEqual([...doc.flags].sort(), [...rec.flags].sort(), `${label}: ธงตรงกัน`);
       else assert.deepEqual(doc[key], rec[key], `${label}: ช่อง ${key} ต้องตรงกัน`);
@@ -149,6 +155,21 @@ function assertHeartbeatAgree(storeMod, worker) {
 test('ข้ามเลน A→B: fixture แล็บ out/out2 (+ระเบียน skipped/failed) ผ่าน runGate+buildCardRecord ของ A แล้ว buildResearchCardsDoc ของ B ต้อง gateChanges ว่างและเก็บตรงทุกช่อง', { skip: SKIP }, (t) => {
   t.diagnostic(`ไฟล์เลน A จาก: ${LANE_A_ROOT}`);
   assertLanesAgree(bSchema, laneARecords());
+});
+
+// ★ 1 ต.ค. 69 (SPEC-v3 สัญญา 8.3 · เลน W2): จำลอง B หลังรวม W1 (คงช่อง suggested_dimensions) — ค่าตรง = ผ่าน · B แต่งค่าเอง = แดง
+test('ข้ามเลน A→B (W2 · สัญญา 8.3): suggested_dimensions ของ A — B ที่คงช่องนี้ต้องเก็บตรงทุกค่า · ค่าเพี้ยน = แดง', { skip: SKIP }, () => {
+  const records = laneARecords();
+  assert.ok(records.every(([, rec]) => Array.isArray(rec.suggested_dimensions)), 'ระเบียน A มี suggested_dimensions เสมอ (ไม่มี = [])');
+  const keeps = (transform) => ({
+    buildResearchCardsDoc: (rec, ctx) => {
+      const out = bSchema.buildResearchCardsDoc(rec, ctx);
+      out.doc.suggested_dimensions = transform(rec.suggested_dimensions);
+      return out;
+    },
+  });
+  assertLanesAgree(keeps((v) => structuredClone(v)), records);
+  assert.throws(() => assertLanesAgree(keeps(() => ['มุมที่ B แต่งเอง']), records), /optional/u);
 });
 
 test('ข้ามเลน A→B: เกณฑ์ด่านของ A เข้ม ≥ B (หลักฐาน ≥20 ตัว · ความมั่นใจ ≥0.6 · การ์ด ≤8) · เพจเราเองของ B เป็นส่วนย่อยของ A', { skip: SKIP }, () => {

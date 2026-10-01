@@ -8,10 +8,14 @@
  * แคช (กติกา "prefix คงที่ก่อน"): ส่วนคงที่ทั้งหมดอยู่ต้นใบงาน (เปลี่ยนเฉพาะเมื่อชนิดสมอง/ชุดเครื่องมือเปลี่ยน)
  *   ส่วนที่เปลี่ยนต่องาน (งบ · ตัวอย่างรสนิยม · ผลรอบก่อน · ลิงก์ · ข่าวดิบ) อยู่ท้ายสุดเสมอ
  * ไม่อ้างตำแหน่งไฟล์ตัวเอง · ไม่อ่าน env — ผู้เรียก (worker) ส่ง path ของไฟล์บัตรลักษณะมาเอง
+ * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 5 + สัญญา 8.3 · เลน W2): งานโหมด write (mode หรือ job.mode = 'write')
+ *   ได้ย่อหน้า "ผลจะถูกเรียบเรียงเข้าเนื้อข่าวอัตโนมัติ" + ช่องใหม่ suggested_dimensions/quote พร้อมตัวอย่าง JSON (AGENT_RESULT_WRITE_TEMPLATE)
+ *   วางต้นช่วงท้าย (หลัง stablePrefix) — prefix แคชเดิมทุกไบต์ทุกโหมด · โหมดอื่น/ไม่ระบุ = ใบงานเดิมทุกไบต์ · ข่าวดิบปิดท้ายเสมอ
  */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { AGENT_RESULT_TEMPLATE, cleanText } from './schema.mjs';
+// ★ 1 ต.ค. 69 (SPEC-v3): + AGENT_RESULT_WRITE_TEMPLATE · ของเดิม: import { AGENT_RESULT_TEMPLATE, cleanText } from './schema.mjs';
+import { AGENT_RESULT_TEMPLATE, AGENT_RESULT_WRITE_TEMPLATE, cleanText } from './schema.mjs';
 
 /** รายชื่อเครื่องมือทั้งหมด (scripts/research-tools/<ชื่อ>.mjs) ตามสเปกส่วน 5 */
 export const ALL_TOOLS = Object.freeze([
@@ -197,6 +201,24 @@ function previousRoundSection(prev) {
 }
 
 /**
+ * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 5 + สัญญา 8.3 · เลน W2): ย่อหน้าเฉพาะงานโหมด write
+ *   บอกเอเจนต์ว่าผลจะถูกเรียบเรียงเข้าเนื้อข่าวอัตโนมัติ (ความแม่น > ปริมาณ · ไม่มั่นใจให้ลด confidence)
+ *   + ช่องใหม่ suggested_dimensions / quote พร้อมตัวอย่าง JSON — ไม่มีข้อมูลเฉพาะงาน (ข้อความคงที่ แคชต่อจาก prefix ได้)
+ */
+function writeModeSection() {
+  return [
+    '## โหมดเขียน (write) — ผลของคุณจะถูกเรียบเรียงเข้าเนื้อข่าวโดยอัตโนมัติ',
+    '- การ์ดที่ผ่านด่านจะถูกบรรณาธิการนำไปเรียบเรียงเป็นเนื้อข่าวจริงก่อนถึงนักเขียน (พนักงานตรวจอีกชั้นก่อนโพสต์) — ความแม่นสำคัญกว่าปริมาณ ส่งเฉพาะข้อเท็จจริงที่ยืนยันได้',
+    '- ถ้าไม่มั่นใจให้ลด confidence ตามจริง (ต่ำกว่า 0.6 = ถึงพนักงานเท่านั้น ไม่เข้าเนื้อข่าว) — การ์ดน้อยแต่ถูกดีกว่าการ์ดมากแต่เดา',
+    '- suggested_dimensions: มุมเล่าที่ข้อมูลของคุณเปิดให้ (ถ้ามี) ไม่เกิน 3 ข้อ ข้อละไม่เกิน 120 ตัวอักษร — เป็นตัวเลือกให้ขั้นวางมุม ไม่ใช่คำสั่ง · ไม่มีให้ใส่ []',
+    '- คำพูดตรงจากคลิป/ถอดเสียง: ใส่ในการ์ดใบนั้นเป็น quote {text, speaker, speaker_confidence} — text = คำพูดตามจริงไม่เกิน 300 ตัวอักษร · speaker = ใครพูด (ไม่เกิน 80 ตัวอักษร) · speaker_confidence = ความมั่นใจ 0–1 ว่าคนนี้พูดประโยคนี้จริง (ไม่แน่ใจให้ต่ำ · นอกช่วง 0–1 ระบบตัด quote ทิ้ง) · ไม่ใช่คำพูดตรง = ไม่ต้องมี quote',
+    '- ช่องที่เพิ่มในโหมดนี้ (ใส่รวมในผลก้อนเดียวกับ "สัญญาผล" ด้านบน — ช่องเดิมทุกช่องยังต้องมีครบ):',
+    AGENT_RESULT_WRITE_TEMPLATE,
+    '',
+  ];
+}
+
+/**
  * ประกอบใบงานเต็ม
  * @param {object} p
  * @param {{id:string, rawText:string, sourceUrls?:string[], createdAt?:string}} p.job
@@ -207,10 +229,14 @@ function previousRoundSection(prev) {
  * @param {string[]} [p.tasteExamples]
  * @param {object|null} [p.previousRound]  ผลรอบ low (ตอนยก medium)
  * @param {number|null} [p.staleDays]  เกณฑ์ข่าวเก่า (env RESEARCH_AGENT_STALE_DAYS ผ่าน worker) — ไม่ส่ง = ไม่มีบรรทัดเกณฑ์
+ * @param {'shadow'|'assist'|'write'|null} [p.mode]  ★ 1 ต.ค. 69 (SPEC-v3): โหมดของงาน — ไม่ส่ง = job.mode (lease ใส่ทุกใบ · worker sanitizeJob คงไว้)
+ *                                     write เท่านั้นที่เติมย่อหน้าโหมดเขียน · อื่นๆ = ใบงานเดิมทุกไบต์
  * @returns {{text:string, stablePrefix:string, boundary:string}}
  */
 export function buildTask({
-  job, budget, brainKind = 'codex', tools = null, browser = true, tasteExamples = [], previousRound = null, staleDays = null,
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3): + mode = null
+  //   ของเดิม: job, budget, brainKind = 'codex', tools = null, browser = true, tasteExamples = [], previousRound = null, staleDays = null,
+  job, budget, brainKind = 'codex', tools = null, browser = true, tasteExamples = [], previousRound = null, staleDays = null, mode = null,
 }) {
   const j = job || {};
   const jobId = cleanText(j.id, 80) || 'unknown';
@@ -222,6 +248,9 @@ export function buildTask({
   const boundary = rawBoundary(jobId, rawText);
 
   const v = [];
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): ย่อหน้าโหมดเขียนวางต้นช่วงท้าย (หลัง prefix แคช — prefix เดิมทุกไบต์)
+  //   ข้อความคงที่ทุกงาน write → แคชต่อจาก prefix ได้ · โหมดอื่น/ไม่ระบุ = ไม่มีย่อหน้านี้ = ใบงานเดิมทุกไบต์ · ข่าวดิบยังปิดท้ายเสมอ
+  if ((mode || j.mode) === 'write') v.push(...writeModeSection());
   v.push(
     '## งบงานนี้',
     `- เรียกเครื่องมือไม่เกิน ${Number(budget && budget.maxCalls) || 24} ครั้ง · เวลารวมไม่เกิน ${Number(budget && budget.maxMinutes) || 6} นาที (ใช้ตามเหมาะสม ข่าวง่ายใช้น้อยกว่านี้)`,

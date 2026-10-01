@@ -17,6 +17,8 @@
 //     route ไม่รับ caseId ที่เป็น number (กันเลขศูนย์นำหน้าหายระหว่างทาง)
 //   · postedAt = เลข ms หรือ ISO → ส่งต่อเป็น ISO (store เก็บตามที่ส่ง · แถวใหม่ที่ยังไม่ส่ง = null · createdAt = ครั้งแรกที่จด)
 //   · POST ซ้ำ = รวมกับแถวเดิม (ช่องที่ไม่ส่งคงค่าเดิม) · ช่องที่ไม่รู้จักไม่ส่งต่อ · null = 400 (store ล้างค่าไม่ได้)
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.2 · เลน W2): + editorMsgId? (ข้อความ "ใบที่สอง" = ผลบรรณาธิการ)
+//   กติกาเดียวกับช่อง id อื่น · additive: ไม่ส่ง = คำขอ/คำตอบเดิมทุกไบต์ · store (saveBotPosted) เก็บช่องนี้ด้วย (แก้คู่กันในรอบเดียวกัน)
 // ยืนยันตัวตน: header x-bot-secret (หรือ x-api-key แบบที่บอทส่งให้ /api/queue/add) ต้องตรง env DISCORD_API_SECRET
 //   ไม่ตั้ง env = ปิดประตูเสมอ (fail-closed) — กติกาเดียวกับ /api/bot/tracking · ไม่ผ่านด่าน/ข้อมูลผิด = ไม่โหลด store เลย
 // error: store ใช้ไม่ได้ (ResearchStorageError) = 503 RESEARCH_STORAGE_UNAVAILABLE · store ว่าข้อมูลผิด (RESEARCH_INVALID_INPUT) = 400
@@ -33,6 +35,9 @@ export const dynamic = 'force-dynamic';
 const ID_RE = /^[A-Za-z0-9_-]{1,100}$/;
 const MAX_RESULT_MSG_IDS = 50; // = BOT_POSTED_MAX_RESULT_MSG_IDS ของเลน B = MAX_RESULT_MSG_IDS ของบอท (discord-bot/researchCard.js)
 const OPTIONAL_ID_KEYS = ['sourceMessageId', 'processingMsgId', 'caseId', 'researchCardMsgId'];
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.2 · W2): ใบที่สอง (ผลบรรณาธิการ) — บอทจด id ข้อความไว้กันโพสต์ซ้ำหลังรีสตาร์ต
+//   แยกรายการ (ไม่แก้บรรทัดเดิม) · ผ่านด่าน id เดียวกับช่องอื่น
+const EDITOR_ID_KEYS = ['editorMsgId'];
 const ID_RULE = '[A-Za-z0-9_-] ยาว 1–100 ตัวอักษร';
 
 function fail(status, error, errorType) {
@@ -87,7 +92,8 @@ function validatePosted(body) {
     if (!id) return { ok: false, error: `${key} ต้องเป็นข้อความ ${ID_RULE}` };
     input[key] = id;
   }
-  for (const key of OPTIONAL_ID_KEYS) {
+  // ★ 1 ต.ค. 69 (SPEC-v3 · W2): + EDITOR_ID_KEYS · ของเดิม: for (const key of OPTIONAL_ID_KEYS) {
+  for (const key of [...OPTIONAL_ID_KEYS, ...EDITOR_ID_KEYS]) {
     if (!Object.hasOwn(body, key)) continue;
     const id = trimmedId(body[key]);
     if (!id) return { ok: false, error: `${key} ต้องเป็นข้อความ ${ID_RULE} (หรือไม่ส่งมา)` };

@@ -329,3 +329,122 @@ test('M10 กลายพันธุ์: ข้อยกเว้นกว้�
   const m = await blMutant('/ฆ่าเชื้อ(?!ชาติ)/gu', '/ฆ่า/gu', 'exception-too-broad');
   assert.throws(() => checkKillDisinfect(m));
 });
+
+// ============================================================
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3 · เลน W2) — ด่านกับฟิลด์ใหม่: "ไม่ตัดการ์ดเพราะฟิลด์ใหม่"
+//   quote: speaker_confidence นอกช่วง 0–1/อ่านไม่ได้ หรือมีคำต้องห้าม → ลบ quote การ์ดคง gate/ช่องเดิม
+//   suggested_dimensions: blacklist ชุดเดียวกับ claim → ตัดเฉพาะข้อ · ผลเก่า = การ์ด/ธง/สถานะเดิม
+// (ซอร์สที่ใช้กลายพันธุ์อ่านเป็น LF เสมอ — บทเรียน autocrlf ของ 827336d7)
+// ============================================================
+const SRC_LF = SRC.replace(/\r\n/g, '\n');
+async function mutantW2(find, replace, name) {
+  assert.ok(SRC_LF.includes(find), `ไม่พบจุดกลายพันธุ์ ${name}`);
+  return importPatchedModule(SRC_LF.replace(find, replace), SRC_URL, `ra-gate-w2-${name}`);
+}
+const QUOTE_OK = Object.freeze({ text: 'ชาวสวีเดนบอกว่ามาช่วยกรอกกระสอบทรายเพราะอยากตอบแทนคนราชบุรี', speaker: 'ชายชาวสวีเดน', speaker_confidence: 0.93 });
+const withoutQuote = (card) => { const c = { ...card }; delete c.quote; return c; };
+
+function checkOldResultsGate(m) {
+  for (const f of ['lab-out-result.json', 'lab-out2-result.json']) {
+    const g = m.runGate(FIX(f), { jobCreatedAt: CREATED, minutes: 3 });
+    assert.deepEqual(g.suggested_dimensions, [], `${f}: ไม่มีมุมเสนอ = []`);
+    assert.ok(g.cards.every((c) => !('quote' in c)), `${f}: ไม่มี quote`);
+    assert.deepEqual([g.stats.quotesDropped, g.stats.dimensionsDropped], [0, 0]);
+  }
+  const failed = m.runGate({ cards: [] }, { minutes: 1 });
+  assert.deepEqual(failed.suggested_dimensions, [], 'ผลล้มรูปเดียวกัน');
+}
+
+test('W2-1. ผลเก่า (fixture out/out2) ผ่านด่านเหมือนเดิม: ไม่มี quote · มุมเสนอ [] · ตัวนับใหม่เป็น 0 (ข้อ 1/2 เดิมยังตรึงการ์ด/ธง/เงิน)', () => checkOldResultsGate(gate));
+
+function checkQuoteGate(m) {
+  const kept = one(m, { ...GOOD, quote: QUOTE_OK });
+  assert.equal(kept.gate, 'pass');
+  assert.deepEqual(kept.quote, QUOTE_OK, 'quote ถูกรูป = คงไว้ทุกช่อง');
+  for (const [sc, label] of [[1.5, '> 1'], [-0.1, '< 0'], [95, 'สเกล 0–100'], [null, 'null'], ['สูงมาก', 'ข้อความไม่ใช่ตัวเลข'], [Number.NaN, 'NaN']]) {
+    const g = m.runGate(synth([{ ...GOOD, quote: { ...QUOTE_OK, speaker_confidence: sc } }]), { jobCreatedAt: CREATED, minutes: 2 });
+    const c = g.cards[0];
+    assert.equal('quote' in c, false, `speaker_confidence ${label} → ลบ quote`);
+    assert.equal(c.gate, 'pass', `${label}: การ์ดต้องไม่ถูกลดเพราะ quote`);
+    assert.ok(!('gate_reason' in c), `${label}: ไม่มีเหตุผลด่านงอก`);
+    assert.deepEqual(c, withoutQuote(one(m, GOOD)), `${label}: การ์ดเหมือนไม่เคยมี quote ทุกช่อง`);
+    assert.deepEqual([g.stats.quotesDropped, g.stats.quoteDropReasons], [1, ['QUOTE_SPEAKER_CONFIDENCE']], label);
+    assert.equal(g.status, 'done');
+  }
+  for (const [edge, value] of [['ขอบล่าง', 0], ['ขอบบน', 1]]) assert.equal(one(m, { ...GOOD, quote: { ...QUOTE_OK, speaker_confidence: value } }).quote.speaker_confidence, value, edge);
+  const bl = m.runGate(synth([{ ...GOOD, quote: { ...QUOTE_OK, text: 'เขาเล่าว่าเคยติดยาบ้ามาก่อน' } }]), { jobCreatedAt: CREATED });
+  assert.equal('quote' in bl.cards[0], false, 'คำต้องห้ามในคำพูด → ลบ quote');
+  assert.equal(bl.cards[0].gate, 'pass', 'คำต้องห้ามในคำพูดไม่ลดการ์ด (claim สะอาด)');
+  assert.deepEqual(bl.stats.quoteDropReasons, ['QUOTE_BLACKLIST']);
+  const staff = one(m, { ...GOOD, confidence: 0.55, quote: QUOTE_OK });
+  assert.equal(staff.gate, 'staff_only');
+  assert.deepEqual(staff.quote, QUOTE_OK, 'การ์ด staff_only คง quote ที่ถูกรูป (ด่าน quote ไม่ขึ้นกับ gate)');
+}
+
+test('W2-2. quote: speaker_confidence นอกช่วง 0–1/อ่านไม่ได้ หรือมีคำต้องห้าม → ลบ quote ไม่ลบการ์ด (gate/ช่องเดิม) · ขอบ 0 และ 1 ผ่าน · นับใน stats', () => checkQuoteGate(gate));
+
+function checkDimensionsGate(m) {
+  const g = m.runGate(synth([GOOD], { suggested_dimensions: ['มุมน้ำใจข้ามชาติ', 'มุมคนติดยาบ้าในหมู่บ้าน', 'มุมคลิปหลุดของอาสา'] }), { jobCreatedAt: CREATED, minutes: 2 });
+  assert.deepEqual(g.suggested_dimensions, ['มุมน้ำใจข้ามชาติ'], 'blacklist ชุดเดียวกับ claim ตัดเฉพาะข้อที่ติด');
+  assert.equal(g.stats.dimensionsDropped, 2);
+  assert.equal(g.status, 'done');
+  assert.equal(g.cards[0].gate, 'pass', 'มุมเสนอติดคำต้องห้ามไม่กระทบการ์ด');
+  assert.deepEqual(m.runGate(synth([GOOD], { suggested_dimensions: ['ใช้แอลกอฮอล์ฆ่าเชื้อกระสอบทราย'] }), { jobCreatedAt: CREATED }).suggested_dimensions,
+    ['ใช้แอลกอฮอล์ฆ่าเชื้อกระสอบทราย'], 'ข้อยกเว้นคำประสม (ฆ่าเชื้อ) ใช้ร่วมกับ claim');
+  const rec = buildCardRecord({ jobId: 'q_w2gate', status: g.status, mode: 'write', brain: { kind: 'codex' }, gated: g, usage: g.usage, nowIso: CREATED });
+  assert.deepEqual(rec.suggested_dimensions, ['มุมน้ำใจข้ามชาติ'], 'ผลด่านถึงระเบียน');
+  assert.deepEqual(validateCardRecord(rec), []);
+}
+
+test('W2-3. suggested_dimensions ผ่าน blacklist เดียวกับ claim (ตัดเฉพาะข้อ · ข้อยกเว้นฆ่าเชื้อใช้ร่วม) → ส่งต่อ buildCardRecord · การ์ดไม่กระทบ', () => checkDimensionsGate(gate));
+
+function checkNewFieldsNeverCut(m) {
+  const cards = [
+    GOOD,
+    { ...GOOD, claim: `${GOOD.claim} ข้อ 2`, confidence: 0.55 },
+    { ...GOOD, claim: `${GOOD.claim} และพบยาบ้า` },
+    { ...GOOD, claim: `${GOOD.claim} ข้อ 4`, source_url: 'ไม่พบ' },
+  ];
+  const plain = m.runGate(synth(cards), { jobCreatedAt: CREATED, minutes: 2 });
+  const rich = m.runGate(synth(cards.map((c, i) => ({ ...c, quote: { ...QUOTE_OK, speaker_confidence: i % 2 ? 7 : 0.95 } })), {
+    suggested_dimensions: ['มุมหนึ่ง', 'มุมสอง', 'มุมสาม', 'มุมสี่'],
+  }), { jobCreatedAt: CREATED, minutes: 2 });
+  assert.deepEqual(rich.cards.map(withoutQuote), plain.cards, 'ฟิลด์ใหม่ไม่เปลี่ยน id/gate/gate_reason/ลำดับของการ์ดใบไหนเลย');
+  assert.deepEqual([rich.status, rich.flags, rich.usage], [plain.status, plain.flags, plain.usage]);
+  assert.deepEqual(rich.suggested_dimensions, ['มุมหนึ่ง', 'มุมสอง', 'มุมสาม'], 'ตัวแปลงตัดเหลือ 3 ข้อ');
+}
+
+test('W2-4. "gate ไม่ตัดการ์ดเพราะฟิลด์ใหม่": ผลเดียวกัน มี/ไม่มี quote+มุมเสนอ → การ์ด (id/gate/เหตุผล/ลำดับ) ธง สถานะ เงิน เท่ากันทุกช่อง', () => checkNewFieldsNeverCut(gate));
+
+// ── กลายพันธุ์ของ W2 (ต้องแดง) ──
+test('MW1 กลายพันธุ์: ด่าน quote ไม่ตรวจช่วง speaker_confidence → ข้อตรวจ quote แดง', async () => {
+  const m = await mutantW2("  else if (typeof sc !== 'number' || !Number.isFinite(sc)\n    || sc < GATE_RULES.QUOTE_SPEAKER_CONFIDENCE_MIN || sc > GATE_RULES.QUOTE_SPEAKER_CONFIDENCE_MAX) dropped = 'QUOTE_SPEAKER_CONFIDENCE';\n", '', 'no-sc-range');
+  assert.throws(() => checkQuoteGate(m));
+});
+
+test('MW2 กลายพันธุ์: quote ผิดช่วงแล้วลดการ์ดเป็น dropped (ตัดการ์ดเพราะฟิลด์ใหม่) → ข้อตรวจแดง', async () => {
+  const m = await mutantW2('  return { card: rest, dropped };', "  return { card: { ...rest, gate: 'dropped', gate_reason: dropped }, dropped };", 'drop-card');
+  assert.throws(() => checkQuoteGate(m));
+  assert.throws(() => checkNewFieldsNeverCut(m));
+});
+
+test('MW3 กลายพันธุ์: มุมเสนอไม่ผ่าน blacklist → ข้อตรวจมุมเสนอแดง', async () => {
+  const m = await mutantW2("    if (typeof d === 'string' && d && !findBlacklist(d).length) kept.push(d);", "    if (typeof d === 'string' && d) kept.push(d);", 'dims-no-blacklist');
+  assert.throws(() => checkDimensionsGate(m));
+});
+
+test('MW4 กลายพันธุ์: ด่านไม่ส่งมุมเสนอต่อ (ทิ้งทั้งหมด) → ข้อตรวจมุมเสนอ/ไม่ตัดการ์ดแดง', async () => {
+  const m = await mutantW2('    suggested_dimensions: dims.kept,', '    suggested_dimensions: [],', 'dims-dropped');
+  assert.throws(() => checkDimensionsGate(m));
+  assert.throws(() => checkNewFieldsNeverCut(m));
+});
+
+test('MW5 กลายพันธุ์: ไม่ตรวจคำต้องห้ามในคำพูด → ข้อตรวจ quote แดง', async () => {
+  const m = await mutantW2("  else if (findBlacklist(q.text).length || findBlacklist(q.speaker).length) dropped = 'QUOTE_BLACKLIST';\n", '', 'quote-no-blacklist');
+  assert.throws(() => checkQuoteGate(m));
+});
+
+test('MW6 กลายพันธุ์: runGate ไม่เรียกด่าน quote → quote นอกช่วงหลุดถึงระเบียน → ข้อตรวจแดง', async () => {
+  const m = await mutantW2('    const q = gateQuote(gateCard(c, own));', '    const q = { card: gateCard(c, own), dropped: null };', 'no-quote-gate');
+  assert.throws(() => checkQuoteGate(m));
+});

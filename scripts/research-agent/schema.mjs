@@ -8,6 +8,12 @@
  *   (ข) "ระเบียนเต็ม" ที่ worker ส่ง POST /api/research/report แล้วเก็บใน store 'research-cards' → buildCardRecord()/validateCardRecord()
  * กติกา: ข้อความทุกช่องถูกตัดความยาว + ลบอักขระควบคุม + ปิดค่าที่หน้าตาเหมือนคีย์ (redactSecrets) ก่อนออกจากเครื่อง
  * ไม่อ้างตำแหน่งไฟล์ตัวเอง · ไม่อ่าน env — ฟังก์ชันล้วน (เทสกลายพันธุ์โหลดสำเนา patch ได้)
+ * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3 · เลน W2): ฟิลด์ใหม่ optional 2 ช่อง — ผลเก่าที่ไม่มีผ่านเหมือนเดิมทุกไบต์
+ *   (ก) ระดับบน suggested_dimensions: string[] ≤3 ข้อ ≤120 ตัวอักษร/ข้อ · ไม่มี = [] (normalizeDimensions)
+ *   (ข) ในการ์ด quote?: {text ≤300, speaker ≤80, speaker_confidence 0–1} · ไม่มี = ไม่ใส่คีย์ (normalizeQuote)
+ *       speaker_confidence เก็บตามที่เอเจนต์ให้ (ไม่บีบ/ไม่แปลงสเกล) — ด่าน (gate.mjs gateQuote) ลบ quote ที่นอกช่วงทิ้งโดยไม่ลบการ์ด
+ *   ระเบียน: OPTIONAL_RECORD_KEYS / OPTIONAL_CARD_KEYS (RECORD_KEYS/CARD_KEYS เดิมไม่เปลี่ยน) · ตัวอย่างผลโหมด write = AGENT_RESULT_WRITE_TEMPLATE
+ *   (ท้ายใบงานเฉพาะงานโหมด write — AGENT_RESULT_TEMPLATE ที่อยู่ใน prefix แคชเดิมทุกไบต์)
  */
 
 export const VALUE_TYPES = Object.freeze(['ความคืบหน้า', 'ต้นทาง', 'ตัวตน', 'ตัวเลข-บริบท', 'อธิบาย', 'อื่นๆ']);
@@ -32,6 +38,8 @@ export const REQUIRED_AGENT_KEYS = Object.freeze(['plan', 'origin_post', 'cards'
 export const LIMITS = Object.freeze({
   text: 300, claim: 500, evidence: 600, why: 400, name: 200, url: 1000, date: 120,
   planItems: 12, cardsIn: 30, corrections: 10, skipped: 20, toolLog: 80, warning: 500,
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): มุมเสนอ ≤3 ข้อ ข้อละ ≤120 ตัวอักษร · quote ≤300 · ผู้พูด ≤80
+  dimensions: 3, dimension: 120, quoteText: 300, speaker: 80,
 });
 
 const VALUE_TYPE_ALIASES = Object.freeze({
@@ -165,9 +173,66 @@ function normalizePlan(list, secrets) {
   }).filter((p) => p && p.question);
 }
 
+// ── ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): ฟิลด์ใหม่ suggested_dimensions + quote (optional ทั้งคู่) ──
+/** ค่าตัวอย่างในโครงผลโหมด write (AGENT_RESULT_WRITE_TEMPLATE) — เอเจนต์คัดลอกมาทั้งดุ้น = ไม่ใช่คำตอบ (แบบเดียวกับ "ต่ำ|กลาง|สูง") */
+export const WRITE_TEMPLATE_PLACEHOLDERS = Object.freeze({
+  dimension: 'มุมเล่าที่ข้อมูลของคุณเปิดให้',
+  quoteText: 'คำพูดตรงตามคลิป/ถอดเสียง',
+});
+
+/**
+ * มุมเล่าที่เอเจนต์เสนอ → string[] ไม่เกิน 3 ข้อ ข้อละไม่เกิน 120 ตัวอักษร (บรรทัดเดียว) · ไม่มี/ผิดชนิด = []
+ * รับสตริงเดี่ยวเป็น 1 ข้อ (เอเจนต์บางรอบไม่ตอบเป็น array) · ตัดข้อว่าง/ซ้ำ/ค่าตัวอย่างจากโครง · ทำซ้ำได้ (ผลเดิม → ผลเดิม)
+ * @param {unknown} value
+ * @param {string[]} [secretValues]
+ * @returns {string[]}
+ */
+export function normalizeDimensions(value, secretValues = []) {
+  const list = Array.isArray(value) ? value : (typeof value === 'string' ? [value] : []);
+  const out = [];
+  for (const item of list) {
+    if (typeof item !== 'string') continue;
+    const s = cleanText(item.replace(/\s+/g, ' '), LIMITS.dimension, secretValues);
+    if (!s || /^[\s.…\-–—]*$/.test(s) || s.includes(WRITE_TEMPLATE_PLACEHOLDERS.dimension)) continue;
+    if (!out.includes(s)) out.push(s);
+    if (out.length >= LIMITS.dimensions) break;
+  }
+  return out;
+}
+
+/** speaker_confidence ตามที่เอเจนต์ให้ (ไม่บีบช่วง · ไม่แปลงสเกล 0–100 · ไม่ปัด) — อ่านเป็นตัวเลขไม่ได้ = null · ด่านเป็นคนตัดสิน */
+function quoteScore(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v.trim());
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/**
+ * คำพูดตรงในการ์ด → {text ≤300, speaker ≤80, speaker_confidence} · ไม่ใช่ object / ไม่มีข้อความ / ค่าตัวอย่างจากโครง = null (ไม่ใส่คีย์)
+ * speaker_confidence เก็บตามที่ให้ (นอกช่วง 0–1 ก็เก็บ) เพื่อให้ด่าน (gate.mjs gateQuote) ลบ quote ทิ้งโดยไม่ลบการ์ด
+ * @param {unknown} value
+ * @param {string[]} [secretValues]
+ * @returns {{text:string, speaker:string, speaker_confidence:number|null}|null}
+ */
+export function normalizeQuote(value, secretValues = []) {
+  if (!isObj(value)) return null;
+  const text = cleanText(value.text, LIMITS.quoteText, secretValues);
+  if (!text || text.includes(WRITE_TEMPLATE_PLACEHOLDERS.quoteText)) return null;
+  return {
+    text,
+    speaker: cleanText(value.speaker, LIMITS.speaker, secretValues).replace(/\s+/g, ' '),
+    speaker_confidence: quoteScore(value.speaker_confidence),
+  };
+}
+
 function normalizeCard(c, secrets) {
   if (!isObj(c)) return null;
-  return {
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): เก็บการ์ดใส่ตัวแปรก่อนเพื่อเติม quote
+  //   ไม่มี quote = ไม่ใส่คีย์ → การ์ดของผลเก่าเดิมทุกไบต์ · ของเดิม: return { …ช่องเดียวกันทุกช่อง… };
+  const card = {
     claim: cleanText(c.claim, LIMITS.claim, secrets),
     value_type: normalizeValueType(c.value_type),
     why_it_adds_value: cleanText(c.why_it_adds_value ?? c.why, LIMITS.why, secrets),
@@ -179,6 +244,9 @@ function normalizeCard(c, secrets) {
     contradicts_raw: toBool(c.contradicts_raw),
     identity: cleanText(c.identity, 20) === 'verified' ? 'verified' : 'generic',
   };
+  const quote = normalizeQuote(c.quote, secrets);
+  if (quote) card.quote = quote;
+  return card;
 }
 
 function normalizeCorrection(r, secrets) {
@@ -281,12 +349,15 @@ export function normalizeAgentResult(raw, { secretValues = [] } = {}) {
       minutes: num(selfReport.minutes),
       what_would_help_next_time: cleanText(selfReport.what_would_help_next_time, LIMITS.text, secrets),
     },
+    // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): มุมเล่าที่เอเจนต์เสนอ — optional (ผลเก่าไม่มี = [] · ช่องอื่นเดิมทุกไบต์)
+    suggested_dimensions: normalizeDimensions(raw.suggested_dimensions, secrets),
   };
   return { ok: true, errors, aliases, result };
 }
 
 /**
  * ประกอบระเบียน research-cards เต็มตามสัญญา 2.2 (ไม่มีฟิลด์นอกสัญญา)
+ * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): + suggested_dimensions ระดับบนเสมอ (ไม่มี = []) · การ์ดคง quote ที่ผ่านด่าน
  * @param {object} p
  */
 export function buildCardRecord({
@@ -329,6 +400,8 @@ export function buildCardRecord({
     stale_news_warning: typeof g.stale_news_warning === 'string' ? g.stale_news_warning : null,
     cards: Array.isArray(g.cards) ? g.cards : [],
     raw_corrections: Array.isArray(g.raw_corrections) ? g.raw_corrections : [],
+    // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): "ไม่มี = []" — คงคีย์เสมอ (ด่านกรองคำต้องห้ามแล้ว · ทำซ้ำได้ ค่าไม่เปลี่ยน)
+    suggested_dimensions: normalizeDimensions(g.suggested_dimensions),
     flags: allFlags,
     skipped: Array.isArray(skipped) ? skipped : (Array.isArray(g.skipped) ? g.skipped : []),
     tool_log: Array.isArray(toolLog) ? toolLog : (Array.isArray(g.tool_log) ? g.tool_log : []),
@@ -347,6 +420,28 @@ export const CARD_KEYS = Object.freeze([
   'id', 'claim', 'value_type', 'why_it_adds_value', 'evidence_quote', 'source_url', 'source_name', 'source_date',
   'confidence', 'contradicts_raw', 'identity', 'gate',
 ]);
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): ช่องที่ "มีได้" (optional) — RECORD_KEYS/CARD_KEYS เดิมไม่เปลี่ยน
+//   ระดับบน suggested_dimensions: buildCardRecord ใส่เสมอ (ไม่มี = []) แต่ระเบียนเก่า/ฝั่งเว็บรุ่นก่อนที่ไม่มีช่องนี้ยังผ่าน validateCardRecord
+//   การ์ด quote: มีเฉพาะเมื่อเอเจนต์ใส่มาและผ่านด่าน (gate.mjs ลบ quote ที่ speaker_confidence นอกช่วง 0–1)
+export const OPTIONAL_RECORD_KEYS = Object.freeze(['suggested_dimensions']);
+export const OPTIONAL_CARD_KEYS = Object.freeze(['quote']);
+
+const cpLen = (s) => [...String(s)].length;
+/** ปัญหารูป quote ('' = ผ่าน) — สัญญา 8.3: text 1–300 · speaker ≤80 · speaker_confidence ตัวเลข 0–1 */
+function quoteProblem(q) {
+  if (!isObj(q)) return 'ต้องเป็น object';
+  if (typeof q.text !== 'string' || !q.text || cpLen(q.text) > LIMITS.quoteText) return 'text ต้องเป็นข้อความ 1–300 ตัวอักษร';
+  if (typeof q.speaker !== 'string' || cpLen(q.speaker) > LIMITS.speaker) return 'speaker ต้องเป็นข้อความไม่เกิน 80 ตัวอักษร';
+  if (typeof q.speaker_confidence !== 'number' || !(q.speaker_confidence >= 0 && q.speaker_confidence <= 1)) return 'speaker_confidence ต้องเป็นตัวเลข 0–1';
+  return '';
+}
+/** ปัญหารูป suggested_dimensions ('' = ผ่าน) — สัญญา 8.3: array ไม่เกิน 3 ข้อ · ข้อละข้อความ 1–120 ตัวอักษร */
+function dimensionsProblem(list) {
+  if (!Array.isArray(list)) return 'ต้องเป็น array';
+  if (list.length > LIMITS.dimensions) return `เกิน ${LIMITS.dimensions} ข้อ`;
+  if (list.some((d) => typeof d !== 'string' || !d || cpLen(d) > LIMITS.dimension)) return 'ทุกข้อต้องเป็นข้อความ 1–120 ตัวอักษร';
+  return '';
+}
 
 function validateCards(cards, errs) {
   if (!Array.isArray(cards)) { errs.push('cards ต้องเป็น array'); return; }
@@ -362,6 +457,11 @@ function validateCards(cards, errs) {
     if (typeof c.confidence !== 'number' || c.confidence < 0 || c.confidence > 1) errs.push(`cards[${i}].confidence ผิด`);
     if (typeof c.contradicts_raw !== 'boolean') errs.push(`cards[${i}].contradicts_raw ต้องเป็น boolean`);
     if (c.gate !== 'dropped' && !isHttpUrl(c.source_url)) errs.push(`cards[${i}].source_url ต้องเป็น http(s)`);
+    // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): quote optional — มีแล้วต้องครบรูป (ด่านลบ quote ผิดช่วงก่อนถึงตรงนี้)
+    if ('quote' in c) {
+      const problem = quoteProblem(c.quote);
+      if (problem) errs.push(`cards[${i}].quote ${problem}`);
+    }
   });
 }
 
@@ -374,7 +474,13 @@ export function validateCardRecord(rec) {
   const errs = [];
   if (!isObj(rec)) return ['ระเบียนไม่ใช่ object'];
   for (const k of RECORD_KEYS) if (!(k in rec)) errs.push(`ขาด ${k}`);
-  for (const k of Object.keys(rec)) if (!RECORD_KEYS.includes(k)) errs.push(`ฟิลด์นอกสัญญา ${k}`);
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): ช่อง optional ไม่นับเป็นฟิลด์นอกสัญญา (มีแล้วต้องถูกรูป)
+  // ของเดิม: for (const k of Object.keys(rec)) if (!RECORD_KEYS.includes(k)) errs.push(`ฟิลด์นอกสัญญา ${k}`);
+  for (const k of Object.keys(rec)) if (!RECORD_KEYS.includes(k) && !OPTIONAL_RECORD_KEYS.includes(k)) errs.push(`ฟิลด์นอกสัญญา ${k}`);
+  if ('suggested_dimensions' in rec) {
+    const problem = dimensionsProblem(rec.suggested_dimensions);
+    if (problem) errs.push(`suggested_dimensions ${problem}`);
+  }
   if (typeof rec.id !== 'string' || !rec.id) errs.push('id ต้องเป็นสตริง');
   if (!Number.isInteger(rec.revision) || rec.revision < 1) errs.push('revision ต้องเป็นจำนวนเต็ม ≥1');
   if (!RECORD_STATUSES.includes(rec.status)) errs.push(`status ผิด: ${rec.status}`);
@@ -425,4 +531,16 @@ export const AGENT_RESULT_TEMPLATE = `{
   "tool_log": [{"tool": "serper", "args": "...", "ok": true, "note": "...", "ms": 0}],
   "browser_available": "ใช้เบราว์เซอร์ได้ไหม/ล็อกอินเป็นใคร (ชื่อที่แสดงเท่านั้น)",
   "self_report": {"tool_calls": 0, "minutes": 0, "what_would_help_next_time": "..."}
+}`;
+
+/**
+ * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): ตัวอย่าง "ช่องที่เพิ่ม" ของผลโหมด write
+ *   suggested_dimensions ระดับบน + quote ในการ์ด (การ์ดตัวอย่างแสดงช่องเดิมครบ ให้เห็นว่า quote อยู่ในการ์ดใบเดียวกัน)
+ *   ใช้เฉพาะท้ายใบงานของงานโหมด write (taskBuilder) — ไม่แตะ AGENT_RESULT_TEMPLATE ที่อยู่ใน prefix แคช
+ *   ค่าตัวอย่างที่ถูกคัดลอกมาทั้งดุ้นถูกตัดทิ้ง (WRITE_TEMPLATE_PLACEHOLDERS) · เป็น JSON ที่ parse ได้ (เทสรวมกับ AGENT_RESULT_TEMPLATE แล้วผ่านตัวแปลงจริง)
+ */
+export const AGENT_RESULT_WRITE_TEMPLATE = `{
+  "suggested_dimensions": ["มุมเล่าที่ข้อมูลของคุณเปิดให้ 1 บรรทัด (ไม่เกิน 120 ตัวอักษร · ไม่เกิน 3 ข้อ · ไม่มีให้ใส่ [])"],
+  "cards": [{"claim": "...", "value_type": "...", "why_it_adds_value": "...", "evidence_quote": "...", "source_url": "https://...", "source_name": "...", "source_date": "...", "confidence": 0.0, "contradicts_raw": false, "identity": "verified|generic",
+    "quote": {"text": "คำพูดตรงตามคลิป/ถอดเสียง (ไม่เกิน 300 ตัวอักษร)", "speaker": "ชื่อหรือบทบาทผู้พูด (ไม่เกิน 80 ตัวอักษร)", "speaker_confidence": 0.0}}]
 }`;

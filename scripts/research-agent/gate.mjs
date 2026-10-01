@@ -15,6 +15,10 @@
  *   identityConfidence ≥ 8 ของ smartResearch เดิม) · ข่าวเก่า: วันที่เรื่องเก่ากว่าวันส่ง > ctx.staleDays วัน = ธง STALE_NEWS
  *   (ข้อ 14: ธงอย่างเดียวทุกอายุ ไม่หยุดงาน · เกณฑ์ = env RESEARCH_AGENT_STALE_DAYS ที่ worker อ่านแล้วส่งมา · ไม่ส่ง = 7 วัน)
  * ไม่อ้างตำแหน่งไฟล์ตัวเอง · ไม่อ่าน env — ฟังก์ชันล้วน
+ * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3 · เลน W2): ฟิลด์ใหม่ไม่ตัดการ์ด
+ *   - quote ในการ์ด (gateQuote): speaker_confidence นอกช่วง 0–1/อ่านไม่ได้ หรือมีคำต้องห้าม → ลบ quote ทิ้ง การ์ดคง gate เดิม
+ *   - suggested_dimensions (gateDimensions): ผ่าน blacklist ชุดเดียวกับ claim → ตัดเฉพาะข้อที่ติด · ผลส่งต่อ buildCardRecord
+ *   - ผลเก่า (ไม่มีฟิลด์ใหม่) = การ์ด/ธง/สถานะเดิมทุกไบต์ (suggested_dimensions = [] · stats เพิ่มตัวนับ)
  */
 import { findBlacklist } from './blacklist.mjs';
 import { costFromToolLog } from './pricing.mjs';
@@ -27,6 +31,9 @@ export const GATE_RULES = Object.freeze({
   VERIFIED_MIN_CONFIDENCE: 0.8,
   ORIGIN_MIN_CONFIDENCE: 0.5,
   STALE_DAYS: 7, // ค่าเริ่มต้นของ RESEARCH_AGENT_STALE_DAYS (ข้อตัดสินผู้คุมงาน 1 ต.ค. 69)
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): ช่วงที่ยอมรับของ quote.speaker_confidence (นอกช่วง = ลบ quote ไม่ลบการ์ด)
+  QUOTE_SPEAKER_CONFIDENCE_MIN: 0,
+  QUOTE_SPEAKER_CONFIDENCE_MAX: 1,
 });
 
 /** เกณฑ์ข่าวเก่า (วัน) ที่ใช้จริง: ค่าที่ worker ส่งมา (> 0) ไม่งั้นค่าเริ่มต้น */
@@ -164,6 +171,45 @@ export function gateCard(card, own = OWN_PAGE) {
 }
 
 /**
+ * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): ด่าน quote ในการ์ด — "ไม่ตัดการ์ดเพราะฟิลด์ใหม่"
+ *   speaker_confidence ไม่ใช่ตัวเลขในช่วง 0–1 (null/ข้อความ/สเกล 0–100) → ลบ quote ทิ้ง การ์ดคงเดิมทุกช่อง (gate ไม่เปลี่ยน)
+ *   คำต้องห้ามในคำพูด/ชื่อผู้พูด → ลบ quote เช่นกัน (คำพูดตรงไหลเข้าเนื้อข่าวได้ = ต้องสะอาดเท่า claim)
+ *   การ์ดไม่มี quote = คืนใบเดิม (อ้างอิงเดิม) · ไม่โยน error
+ * @param {object} card  การ์ดหลัง gateCard
+ * @returns {{card: object, dropped: null|'QUOTE_SCHEMA'|'QUOTE_SPEAKER_CONFIDENCE'|'QUOTE_BLACKLIST'}}
+ */
+export function gateQuote(card) {
+  if (!card || typeof card !== 'object' || !('quote' in card)) return { card, dropped: null };
+  const q = card.quote;
+  const sc = q && typeof q === 'object' ? q.speaker_confidence : null;
+  let dropped = null;
+  if (!q || typeof q !== 'object' || typeof q.text !== 'string' || !q.text.trim()) dropped = 'QUOTE_SCHEMA';
+  else if (typeof sc !== 'number' || !Number.isFinite(sc)
+    || sc < GATE_RULES.QUOTE_SPEAKER_CONFIDENCE_MIN || sc > GATE_RULES.QUOTE_SPEAKER_CONFIDENCE_MAX) dropped = 'QUOTE_SPEAKER_CONFIDENCE';
+  else if (findBlacklist(q.text).length || findBlacklist(q.speaker).length) dropped = 'QUOTE_BLACKLIST';
+  if (!dropped) return { card, dropped: null };
+  const rest = { ...card };
+  delete rest.quote;
+  return { card: rest, dropped };
+}
+
+/**
+ * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): มุมเสนอ (suggested_dimensions) ผ่านคำต้องห้ามชุดเดียวกับ claim
+ *   ติด = ตัดเฉพาะข้อนั้น (การ์ด/ธง/สถานะงานไม่กระทบ) · ไม่ใช่ข้อความ = ตัด
+ * @param {unknown} list
+ * @returns {{kept: string[], dropped: number}}
+ */
+export function gateDimensions(list) {
+  const kept = [];
+  let dropped = 0;
+  for (const d of Array.isArray(list) ? list : []) {
+    if (typeof d === 'string' && d && !findBlacklist(d).length) kept.push(d);
+    else dropped += 1;
+  }
+  return { kept, dropped };
+}
+
+/**
  * รันด่านทั้งหมดบนผลของเอเจนต์
  * @param {unknown} rawResult  JSON ของเอเจนต์ (ยังไม่ normalize ก็ได้)
  * @param {object} ctx
@@ -176,7 +222,7 @@ export function gateCard(card, own = OWN_PAGE) {
  * @param {object} [ctx.ownPage]
  * @returns {{ok:boolean, status:'done'|'failed', errors:string[], complexity:string|null, plan:Array, origin_post:object,
  *   story_date_estimate:string, stale_news_warning:string|null, cards:Array, raw_corrections:Array, flags:string[],
- *   skipped:string[], tool_log:Array, usage:object, stats:object}}
+ *   skipped:string[], tool_log:Array, usage:object, suggested_dimensions:string[], stats:object}}
  */
 export function runGate(rawResult, ctx = {}) {
   const norm = normalizeAgentResult(rawResult, { secretValues: ctx.secretValues || [] });
@@ -186,6 +232,7 @@ export function runGate(rawResult, ctx = {}) {
       origin_post: { url: null, source_name: '', date: '', confidence: 0 },
       story_date_estimate: 'ไม่ทราบ', stale_news_warning: null, cards: [], raw_corrections: [],
       flags: ['AGENT_FAILED'], skipped: [], tool_log: [], usage: { tool_calls: 0, minutes: Number(ctx.minutes) || 0, costUsd: 0 },
+      suggested_dimensions: [], // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): รูปเดียวกับผลที่ผ่าน (ไม่มี = [])
       stats: { aliases: norm.aliases },
     };
   }
@@ -195,7 +242,14 @@ export function runGate(rawResult, ctx = {}) {
   const addFlag = (f) => { if (!flags.includes(f)) flags.push(f); };
 
   // การ์ด: ด่าน 2/3/4/6 → เรียง confidence (เสถียร) → ตัด 8 (ด่าน 8) → ตั้ง id R1..Rn
-  const gatedCards = r.cards.map((c, i) => ({ c: gateCard(c, own), i }));
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): quote ผ่านด่านของตัวเอง (gateQuote) หลังตัดสิน gate ของการ์ด — ลบแค่ quote
+  // ของเดิม: const gatedCards = r.cards.map((c, i) => ({ c: gateCard(c, own), i }));
+  const quoteDrops = [];
+  const gatedCards = r.cards.map((c, i) => {
+    const q = gateQuote(gateCard(c, own));
+    if (q.dropped) quoteDrops.push(q.dropped);
+    return { c: q.card, i };
+  });
   gatedCards.sort((a, b) => (b.c.confidence - a.c.confidence) || (a.i - b.i));
   const kept = gatedCards.slice(0, GATE_RULES.MAX_CARDS).map(({ c }, idx) => ({ id: `R${idx + 1}`, ...c }));
   const cut = Math.max(0, gatedCards.length - kept.length);
@@ -227,6 +281,8 @@ export function runGate(rawResult, ctx = {}) {
   if ((Number.isFinite(maxCalls) && maxCalls > 0 && usage.tool_calls > maxCalls)
     || (Number.isFinite(maxMinutes) && maxMinutes > 0 && usage.minutes > maxMinutes + 1)) addFlag('OVER_BUDGET');
 
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): มุมเสนอผ่านคำต้องห้ามชุดเดียวกับ claim
+  const dims = gateDimensions(r.suggested_dimensions);
   const counts = { pass: 0, staff_only: 0, dropped: 0 };
   for (const c of kept) counts[c.gate]++;
   return {
@@ -244,7 +300,13 @@ export function runGate(rawResult, ctx = {}) {
     skipped: r.skipped,
     tool_log: r.tool_log,
     usage,
-    stats: { ...counts, cut, aliases: norm.aliases, byTool: cost.byTool, browser: r.browser_available, selfReport: r.self_report },
+    suggested_dimensions: dims.kept, // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3)
+    // ★ 1 ต.ค. 69 (W2): + ตัวนับ quote/มุมเสนอที่ถูกตัด (สถิติเท่านั้น ไม่เข้าระเบียน)
+    // ของเดิม: stats: { ...counts, cut, aliases: norm.aliases, byTool: cost.byTool, browser: r.browser_available, selfReport: r.self_report },
+    stats: {
+      ...counts, cut, aliases: norm.aliases, byTool: cost.byTool, browser: r.browser_available, selfReport: r.self_report,
+      quotesDropped: quoteDrops.length, quoteDropReasons: quoteDrops, dimensionsDropped: dims.dropped,
+    },
   };
 }
 
