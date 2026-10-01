@@ -1,0 +1,247 @@
+{
+    "research_plan":  [
+                          {
+                              "question":  "ใครเป็นผู้โพสต์ต้นฉบับและเผยแพร่เมื่อใด",
+                              "why_valuable":  "ตรวจคำอ้างบุคคล สถานที่ และข่าวเก่า",
+                              "decided":  "ค้น",
+                              "reason":  "ข่าวดิบไม่มีชื่อผู้เล่าหรือ URL จึงให้ความสำคัญสูงสุด"
+                          },
+                          {
+                              "question":  "มีความคืบหน้าหรือแก้ข่าวในความคิดเห็นหรือไม่",
+                              "why_valuable":  "ป้องกันนำข้อความคลาดเคลื่อนมาเผยแพร่",
+                              "decided":  "ค้น",
+                              "reason":  "อ่านความคิดเห็นของโพสต์ที่พบ แต่ยังไม่พบต้นฉบับ"
+                          },
+                          {
+                              "question":  "เกิดเหตุวันใดและเป็นน้ำท่วมรอบใด",
+                              "why_valuable":  "ไม่ใช้วันที่รับข่าวแทนวันเกิดเหตุ",
+                              "decided":  "ค้น",
+                              "reason":  "ค้นร่วมกับต้นทาง; ยังระบุไม่ได้"
+                          },
+                          {
+                              "question":  "ประวัติส่วนตัว ที่อยู่ และเหตุสูญเสียขาของชายในเรื่อง",
+                              "why_valuable":  "ไม่จำเป็นต่อการยืนยันการช่วยเหลือ",
+                              "decided":  "ไม่ค้น",
+                              "reason":  "เป็นบุคคลทั่วไป ไม่มีเหตุจำเป็นต้องขยายข้อมูลส่วนตัวหรือสุขภาพ"
+                          },
+                          {
+                              "question":  "ยอดน้ำท่วมและตัวเลขกระสอบทรายระดับจังหวัด",
+                              "why_valuable":  "อาจเพิ่มบริบทเมื่อทราบวันและพื้นที่",
+                              "decided":  "ไม่ค้น",
+                              "reason":  "ยังไม่ทราบวันเกิดเหตุและจุดเกิดเหตุ การนำตัวเลขรอบอื่นมาเชื่อมเสี่ยงทำให้เข้าใจผิด"
+                          }
+                      ],
+    "tool_log":  [
+                     {
+                         "tool":  "exec_command",
+                         "args":  "อ่าน README-TOOLS.md UTF8",
+                         "ok":  true,
+                         "note":  "อ่านกติกาเครื่องมือก่อนค้น"
+                     },
+                     {
+                         "tool":  "clock.curr_time",
+                         "args":  "{}",
+                         "ok":  true,
+                         "note":  "เริ่มจับเวลา 2026-10-01 06:14:36 UTC"
+                     },
+                     {
+                         "tool":  "exec_command",
+                         "args":  "อ่าน tools/apify.mjs และ computer-use/SKILL.md UTF8",
+                         "ok":  true,
+                         "note":  "ตรวจวิธีส่ง JSON และข้อกำหนดเบราว์เซอร์; ไม่ได้ใช้ native Windows automation"
+                     },
+                     {
+                         "tool":  "serper",
+                         "args":  "สวีเดน ขาเทียม ราชบุรี กระสอบ --num 8",
+                         "ok":  true,
+                         "note":  "ไม่พบผลตรงเรื่อง"
+                     },
+                     {
+                         "tool":  "apify",
+                         "args":  "facebook-search-scraper: ขาเทียม ราชบุรี",
+                         "ok":  false,
+                         "note":  "inputJSON invalid จากการส่งอาร์กิวเมนต์ผ่าน PowerShell"
+                     },
+                     {
+                         "tool":  "serper",
+                         "args":  "ชาวสวีเดน ตักทราย --num 8",
+                         "ok":  true,
+                         "note":  "ไม่พบผลตรงเรื่อง"
+                     },
+                     {
+                         "tool":  "exec_command",
+                         "args":  "อ่าน tools/serper.mjs UTF8",
+                         "ok":  true,
+                         "note":  "ตรวจวิธีรับคำค้น"
+                     },
+                     {
+                         "tool":  "apify",
+                         "args":  "facebook-search-scraper searchQueries=[ขาเทียม ราชบุรี] resultsLimit=8 timeout=60",
+                         "ok":  false,
+                         "note":  "แก้ quoting ด้วย --%; actor คืน error=no_items, Empty or private data for provided input"
+                     },
+                     {
+                         "tool":  "cua",
+                         "args":  "createBrowserTab iab: Facebook search posts ขาเทียม ราชบุรี",
+                         "ok":  false,
+                         "note":  "Browser is not available: iab"
+                     },
+                     {
+                         "tool":  "web.run",
+                         "args":  "ค้น ขาเทียม ราชบุรี ทราย; สวีเดน กระสอบ น้ำท่วม",
+                         "ok":  true,
+                         "note":  "ไม่พบผลที่ตรง; ไม่ใช้เรื่องอื่นมาประกอบเป็นหลักฐานของเหตุการณ์นี้"
+                     },
+                     {
+                         "tool":  "cua",
+                         "args":  "getState",
+                         "ok":  true,
+                         "note":  "พบ Edge เชื่อมต่อผ่าน extension"
+                     },
+                     {
+                         "tool":  "apify",
+                         "args":  "facebook-search-scraper searchQueries=[ขาเทียม,สวีเดน ราชบุรี] resultsLimit=8 timeout=60",
+                         "ok":  false,
+                         "note":  "actor คืน error=no_items"
+                     },
+                     {
+                         "tool":  "serper",
+                         "args":  "ฝรั่ง ขาเทียม ช่วย น้ำท่วม --num 6",
+                         "ok":  true,
+                         "note":  "พบเรื่องช่วยเข็นรถและลุงเชน ซึ่งไม่ใช่เหตุการณ์เดียวกัน"
+                     },
+                     {
+                         "tool":  "cua",
+                         "args":  "createBrowserTab Edge 2: Facebook search posts ขาเทียม ราชบุรี",
+                         "ok":  true,
+                         "note":  "เปิดผลค้นเฟซบุ๊กได้"
+                     },
+                     {
+                         "tool":  "cua",
+                         "args":  "getAXState ผลค้น",
+                         "ok":  true,
+                         "note":  "พบโพสต์รวมไอจีดาราตรงเนื้อหา; มีแชทเดิมปรากฏโดยไม่ตั้งใจ ไม่ใช้หรือบันทึกเนื้อหาแชทในรายงาน"
+                     },
+                     {
+                         "tool":  "cua",
+                         "args":  "ปิดหน้าต่างแชทที่ไม่เกี่ยวข้องและเปิดโพสต์รวมไอจีดารา",
+                         "ok":  true,
+                         "note":  "เข้าหน้าโพสต์สาธารณะ"
+                     },
+                     {
+                         "tool":  "cua",
+                         "args":  "getAXState โพสต์และความคิดเห็น",
+                         "ok":  true,
+                         "note":  "อ่านเนื้อเต็ม; 31 reactions, 2 comments, 1 share; คอมเมนต์เพจทวนเนื้อหา อีกคอมเมนต์เป็นอีโมจิและเพจตอบ Thx for comment; ไม่พบแก้ข่าวในส่วนที่แสดง"
+                     },
+                     {
+                         "tool":  "cua",
+                         "args":  "ปิดหน้าต่างโพสต์กลับผลค้น",
+                         "ok":  true,
+                         "note":  "เตรียมค้นผู้เล่าเดิม"
+                     },
+                     {
+                         "tool":  "cua",
+                         "args":  "ค้นผ่านช่อง Facebook: สวีเดน ขาเทียม",
+                         "ok":  true,
+                         "note":  "ส่งคำค้นผ่าน UI"
+                     },
+                     {
+                         "tool":  "cua",
+                         "args":  "getAXState ผลค้น สวีเดน ขาเทียม",
+                         "ok":  true,
+                         "note":  "พบโพสต์เดิมและผลไม่เกี่ยวข้อง ยังไม่พบต้นทาง"
+                     },
+                     {
+                         "tool":  "apify",
+                         "args":  "facebook-posts-scraper startUrls=[https://www.facebook.com/IG.dara/posts/pfbid02xtmH9UpCU2yNs9dKTV6R9ZgeQyrXm7EU97zBkZ64t9MrSAXTe4jxBsyzLoiaKK1el] resultsLimit=1 timeout=60",
+                         "ok":  true,
+                         "note":  "time=2026-10-01T05:51:22.000Z; likes=31 comments=2 shares=1"
+                     },
+                     {
+                         "tool":  "fetch-page",
+                         "args":  "https://www.facebook.com/IG.dara/posts/pfbid02xtmH9UpCU2yNs9dKTV6R9ZgeQyrXm7EU97zBkZ64t9MrSAXTe4jxBsyzLoiaKK1el --max 5000",
+                         "ok":  true,
+                         "note":  "ดึงเนื้อเต็มและความคิดเห็นได้; published ว่าง แสดง 26 minutes ago; ใช้ timestamp จาก Apify"
+                     },
+                     {
+                         "tool":  "exec_command",
+                         "args":  "สร้าง out2/result.json UTF8",
+                         "ok":  true,
+                         "note":  "ตีความชื่อไฟล์ส่งมอบ out2/result.json ที่ระบุสองครั้งเป็นข้อยกเว้นเฉพาะไฟล์ต่อข้อความห้ามแก้นอก out/; ไม่แก้ไฟล์อื่น"
+                     },
+                     {
+                         "tool":  "exec_command",
+                         "args":  "อ่านและตรวจ JSON UTF8",
+                         "ok":  true,
+                         "note":  "ตรวจรูปแบบและฟิลด์หลังเขียน"
+                     },
+                     {
+                         "tool":  "exec_command",
+                         "args":  "แก้การคำนวณเวลาจาก timezone และตรวจไฟล์",
+                         "ok":  true,
+                         "note":  "การตรวจพบ minutes ติดลบจาก DateTime timezone; แก้ใช้ DateTimeOffset ทำให้เกินงบ 24 ครั้งจำนวน 1 ครั้ง รายงานตามจริง"
+                     }
+                 ],
+    "story_date_estimate":  "ไม่ทราบ",
+    "stale_news_warning":  "ยังตรวจไม่ได้ว่าเป็นข่าวเก่าหรือไม่: ไม่พบโพสต์ต้นฉบับหรือวันเกิดเหตุ; โพสต์ที่ยืนยันได้เผยแพร่ 2026-10-01 เวลา 05:51:22 UTC ซึ่งหลังเวลาส่งข่าวดิบ 05:15:38 UTC จึงไม่ใช่หลักฐานว่าเหตุการณ์เพิ่งเกิด",
+    "origin_post":  {
+                        "url":  "ไม่พบ",
+                        "source_name":  "ไม่พบผู้เล่าหรือโพสต์ต้นฉบับ; โพสต์รวมไอจีดาราที่พบเป็นเนื้อหาซ้ำและเผยแพร่ภายหลัง",
+                        "date":  "ไม่ทราบ",
+                        "confidence":  0
+                    },
+    "fact_cards":  [
+                       {
+                           "claim":  "พบโพสต์เพจรวมไอจีดาราที่เล่าเรื่องเดียวกัน แต่เผยแพร่หลังเวลาส่งข่าวดิบ จึงใช้เป็นต้นทางเดิมไม่ได้",
+                           "value_type":  "ต้นทาง",
+                           "why_it_adds_value":  "แยกโพสต์เผยแพร่ซ้ำออกจากพยานต้นทาง; Apify ระบุ 2026-10-01T05:51:22.000Z เทียบกับเวลาส่งข่าว 05:15:38.248Z",
+                           "evidence_quote":  "สาวรายหนึ่งได้เจอเขาทำงานอยู่ตรงนั้น แล้วนำเรื่องนี้มาเล่าต่อ",
+                           "source_url":  "https://www.facebook.com/IG.dara/posts/pfbid02xtmH9UpCU2yNs9dKTV6R9ZgeQyrXm7EU97zBkZ64t9MrSAXTe4jxBsyzLoiaKK1el",
+                           "source_name":  "รวมไอจีดารา / Facebook (อ่านผ่าน CUA, Apify และ fetch-page)",
+                           "source_date":  "2026-10-01T05:51:22.000Z",
+                           "confidence":  0.99,
+                           "contradicts_raw":  false
+                       },
+                       {
+                           "claim":  "โพสต์เผยแพร่ซ้ำที่ตรวจได้มียอดแชร์ 1 ครั้งและแสดง 2 ความคิดเห็น ณ เวลาตรวจ ไม่ใช่ยอดของโพสต์ต้นฉบับ",
+                           "value_type":  "ตัวเลข-บริบท",
+                           "why_it_adds_value":  "มีตัวเลขตรวจสอบได้โดยไม่อ้างว่าข่าวแพร่หลายมากจากคำว่าไวรัล",
+                           "evidence_quote":  "2 comments\n1 share",
+                           "source_url":  "https://www.facebook.com/IG.dara/posts/pfbid02xtmH9UpCU2yNs9dKTV6R9ZgeQyrXm7EU97zBkZ64t9MrSAXTe4jxBsyzLoiaKK1el",
+                           "source_name":  "รวมไอจีดารา / Facebook",
+                           "source_date":  "2026-10-01T05:51:22.000Z",
+                           "confidence":  0.99,
+                           "contradicts_raw":  false
+                       },
+                       {
+                           "claim":  "ในความคิดเห็นที่หน้าโพสต์แสดง ไม่พบข้อมูลความคืบหน้าหรือแก้ข่าว โดยเพจทวนเนื้อหาเดิมและตอบขอบคุณความคิดเห็น",
+                           "value_type":  "ความคืบหน้า",
+                           "why_it_adds_value":  "บอกขอบเขตการตรวจจริง ไม่ถือว่าการไม่มีคำแก้ข่าวพิสูจน์เนื้อข่าวทั้งหมด",
+                           "evidence_quote":  "Thx for comment",
+                           "source_url":  "https://www.facebook.com/IG.dara/posts/pfbid02xtmH9UpCU2yNs9dKTV6R9ZgeQyrXm7EU97zBkZ64t9MrSAXTe4jxBsyzLoiaKK1el",
+                           "source_name":  "รวมไอจีดารา / Facebook ความคิดเห็นที่แสดง",
+                           "source_date":  "2026-10-01 (วันที่จากเวลาแสดงสัมพัทธ์ในหน้าที่ตรวจ; ไม่พบ timestamp ความคิดเห็นแบบเต็ม)",
+                           "confidence":  0.95,
+                           "contradicts_raw":  false
+                       }
+                   ],
+    "raw_contradictions":  [
+
+                           ],
+    "skipped":  [
+                    "ไม่พบหลักฐานขัดข่าวดิบโดยตรง แต่ยังยืนยันสัญชาติ ขาเทียม สถานที่ วันเกิดเหตุ และคำพูดจากผู้เกี่ยวข้องเองไม่ได้",
+                    "ไม่ยกคำกล่าวในโพสต์เผยแพร่ซ้ำเป็นการยืนยันอิสระ เพราะไม่ระบุผู้เล่าเดิม",
+                    "ไม่ค้นประวัติส่วนตัวหรือสาเหตุการสูญเสียขา",
+                    "ไม่ใช้ข่าวช่วยเข็นรถฝ่าน้ำท่วมหรือข่าวลุงเชนแทนเรื่องนี้",
+                    "ไม่ค้นสถิติน้ำท่วมปัจจุบันมาอธิบายเหตุการณ์ที่ยังไม่ทราบวัน",
+                    "ไม่ได้พบต้นฉบับ จึงไม่มีวันที่ ยอดแชร์ หรือคอมเมนต์ของต้นฉบับให้รายงาน",
+                    "คำสั่งระบุทั้ง out2/result.json และห้ามแก้นอก out/; ใช้ชื่อไฟล์ส่งมอบที่ระบุซ้ำเป็นข้อยกเว้นเฉพาะไฟล์นี้"
+                ],
+    "browser_available":  "ใช้ Edge ผ่าน CUA extension ได้และอ่านโพสต์/ความคิดเห็นสาธารณะจริง; iab ใช้ไม่ได้; Apify facebook-search-scraper คืน no_items แต่ facebook-posts-scraper ดึงโพสต์ที่รู้ URL ได้",
+    "self_report":  {
+                        "tool_calls":  25,
+                        "minutes":  4.86,
+                        "what_would_help_next_time":  "ขอ URL หรือภาพหน้าจอโพสต์ที่พนักงานใช้เขียนข่าว โดยเฉพาะชื่อผู้เล่าเดิมและภาพที่เห็นเครดิต; จำนวน tool_calls นับการเรียกเครื่องมือย่อยจริงรวมอ่านไฟล์ นาฬิกา เบราว์เซอร์ เขียนและตรวจไฟล์ ไม่รวม functions.exec ที่เป็นตัวห่อ"
+                    }
+}
