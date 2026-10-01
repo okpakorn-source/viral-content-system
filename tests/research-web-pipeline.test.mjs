@@ -419,11 +419,18 @@ const cut = (source, start, end) => {
   return source.slice(0, i) + source.slice(j);
 };
 /** autoFlowServiceText ที่ถอด hook รีเสิร์ชทั้ง 4 จุดออก (= ต้นฉบับก่อนเลน B — ตรวจไบต์ตรงกับ backup แล้วตอนเขียน) */
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 · เลน W1): + ถอด hook โหมด write 3 จุด (จุดเสียบหลังสกัด · มุมเสนอใน args แตกประเด็น ·
+//   ข้อเท็จจริงการ์ดใน correctionResearchFacts) — ซอร์สที่ถอดแล้วยังเป็น "ก่อนมีรีเสิร์ชเอเจนต์" (บล็อก writerRawSourceText ที่ย้ายที่ = ข้อความเดิม)
+//   ข้อสอบเดิมไม่เปลี่ยน — ปิดสวิตช์ต้องเหมือนซอร์สนี้ทุกไบต์ (ครอบ hook โหมด write ด้วย) · ซอร์สถอดเฉพาะโหมด write อยู่ใน tests/research-write-pipeline
 function stripAutoFlowHook(source) {
   let s = cut(source, '  // ★ 1 ต.ค. 69 (Research Agent v2 · เลน B · SPEC-v2 ส่วน 9 · ไฟล์ล็อก', '  const [bpSettled, srSettled] = await Promise.allSettled([');
   s = cut(s, '  // ★ 1 ต.ค. 69 (Research Agent v2): ปิดรอบอ่านการ์ด', '  const stepGenStart = Date.now();');
   s = cut(s, '  // ★ 1 ต.ค. 69 (Research Agent v2 · เลน B · SPEC-v2 ส่วน 3/9)', '  const generationLogAttempt = await settleTelemetryWithinReserve(');
   s = cut(s, '        // ★ 1 ต.ค. 69 (Research Agent v2): {researchAgent, jobId, workflowId}', '      },\n      userId: _user.userId,');
+  s = cut(s, '  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3) — จุดเสียบหลังขั้นสกัด', '  // ★ 21 ส.ค. 69: เก็บข้อความที่ผู้ใช้วางไว้แยกจาก newsData.newsBody');
+  s = cut(s, '    // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3): มุมเสนอ', "  }), 300000, 'breakdown');");
+  s = cut(s, '    // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3): + ข้อเท็จจริงของการ์ด', '    .filter(Boolean)\n    .join(');
+  assert.doesNotMatch(s, /_researchWrite/, 'ซอร์สที่ถอดแล้วต้องไม่มี hook โหมด write หลงเหลือ');
   assert.doesNotMatch(s, /research-agent|_researchAgent/, 'ซอร์สที่ถอดแล้วต้องไม่มี hook หลงเหลือ');
   return s;
 }

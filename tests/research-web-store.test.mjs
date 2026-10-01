@@ -53,7 +53,11 @@ test('modes: ปิดเป็นค่าเริ่มต้น เปิด
   assert.equal(modes.getResearchAgentWaitMs({ RESEARCH_AGENT_MODE: 'shadow', RESEARCH_AGENT_WAIT_MS: '90000' }), 0);
   assert.equal(modes.getResearchAgentWaitMs({ RESEARCH_AGENT_MODE: 'assist' }), 90_000);
   assert.equal(modes.getResearchAgentWaitMs({ RESEARCH_AGENT_MODE: 'assist', RESEARCH_AGENT_WAIT_MS: '15000' }), 15_000);
-  assert.equal(modes.getResearchAgentWaitMs({ RESEARCH_AGENT_MODE: 'write', RESEARCH_AGENT_WAIT_MS: '999999' }), 180_000);
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ข้อตัดสิน #1 · เลน W1): write แยกเพดาน 300000 แล้ว — เพดาน 180000 คงตรวจที่ assist
+  //   ของเดิม: assert getResearchAgentWaitMs({ RESEARCH_AGENT_MODE: 'write', RESEARCH_AGENT_WAIT_MS: '999999' }) === 180_000 (สมัยเฟส 1 write = assist)
+  assert.equal(modes.getResearchAgentWaitMs({ RESEARCH_AGENT_MODE: 'assist', RESEARCH_AGENT_WAIT_MS: '999999' }), 180_000);
+  assert.equal(modes.getResearchAgentWaitMs({ RESEARCH_AGENT_MODE: 'write', RESEARCH_AGENT_WAIT_MS: '999999' }), 300_000);
+  assert.equal(modes.getResearchAgentWaitMs({ RESEARCH_AGENT_MODE: 'write' }), 300_000);
   assert.equal(modes.getResearchAgentWaitMs({ RESEARCH_AGENT_MODE: 'assist', RESEARCH_AGENT_WAIT_MS: 'abc' }), 90_000);
   assert.equal(modes.getResearchAgentQuotaAlertPct({}), 15);
 });

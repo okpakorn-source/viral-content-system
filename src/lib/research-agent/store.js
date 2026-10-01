@@ -4,6 +4,8 @@
 // สเปก C:\tmp\research-agent-lab\SPEC-v2.md ส่วน 2.1–2.3 · ตาราง Supabase store_items (ไม่แก้ schema — prisma ห้ามแตะ)
 //   store 'research-requests' (ใบขอค้นคว้า 1 ใบ/งานคิว) · 'research-cards' (ผลการ์ด) · 'bot-posted' (บอทจดว่าโพสต์ผลที่ไหน)
 //   + 'research-workers' (ชีพจร/โควตาของ worker ต่อเครื่อง — ใช้ตอบ /api/research/status และตัดสิน "ออฟไลน์")
+//   + ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.1): 'research-editor' (ผลบรรณาธิการเรียบเรียง · row 'redit_<jobId>')
+//     saveEditorResult/getEditorResult · ไม่เก็บฉบับเสริมเต็ม (พรีวิว ≤400) · บอทอ่านผ่านช่อง editor ของ GET /api/research/cards
 // ⚠️ กับดักที่ต้องรู้: store_items.id เป็น PK ทั้งตาราง (โค้ดเดิม upsert onConflict:'id' — ytJobStore/megaJobStore ฯลฯ)
 //   ไม่ใช่ต่อ store → job_queue ใช้ jobId (q_…) เป็น id อยู่แล้ว ถ้าใช้ jobId ตรงๆ จะชน 23505 ทันที
 //   จึงเติมคำนำหน้า row id ต่อ store (rreq_ / rcard_ / bposted_ / rworker_) · ส่วน data.id = jobId ตามสัญญา 2.x ทุกไบต์
@@ -17,13 +19,20 @@
 // ไม่มีโหมดไฟล์สำรอง: งานข่าวที่จะมีใบขอได้ต้องผ่าน /api/queue/add ซึ่งบังคับ Supabase อยู่แล้ว · ท่อข่าวอ่านไม่ได้ = fail-open
 // ============================================================
 
-import { buildResearchCardsDoc, capText, normalizeFeedbackList, normalizeHttpUrl } from '@/lib/research-agent/cardsSchema';
+import { buildResearchCardsDoc, capText, normalizeFeedbackList, normalizeHttpUrl, normalizeSuggestedDimensions } from '@/lib/research-agent/cardsSchema';
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.1): + normalizeSuggestedDimensions (ใช้ใน buildEditorResultDoc) · ของเดิม: import 4 ตัวแรก
 import { getResearchAgentDeadlineMin, isResearchAgentOn } from '@/lib/research-agent/modes';
 
 export const RESEARCH_REQUESTS_STORE = 'research-requests';
 export const RESEARCH_CARDS_STORE = 'research-cards';
 export const BOT_POSTED_STORE = 'bot-posted';
 export const RESEARCH_WORKERS_STORE = 'research-workers';
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.1): ผลบรรณาธิการเรียบเรียง แยกจาก research-cards
+//   (เอเจนต์อาจ report ซ้ำ/ชน cas กับเอกสารการ์ด) · row id 'redit_<jobId>' · data.id = jobId · เขียนแบบ upsert (insert/cas)
+export const RESEARCH_EDITOR_STORE = 'research-editor';
+export const RESEARCH_EDITOR_STATUSES = Object.freeze(['done', 'not_ready', 'failed', 'skipped']);
+/** เก็บเนื้อฉบับเสริมได้แค่พรีวิว ≤ 400 ตัวอักษร (เนื้อข่าวสุดท้ายอยู่ generation_logs แล้ว — สัญญา 8.1) */
+export const RESEARCH_EDITOR_PREVIEW_CHARS = 400;
 
 export const RESEARCH_JOB_ID_RE = /^[A-Za-z0-9_-]{1,100}$/;
 export const RESEARCH_WORKER_ID_RE = /^[A-Za-z0-9._:@-]{1,80}$/;
@@ -45,6 +54,7 @@ export const researchRequestRowId = (jobId) => `rreq_${jobId}`;
 export const researchCardsRowId = (jobId) => `rcard_${jobId}`;
 export const botPostedRowId = (jobId) => `bposted_${jobId}`;
 export const researchWorkerRowId = (workerId) => `rworker_${workerId}`;
+export const researchEditorRowId = (jobId) => `redit_${jobId}`; // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.1)
 
 export class ResearchStorageError extends Error {
   constructor(message = 'ที่เก็บข้อมูลรีเสิร์ชใช้ไม่ได้ชั่วคราว') {
@@ -132,6 +142,65 @@ function validRequest(doc) {
   return isPlainObject(doc) && RESEARCH_JOB_ID_RE.test(String(doc.id || ''))
     && RESEARCH_REQUEST_STATUSES.includes(doc.status) && isRevision(doc.revision)
     && Number.isFinite(Date.parse(doc.deadlineAt || ''));
+}
+
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.1): ระเบียนผลบรรณาธิการ (store research-editor)
+const EDITOR_CARD_ID_RE = /^R\d{1,2}$/;
+const EDITOR_FLAG_RE = /^[A-Z][A-Z0-9_]{1,47}$/;
+const editorText = (value, max) => capText(typeof value === 'number' ? String(value) : value, max);
+const editorCardId = (value) => (typeof value === 'string' && EDITOR_CARD_ID_RE.test(value) ? value : null);
+const editorCount = (value) => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.round(value) : null);
+
+/**
+ * ระเบียน "ผลบรรณาธิการ" ตามสัญญา 8.1 — เก็บเฉพาะช่องในสัญญา (allowlist) + ตัดความยาวทุกช่อง
+ *   ห้ามมี enriched_source เต็ม (เก็บได้แค่ enriched_preview ≤ 400) · status นอกรายการ = failed · mode = 'write' เสมอ
+ *   revision/createdAt = ของที่เก็บ (upsert แบบ cas) · ช่องที่ไม่ส่ง = ค่าว่างตามชนิด (ผู้อ่าน/บอทไม่ต้องเช็ค undefined)
+ * @param {string} jobId
+ * @param {object} record  ผลจาก writeStage (src/lib/research-agent/writeStage.js)
+ * @param {{ nowIso: string, existing?: object|null }} ctx
+ */
+export function buildEditorResultDoc(jobId, record, { nowIso, existing = null } = {}) {
+  if (!RESEARCH_JOB_ID_RE.test(String(jobId || ''))) throw researchInputError('jobId ไม่ถูกต้อง');
+  const src = isPlainObject(record) ? record : {};
+  const list = (value) => (Array.isArray(value) ? value : []);
+  const iso = typeof nowIso === 'string' && nowIso ? nowIso : new Date().toISOString();
+  const doc = {
+    id: jobId,
+    status: RESEARCH_EDITOR_STATUSES.includes(src.status) ? src.status : 'failed',
+    mode: 'write',
+    used_cards: [...new Set(list(src.used_cards).map(editorCardId).filter(Boolean))].slice(0, 20),
+    corrections: list(src.corrections).filter(isPlainObject).map((c) => ({
+      field: editorText(c.field, 80),
+      from: editorText(c.from, 300),
+      to: editorText(c.to, 300),
+      source_url: normalizeHttpUrl(c.source_url),
+      source_name: editorText(c.source_name, 200),
+      card: editorCardId(c.card),
+    })).filter((c) => c.field || c.to).slice(0, 10),
+    additions: list(src.additions).filter(isPlainObject)
+      .map((a) => ({ text: editorText(a.text, 300), card: editorCardId(a.card) }))
+      .filter((a) => a.text).slice(0, 12),
+    not_used: list(src.not_used).filter(isPlainObject)
+      .map((n) => ({ card: editorCardId(n.card), why: editorText(n.why, 200) }))
+      .filter((n) => n.card || n.why).slice(0, 20),
+    suggested_dimensions: normalizeSuggestedDimensions(src.suggested_dimensions),
+    staff_notes: list(src.staff_notes).map((s) => editorText(s, 300)).filter(Boolean).slice(0, 10),
+    warnings: list(src.warnings).map((s) => editorText(s, 300)).filter(Boolean).slice(0, 10),
+    flags: [...new Set(list(src.flags).map((f) => editorText(f, 48).toUpperCase()).filter((f) => EDITOR_FLAG_RE.test(f)))].slice(0, 20),
+    original_chars: editorCount(src.original_chars),
+    enriched_chars: editorCount(src.enriched_chars),
+    ratio: typeof src.ratio === 'number' && Number.isFinite(src.ratio) && src.ratio >= 0 ? Math.round(src.ratio * 100) / 100 : null,
+    waitedMs: editorCount(src.waitedMs),
+    editorMs: editorCount(src.editorMs),
+    model: editorText(src.model, 60) || null,
+    reason: editorText(src.reason, 300) || null,
+    createdAt: typeof existing?.createdAt === 'string' ? existing.createdAt : iso,
+    updatedAt: iso,
+    revision: (isRevision(existing?.revision) ? existing.revision : 0) + 1,
+  };
+  const preview = editorText(src.enriched_preview, RESEARCH_EDITOR_PREVIEW_CHARS);
+  if (preview) doc.enriched_preview = preview;
+  return doc;
 }
 
 /** โควตาที่ worker แจ้ง (ตัวเลข % ที่เหลือ หรือ {pct|remainingPct|percentLeft, account}) → {pct, account} | null */
@@ -440,7 +509,9 @@ export function createResearchStorage({ sb, now = () => Date.now() } = {}) {
       const jobId = String(input?.jobId ?? input?.id ?? '');
       if (!RESEARCH_JOB_ID_RE.test(jobId)) throw researchInputError('jobId ไม่ถูกต้อง');
       const patch = {};
-      for (const key of ['channelId', 'sourceMessageId', 'processingMsgId', 'researchCardMsgId']) {
+      // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.2): + editorMsgId (บอทจดข้อความ "สิ่งที่เพิ่ม/แก้" กันโพสต์ซ้ำหลัง restart)
+      //   ของเดิม: ['channelId', 'sourceMessageId', 'processingMsgId', 'researchCardMsgId'] · ⚠️ route /api/bot/posted ต้องส่งช่องนี้ต่อด้วย
+      for (const key of ['channelId', 'sourceMessageId', 'processingMsgId', 'researchCardMsgId', 'editorMsgId']) {
         const value = optionalId(input?.[key]);
         if (value) patch[key] = value;
       }
@@ -468,6 +539,30 @@ export function createResearchStorage({ sb, now = () => Date.now() } = {}) {
 
     getBotPosted(jobId) {
       return getDoc(BOT_POSTED_STORE, botPostedRowId(jobId));
+    },
+
+    /**
+     * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.1): บันทึกผลบรรณาธิการ (upsert) — ท่อข่าวเรียกทุกกรณี
+     * (done/not_ready/failed/skipped) · มีแล้ว = ทับด้วยรอบล่าสุดแบบ cas (งานคิวที่ถูกส่งซ้ำ) · createdAt คงของเดิม
+     * @returns {Promise<object>} เอกสารที่บันทึกแล้ว · jobId ผิด = researchInputError · ชน cas เกิน 3 รอบ/ฐานล้ม = ResearchStorageError
+     */
+    async saveEditorResult(jobId, record) {
+      if (!RESEARCH_JOB_ID_RE.test(String(jobId || ''))) throw researchInputError('jobId ไม่ถูกต้อง');
+      const rowId = researchEditorRowId(jobId);
+      for (let attempt = 0; attempt < CAS_RETRIES; attempt++) {
+        // eslint-disable-next-line no-await-in-loop -- อ่านค่าล่าสุดก่อน cas
+        const current = await getDoc(RESEARCH_EDITOR_STORE, rowId);
+        const doc = buildEditorResultDoc(jobId, record, { nowIso: isoNow(), existing: current });
+        // eslint-disable-next-line no-await-in-loop -- เขียนแบบ cas/insert ทีละรอบ
+        const ok = current ? await casDoc(RESEARCH_EDITOR_STORE, rowId, current.revision, doc) : await insertDoc(RESEARCH_EDITOR_STORE, rowId, doc, doc.createdAt);
+        if (ok) return doc;
+      }
+      throw new ResearchStorageError('บันทึกผลบรรณาธิการชนกับการเขียนอื่นเกินจำนวนครั้งที่กำหนด');
+    },
+
+    /** ★ 1 ต.ค. 69 (โหมด write · สัญญา 8.1): ผลบรรณาธิการของงาน | null */
+    getEditorResult(jobId) {
+      return getDoc(RESEARCH_EDITOR_STORE, researchEditorRowId(jobId));
     },
   };
 }

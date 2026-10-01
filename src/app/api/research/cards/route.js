@@ -5,6 +5,8 @@
 // → {found, request:{status,…}|null, cards: เอกสาร research-cards|null, summary}
 //   found:false + request.status queued/leased = ยังทำอยู่ (บอท poll ต่อ) · request null หรือ failed/expired = หยุด poll
 //   tool_log ไม่ถูกส่ง (ใหญ่ · บอทไม่ใช้) เว้นแต่ ?full=1 · ไม่ส่ง rawText/userId ของใบขอ
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.1): + ช่อง editor = ระเบียนผลบรรณาธิการ (store research-editor) | null
+//   ช่องเดิมทุกช่องคงรูปเดิม · อ่าน editor ล้ม = null (ไม่ทำให้การ์ดอ่านไม่ได้ — ฐานล้มจริง getCards ก็ตอบ 503 อยู่แล้ว)
 // ============================================================
 import { checkBotKey, jsonFail, jsonOk, storageErrorResponse } from '@/lib/research-agent/http';
 import { summarizeCardsDoc } from '@/lib/research-agent/cardsSchema';
@@ -43,7 +45,12 @@ export async function GET(req) {
     const full = url.searchParams.get('full') === '1';
 
     const storage = await loadResearchStorage();
-    const [doc, request] = await Promise.all([storage.getCards(jobId), storage.getRequest(jobId)]);
+    // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.1): อ่านผลบรรณาธิการคู่กัน (ของเดิม: Promise.all 2 ตัว getCards/getRequest)
+    const [doc, request, editor] = await Promise.all([
+      storage.getCards(jobId),
+      storage.getRequest(jobId),
+      Promise.resolve().then(() => storage.getEditorResult(jobId)).catch(() => null),
+    ]);
     const config = getResearchAgentConfig();
     return jsonOk({
       jobId,
@@ -53,6 +60,7 @@ export async function GET(req) {
       request: request ? publicRequest(request) : null,
       cards: doc ? publicCards(doc, full) : null,
       summary: doc ? summarizeCardsDoc(doc) : null,
+      editor: editor || null, // ★ 1 ต.ค. 69 (โหมด write · สัญญา 8.1): ไม่มี = null
     });
   } catch (error) {
     console.warn(`[ResearchCards] ล้ม: ${error?.errorType || error?.name || 'error'}`);

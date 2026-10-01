@@ -14,6 +14,10 @@
 //   ข้อที่ "ไม่ได้" ทำซ้ำฝั่งเว็บ (อยู่ที่ worker เลน A): 3) คำต้องห้าม BLACKLIST (ไฟล์กลาง scripts/research-agent/blacklist.mjs)
 //     7) คิดเงินจาก tool_log ด้วยตารางราคา (ฝั่งเว็บรับตัวเลข usage ที่ worker คำนวณ — แค่กรองให้เป็นตัวเลขไม่ติดลบ)
 // ข้อความทุกช่องถูกตัดความยาว · tool_log ถูกลบรูปแบบกุญแจ (sk-… / api_key=… / Bearer …) ก่อนเก็บ — ห้ามมีคีย์ในผล
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): รับ/คง 2 ฟิลด์ใหม่แบบ optional (เอเจนต์ของเลน W2 กรอก)
+//   · ระดับบน suggested_dimensions: string[] (≤3 ข้อ · ≤120 ตัวอักษร/ข้อ · ไม่ซ้ำ) — มีคีย์ในผล = เก็บ (ผิดชนิด = []) · ไม่มีคีย์ = ไม่ใส่
+//   · ในการ์ด quote?: {text ≤300, speaker ≤80, speaker_confidence 0–1} — text ว่าง/ไม่ใช่ object = ไม่ใส่ · ความมั่นใจอ่านไม่ได้ = 0
+//   ผลเก่าที่ไม่มีสองฟิลด์นี้ = เอกสารเดิมทุกไบต์ (ไม่เติมคีย์) · ด่านไม่บีบ/ไม่ตัดการ์ดเพราะฟิลด์ใหม่ (gateChanges ไม่เปลี่ยน)
 // ============================================================
 
 export const RESEARCH_RESULT_STATUSES = Object.freeze(['done', 'failed', 'skipped']);
@@ -22,6 +26,11 @@ export const RESEARCH_MAX_DISPLAY_CARDS = 8;
 export const RESEARCH_MIN_EVIDENCE_CHARS = 20;
 export const RESEARCH_MIN_PASS_CONFIDENCE = 0.6;
 export const RESEARCH_MAX_FEEDBACK = 300;
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): เพดานของฟิลด์ใหม่
+export const RESEARCH_MAX_SUGGESTED_DIMENSIONS = 3;
+export const RESEARCH_MAX_DIMENSION_CHARS = 120;
+export const RESEARCH_MAX_QUOTE_CHARS = 300;
+export const RESEARCH_MAX_QUOTE_SPEAKER_CHARS = 80;
 
 const MAX_DROPPED_KEPT = 8;
 const MAX_PLAN = 12;
@@ -158,6 +167,37 @@ export function evidenceAnchorsClaim(claim, quote) {
 
 const tighten = (gate, cap) => (GATE_RANK[cap] < GATE_RANK[gate] ? cap : gate);
 
+/**
+ * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): มุมเสนอของเอเจนต์ → ≤3 ข้อ · ≤120 ตัวอักษร/ข้อ · ตัดว่าง/ซ้ำ
+ * ผิดชนิด (ไม่ใช่ array) = [] — ผู้เรียกตัดสินเองว่าจะใส่คีย์หรือไม่ (ผลเก่าที่ไม่มีคีย์ต้องไม่ถูกเติม)
+ */
+export function normalizeSuggestedDimensions(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const item of list) {
+    const text = capText(item, RESEARCH_MAX_DIMENSION_CHARS);
+    if (!text || out.includes(text)) continue;
+    out.push(text);
+    if (out.length >= RESEARCH_MAX_SUGGESTED_DIMENSIONS) break;
+  }
+  return out;
+}
+
+/**
+ * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): คำพูดตรงในการ์ด → {text ≤300, speaker ≤80, speaker_confidence 0–1} | null
+ * text ว่าง/ไม่ใช่ object = null (ไม่ใส่คีย์) · speaker_confidence อ่านไม่ได้/นอกช่วง = 0 (ถือว่าไม่มั่นใจ → บรรณาธิการเล่าทางอ้อม ข้อ 11)
+ */
+export function normalizeCardQuote(quote) {
+  if (!isPlainObject(quote)) return null;
+  const text = capText(quote.text, RESEARCH_MAX_QUOTE_CHARS);
+  if (!text) return null;
+  return {
+    text,
+    speaker: capText(quote.speaker, RESEARCH_MAX_QUOTE_SPEAKER_CHARS),
+    speaker_confidence: unitNumber(quote.speaker_confidence) ?? 0,
+  };
+}
+
 function normalizePlan(plan) {
   if (!Array.isArray(plan)) return [];
   return plan.filter(isPlainObject).slice(0, MAX_PLAN).map((item) => {
@@ -245,6 +285,9 @@ function normalizeCard(card, gateChanges) {
     identity: card.identity === 'verified' ? 'verified' : 'generic',
     gate,
   };
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): คงคำพูดตรงของการ์ด (มีเฉพาะเมื่อเอเจนต์ส่ง text มา · ไม่แตะ gate)
+  const quote = normalizeCardQuote(card.quote);
+  if (quote) out.quote = quote;
   const reasonText = [workerReason, changed && reasons.length ? `web:${reasons.join('+')}` : ''].filter(Boolean).join(' · ');
   if (reasonText) out.gate_reason = capText(reasonText, 240);
   return out;
@@ -402,6 +445,8 @@ export function buildResearchCardsDoc(result, { jobId, mode, nowIso, existing = 
     stale_news_warning: textOrNull(source.stale_news_warning, 600),
     cards,
     raw_corrections: rawCorrections,
+    // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.3): มุมเสนอ — มีคีย์ในผลเท่านั้นถึงใส่ (ผลเก่า = เอกสารเดิมทุกไบต์)
+    ...(Object.hasOwn(source, 'suggested_dimensions') ? { suggested_dimensions: normalizeSuggestedDimensions(source.suggested_dimensions) } : {}),
     flags: [...flags].slice(0, MAX_FLAGS),
     skipped: (Array.isArray(source.skipped) ? source.skipped : []).map((s) => capText(s, 300)).filter(Boolean).slice(0, MAX_SKIPPED),
     tool_log: toolLog,

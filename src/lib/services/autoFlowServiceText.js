@@ -198,11 +198,7 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     addLog('Step1', `➕ ผนวกข้อความจากผู้ใช้ ${text.length} ตัวอักษร`);
   }
 
-  // ★ 21 ส.ค. 69: เก็บข้อความที่ผู้ใช้วางไว้แยกจาก newsData.newsBody ซึ่งผ่าน AI สกัด
-  //   ส่งเฉพาะสายข้อความดิบไปให้นักเขียนอ่านก่อนวัตถุดิบเดิมทั้งหมด สาย URL/คลิปไม่เปลี่ยน
-  const writerRawSourceText = (detectedType === 'text' || detectedType === 'plain_text')
-    ? rawText
-    : undefined;
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3): บล็อก writerRawSourceText (21 ส.ค. 69) ย้ายลงไปหลังขั้นสกัด+จุดเสียบ write — ดูคอมเมนต์ที่นั่น
 
   if (contentFallback) addLog('Step1', '⚠️ ใช้ URL fallback — AI จะวิเคราะห์เนื้อหาจาก context ที่มี (ผลลัพธ์อาจจำกัด)');
 
@@ -256,6 +252,37 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   addLog('Step2', `✅ "${newsData.newsTitle?.slice(0, 40)}..." (${newsData.newsBody.length} ตัวอักษร, ${((Date.now() - step2Start) / 1000).toFixed(1)}s)`);
   await logPipeline({ workflowId: _autoWorkflowId, step: 'extract', status: 'success', duration: Date.now() - step2Start, detail: (newsData.newsTitle || '').slice(0, 60) }).catch(() => {});
 
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3) — จุดเสียบหลังขั้นสกัด ก่อนแตกประเด็น (สเปกส่วน 3 · ไฟล์ล็อก: ผู้คุมงาน commit พร้อมรหัส NEWS-LOCK)
+  //   เฉพาะ RESEARCH_AGENT ตั้ง + RESEARCH_AGENT_MODE มีคำว่า write + สายข้อความ (ตัวกรองหยาบ · ตัดสินจริงใน writeStage — ค่าแปลก = null)
+  //   รอการ์ด ≤ WAIT_MS นับจากเริ่มท่อ (เลิกรอเมื่อเส้นตายรวมเหลือ < 480s · ไม่ใช้ withTimeout ของท่อ = ไม่จองงบ) → บรรณาธิการเรียบเรียง
+  //   (claude-opus-5-5 medium ≤ 60s · ไม่กินงบ 420s สุดท้าย) → ด่านเชิงกล → ผ่าน = ฉบับเสริมเป็นความจริงหลักของทุกขั้นถัดไป:
+  //   rawText → writerRawSourceText (แตกประเด็น/นักเขียน) · groundingSourceText (correction/grounding) · ด่าน RAW · sourceText ของ generation log
+  //   newsData.newsBody → แตกประเด็น/blueprint/การ์ด/รีเสิร์ชต่อมุม/correction/คลัง · ต้นฉบับเดิม = analysisResult.researchAgent.original_preview
+  //   (≤400) + research-requests[jobId].rawText (เต็ม) · เวลารอ/บรรณาธิการนับรวมใน stepTimings.extract (แยกดู pipeline_info.researchAgent.editor)
+  //   ไม่ตั้ง/โหมดอื่น/สาย URL = ไม่ import ไม่รอ = เดิมทุกไบต์ · ทุกความล้มเหลว = null หรือสถานะ ≠ done = ข่าวเดินต่อจากต้นฉบับ (fail-open)
+  const _researchWrite = (process.env.RESEARCH_AGENT && /write/i.test(process.env.RESEARCH_AGENT_MODE || '')
+      && (detectedType === 'text' || detectedType === 'plain_text'))
+    ? await import('@/lib/research-agent/writeStage')
+      .then((m) => m.runResearchWriteStage({
+        workflowId: _autoWorkflowId, rawText, newsData, pipelineStartedAt: startTime, deadline: getActivePipelineDeadline(),
+      }))
+      .catch(() => null)
+    : null;
+  if (_researchWrite?.logLine) addLog('ResearchWrite', _researchWrite.logLine);
+  if (_researchWrite?.enrichedSource) {
+    rawText = _researchWrite.enrichedSource; // ฉบับเสริม = ความจริงหลัก (writerRawSourceText/grounding/ด่าน RAW อ่านจากตัวแปรนี้)
+    newsData.newsBody = _researchWrite.enrichedSource;
+  }
+
+  // ★ 21 ส.ค. 69: เก็บข้อความที่ผู้ใช้วางไว้แยกจาก newsData.newsBody ซึ่งผ่าน AI สกัด
+  //   ส่งเฉพาะสายข้อความดิบไปให้นักเขียนอ่านก่อนวัตถุดิบเดิมทั้งหมด สาย URL/คลิปไม่เปลี่ยน
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3): ย้ายบล็อกนี้ (ข้อความเดิมทุกตัว) ลงมาหลังจุดเสียบ write
+  //   ของเดิม: อยู่ก่อน "=== STEP 2: สกัดข่าว" · ช่วงที่ย้ายข้ามไม่มีบรรทัดไหนเปลี่ยน rawText (ขั้นสกัดอ่านอย่างเดียว) → ทุกโหมดได้ค่าเดิม ·
+  //   โหมด write ที่บรรณาธิการผ่าน = ฉบับเสริม (rawText ถูกแทนด้านบน)
+  const writerRawSourceText = (detectedType === 'text' || detectedType === 'plain_text')
+    ? rawText
+    : undefined;
+
   // === STEP 3: แตกประเด็น (Breakdown) ===
   const step3Start = Date.now();
   addLog('Step3', '🔍 AI กำลังวิเคราะห์มุมข่าว...');
@@ -272,6 +299,9 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S9 · เจ้าของอนุมัติ) — PL-23: แตกประเด็นเคยเห็นแต่เนื้อที่ AI สกัด (text ด้านบน) แต่พรอมต์เรียกมันว่า RAW
     //   → ส่งข้อความดิบที่ผู้ใช้วาง (writerRawSourceText ชุดเดียวกับนักเขียน/ด่าน) ไปด้วย · สาย URL/คลิป = ไม่มี = {} · ถอย NARRATIVE_LEGACY=1 = {} = args เดิมทุกไบต์
     ...breakdownRawSourceArgs(writerRawSourceText),
+    // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3): มุมเสนอจากเอเจนต์/บรรณาธิการ "ตัวเลือก ไม่บังคับ" ต่อท้าย args เดิม (customPrompt
+    //   ของขั้นแตกประเด็น) · มีเฉพาะโหมด write ที่ฉบับเสริมผ่าน · อื่นๆ = {} = args เดิมทุกไบต์
+    ...(_researchWrite?.breakdownArgs || {}),
   }), 300000, 'breakdown'); // ★ 300s (10 ก.ค. 69) — ห้ามต่ำกว่าผลรวมชั้นใน ไม่งั้น job ตายทั้งงานทั้งที่ fallback กำลังจะรอด · ★ 30 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 2 · เจ้าของอนุมัติ) CFG-09: ชั้นในจริง = sol 200s (breakdown_primary_inner) + terra 90s (breakdown_fallback) = 290s → เผื่อเหลือแค่ ~10s และ 10s นี้ต้องครอบงาน DB ในขั้นเดียวกันด้วย (getWorkflow ก่อนเรียก AI + saveBreakdown/loadFromDB/saveMemoryToDB หลังได้ผล) · ค่าเริ่มต้น sol 1 นัด → terra 1 นัด จบ (ถอย BREAKDOWN_SINGLE_FALLBACK=0) · คอมเมนต์เดิม "inner gpt-5.5 200s + fallback gpt-4o 60s + เผื่อ 40s" ตกรุ่นตั้งแต่ ee64be89 เปลี่ยน fallback 60→90s
 
   if (!breakRes.success || !breakRes.data) {
@@ -355,10 +385,12 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   //   เริ่มอ่านการ์ดเอเจนต์ค้นคว้า research-cards[jobId] (poll ทุก 5 วิ) ขนานกับ Blueprint/SmartResearch — ไม่ใช้ withTimeoutSignal/
   //   assertCanStart (ไม่จองงบเส้นตาย) · ไม่ตั้ง RESEARCH_AGENT = ไม่ import ไม่อ่าน ไม่รอ = เดิมทุกไบต์ · ล้ม/ช้า/ออฟไลน์ = fail-open
   //   ไม่แตะนักเขียน/ด่าน/correction (ข้อ 24 — เฟส write ค่อยต่อ researchData/ด่าน RAW หลังเจ้าของอนุมัติไฟล์ล็อก)
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3): โหมด write ที่ขั้นหลังสกัดรอ/อ่านการ์ดแล้ว = ใช้ผลนั้นซ้ำ (ไม่ poll/ไม่รอซ้ำ)
+  //   ของเดิม: `? import('@/lib/research-agent/readCards')…` ตรงๆ (ไม่มีกิ่ง _researchWrite?.poll) · ไม่มีผล write = กิ่งเดิมทุกไบต์
   const _researchAgentPoll = process.env.RESEARCH_AGENT
-    ? import('@/lib/research-agent/readCards')
+    ? (_researchWrite?.poll ? Promise.resolve(_researchWrite.poll) : import('@/lib/research-agent/readCards')
       .then((m) => m.startResearchAgentPoll({ workflowId: _autoWorkflowId, deadline: getActivePipelineDeadline() }))
-      .catch(() => null)
+      .catch(() => null))
     : null;
   const [bpSettled, srSettled] = await Promise.allSettled([
     // Task 1: Blueprint
@@ -846,6 +878,8 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   if (angleGate?.warning) pipelineQualityWarnings.push(angleGate.warning); // ★ 30 ก.ย. 69 (PL-08): พนักงานเห็นมุมที่ล้ม+เหตุ (บอท Discord แสดง qualityWarnings)
   const correctionResearchFacts = (factPool?.facts || [])
     .map((x) => (typeof x === 'string' ? x : (x?.text || x?.content || '')))
+    // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3): + ข้อเท็จจริงของการ์ดที่ฉบับเสริมใช้ (placeScrub/L1.8 ไม่ลบชื่อจากการ์ด) · ไม่มี = [] = เดิมทุกไบต์
+    .concat(_researchWrite?.researchFacts || [])
     .filter(Boolean)
     .join('\n') || null;
   const groundingSourceText = (detectedType === 'text' || detectedType === 'plain_text')

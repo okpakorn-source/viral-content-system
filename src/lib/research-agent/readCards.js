@@ -12,16 +12,21 @@
 // ผลที่ใช้ต่อ: run.analysis → analysisResult.researchAgent (shadow: {status,mode,cardsCount,flags} · assist/write: + cards/
 //   raw_corrections/origin_post/stale_news_warning) · run.pipelineInfo → generation_logs.pipeline_info {researchAgent, jobId, workflowId}
 //   · logPipeline step 'research-agent' (ไม่รอผล) · โหมด write ในเฟส 1 = แบบ assist (ไม่ส่งเข้านักเขียน/ด่าน — ข้อ 24)
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 3): + waitResearchCards() — โหมด write รอการ์ด "หลังขั้นสกัด"
+//   (≤ maxWaitMs นับจากเริ่มท่อ · เลิกรอเมื่อเส้นตายรวมเหลือ < RESEARCH_PIPELINE_RESERVE_MS · นาฬิกา/timer ฉีดได้ · ไม่ unref)
+//   ผลรูปเดียวกับ settle() (buildResearchAgentRun) + outcome · buildResearchAgentRun รับ editor/originalPreview (ไม่ส่ง = ผลเดิมทุกไบต์)
+//   ช่อง PRE-GENERATE เดิม (startResearchAgentPoll) ไม่ถูกแก้ — โหมด write ข้ามช่องนั้นจากฝั่งท่อ (ใช้ผลรอบนี้ซ้ำ)
 // ============================================================
 
-import { summarizeCardsDoc } from '@/lib/research-agent/cardsSchema';
+import { capText, summarizeCardsDoc } from '@/lib/research-agent/cardsSchema'; // ★ 1 ต.ค. 69 (โหมด write · SPEC-v3): + capText (ของเดิม: import เฉพาะ summarizeCardsDoc)
 import {
   getResearchAgentMode,
   getResearchAgentWaitMs,
   isResearchAgentOn,
   RESEARCH_AGENT_OFFLINE_AFTER_MS,
 } from '@/lib/research-agent/modes';
-import { jobIdFromWorkflowId, loadResearchStorage } from '@/lib/research-agent/store';
+// ★ 1 ต.ค. 69 (โหมด write · SPEC-v3): + RESEARCH_JOB_ID_RE (waitResearchCards รับ jobId ตรง) · ของเดิม: import 2 ตัวแรก
+import { jobIdFromWorkflowId, loadResearchStorage, RESEARCH_JOB_ID_RE } from '@/lib/research-agent/store';
 
 export const RESEARCH_POLL_MS = 5_000;
 export const RESEARCH_READ_TIMEOUT_MS = 4_000;
@@ -82,8 +87,29 @@ function pickAssistCards(doc) {
     }));
 }
 
+/**
+ * ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.1): ระเบียนผลบรรณาธิการ → ฉบับย่อสำหรับ pipeline_info
+ * {status, used, corrections, additions, ratio, waitedMs, editorMs} — used/corrections/additions = จำนวน (เนื้อเต็มอยู่ store research-editor)
+ */
+export function compactEditorSummary(editor) {
+  const source = editor && typeof editor === 'object' ? editor : {};
+  const count = (value) => (Array.isArray(value) ? value.length : 0);
+  const num = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : null);
+  return {
+    status: typeof source.status === 'string' ? source.status : null,
+    used: count(source.used_cards),
+    corrections: count(source.corrections),
+    additions: count(source.additions),
+    ratio: num(source.ratio),
+    waitedMs: num(source.waitedMs),
+    editorMs: num(source.editorMs),
+  };
+}
+
 /** สรุปผลรอบนี้ → { analysis, pipelineInfo, summary } (ไม่มีเนื้อการ์ดใน pipeline_info — เก็บใน research-cards แล้ว) */
-export function buildResearchAgentRun({ outcome, mode, jobId, workflowId, ms, waitedMs, polls }) {
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.1): + editor/originalPreview (ไม่ส่ง = null = ผลเดิมทุกไบต์)
+//   ของเดิม: export function buildResearchAgentRun({ outcome, mode, jobId, workflowId, ms, waitedMs, polls }) {
+export function buildResearchAgentRun({ outcome, mode, jobId, workflowId, ms, waitedMs, polls, editor = null, originalPreview = null }) {
   const doc = outcome?.card || null;
   const counts = doc ? summarizeCardsDoc(doc) : { cardsCount: 0, passCount: 0, staffOnlyCount: 0, flags: [] };
   const status = doc ? (counts.status || 'done') : (outcome?.status || 'pending');
@@ -107,6 +133,13 @@ export function buildResearchAgentRun({ outcome, mode, jobId, workflowId, ms, wa
     analysis.origin_post = doc.origin_post ?? null;
     analysis.stale_news_warning = doc.stale_news_warning ?? null;
   }
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.1): analysisResult.researchAgent.editor = ระเบียนเต็ม (บอทเลน W2 อ่าน)
+  //   pipeline_info.researchAgent.editor = ฉบับย่อ · original_preview = ต้นฉบับเดิม ≤ 400 ตัวอักษร (เฉพาะเมื่อฉบับเสริมแทนต้นฉบับ)
+  if (editor && typeof editor === 'object') {
+    summary.editor = compactEditorSummary(editor);
+    analysis.editor = editor;
+  }
+  if (typeof originalPreview === 'string' && originalPreview) analysis.original_preview = capText(originalPreview, 400);
   return {
     summary,
     analysis,
@@ -296,4 +329,166 @@ export function startResearchAgentPoll({
       return settling;
     },
   };
+}
+
+// ============================================================
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 3.1) — รอการ์ดหลังขั้นสกัด (โหมด write)
+// ============================================================
+
+/**
+ * อ่านสถานะการ์ด/ใบขอหนึ่งรอบ (กติกาเดียวกับ readOnce ของ startResearchAgentPoll — แยกเป็นฟังก์ชันของโหมด write
+ * เพื่อไม่แตะ loop เดิมของ shadow/assist) · workerState.online: null = ยังไม่รู้ (เช็คชีพจรครั้งเดียวเมื่อใบขอยัง queued)
+ */
+async function readWriteOutcome(storage, jobId, { now, offlineAfterMs, workerState }) {
+  const card = await storage.getCards(jobId);
+  if (card && FINAL_CARD_STATUSES.has(card.status)) return { final: true, card };
+  const request = await storage.getRequest(jobId);
+  if (!request) return { final: true, status: 'no_request' };
+  if (request.status === 'failed' || request.status === 'expired') return { final: true, status: request.status, request };
+  if (request.status === 'done') {
+    const late = await storage.getCards(jobId); // การ์ดเขียนก่อนปิดใบขอ — อ่านซ้ำหนึ่งครั้ง
+    if (late && FINAL_CARD_STATUSES.has(late.status)) return { final: true, card: late, request };
+  }
+  if ((request.status === 'leased' || request.status === 'queued') && Date.parse(request.deadlineAt || '') <= now()) {
+    return { final: true, status: 'expired', request };
+  }
+  if (request.status === 'queued' && workerState.online === null && typeof storage.listWorkers === 'function') {
+    const workers = await storage.listWorkers({ limit: 5 });
+    const seen = (Array.isArray(workers) ? workers : []).map((w) => Date.parse(w?.lastSeenAt || '')).filter(Number.isFinite);
+    workerState.online = seen.some((t) => now() - t <= offlineAfterMs);
+  }
+  return { final: false, status: 'pending', request, workerOnline: workerState.online };
+}
+
+/**
+ * โหมด write: รอการ์ดของงานนี้หลังขั้นสกัด จน (1) ได้ผลสุดท้าย (การ์ด done/failed/skipped · ใบขอ failed/expired/ไม่มีใบขอ)
+ *   (2) ครบ maxWaitMs นับจาก startedAt (= เวลาเริ่มท่อ — ข้อตัดสิน #1 "นับจากเริ่มท่อ") (3) เส้นตายรวมเหลือ < reserveMs
+ *   (4) เส้นตายรวม abort (5) worker ออฟไลน์ (ใบขอยัง queued + ไม่มีชีพจร ≤ 10 นาที) (6) อ่านล้ม 3 ครั้งติด
+ * ไม่ใช้ withTimeoutSignal/assertCanStart (ไม่จองงบเส้นตาย) · อ่านอย่างน้อย 1 รอบเสมอ (งบหมดแล้วแต่การ์ดมาแล้ว = ได้ใช้)
+ * นาฬิกา/timer/ตัวอ่านฉีดได้ทั้งหมด · timer ไม่ unref (ท่อกำลังรออยู่จริง) · ปิดสวิตช์ = null · ไม่โยน (fail-open)
+ * @param {{ workflowId?: string, jobId?: string, maxWaitMs?: number, startedAt?: number, deadline?: object|null, env?: object,
+ *   pollMs?: number, readTimeoutMs?: number, reserveMs?: number, offlineAfterMs?: number, now?: () => number,
+ *   timers?: {setTimer: Function, clearTimer: Function}, read?: (jobId: string) => Promise<object>,
+ *   loadStorage?: () => Promise<object>, logPipeline?: (entry: object) => any }} [options]
+ *   read = ตัวอ่านหนึ่งรอบ คืน {final, status, card?, request?, workerOnline?} (ไม่ส่ง = อ่านจาก store ผ่าน loadStorage)
+ * @returns {Promise<null | (ReturnType<typeof buildResearchAgentRun> & { outcome: object })>}
+ */
+export async function waitResearchCards({
+  workflowId = null,
+  jobId: jobIdInput = null,
+  maxWaitMs,
+  startedAt,
+  deadline = null,
+  env = process.env,
+  pollMs = RESEARCH_POLL_MS,
+  readTimeoutMs = RESEARCH_READ_TIMEOUT_MS,
+  reserveMs = RESEARCH_PIPELINE_RESERVE_MS,
+  offlineAfterMs = RESEARCH_AGENT_OFFLINE_AFTER_MS,
+  now = Date.now,
+  timers = defaultTimers,
+  read = null,
+  loadStorage = loadResearchStorage,
+  logPipeline = defaultLogPipeline,
+} = {}) {
+  if (!isResearchAgentOn(env)) return null; // ปิดสวิตช์ = ไม่แตะฐาน ไม่รอ (แบบเดียวกับ startResearchAgentPoll)
+  const mode = getResearchAgentMode(env);
+  const waitMs = Number.isFinite(maxWaitMs) ? Math.max(0, maxWaitMs) : getResearchAgentWaitMs(env, mode);
+  const jobId = typeof jobIdInput === 'string' && RESEARCH_JOB_ID_RE.test(jobIdInput) ? jobIdInput : jobIdFromWorkflowId(workflowId);
+  const begin = now();
+  const origin = Number.isFinite(startedAt) ? startedAt : begin;
+  const waitEnd = origin + waitMs;
+  const deadlineSignal = deadline?.signal && typeof deadline.signal.addEventListener === 'function' ? deadline.signal : null;
+  let aborted = Boolean(deadlineSignal?.aborted);
+  let sleepTimer = null;
+  let wake = null;
+  const onAbort = () => {
+    aborted = true;
+    if (sleepTimer !== null) { timers.clearTimer(sleepTimer); sleepTimer = null; }
+    if (wake) { const w = wake; wake = null; w(); }
+  };
+  if (deadlineSignal && !aborted) deadlineSignal.addEventListener('abort', onAbort, { once: true });
+  const sleep = (ms) => new Promise((resolve) => {
+    if (aborted) { resolve(); return; }
+    wake = resolve;
+    sleepTimer = timers.setTimer(() => { sleepTimer = null; wake = null; resolve(); }, ms);
+  });
+  // งบเส้นตายคิดครั้งเดียวตอนเริ่มรอ (= deadlineAt − กันชน) — แบบเดียวกับ settle() ของ PRE-GENERATE
+  const remaining = typeof deadline?.remainingMs === 'function' ? Number(deadline.remainingMs()) : Number.POSITIVE_INFINITY;
+  const budgetEnd = Number.isFinite(remaining) ? begin + Math.max(0, remaining - reserveMs) : Number.POSITIVE_INFINITY;
+  const stopAt = Math.min(waitEnd, budgetEnd);
+
+  let outcome = { final: false, status: 'pending' };
+  let polls = 0;
+  try {
+    let reader = typeof read === 'function' ? read : null;
+    if (!jobId) {
+      outcome = { final: true, status: 'no_job' };
+    } else {
+      if (!reader) {
+        let storage = null;
+        try {
+          storage = await within(Promise.resolve().then(() => loadStorage()), readTimeoutMs, timers, null);
+        } catch {
+          storage = null;
+        }
+        if (storage) {
+          const workerState = { online: null };
+          reader = (id) => readWriteOutcome(storage, id, { now, offlineAfterMs, workerState });
+        }
+      }
+      if (!reader) {
+        outcome = { final: true, status: 'unavailable' };
+      } else {
+        let latest = null;
+        let errors = 0;
+        for (;;) {
+          if (aborted) { outcome = latest || { final: false, status: 'pending' }; break; } // เส้นตายรวมหมดแล้ว = ไม่อ่านต่อ
+          // eslint-disable-next-line no-await-in-loop -- poll ทีละครั้งตามจังหวะ (ห้ามยิงซ้อน)
+          const result = await within(Promise.resolve().then(() => reader(jobId)), readTimeoutMs, timers, { final: false, status: 'pending', timedOut: true })
+            .catch(() => ({ final: false, status: 'pending', error: true }));
+          polls += 1;
+          if (result?.final) { outcome = result; break; }
+          if (result?.error || result?.timedOut) errors += 1;
+          else errors = 0;
+          latest = { ...(result || {}), final: false, status: 'pending', ...(latest?.request && !result?.request ? { request: latest.request } : {}) };
+          if (latest.request?.status === 'queued' && result?.workerOnline === false) { outcome = { ...latest, final: true, status: 'offline' }; break; }
+          if (errors >= 3) { outcome = { ...latest, final: true, status: 'error' }; break; }
+          if (aborted) { outcome = latest; break; }
+          const t = now();
+          if (t >= stopAt) { outcome = latest; break; }
+          // eslint-disable-next-line no-await-in-loop -- เว้นจังหวะ poll (timer ถูก clear เมื่อ abort)
+          await sleep(Math.min(pollMs, stopAt - t));
+          if (aborted) { outcome = latest; break; }
+        }
+      }
+    }
+  } catch {
+    outcome = { final: true, status: 'error' };
+  } finally {
+    if (sleepTimer !== null) { timers.clearTimer(sleepTimer); sleepTimer = null; }
+    if (deadlineSignal) deadlineSignal.removeEventListener('abort', onAbort);
+  }
+
+  const elapsed = Math.max(0, now() - begin);
+  const run = buildResearchAgentRun({ outcome, mode, jobId, workflowId, ms: elapsed, waitedMs: elapsed, polls });
+  try {
+    Promise.resolve(logPipeline({
+      workflowId,
+      step: 'research-agent',
+      status: pipelineLogStatus(run.summary.status),
+      duration: run.summary.ms,
+      detail: `${mode} · ${run.summary.status} · ${run.summary.cardsCount} การ์ด${run.summary.flags.length ? ` · ${run.summary.flags.join(',')}` : ''} · รอหลังสกัด`,
+      metadata: {
+        status: run.summary.status,
+        mode,
+        cards: run.summary.cardsCount,
+        pass: run.summary.passCount,
+        flags: run.summary.flags,
+        ms: run.summary.ms,
+        waitedMs: run.summary.waitedMs,
+        brain: run.summary.brain,
+      },
+    })).catch(() => {});
+  } catch { /* บันทึกล้มไม่กระทบข่าว */ }
+  return { ...run, outcome };
 }

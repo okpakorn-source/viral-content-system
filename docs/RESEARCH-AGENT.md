@@ -41,9 +41,9 @@ Vercel cron → /api/auto/process → autoFlowServiceText (extract → breakdown
 | ตัวแปร | ตั้งที่ | ไม่ตั้ง = | ใช้ทำอะไร |
 |---|---|---|---|
 | `RESEARCH_AGENT` | Vercel **และ** Railway | ปิดทั้งระบบ | `1` = เปิด (รับเฉพาะ `1`) · Vercel = ใบขอ/ท่อ/route · Railway = บอทแยกลิงก์ ตามการ์ด 👍👎 เตือนโควตา — ต้องเปิดทั้งสองที่ |
-| `RESEARCH_AGENT_MODE` | Vercel | shadow | `shadow` → `assist` → `write` (สเปกข้อ 3) · ค่าอื่น = shadow · `write` ในเฟส 1 ท่อทำแบบ assist (นักเขียน/ด่านยังไม่ได้รับการ์ด — เจ้าของ#24) |
+| `RESEARCH_AGENT_MODE` | Vercel | shadow | `shadow` → `assist` → `write` (สเปกข้อ 3) · ค่าอื่น = shadow · `write` (เฟส 2 · SPEC-v3 · ส่วน 16) = รอการ์ดหลังขั้นสกัด → บรรณาธิการเรียบเรียงฉบับเสริม → ใช้แทนต้นฉบับในทุกขั้นถัดไป (สายข้อความเท่านั้น · สาย URL/คลิปทำแบบ assist) |
 | `RESEARCH_AGENT_SECRET` | Vercel **และ** เครื่อง worker (ค่าเดียวกัน) · ⛔ **ห้ามตั้งบน Railway** | route ของ worker ตอบ 503 (ปิดประตู) | ความลับของ header `x-research-secret` (lease/heartbeat/report) · บอทไม่ใช้ค่านี้ |
-| `RESEARCH_AGENT_WAIT_MS` | Vercel | shadow = 0 เสมอ · assist/write = 90000 | ท่อรอการ์ดที่ PRE-GENERATE ได้นานสุด (ms) · เพดาน 180000 · fail-open |
+| `RESEARCH_AGENT_WAIT_MS` | Vercel | shadow = 0 เสมอ · assist = 90000 · write = 300000 | assist: ท่อรอการ์ดที่ PRE-GENERATE ได้นานสุด (ms) · เพดาน 180000 · write: รอหลังขั้นสกัด นับจากเริ่มท่อ · เพดาน 300000 · ทั้งสองโหมดเลิกรอเมื่อเส้นตายรวมเหลือ < 480 วิ · fail-open |
 | `RESEARCH_AGENT_DEADLINE_MIN` | Vercel | 15 | เส้นตายใบขอ = เวลาเข้าคิว + นาทีนี้ (1–120) · ใบที่ worker ยังไม่หยิบเมื่อเลยเวลา = `expired` (ข่าวเดินต่อปกติ) · worker ที่หยิบแล้วใช้เส้นตายนี้คุมเวลางาน (ไม่เกิน MAX_MINUTES+1) · ข้อตัดสิน 1 ต.ค. 69 แทนสูตรเดิม "MAX_MINUTES + 60 วิ" |
 | `RESEARCH_AGENT_MAX_CALLS` | เครื่อง worker | 24 | เพดานเรียกเครื่องมือต่องาน (เจ้าของ#18) |
 | `RESEARCH_AGENT_MAX_MINUTES` | เครื่อง worker | 6 | เพดานเวลาต่องาน (Codex ถูกตัดที่นาทีนี้ + 1 แต่ไม่เกินเส้นตายใบขอ) · ฝั่งเว็บไม่อ่านแล้ว |
@@ -212,7 +212,8 @@ Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='cmd.exe'" | Wher
 | ให้ใบขอรอ worker นานขึ้น/สั้นลง | Vercel | `RESEARCH_AGENT_DEADLINE_MIN` (ค่าเริ่มต้น 15 · 1–120) → Redeploy | ใบขอใหม่หลัง deployment ใหม่ขึ้น |
 | บอทหยุดโพสต์การ์ด | Railway / Vercel | Railway: ลบ `RESEARCH_AGENT` (หรือค่าอื่นที่ไม่ใช่ `1`) → restart · หรือปิด `RESEARCH_AGENT` บน Vercel → บอทได้ `enabled:false` แล้วเลิกถามเอง | restart / redeploy |
 | ถอยโค้ดทั้งก้อน | Vercel / git | Vercel → Deployments → deployment ก่อนรวม → Instant Rollback/Promote (เร็วสุด) · หรือ `git revert` คอมมิตที่รวม (แตะไฟล์ล็อก → ต้องมีรหัส NEWS-LOCK และเจ้าของอนุมัติ) | ทันที / deploy ใหม่ |
-| ล้างข้อมูล | Supabase | แถว `store_items` ที่ `store_name` เป็น `research-requests` · `research-cards` · `bot-posted` · `research-workers` (row id ขึ้นต้น `rreq_` · `rcard_` · `bposted_` · `rworker_`) — **ไม่ต้องลบเพื่อถอย** (ตอนปิดสวิตช์ไม่มีใครอ่าน) ลบเฉพาะเมื่อเจ้าของต้องการ | — |
+| ล้างข้อมูล | Supabase | แถว `store_items` ที่ `store_name` เป็น `research-requests` · `research-cards` · `bot-posted` · `research-workers` · `research-editor` (row id ขึ้นต้น `rreq_` · `rcard_` · `bposted_` · `rworker_` · `redit_`) — **ไม่ต้องลบเพื่อถอย** (ตอนปิดสวิตช์ไม่มีใครอ่าน) ลบเฉพาะเมื่อเจ้าของต้องการ | — |
+| เลิกใช้ฉบับเสริม (คงการ์ดให้พนักงาน) | Vercel | `RESEARCH_AGENT_MODE=assist` → Redeploy (ข่าวกลับไปเขียนจากต้นฉบับพนักงานทุกไบต์ · ระเบียน `research-editor` เดิมไม่มีใครอ่านต่อ) | deployment ใหม่ขึ้น |
 
 env บน Vercel มีผลกับ deployment ใหม่เท่านั้น (ต้อง Redeploy) · env ฝั่ง worker มีผลเมื่อรีสตาร์ต worker
 
@@ -349,3 +350,13 @@ node scripts/research-agent-report.mjs --env D:\อื่น\.env.local   # ใ�
 | `scripts/research-agent-worker.mjs` · `scripts/research-agent-worker-forever.cmd` · `scripts/research-agent-account.cmd` · `scripts/research-agent/*` · `scripts/research-tools/*` 🔗 | A | worker · ตัวรัน Codex · ด่านเชิงกล · ราคา · เข็มขัดเครื่องมือ |
 | `src/lib/research-agent/*` · `src/app/api/research/*` · `src/app/api/queue/add/route.js` · `src/lib/services/autoFlowServiceText.js` · `src/lib/services/generationLogger.js` · `src/lib/ai/usageLogger.js` 🔗 | B | store · route · จุดเสียบท่อ PRE-GENERATE · log |
 | `discord-bot/researchCard.js` · `src/app/api/bot/posted/route.js` 🔗 | C | การ์ด Discord · รีแอ็กชัน · เตือนโควตา |
+| `src/lib/research-agent/editorBrief.js` · `src/lib/research-agent/writeStage.js` · `tests/research-editor-brief.test.mjs` · `tests/research-write-pipeline.test.mjs` | W1 | โหมด write: บรรณาธิการเรียบเรียง + ด่านเชิงกล · ขั้นรอการ์ดหลังสกัด · store `research-editor` (ส่วน 16) |
+
+## 16. โหมด write (เฟส 2 · SPEC-v3 · เจ้าของเคาะ 1 ต.ค. 69 "เปิดเลยได้ write พนักงานจะตรวจก่อนโพสต์")
+
+- **เปิด:** `RESEARCH_AGENT=1` + `RESEARCH_AGENT_MODE=write` (Vercel) · ถอย = `assist` (ส่วน 8) · ปิดสวิตช์/โหมดอื่น = ท่อเดิมทุกไบต์ (เทส `tests/research-write-pipeline.test.mjs` เทียบซอร์สที่ถอด hook)
+- **ไหลอย่างไร (สายข้อความเท่านั้น):** สกัดข่าวเสร็จ → **รอการ์ด ≤ `RESEARCH_AGENT_WAIT_MS` (ค่าเริ่มต้น 300000) นับจากเริ่มท่อ** · เลิกรอเมื่อเส้นตายรวมเหลือ < 480 วิ (ไม่กินงบนักเขียน) → การ์ด `gate=pass` ที่มั่นใจ ≥ 0.85 (สื่อ/รายการหลัก ≥ 0.75) + รายการแก้ที่ผ่านเกณฑ์ → **บรรณาธิการเรียบเรียง** (`claude-opus-5-5` effort `medium` ≤ 60 วิ · ไม่เรียกเมื่อเวลาเหลือ < 435 วิ) → **ด่านเชิงกล** (ไม่ใช้ AI): ประโยคใหม่ที่มีตัวเลข/ชื่อคน-สถานที่หลังคำนำหน้า/คำอังกฤษ/ข้อความในอัญประกาศที่หาที่มาในต้นฉบับหรือการ์ดที่ใช้ไม่ได้ · มี URL · มี "ตามรายงาน/อ้างอิงจาก/ที่มา:" = ตัดทิ้งทั้งประโยค · ตัดเกิน 30% ของส่วนที่เพิ่ม หรือยาว > 2 เท่า / < 0.6 เท่าของต้นฉบับ = ใช้ต้นฉบับ
+- **ผ่าน = ฉบับเสริมเป็นความจริงหลักของทุกขั้นถัดไป:** แตกประเด็น (RAW + เนื้อ + "มุมเสนอ (ตัวเลือก ไม่บังคับ)") · blueprint · เลือกการ์ด · รีเสิร์ชต่อมุม · นักเขียน (RAW-FIRST) · correction (+ ข้อเท็จจริงการ์ดที่ใช้) · ด่าน RAW · `sourceText` ของ generation log · ต้นฉบับเดิม = `analysisResult.researchAgent.original_preview` (≤ 400) + `research-requests[jobId].rawText` (เต็ม)
+- **ไม่ทัน/ล้ม/ไม่มีการ์ดผ่านเกณฑ์ = ข่าวเขียนจากต้นฉบับ** (อินพุตทุกขั้นเท่าปิดสวิตช์) · บอทแจ้งพนักงานจากช่อง `editor`
+- **ผลบรรณาธิการ (สัญญา 8.1):** store `research-editor` row `redit_<jobId>` (ทุกสถานะ `done`/`not_ready`/`failed`/`skipped` · ไม่เก็บฉบับเสริมเต็ม มีแค่ `enriched_preview` ≤ 400) · อ่านได้ที่ `GET /api/research/cards?jobId=` ช่อง `editor` · `analysisResult.researchAgent.editor` · `pipeline_info.researchAgent.editor` (ตัวเลขย่อ) · `pipeline_logs` step `research-editor`
+- **ข้อจำกัด:** ชื่อคนไทยที่ไม่มีคำนำหน้า/อัญประกาศตรวจเชิงกลไม่ได้ (พึ่งกติกาในพรอมต์ + พนักงานตรวจก่อนโพสต์) · เวลาที่รอ/บรรณาธิการนับรวมใน `stepTimings.extract` · สาย URL/คลิปยังไม่เข้าโหมด write

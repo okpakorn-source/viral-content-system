@@ -5,8 +5,12 @@
 //   · RESEARCH_AGENT=1 เท่านั้นที่เปิด — ไม่ตั้ง / ว่าง / ค่าอื่น = ปิด = พฤติกรรมเดิมทุกไบต์ (คิว/ท่อ/บันทึก)
 //   · RESEARCH_AGENT_MODE = shadow | assist | write (ค่าอื่น/ไม่ตั้ง = shadow) — write ในเฟส 1 ท่อข่าวทำแบบ assist
 //     (นักเขียน/ด่านไม่ได้รับการ์ดจนกว่าเจ้าของอนุมัติไฟล์ล็อกในเฟส write — ข้อ 24)
+//     ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3): เจ้าของเคาะเปิด write แล้ว — สายข้อความ: รอการ์ดหลังสกัด → บรรณาธิการ
+//       เรียบเรียงฉบับเสริม → ใช้แทนต้นฉบับ (src/lib/research-agent/writeStage.js) · สาย URL/คลิปยังทำแบบ assist
 //   · RESEARCH_AGENT_WAIT_MS = เวลาที่ท่อยอมรอการ์ด นับจากเริ่มช่อง PRE-GENERATE · shadow = 0 เสมอ (ท่อไม่รอ แม้ตั้งค่าไว้)
 //     assist/write ไม่ตั้ง = 90000 · เพดาน 180000 (กันตั้งผิดจนกินงบ generate — ข้อ 4)
+//     ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3): write เปลี่ยนเป็นรอ "หลังขั้นสกัด" นับจากเริ่มท่อ · ไม่ตั้ง = 300000 ·
+//       เพดาน 300000 (ข้อตัดสิน #1) — บรรทัดบน (90000/180000) เหลือใช้กับ assist เท่านั้น · เส้นตายรวม (กันชน 480s) ยังตัดก่อนเสมอ
 //   · RESEARCH_AGENT_DEADLINE_MIN (ค่าเริ่มต้น 15 · บีบเข้า 1–120) = เส้นตายใบขอ: deadlineAt = createdAt + นาที×60s
 //     ★ ข้อตัดสินผู้คุมงาน 1 ต.ค. 69 (แทนสูตรสัญญา 2.1 เดิม "MAX_MINUTES×60s + 60s" = 7 นาที): เจ้าของบอกงานเข้า
 //     30–40 ข่าว/วัน (08:00–22:00) เป็นจังหวะไม่ตายตัว · worker รับขนานได้ RESEARCH_AGENT_CONCURRENCY (ค่าเริ่มต้น 2)
@@ -24,6 +28,10 @@ export const RESEARCH_AGENT_DEFAULT_DEADLINE_MIN = 15;
 export const RESEARCH_AGENT_DEADLINE_MAX_MIN = 120;
 export const RESEARCH_AGENT_ASSIST_DEFAULT_WAIT_MS = 90_000;
 export const RESEARCH_AGENT_WAIT_MAX_MS = 180_000;
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3): โหมด write รอการ์ด "หลังขั้นสกัด" ได้ ≤ 5 นาที นับจากเริ่มท่อ (ข้อตัดสิน #1)
+//   ค่าเริ่มต้น + เพดานของ write เท่านั้น — assist คง 90000/180000 เดิมทุกไบต์ · เส้นตายรวมของท่อยังตัดก่อนเสมอ (readCards.waitResearchCards)
+export const RESEARCH_AGENT_WRITE_DEFAULT_WAIT_MS = 300_000;
+export const RESEARCH_AGENT_WRITE_WAIT_MAX_MS = 300_000;
 export const RESEARCH_AGENT_DEFAULT_QUOTA_ALERT_PCT = 15;
 /** ไม่มีชีพจร worker นานกว่านี้ = ออฟไลน์ (สเปกส่วน 8 แผนสำรองข้อ 3) */
 export const RESEARCH_AGENT_OFFLINE_AFTER_MS = 10 * 60 * 1000;
@@ -49,9 +57,14 @@ export function getResearchAgentMode(env = process.env) {
   return RESEARCH_AGENT_MODES.includes(value) ? value : 'shadow';
 }
 
-/** เวลาที่ท่อยอมรอการ์ด (ms) นับจากเริ่มช่อง PRE-GENERATE — shadow = 0 เสมอ */
+/** เวลาที่ท่อยอมรอการ์ด (ms) — shadow = 0 เสมอ · assist นับจากเริ่มช่อง PRE-GENERATE · write นับจากเริ่มท่อ (รอหลังขั้นสกัด) */
 export function getResearchAgentWaitMs(env = process.env, mode = getResearchAgentMode(env)) {
   if (mode === 'shadow') return 0;
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3): write = ค่าเริ่มต้น 300000 · เพดาน 300000 (ข้อตัดสิน #1)
+  //   ของเดิม: บรรทัด return ด้านล่างใช้กับทั้ง assist และ write (write ในเฟส 1 = แบบ assist) — assist ยังได้บรรทัดเดิมทุกไบต์
+  if (mode === 'write') {
+    return boundedInt(env?.RESEARCH_AGENT_WAIT_MS, RESEARCH_AGENT_WRITE_DEFAULT_WAIT_MS, 0, RESEARCH_AGENT_WRITE_WAIT_MAX_MS);
+  }
   return boundedInt(env?.RESEARCH_AGENT_WAIT_MS, RESEARCH_AGENT_ASSIST_DEFAULT_WAIT_MS, 0, RESEARCH_AGENT_WAIT_MAX_MS);
 }
 

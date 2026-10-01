@@ -239,6 +239,19 @@ export function compactResearchAgentPipelineInfo(info) {
       ms: num(ra.ms),
       waitedMs: num(ra.waitedMs),
       polls: num(ra.polls),
+      // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.1): ผลบรรณาธิการฉบับย่อ — มีเฉพาะโหมด write ที่ส่ง editor มา
+      //   (ไม่ส่ง = ไม่มีคีย์ = pipeline_info ของ shadow/assist เดิมทุกไบต์) · ตัวเลขล้วน ไม่มีเนื้อข่าว/การ์ด
+      ...(ra.editor && typeof ra.editor === 'object' && !Array.isArray(ra.editor) ? {
+        editor: {
+          status: str(ra.editor.status, 20),
+          used: num(ra.editor.used),
+          corrections: num(ra.editor.corrections),
+          additions: num(ra.editor.additions),
+          ratio: num(ra.editor.ratio),
+          waitedMs: num(ra.editor.waitedMs),
+          editorMs: num(ra.editor.editorMs),
+        },
+      } : {}),
     };
   }
   if (typeof source.jobId === 'string' && source.jobId) out.jobId = source.jobId.slice(0, 120);
