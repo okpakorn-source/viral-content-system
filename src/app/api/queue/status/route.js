@@ -55,6 +55,16 @@ export async function GET(req) {
       }, { status: 404 });
     }
     
+    // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 9 · W3): งาน pending ที่คิวชะลอรอรีเสิร์ช (research hold)
+    //   → ตอบเพิ่ม researchHold {heldMs, maxMs} ให้บอทโชว์ "⏳ กำลังค้นคว้าก่อนเขียน" · ตัวช่วยเดียวกับตัวหยิบงาน (research-agent/queueHold.js)
+    //   additive + fail-open (อ่านไม่ได้/ช้า/ไม่ถูก hold = ไม่มีช่องนี้ = คำตอบเดิม) · ไม่ตั้ง RESEARCH_AGENT=1 + MODE=write = ไม่ import อะไร
+    //   self-heal ด้านบนคงเดิม: ปลุก worker ทุก 20 วิ (งานที่ hold ถูกข้ามใน getNextPendingJobs เอง · ปลุกนี้ทำให้หยิบทันทีเมื่อ hold จบ)
+    const _raEnv = (v) => String(v ?? '').trim().replace(/^["']|["']$/g, '').trim(); // = cleanEnv ของ research-agent/modes.js
+    const researchHold = (jobStatus.status === 'pending'
+        && _raEnv(process.env.RESEARCH_AGENT) === '1' && _raEnv(process.env.RESEARCH_AGENT_MODE).toLowerCase() === 'write')
+      ? await import('@/lib/research-agent/queueHold').then((m) => m.getResearchHoldInfo(jobStatus)).catch(() => null)
+      : null;
+
     return NextResponse.json({
       success: true,
       jobId: jobStatus.id,
@@ -66,7 +76,8 @@ export async function GET(req) {
       errorType: jobStatus.errorType || null,
       failedStep: jobStatus.failedStep || null,
       startedAt: jobStatus.startedAt,
-      completedAt: jobStatus.completedAt
+      completedAt: jobStatus.completedAt,
+      ...(researchHold ? { researchHold } : {}), // ★ W3 — ของเดิม: completedAt เป็นช่องสุดท้าย (ไม่มีช่องนี้)
     });
     
   } catch (error) {

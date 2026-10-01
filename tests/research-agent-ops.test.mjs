@@ -50,6 +50,8 @@ const REQUIRED_ENV = Object.freeze([
   'RESEARCH_AGENT_CODEX_ACCOUNTS', 'RESEARCH_AGENT_WORKDIR', 'RESEARCH_AGENT_WORKER_ID',
   'RESEARCH_AGENT_DEADLINE_MIN', 'RESEARCH_AGENT_CONCURRENCY', 'RESEARCH_AGENT_STALE_DAYS', 'RESEARCH_AGENT_OWNER_DISCORD_ID',
   'RESEARCH_AGENT_CODEX_BIN', 'RESEARCH_AGENT_IDLE_MS',
+  // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 9 · W3): คิวชะลอหยิบงาน (src/lib/research-agent/queueHold.js อ่าน)
+  'RESEARCH_AGENT_HOLD_MS',
 ]);
 /**
  * ที่ตั้ง (ป้ายใน .env.example) = ทุกที่ที่ต้องตั้งให้ค่านั้นมีผล · Vercel = เลน B · Railway = บอทเลน C · เครื่อง = worker เลน A
@@ -61,6 +63,7 @@ const ENV_PLACES = Object.freeze({
   RESEARCH_AGENT_SECRET: ['Vercel', 'เครื่อง'], // ⛔ ไม่ใช่ Railway (contract-check #7)
   RESEARCH_AGENT_WAIT_MS: ['Vercel'],
   RESEARCH_AGENT_DEADLINE_MIN: ['Vercel'],
+  RESEARCH_AGENT_HOLD_MS: ['Vercel'], // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 9 · W3): ตัวหยิบงานคิว + /api/queue/status บน Vercel
   RESEARCH_AGENT_MAX_CALLS: ['เครื่อง'],
   RESEARCH_AGENT_MAX_MINUTES: ['เครื่อง'], // ฝั่งเว็บเลิกอ่านแล้ว (เส้นตายใบขอ = DEADLINE_MIN)
   RESEARCH_AGENT_EFFORT: ['เครื่อง'],

@@ -592,10 +592,23 @@ export async function getNextPendingJobs(limit = 1) {
     }
     const availableSlots = Math.min(limit, maxConcurrency - processingHere);
 
-    const pendingJobs = allJobs
+    // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 9 · W3): คิวชะลอหยิบงานข่าวที่ใบขอรีเสิร์ชยังไม่เสร็จ (research hold)
+    //   เฉพาะ RESEARCH_AGENT=1 + RESEARCH_AGENT_MODE=write → ส่งงาน pending ที่ canRunHere "ทั้งหมด" (เรียงแล้ว) ให้
+    //   src/lib/research-agent/queueHold.js กรองงานที่ต้องรอออก แล้วค่อย slice เติมสล็อตจากงานที่ไม่ถูก hold (งานถัดไปไม่ถูกบล็อก)
+    //   งานที่ hold ยัง pending (ไม่ claim · ไม่นับ processing) · log 1 บรรทัด/รอบในตัวช่วย · ล้ม/ช้าเกิน 3 วิ = รายการเดิม (fail-open)
+    //   ปิดสวิตช์/โหมดอื่น = ไม่ import อะไร · filter/sort/slice/claim เดิมทุกไบต์ (เทส tests/research-queue-hold.test.mjs เทียบซอร์สที่ถอด hook)
+    //   ของเดิม: const pendingJobs = allJobs.filter(j => j.status === 'pending' && canRunHere(j)).sort(…createdAt…).slice(0, availableSlots);
+    const _raEnv = (v) => String(v ?? '').trim().replace(/^["']|["']$/g, '').trim(); // = cleanEnv ของ research-agent/modes.js
+    const _pendingHere = allJobs
       .filter(j => j.status === 'pending' && canRunHere(j))
-      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
-      .slice(0, availableSlots);
+      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    const _pickable = (_raEnv(process.env.RESEARCH_AGENT) === '1' && _raEnv(process.env.RESEARCH_AGENT_MODE).toLowerCase() === 'write')
+      ? await import('@/lib/research-agent/queueHold')
+        .then((m) => m.applyResearchHold(_pendingHere))
+        .then((ready) => (Array.isArray(ready) ? ready : _pendingHere))
+        .catch(() => _pendingHere)
+      : _pendingHere;
+    const pendingJobs = _pickable.slice(0, availableSlots);
 
     const skipped = allJobs.filter(j => j.status === 'pending' && !canRunHere(j)).length;
     if (skipped > 0) console.log(`[QueueService] ⏭️ ข้าม ${skipped} งานที่เป็นของอีกเครื่อง (คลิป→เครื่องทีม | ข่าว→Vercel)`);

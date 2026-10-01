@@ -383,6 +383,19 @@ async function processNewsJob(job) {
   }
 }
 
+// ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 9 · W3): ช่อง researchHold ของ /api/queue/status (คิวชะลอหยิบงานรอรีเสิร์ช)
+//   {heldMs, maxMs} เป็นตัวเลขถูกรูป → {heldMs, maxMs} (บีบเพดาน 10 นาที = เพดาน hold ฝั่งเว็บ กันค่าเพี้ยนยืดเวลารอไม่รู้จบ)
+//   ไม่มี/ผิดรูป = null → บอทใช้ข้อความ/การปลุก worker/เวลารอเดิมทุกไบต์
+const QUEUE_HOLD_MAX_MS = 10 * 60 * 1000;
+function queueResearchHold(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const { heldMs, maxMs } = raw;
+  if (typeof heldMs !== 'number' || typeof maxMs !== 'number' || !Number.isFinite(heldMs) || !Number.isFinite(maxMs)) return null;
+  if (heldMs < 0 || maxMs <= 0) return null;
+  const cap = Math.min(maxMs, QUEUE_HOLD_MAX_MS);
+  return { heldMs: Math.min(heldMs, cap), maxMs: cap };
+}
+
 // ★ 2 ก.ย. 69: ลูปติดตามผล + โพสต์ผลลัพธ์ — แยกจาก processNewsJob ให้เส้นทางปกติและเส้นทางกู้หลังรีสตาร์ต (resumeTrackedJob)
 //   ใช้ร่วมกัน · เนื้อในย้ายมาทั้งก้อนไม่แก้สักบรรทัด (คงย่อหน้าเดิมให้ diff เห็นว่าเป็นการย้ายล้วน) · โยน error ให้ผู้เรียกจัดการเหมือนเดิม
 async function pollJobUntilDone({ jobId, processingMsg, message, headers, queueUrl, jobStartTime }) {
@@ -396,8 +409,14 @@ async function pollJobUntilDone({ jobId, processingMsg, message, headers, queueU
     let workerRetriggerCount = 0;
 
     let notFoundCount = 0; // ★ Track consecutive 'job not found'
+    // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 9 · W3): คิวชะลอหยิบงานรอรีเสิร์ช — สถานะคิวตอบ researchHold
+    //   ระหว่างงาน pending ถูก hold → ข้อความรอ "⏳ กำลังค้นคว้าก่อนเขียน (x/y นาที)" · ไม่ปลุก worker เปล่าระหว่าง hold
+    //   · ยืดเวลารอผลเท่าเพดาน hold ที่เห็น (hold ≤ 10 นาที + ท่อ ≤ ~13 นาที เกิน 15 นาทีเดิมได้ — ไม่ยืด = บอทตัดว่าหมดเวลา
+    //   ทั้งที่งานยังเดิน → พนักงานส่งซ้ำ = เจนเบิ้ล) · ไม่มีช่องนี้ (ปิดสวิตช์/โหมดอื่น) = เดิมทุกไบต์
+    let holdExtraMs = 0;
+    let lastHoldText = '';
 
-    while (Date.now() - pollStartTime < maxPollTime) {
+    while (Date.now() - pollStartTime < maxPollTime + holdExtraMs) { // ★ W3 ของเดิม: while (Date.now() - pollStartTime < maxPollTime) {
       await new Promise(r => setTimeout(r, 3000)); // poll every 3s
 
       try {
@@ -412,12 +431,26 @@ async function pollJobUntilDone({ jobId, processingMsg, message, headers, queueU
           continue;
         }
         notFoundCount = 0; // reset on success
+        const hold = st.status === 'pending' ? queueResearchHold(st.researchHold) : null; // ★ W3: null = ไม่ได้ถูกชะลอ (ทางเดิม)
 
         // === Fallback: re-trigger worker if still pending after 10s ===
-        if (st.status === 'pending' && (Date.now() - pollStartTime > 10000) && workerRetriggerCount < 3) {
+        // ★ W3: + !hold — งานที่ถูกชะลอ ปลุกไปก็ถูกข้าม (เก็บโควตาปลุก 3 ครั้งไว้ปลุกทันทีเมื่อ hold จบ)
+        //   ของเดิม: if (st.status === 'pending' && (Date.now() - pollStartTime > 10000) && workerRetriggerCount < 3) {
+        if (st.status === 'pending' && !hold && (Date.now() - pollStartTime > 10000) && workerRetriggerCount < 3) {
           workerRetriggerCount++;
           console.log(`[Discord Bot] Job still pending, re-triggering worker (attempt ${workerRetriggerCount})`);
           axios.post(workerUrl, { trigger: 'retry' }, { headers, timeout: 10000 }).catch(() => {});
+        }
+
+        if (hold) { // ★ W3: กำลังชะลอรอรีเสิร์ช → แก้ข้อความเมื่อตัวเลขเปลี่ยน (ไม่สแปม Discord) · ยืดเวลารอเท่าเพดาน hold
+          holdExtraMs = Math.max(holdExtraMs, hold.maxMs);
+          const holdText = `⏳ กำลังค้นคว้าก่อนเขียน (${Math.floor(hold.heldMs / 60000)}/${Math.ceil(hold.maxMs / 60000)} นาที)`;
+          if (lastStatus !== 'research_hold' || holdText !== lastHoldText) {
+            await processingMsg.edit(holdText).catch(() => {});
+            lastHoldText = holdText;
+          }
+          lastStatus = 'research_hold';
+          continue;
         }
 
         if (st.status === 'pending' && st.status !== lastStatus) {
