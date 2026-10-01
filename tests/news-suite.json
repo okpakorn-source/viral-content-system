@@ -72,6 +72,7 @@
     "tests/archive-best-effort-pl13.test.mjs",
     "tests/archive-save-truth.test.mjs",
     "tests/batch5-v2-pinned-ai.test.mjs",
+    "tests/bot-research-card.test.mjs",
     "tests/bot-resume.test.mjs",
     "tests/bot-review-reactions.test.mjs",
     "tests/bot-tracking-route.test.mjs",

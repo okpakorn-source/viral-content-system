@@ -2,6 +2,8 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, EmbedBuilder, Partials } = require('discord.js');
 const axios = require('axios');
 const { makeQueueTerminalError, isQueueTerminalError, selectQualityWarnings } = require('./queue-errors');
+// ★ 1 ต.ค. 69 (research v2 · เลน C): บัตรข้อเท็จจริงจากเอเจนต์ค้นคว้า — โมดูลแยก (axios/EmbedBuilder/นาฬิกาฉีดจากไฟล์นี้ ไม่ require เอง)
+const { createResearchCards } = require('./researchCard');
 
 // ★ 3 ก.ย. 69: ย้าย envFlag + สวิตช์ปุ่ม/บรรทัดเตือนขึ้นมาก่อนสร้าง Client — intents/partials ต้องรู้ค่าสวิตช์ตอนสร้าง
 //   รับเฉพาะ '0'/'1' ตรงตัว: '1'=เปิด · '0'=ปิด · ค่าอื่น/ไม่ตั้ง=ค่าเริ่มต้น (ตัวฟังก์ชันเดิมทุกบรรทัด แค่ย้ายที่)
@@ -18,6 +20,10 @@ const BOT_REVIEW_REACTIONS = envFlag('BOT_REVIEW_REACTIONS', false);
 // ★ 3 ก.ย. 69: บรรทัดเตือนใต้ผลข่าว (⚠️ อาจตกข้อเท็จจริง / ⚠️ ความคล้าย / 🔥 โอกาสปัง — ดู buildWarningLines) เปิดเป็นค่าเริ่มต้น
 //   เดิมผูกกับ BOT_REVIEW_REACTIONS — เจ้าของสั่ง "ปิดปุ่มแต่คงบรรทัดเตือน" จึงแยกสวิตช์ · ปิดคืน: BOT_RESULT_WARNINGS=0 → เนื้อ embed เดิมล้วนทุกไบต์
 const BOT_RESULT_WARNINGS = envFlag('BOT_RESULT_WARNINGS', true);
+// ★ 1 ต.ค. 69 (research v2 · เลน C · SPEC-v2 ส่วน 7): บัตรข้อเท็จจริงจากเอเจนต์ค้นคว้า — ค่าเริ่มต้น=ปิด · เปิด: RESEARCH_AGENT=1 (รับ '1' ตรงตัวแบบ envFlag)
+//   ปิด = บอทเดิมทุกไบต์ (payload คิว · intents · partials · listener · คำขอ HTTP ไม่เปลี่ยน)
+//   เปิด = แยกลิงก์ → sourceUrls · ตามการ์ดทุก 20 วิ · reply 🧾 ใต้ข้อความพนักงาน · 👍👎 → feedback · เตือนโควตา (ดู discord-bot/researchCard.js)
+const RESEARCH_AGENT = envFlag('RESEARCH_AGENT', false);
 
 const client = new Client({
   intents: [
@@ -26,11 +32,31 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     // ★ 2 ก.ย. 69 (ข้อ 6 ปุ่มพนักงาน) → 3 ก.ย. 69: intent รับ event กด reaction มีไว้เพื่อฟีเจอร์ปุ่มอย่างเดียว → ขอเฉพาะตอนสวิตช์เปิด
     //   (intents เป็น array ธรรมดา discord.js v14 อ่านครั้งเดียวตอน new Client — ผันตาม env ได้ ไม่กระทบ event Guilds/Messages เดิม)
-    ...(BOT_REVIEW_REACTIONS ? [GatewayIntentBits.GuildMessageReactions] : []),
+    //   ★ 1 ต.ค. 69 (research v2 · เลน C): บัตรข้อเท็จจริงรับ 👍👎 ด้วย → ขอ intent นี้เมื่อ RESEARCH_AGENT=1 ด้วย (ปิดทั้งคู่ = เหมือนเดิม)
+    ...((BOT_REVIEW_REACTIONS || RESEARCH_AGENT) ? [GatewayIntentBits.GuildMessageReactions] : []),
   ],
   // ★ 2 ก.ย. 69 → 3 ก.ย. 69: partials Message/Reaction มีไว้รับ reaction บนข้อความที่โพสต์ก่อนรีสตาร์ต (ค่อย fetch ตอนกด) — ของฟีเจอร์ปุ่มอย่างเดียว
   //   → ประกาศเฉพาะตอนสวิตช์เปิด (บอทฟังแค่ ready/messageCreate ซึ่ง messageCreate ไม่มีทางเป็น partial — ปิดแล้วเหมือนก่อนมีฟีเจอร์ปุ่มทุกช่อง)
-  ...(BOT_REVIEW_REACTIONS ? { partials: [Partials.Message, Partials.Reaction] } : {}),
+  //   ★ 1 ต.ค. 69 (research v2 · เลน C): บัตรที่โพสต์ก่อนรีสตาร์ตก็ต้องรับ 👍👎 ได้ → ประกาศเมื่อ RESEARCH_AGENT=1 ด้วย
+  ...((BOT_REVIEW_REACTIONS || RESEARCH_AGENT) ? { partials: [Partials.Message, Partials.Reaction] } : {}),
+});
+
+// ★ 1 ต.ค. 69 (research v2 · เลน C): ตัวจัดการบัตรข้อเท็จจริง — สวิตช์ปิด = ทุกเมธอด no-op (ไม่ตั้ง timer ไม่ยิง HTTP ไม่แตะ payload)
+//   เส้นทางข่าวเรียกแบบไม่รอ (fail-open): รีเสิร์ชล้ม/ช้า/ออฟไลน์ ข่าวไม่ล้ม ไม่ช้าลง · URL/กุญแจชุดเดียวกับคิว+สมุด (buildQueueUrl/buildApiHeaders/buildTrackingHeaders)
+const research = createResearchCards({
+  enabled: RESEARCH_AGENT,
+  env: process.env,
+  http: axios,
+  EmbedBuilder,
+  client,
+  buildApiUrl: (path) => buildQueueUrl().replace('/api/queue/add', path),
+  buildApiHeaders,
+  buildBotHeaders: buildTrackingHeaders,
+  isShuttingDown: () => shuttingDown,
+  logger: console,
+  now: () => Date.now(),
+  setTimeout,
+  clearTimeout,
 });
 
 // ดึงค่า config จาก .env
@@ -247,6 +273,9 @@ async function processNewsJob(job) {
       _botInstance: BOT_INSTANCE,   // ★ ใครยิงเข้าคิว (สืบจำนวนบอท)
       _msgId: message.id,           // ★ ข้อความ Discord ไหน (สืบ double-event)
     };
+    // ★ 1 ต.ค. 69 (research v2 · เลน C · เจ้าของข้อ 2): RESEARCH_AGENT=1 → ลิงก์ในข้อความแยกเป็น payload.sourceUrls
+    //   (+ input ที่ตัดลิงก์ ถ้าเหลือ ≥ 20 ตัวอักษร · สั้นกว่านั้น = url mode เดิม) · ปิด = payload เดิมทุกไบต์
+    research.applySourceUrls(payload, content);
 
     const headers = buildApiHeaders();
 
@@ -294,6 +323,8 @@ async function processNewsJob(job) {
       : `รับทราบครับ! กำลังอ่านข้อมูลและปั้นบทความไวรัล รอสักครู่นะครับ ⚡...`;
     if (processingMsg) await processingMsg.edit(ackText).catch(() => {});
     else processingMsg = await message.reply(ackText);
+    // ★ 1 ต.ค. 69 (research v2 · เลน C): ได้ jobId + ack แล้ว → เริ่มถามบัตรข้อเท็จจริงทุก 20 วิ (ไม่รอ · สวิตช์ปิด = no-op)
+    research.watch({ jobId, message, processingMsg });
 
     // ★ 2 ก.ย. 69: ได้ jobId + ข้อความ ack แล้ว → จดลงสมุดที่เซิร์ฟเวอร์ (ล้มเงียบ ห้ามทำงานหลักพัง)
     //   บอทตัวใหม่หลัง redeploy จะอ่านสมุดนี้แล้วตามงานต่อ (ดู resumeTrackedJobs) · ปิดสวิตช์ = ไม่ยิงอะไรเลย
@@ -347,6 +378,8 @@ async function processNewsJob(job) {
     // ★ 2 ก.ย. 69: จบงาน/ล้ม → ถอนออกจากสมุด · ยกเว้น (ก) กำลังปิดตัวตาม SIGTERM (client ถูก destroy โพสต์อะไรไม่ได้แล้ว)
     //   — เก็บสมุดไว้ให้ตัวใหม่ตามต่อ (ข) งานถูก instance อื่นรับช่วงไปแล้ว — สมุดเป็นของเขา ห้ามลบ
     if (trackedJobId && !shuttingDown && !handedOff) await trackingDelete(trackedJobId);
+    // ★ 1 ต.ค. 69 (research v2 · เลน C): งานจบ → ถามบัตรต่ออีก ≤ 15 นาที + จด bot-posted ถ้าโพสต์ผลแล้ว (ไม่รอ · ส่งต่อ instance อื่น/ปิดตัว = เลิกตาม)
+    research.jobEnded(trackedJobId, { handedOff, shuttingDown });
   }
 }
 
@@ -739,6 +772,7 @@ async function resumeTrackedJob(entry, { client: bot = client, now = Date.now() 
     startedAt: new Date(jobStartTime).toISOString(),
     queueUrl,
   });
+  research.watch({ jobId, message, processingMsg }); // ★ 1 ต.ค. 69 (research v2 · เลน C): งานที่กู้มาก็ตามบัตรต่อ (สวิตช์ปิด = no-op)
   let handedOff = false;
   activeCount++;
   try {
@@ -756,6 +790,7 @@ async function resumeTrackedJob(entry, { client: bot = client, now = Date.now() 
   } finally {
     activeCount--;
     if (!handedOff && !shuttingDown) await trackingDelete(jobId);
+    research.jobEnded(jobId, { handedOff, shuttingDown }); // ★ 1 ต.ค. 69 (research v2 · เลน C)
   }
 }
 
@@ -970,6 +1005,16 @@ if (BOT_REVIEW_REACTIONS) {
   client.on('messageReactionAdd', (reaction, user) => {
     handleReaction(reaction, user).catch((err) => {
       console.warn(`[Review] 🩹 จัดการ reaction ล้ม (ไม่กระทบงานหลัก): ${String(err?.message || err).slice(0, 80)}`);
+    });
+  });
+}
+
+// ★ 1 ต.ค. 69 (research v2 · เลน C): 👍/👎 บนบัตรข้อเท็จจริง → POST /api/research/feedback · ผูกเฉพาะตอน RESEARCH_AGENT=1
+//   ตัวฟังปุ่มรีวิวด้านบนข้ามบัตรเอง (บัตรไม่มีลิงก์ /generation-logs/ ในเนื้อข้อความ) · ตัวนี้ข้ามข้อความผลข่าวเอง (ไม่มี "jobId:" ท้ายบัตร)
+if (RESEARCH_AGENT) {
+  client.on('messageReactionAdd', (reaction, user) => {
+    research.handleReaction(reaction, user).catch((err) => {
+      console.warn(`[Research] 🩹 จัดการ reaction บนบัตรล้ม (ไม่กระทบงานหลัก): ${String(err?.message || err).slice(0, 80)}`);
     });
   });
 }
