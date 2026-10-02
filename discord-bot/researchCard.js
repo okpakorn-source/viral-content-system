@@ -47,6 +47,9 @@
 // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 10 · W4): รู้จักธง ENCODING_BROKEN แบบ additive
 //   (worker ตั้งเมื่อไฟล์ผลเอเจนต์ภาษาไทยกลายเป็น ? ทั้งรอบ · ระเบียน failed + การ์ดทุกใบ dropped) → บัตรใบแรกขึ้น
 //   "⚠️ ไฟล์ผลเอเจนต์เข้ารหัสผิด — รีเสิร์ชรอบนี้ใช้ไม่ได้" (แทนป้าย 🏷️ ENCODING_BROKEN) · ใบที่สองแสดงธงเป็นคำไทย · ไม่มีธงนี้ = เดิมทุกไบต์
+// ★ 2 ต.ค. 69 (เฝ้า worker + สรุปรายวัน · SPEC-v3 ส่วน 12 · W7): createResearchWatchdog (ส่วนท้ายไฟล์) — worker ค้นคว้าออฟไลน์ ≥ 10 นาที ·
+//   รีเสิร์ชล้มติดกัน ≥ 3 · สรุปรายวัน 07:30 → DM เจ้าของ (สำรอง: ห้อง ADMIN_LOG_CHANNEL_ID → log) · บัตรส่งผลให้ตัวเฝ้าผ่าน hub ต่อ client
+//   (บรรทัดเดียวใน deliverCard และ deliverEditor · ไม่มีตัวเฝ้าที่ start แล้ว = ไม่ทำอะไร → บัตร/HTTP/log/timer เดิมทุกไบต์)
 // ============================================================
 
 const POLL_MS = 20 * 1000;              // ถามการ์ดทุก 20 วิ (สเปกส่วน 7)
@@ -992,6 +995,9 @@ function createResearchCards(options = {}) {
   // ── 4) โพสต์บัตร ──
   async function deliverCard(state, card) {
     if (state.cardMsgId || isShuttingDown()) return false;
+    // ★ 2 ต.ค. 69 (เฝ้า worker + สรุปรายวัน · SPEC-v3 ส่วน 12 · W7): บอกตัวเฝ้า (ล้มติดกัน) ว่าบอทเห็นผลการ์ดงานนี้
+    //   ผ่าน hub ต่อ client (ไม่มีตัวเฝ้าที่ start แล้ว = ไม่ทำอะไร · ไม่ยิง HTTP ไม่ log ไม่ตั้ง timer) · ตัวเฝ้ากันนับซ้ำต่อ jobId เอง
+    emitCardOutcome(client, () => cardOutcomeEvent(state.jobId, card));
     // กันโพสต์ซ้ำข้าม instance (ช่วง Railway redeploy ทับกัน / งานที่กู้หลังรีสตาร์ต): มีคนจดบัตรของงานนี้ไว้แล้ว = ไม่โพสต์
     const prior = await readPosted(state.jobId);
     const priorCard = idOf(prior?.researchCardMsgId);
@@ -1068,6 +1074,8 @@ function createResearchCards(options = {}) {
 
   async function deliverEditor(state, record) {
     if (!record || state.editorMsgId || state.ended || isShuttingDown()) return false;
+    // ★ 2 ต.ค. 69 (W7): ผลบรรณาธิการที่บอทเห็น (failed = นับล้มติดกัน · done = รีเซ็ต) → ตัวเฝ้า · ไม่มีตัวเฝ้า = ไม่ทำอะไร
+    emitCardOutcome(client, () => ({ kind: 'editor', jobId: state.jobId, status: str(record.status) }));
     state.writeMode = true;
     // กันโพสต์ซ้ำข้าม instance (redeploy ทับกัน / งานที่กู้หลังรีสตาร์ต): bot-posted มี editorMsgId แล้ว = ไม่โพสต์ (อ่านไม่ได้ = โพสต์ · fail-open)
     const prior = await readPosted(state.jobId);
@@ -1393,6 +1401,662 @@ function createResearchCards(options = {}) {
   };
 }
 
+// ============================================================
+// ★ 2 ต.ค. 69 (เฝ้า worker + สรุปรายวัน · SPEC-v3 ส่วน 12 · W7) — ตัวเฝ้าเอเจนต์ค้นคว้า · ล้มติดกัน · สรุปรายวัน DM เจ้าของ
+// ------------------------------------------------------------
+// เจ้าของตอบ 2 ต.ค. 69: คอมเครื่องเดียวเปิดตลอด ไม่มี worker สำรอง → ต้องแจ้งเตือนให้ไว · ส่งหาเจ้าของ (RESEARCH_AGENT_OWNER_DISCORD_ID)
+// สวิตช์: RESEARCH_AGENT=1 ของบอท (อ่าน env ตรงตัว '1' = ความหมายเดียวกับ envFlag ของ index.js) · ไม่ตั้ง/ค่าอื่น = ทุกเมธอด no-op
+//   (ไม่ตั้ง interval ไม่ยิง HTTP ไม่ log) · index.js สร้างตอนโหลด (เงียบ) → start() ใน ready · stop() ตอนปิดตัว (gracefulShutdown)
+// 1) ตัวเฝ้า: setInterval ทุก 60 วิ (ฉีดได้ · ไม่ unref · stop ล้าง) → GET /api/research/status (x-api-key เดิมของบอท)
+//    · offline (route: ไม่มี worker ชีพจร ≤ 10 นาที) และ now − lastSeenAt ≥ 10 นาที → ส่ง 🔴 ครั้งเดียว · ยังออฟไลน์ = ซ้ำทุก 60 นาที
+//      (route ไม่มี lastSeenAt = ไม่เคยเห็น worker → นับจากครั้งแรกที่ตัวเฝ้าเห็นออฟไลน์) · กลับ online หลังเตือนแล้ว → ส่ง 🟢 (ออฟไลน์ไป x นาที)
+//    · ติดต่อ route ไม่ได้ (เน็ต/HTTP ไม่ใช่ 2xx/ตอบผิดรูป) ≠ worker ออฟไลน์ (สถานะ worker คงเดิม) · ล้มติดกัน ≥ 3 → ⚠️ ≤ 1 ครั้ง/ชม.
+//    · เว็บปิดสวิตช์ (enabled:false / status disabled) = ไม่เฝ้าออฟไลน์ (ล้างสถานะเงียบๆ)
+// 2) ล้มติดกัน: ผลที่บอทเห็นจากบัตร (createResearchCards → hub ต่อ client ใน deliverCard/deliverEditor · ไม่มีตัวเฝ้า = ไม่ทำอะไร)
+//    งานล้ม = การ์ด status failed หรือธง AGENT_FAILED/ENCODING_BROKEN/BRAIN_UNAVAILABLE หรือบรรณาธิการ failed · done = รีเซ็ต
+//    · ติดกัน 3 → ส่ง 1 ครั้ง (ซ้ำเมื่อถึง 6, 9 …) พร้อม jobId 3 ตัวล่าสุด · skipped/not_ready ไม่นับ ไม่รีเซ็ต · งานเดิมนับครั้งเดียว
+// 3) สรุปรายวัน HH:MM เวลาไทย (ค่าเริ่มต้น 07:30 · RESEARCH_DIGEST_HOUR/RESEARCH_DIGEST_MINUTE · ปิดเฉพาะสรุป RESEARCH_DIGEST=0) ตรวจทุกรอบ 60 วิ
+//    · ทนรีสตาร์ต + กันสอง instance ช่วง redeploy: store 'bot-state' แถว bstate_daily-digest ผ่าน /api/research/bot-state (cas)
+//      อ่าน → ส่งแล้ว = ข้าม · instance อื่นจองอยู่ (< 10 นาที) = รอ · ไม่งั้นจอง (status sending) → GET /api/research/digest?since&until
+//      (เมื่อวาน HH:MM → วันนี้ HH:MM) → ส่ง (≤ 1,800 ตัวอักษร) → บันทึก sent · บอทล่มตอนถึงเวลา = ส่งตอนตื่นได้จนถึงรอบถัดไป
+//    · อ่าน/จอง/ดึงสรุปไม่ได้ = ลองใหม่ทุก 5 นาที ≤ 12 ครั้ง/วัน (ครั้งสุดท้ายส่งฉบับ "ดึงสรุปไม่ได้" แทนการเงียบ)
+// 4) ส่งหาเจ้าของ (sendOwner): DM → ล้ม (ปิด DM/ไม่ได้อยู่เซิร์ฟเวอร์เดียวกัน) = ห้อง ADMIN_LOG_CHANNEL_ID (mention เจ้าของ) → ล้ม/ไม่ตั้ง = log
+//    · ไม่ตั้ง owner id = ห้อง (ไม่ mention) → ไม่มีห้อง = ข้าม + log
+// ความปลอดภัย: ข้อความจากเว็บ (ชื่อข่าว/jobId/เหตุ) = DATA — escape markdown · ไม่ mention ใคร (ยกเว้นเจ้าของในห้องสำรอง)
+//   · ไม่ log คีย์/header · สรุปไม่มีเนื้อข่าว (ชื่อข่าว ≤ 50 ตัวอักษร ≤ 3 ข่าว)
+// ============================================================
+const WATCH_INTERVAL_MS = 60 * 1000;
+const WORKER_OFFLINE_ALERT_MS = 10 * 60 * 1000;
+const OFFLINE_REPEAT_MS = 60 * 60 * 1000;
+const CONTACT_FAIL_ALERT_AT = 3;
+const CONTACT_ALERT_REPEAT_MS = 60 * 60 * 1000;
+const FAIL_STREAK_STEP = 3;
+const OUTCOME_JOBS_MAX = 50;
+const FAIL_FLAG_REASONS = Object.freeze({
+  ENCODING_BROKEN: 'ไฟล์ผลเข้ารหัสผิด',
+  BRAIN_UNAVAILABLE: 'สมอง Codex ใช้ไม่ได้',
+  AGENT_FAILED: 'เอเจนต์ล้ม',
+});
+const DIGEST_DEFAULT_HOUR = 7;
+const DIGEST_DEFAULT_MINUTE = 30;
+const DIGEST_MAX_CHARS = 1800;
+const DIGEST_RETRY_MS = 5 * 60 * 1000;
+const DIGEST_MAX_ATTEMPTS = 12;
+const DIGEST_CLAIM_STALE_MS = 10 * 60 * 1000;
+const DIGEST_HTTP_TIMEOUT_MS = 15 * 1000; // route จำกัดตัวเอง 8 วิ + เผื่อ cold start ของ Vercel
+const DIGEST_STATE_KEY = 'daily-digest';
+const OWNER_MESSAGE_MAX = 1900;          // เพดานข้อความ Discord 2000 — เผื่อ mention เจ้าของในห้องสำรอง
+const DAY_MS = 24 * 60 * 60 * 1000;
+const WORKER_CHECK_HINT = 'ตรวจเครื่อง worker: node scripts/research-agent-worker.mjs --check';
+const TH_MONTHS = Object.freeze(['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']);
+const DIGEST_FLAG_LABELS = Object.freeze({ STALE_NEWS: 'ข่าวเก่า', RAW_CONTRADICTION: 'ขัดต้นฉบับ', ORIGIN_NOT_FOUND: 'ยืนยันต้นทางไม่ได้' });
+const DIGEST_EXTRA_FLAG_LABELS = Object.freeze({
+  ENCODING_BROKEN: 'ไฟล์เข้ารหัสผิด',
+  BRAIN_UNAVAILABLE: 'สมองใช้ไม่ได้',
+  AGENT_FAILED: 'เอเจนต์ล้ม',
+  QUOTA_LOW: 'โควตาใกล้หมด',
+  BROWSER_WRONG_ACCOUNT: 'เบราว์เซอร์ผิดบัญชี',
+});
+
+// ── hub ผลบัตรต่อ client (บัตร → ตัวเฝ้า) · WeakMap: บอทแต่ละตัว (รวมบอทปลอมในเทส) แยกกัน ไม่รั่วข้ามกัน ──
+const cardOutcomeHubs = new WeakMap();
+
+/** ส่งผลบัตรให้ตัวเฝ้าที่ subscribe ไว้กับ client นี้ · ไม่มีใครฟัง = ไม่สร้าง event เลย · ตัวฟังล้มไม่กระทบบัตร */
+function emitCardOutcome(client, makeEvent) {
+  if (!client || typeof client !== 'object') return;
+  const listeners = cardOutcomeHubs.get(client);
+  if (!listeners || listeners.size === 0) return;
+  let event;
+  try {
+    event = typeof makeEvent === 'function' ? makeEvent() : makeEvent;
+  } catch {
+    return;
+  }
+  for (const listener of [...listeners]) {
+    try { listener(event); } catch { /* ตัวเฝ้าล้มห้ามกระทบบัตร */ }
+  }
+}
+
+/** ฟังผลบัตรของ client นี้ → คืนฟังก์ชันเลิกฟัง */
+function subscribeCardOutcomes(client, listener) {
+  if (!client || typeof client !== 'object' || typeof listener !== 'function') return () => {};
+  let listeners = cardOutcomeHubs.get(client);
+  if (!listeners) {
+    listeners = new Set();
+    cardOutcomeHubs.set(client, listeners);
+  }
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
+function cardOutcomeEvent(jobId, card) {
+  const record = card && typeof card === 'object' ? card : {};
+  return { kind: 'card', jobId, status: str(record.status), flags: [...normalizeFlags(record)] };
+}
+
+// ── เวลาไทย ──
+function readClockPart(raw, fallback, max) {
+  const text = String(raw ?? '').trim();
+  if (!/^\d{1,2}$/u.test(text)) return fallback;
+  const n = Number(text);
+  return n <= max ? n : fallback;
+}
+
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+function bangkokParts(ms) {
+  const d = new Date(ms + BANGKOK_OFFSET_MS);
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth(), day: d.getUTCDate(), hour: d.getUTCHours(), minute: d.getUTCMinutes() };
+}
+
+/** "2 ต.ค. 69" (พ.ศ. 2 หลัก) */
+function thaiDateText(ms) {
+  const p = bangkokParts(ms);
+  return `${p.day} ${TH_MONTHS[p.month]} ${pad2((p.year + 543) % 100)}`;
+}
+
+/** "07:30" เวลาไทย */
+function bangkokClock(ms) {
+  const p = bangkokParts(ms);
+  return `${pad2(p.hour)}:${pad2(p.minute)}`;
+}
+
+/**
+ * รอบสรุปล่าสุดที่ถึงเวลาแล้ว (HH:MM เวลาไทย ≤ t) → { key: วันที่ไทยของจุดสิ้นสุด 'YYYY-MM-DD', startMs: จุดสิ้นสุด − 24 ชม., endMs }
+ * เช่น t = 2 ต.ค. 10:00 (ไทย) → 2 ต.ค. 07:30 · t = 2 ต.ค. 06:00 → 1 ต.ค. 07:30 (ยังไม่ถึงรอบวันนี้)
+ */
+function digestSlotAt(t, hour = DIGEST_DEFAULT_HOUR, minute = DIGEST_DEFAULT_MINUTE) {
+  const local = t + BANGKOK_OFFSET_MS;
+  let endLocal = Math.floor(local / DAY_MS) * DAY_MS + (hour * 60 + minute) * 60 * 1000;
+  if (endLocal > local) endLocal -= DAY_MS;
+  const endMs = endLocal - BANGKOK_OFFSET_MS;
+  return { key: new Date(endLocal).toISOString().slice(0, 10), startMs: endMs - DAY_MS, endMs };
+}
+
+/**
+ * คำตอบ GET /api/research/status (src/app/api/research/status/route.js) → { enabled, online, lastSeenMs, quota } | null (อ่านไม่ออก)
+ * null = ถือเป็น "ติดต่อไม่ได้" (ไม่ใช่ออฟไลน์) · status ที่ไม่รู้จักขณะเว็บเปิด = null
+ */
+function parseWatchStatus(body) {
+  if (!body || typeof body !== 'object' || body.success !== true) return null;
+  const status = typeof body.status === 'string' ? body.status.trim().toLowerCase() : '';
+  const enabled = body.enabled !== false && status !== 'disabled';
+  if (enabled && status !== 'online' && status !== 'offline') return null;
+  const seen = Date.parse(typeof body.lastSeenAt === 'string' ? body.lastSeenAt : '');
+  const quotaPct = body.quota && typeof body.quota === 'object' ? firstFinite(body.quota.pct) : null;
+  return {
+    enabled,
+    online: status === 'online',
+    lastSeenMs: Number.isFinite(seen) ? seen : null,
+    quota: quotaPct === null ? null : { pct: Math.max(0, Math.min(100, quotaPct)), account: str(body.quota.account).slice(0, 20) || null },
+  };
+}
+
+/** ผลบัตร → { verdict: 'failed'|'done', reason? } | null (ไม่นับ) */
+function outcomeVerdict(event) {
+  if (!event || typeof event !== 'object' || !isJobId(event.jobId)) return null;
+  if (event.kind === 'card') {
+    const flags = Array.isArray(event.flags) ? event.flags : [];
+    const flag = Object.keys(FAIL_FLAG_REASONS).find((f) => flags.includes(f));
+    if (flag) return { verdict: 'failed', reason: FAIL_FLAG_REASONS[flag] };
+    if (event.status === 'failed') return { verdict: 'failed', reason: 'รีเสิร์ชล้ม' };
+    if (event.status === 'done') return { verdict: 'done' };
+    return null;
+  }
+  if (event.kind === 'editor') {
+    if (event.status === 'failed') return { verdict: 'failed', reason: 'บรรณาธิการล้ม' };
+    if (event.status === 'done') return { verdict: 'done' };
+  }
+  return null;
+}
+
+// ── ข้อความสรุปรายวัน (pure — เทสได้โดยไม่ต้องมี discord.js) ──
+function digestCount(value) {
+  const n = firstFinite(value);
+  return n === null || n < 0 ? 0 : Math.round(n);
+}
+
+function usdText(value) {
+  const n = firstFinite(value);
+  if (n === null || n < 0) return '?';
+  return `$${n >= 10 ? n.toFixed(1) : n >= 1 ? n.toFixed(2) : n.toFixed(3)}`;
+}
+
+function digestWatchLine(item, caseUrl) {
+  const caseId = /^[A-Za-z0-9_-]{1,20}$/u.test(str(item.caseId)) ? str(item.caseId) : null;
+  const label = caseId ? `#${escapeMd(caseId)}` : (safe(item.jobId, 40) || '?');
+  const title = safe(item.title, 50);
+  const parts = [];
+  const corrections = digestCount(item.corrections);
+  const additions = digestCount(item.additions);
+  const down = digestCount(item.down);
+  if (corrections > 0) parts.push(`แก้ ${corrections}`);
+  if (additions > 0) parts.push(`เพิ่ม ${additions}`);
+  if (down > 0) parts.push(`👎 ${down}`);
+  let url = null;
+  if (caseId && typeof caseUrl === 'function') {
+    try { url = safeUrl(caseUrl(caseId)); } catch { url = null; }
+  }
+  return `• ${label}${title ? ` ${title}` : ''}${parts.length > 0 ? ` — ${parts.join(' · ')}` : ''}${url ? ` <${url}>` : ''}`;
+}
+
+// ≤ max ตัวอักษร: ตัดรายการ "ข่าวที่ควรดู" จากท้ายก่อน (ตัวเลขหลักต้องอยู่ครบ) แล้วค่อยตัดความยาวทั้งข้อความ
+function fitDigestText(lines, tail, max) {
+  const keep = [...tail];
+  while (keep.length > 0 && [...lines, ...keep].join('\n').length > max) keep.pop();
+  if (keep.length === 1) keep.pop(); // เหลือแต่หัวข้อ = ไม่ต้องมี
+  return clip([...lines, ...keep].join('\n'), max);
+}
+
+/**
+ * คำตอบ GET /api/research/digest (src/lib/research-agent/digest.js buildDigest) → ข้อความ DM ≤ 1,800 ตัวอักษร
+ * @param {object|null} digest  { enabled, since, until, news|null, cards|null, aiCost|null, watchlist[], errors[] } · null = ดึงไม่ได้
+ * @param {{ slot?: {startMs: number, endMs: number}, quota?: {pct: number, account?: string}|null,
+ *   caseUrl?: (caseId: string) => string, error?: string|null }} [ctx]
+ */
+function renderDigestMessage(digest, ctx = {}) {
+  const d = isPlainRecord(digest) ? digest : {};
+  const c = isPlainRecord(ctx) ? ctx : {};
+  const slot = isPlainRecord(c.slot) ? c.slot : {};
+  const startMs = firstFinite(slot.startMs, Date.parse(String(d.since ?? '')));
+  const endMs = firstFinite(slot.endMs, Date.parse(String(d.until ?? '')));
+  const lines = [];
+  if (endMs === null) lines.push('📊 สรุปรีเสิร์ช');
+  else {
+    const range = startMs === null ? '' : ` (${thaiDateText(startMs)} ${bangkokClock(startMs)} → ${thaiDateText(endMs)} ${bangkokClock(endMs)})`;
+    lines.push(`📊 สรุปรีเสิร์ช ${thaiDateText(endMs)}${range}`);
+  }
+  if (str(c.error)) lines.push(`⚠️ ดึงสรุปจาก Vercel ไม่ได้ (${safe(c.error, 80)}) — ตัวเลขด้านล่างไม่ครบ · ดู log บอท/สถานะ Vercel`);
+  if (d.enabled === false) lines.push('⏸️ ระบบค้นคว้าฝั่งเว็บปิดอยู่ (สวิตช์บน Vercel)');
+  const news = isPlainRecord(d.news) ? d.news : null;
+  if (news) {
+    const modeCounts = isPlainRecord(news.modes) ? news.modes : {};
+    const modes = ['write', 'assist', 'shadow', 'other'].filter((m) => digestCount(modeCounts[m]) > 0).map((m) => `${m} ${digestCount(modeCounts[m])}`);
+    lines.push(`📰 ข่าวทั้งหมด ${digestCount(news.total)}${news.capped === true ? '+' : ''} · ผ่านระบบใหม่ ${digestCount(news.withAgent)}${modes.length > 0 ? ` (${modes.join(' · ')})` : ''}`);
+    const editor = isPlainRecord(news.editor) ? news.editor : {};
+    lines.push(`🧾 เข้าเนื้อ ${digestCount(editor.done)} · ไม่ทัน ${digestCount(editor.not_ready)} · ไม่ผ่านเกณฑ์ ${digestCount(editor.skipped)} · ล้ม ${digestCount(editor.failed)} · ไฟล์เข้ารหัสผิด ${digestCount(news.encodingBroken)}`);
+    lines.push(`✏️ แก้ข้อผิดรวม ${digestCount(news.corrections)} จุด · เพิ่มข้อมูลรวม ${digestCount(news.additions)} จุด`);
+    const times = [];
+    const wait = durationText(news.avgWaitMs);
+    const editorTime = durationText(news.avgEditorMs);
+    const totalSec = firstFinite(news.avgTotalSec);
+    const total = totalSec === null ? null : durationText(totalSec * 1000);
+    if (wait) times.push(`รอการ์ด ${wait}`);
+    if (editorTime) times.push(`บรรณาธิการ ${editorTime}`);
+    if (total) times.push(`ทั้งท่อ ${total}`);
+    if (times.length > 0) lines.push(`⏱️ เฉลี่ย: ${times.join(' · ')}`);
+  } else {
+    lines.push('📰 ข่าว: อ่านไม่ได้');
+  }
+  const cards = isPlainRecord(d.cards) ? d.cards : null;
+  if (cards) {
+    const flags = isPlainRecord(cards.flags) ? cards.flags : {};
+    const flagText = [
+      ...Object.entries(DIGEST_FLAG_LABELS).map(([flag, label]) => `${label} ${digestCount(flags[flag])}`),
+      ...Object.entries(DIGEST_EXTRA_FLAG_LABELS).filter(([flag]) => digestCount(flags[flag]) > 0).map(([flag, label]) => `${label} ${digestCount(flags[flag])}`),
+    ];
+    lines.push(`🚩 ธง: ${flagText.join(' · ')}`);
+    const status = isPlainRecord(cards.status) ? cards.status : {};
+    const avgMinutes = firstFinite(cards.avgMinutes);
+    lines.push(`🤖 เอเจนต์ ${digestCount(cards.total)}${cards.capped === true ? '+' : ''} งาน (สำเร็จ ${digestCount(status.done)} · ล้ม ${digestCount(status.failed)} · ข้าม ${digestCount(status.skipped)})${avgMinutes !== null ? ` · เฉลี่ย ${avgMinutes} นาที/งาน` : ''}`);
+  } else {
+    lines.push('🚩 การ์ด/ธง: อ่านไม่ได้');
+  }
+  const ai = isPlainRecord(d.aiCost) ? d.aiCost : null;
+  lines.push(`💵 ${cards ? `ค่าเครื่องมือ ${usdText(cards.toolCostUsd)}` : 'ค่าเครื่องมือ: อ่านไม่ได้'} · ${ai ? `AI ประมาณ ${usdText(ai.usd)}${ai.capped === true ? '+' : ''} (${digestCount(ai.calls)} ครั้ง · ทุกงานในช่วง)` : 'AI: อ่านไม่ได้'}`);
+  const quota = isPlainRecord(c.quota) ? c.quota : null;
+  const pct = quota ? firstFinite(quota.pct) : null;
+  lines.push(pct === null ? '🔋 โควตา Codex ล่าสุด: ไม่ทราบ' : `🔋 โควตา Codex ล่าสุด ${Math.round(pct)}%${str(quota.account) ? ` (บัญชี ${safe(quota.account, 20)})` : ''}`);
+  if (cards) {
+    const votes = isPlainRecord(cards.votes) ? cards.votes : {};
+    const first = isPlainRecord(votes.first) ? votes.first : {};
+    const second = isPlainRecord(votes.second) ? votes.second : {};
+    const downs = listOf(votes.downJobs).filter(isPlainRecord).map((j) => safe(j.jobId, 40)).filter(Boolean).slice(0, 5);
+    lines.push(`👍👎 ใบแรก 👍 ${digestCount(first.up)} 👎 ${digestCount(first.down)} · ใบสอง 👍 ${digestCount(second.up)} 👎 ${digestCount(second.down)}${downs.length > 0 ? ` · ได้ 👎: ${downs.join(', ')}` : ''}`);
+  }
+  const errors = listOf(d.errors).map((e) => safe(e, 60)).filter(Boolean).slice(0, 4);
+  if (errors.length > 0) lines.push(`⚠️ ข้อมูลไม่ครบ: ${errors.join(' · ')}`);
+  const watch = listOf(d.watchlist).filter(isPlainRecord).slice(0, 3).map((item) => digestWatchLine(item, c.caseUrl));
+  return fitDigestText(lines, watch.length > 0 ? ['👀 ข่าวที่ควรดู:', ...watch] : [], DIGEST_MAX_CHARS);
+}
+
+/**
+ * ตัวเฝ้า (สเปกส่วน 12) — สร้างได้เสมอ · ทำงานเมื่อสวิตช์เปิดและเรียก start() แล้วเท่านั้น
+ * @param {object} options
+ * @param {object} options.env              process.env ของบอท — อ่าน RESEARCH_AGENT ('1' = เปิด · ไม่ส่ง options.enabled) ·
+ *   RESEARCH_AGENT_OWNER_DISCORD_ID · ADMIN_LOG_CHANNEL_ID · RESEARCH_DIGEST ('0' = ปิดสรุป) · RESEARCH_DIGEST_HOUR (7) · RESEARCH_DIGEST_MINUTE (30)
+ * @param {boolean} [options.enabled]       ทับสวิตช์จาก env (เทส)
+ * @param {{get: Function, post: Function}} options.http   axios
+ * @param {object} options.client           discord.js Client (DM: client.users.fetch · ห้องสำรอง: client.channels.fetch) — ตัวเดียวกับที่ให้บัตร (hub)
+ * @param {(path: string) => string} options.buildApiUrl  · options.buildApiHeaders (x-api-key เดิมของบอท)
+ * @param {Function} [options.setInterval] · [options.clearInterval] · [options.now] · [options.isShuttingDown] · [options.logger]
+ * @param {string|(() => string)} [options.instance]  ชื่อ instance (จดลง bot-state ตอนจองส่งสรุป)
+ */
+function createResearchWatchdog(options = {}) {
+  const env = options.env && typeof options.env === 'object' ? options.env : {};
+  const enabled = typeof options.enabled === 'boolean' ? options.enabled : String(env.RESEARCH_AGENT ?? '') === '1';
+  const http = options.http;
+  const client = options.client || null;
+  const logger = options.logger || console;
+  const now = typeof options.now === 'function' ? options.now : () => Date.now();
+  const setIntervalFn = typeof options.setInterval === 'function' ? options.setInterval : setInterval;
+  const clearIntervalFn = typeof options.clearInterval === 'function' ? options.clearInterval : clearInterval;
+  const isShuttingDown = typeof options.isShuttingDown === 'function' ? options.isShuttingDown : () => false;
+  const ownerId = readSnowflake(env.RESEARCH_AGENT_OWNER_DISCORD_ID);
+  const adminChannelId = readSnowflake(env.ADMIN_LOG_CHANNEL_ID);
+  const digestEnabled = String(env.RESEARCH_DIGEST ?? '').trim() !== '0';
+  const digestHour = readClockPart(env.RESEARCH_DIGEST_HOUR, DIGEST_DEFAULT_HOUR, 23);
+  const digestMinute = readClockPart(env.RESEARCH_DIGEST_MINUTE, DIGEST_DEFAULT_MINUTE, 59);
+  const apiUrl = (path) => options.buildApiUrl(path);
+  const apiHeaders = () => ({ ...options.buildApiHeaders() });
+  const caseUrl = (caseId) => apiUrl(`/generation-logs/${encodeURIComponent(caseId)}`);
+  const warn = (text) => { try { logger.warn(text); } catch { /* log ล้มห้ามทำงานหลักพัง */ } };
+  const info = (text) => { try { logger.log(text); } catch { /* log ล้มห้ามทำงานหลักพัง */ } };
+  const isoAt = (ms) => new Date(ms).toISOString();
+  const instanceName = () => {
+    try {
+      const raw = typeof options.instance === 'function' ? options.instance() : options.instance;
+      return str(raw).slice(0, 80) || null;
+    } catch {
+      return null;
+    }
+  };
+
+  let started = false;
+  let timer = null;
+  let unsubscribe = null;
+  let busy = false;
+  const watch = { offlineSince: null, offlineAlertAt: null, contactFails: 0, contactAlertAt: null, lastStatus: null, webDisabled: false };
+  const outcomes = new Map(); // jobId → { verdict, reason } (ลำดับ = ลำดับที่บอทเห็นผลครั้งแรก)
+  let streakLevelAlerted = 0;
+  const digest = { key: null, attempts: 0, nextAt: 0, doneKey: null };
+  const pending = new Set();
+
+  function track(promise) {
+    pending.add(promise);
+    const done = () => { pending.delete(promise); };
+    promise.then(done, done);
+    return promise;
+  }
+
+  // ── 4) ส่งหาเจ้าของ: DM → ห้องสำรอง → log (ไม่โยน · คืนช่องทางที่ส่งได้) ──
+  async function sendOwner(content, label) {
+    const text = clip(String(content ?? ''), OWNER_MESSAGE_MAX);
+    if (ownerId && client?.users && typeof client.users.fetch === 'function') {
+      try {
+        const user = await client.users.fetch(ownerId);
+        await user.send({ content: text, allowedMentions: { parse: [] } });
+        info(`[ResearchWatch] 📨 ส่ง DM เจ้าของแล้ว (${label})`);
+        return 'dm';
+      } catch (err) {
+        warn(`[ResearchWatch] 🩹 DM เจ้าของไม่สำเร็จ (${label}): ${errText(err)}${adminChannelId ? ' — ส่งห้อง ADMIN_LOG_CHANNEL_ID แทน' : ''}`);
+      }
+    }
+    if (adminChannelId && client?.channels && typeof client.channels.fetch === 'function') {
+      try {
+        const channel = await client.channels.fetch(adminChannelId);
+        if (!channel || typeof channel.send !== 'function') throw new Error('ห้องไม่รับข้อความ');
+        await channel.send({
+          content: ownerId ? `<@${ownerId}> ${text}` : text,
+          allowedMentions: ownerId ? { parse: [], users: [ownerId] } : { parse: [] },
+        });
+        info(`[ResearchWatch] 📨 โพสต์ห้อง ADMIN_LOG_CHANNEL_ID แทน DM (${label})`);
+        return 'channel';
+      } catch (err) {
+        warn(`[ResearchWatch] 🩹 โพสต์ห้อง ADMIN_LOG_CHANNEL_ID ไม่สำเร็จ (${label}): ${errText(err)}`);
+      }
+    }
+    const reason = ownerId || adminChannelId ? 'ส่งไม่สำเร็จ' : 'ไม่ตั้ง RESEARCH_AGENT_OWNER_DISCORD_ID / ADMIN_LOG_CHANNEL_ID (ข้าม)';
+    warn(`[ResearchWatch] ⚠️ แจ้งเจ้าของไม่ได้ (${label} · ${reason}): ${clip(oneLine(text), 160)}`);
+    return 'log';
+  }
+
+  function notify(content, label) {
+    return track(sendOwner(content, label));
+  }
+
+  // ── 1) ตัวเฝ้า worker ──
+  async function fetchStatus() {
+    try {
+      const res = await http.get(apiUrl('/api/research/status'), { headers: apiHeaders(), timeout: HTTP_TIMEOUT_MS });
+      const status = parseWatchStatus(res?.data);
+      return status ? { ok: true, status } : { ok: false, reason: 'ตอบผิดรูป' };
+    } catch (err) {
+      const code = Number(err?.response?.status);
+      return { ok: false, reason: Number.isFinite(code) && code > 0 ? `HTTP ${code}` : errText(err) };
+    }
+  }
+
+  async function onStatus(status, t) {
+    if (watch.contactFails >= CONTACT_FAIL_ALERT_AT) info(`[ResearchWatch] ✅ ติดต่อ Vercel ได้แล้ว (หลังล้มติดกัน ${watch.contactFails} ครั้ง)`);
+    watch.contactFails = 0;
+    watch.lastStatus = status;
+    if (!status.enabled) {
+      if (!watch.webDisabled) info('[ResearchWatch] ⏸️ เว็บปิดระบบค้นคว้า (enabled:false) — ไม่เฝ้าออฟไลน์จนกว่าจะเปิด');
+      watch.webDisabled = true;
+      watch.offlineSince = null;
+      watch.offlineAlertAt = null;
+      return;
+    }
+    watch.webDisabled = false;
+    if (status.online) {
+      if (watch.offlineAlertAt !== null) {
+        const minutes = Math.max(1, Math.round((t - watch.offlineSince) / 60000));
+        await notify(`🟢 worker กลับมาแล้ว (ออฟไลน์ไป ${minutes} นาที)`, 'worker-online');
+      }
+      watch.offlineSince = null;
+      watch.offlineAlertAt = null;
+      return;
+    }
+    const since = status.lastSeenMs !== null ? status.lastSeenMs : (watch.offlineSince ?? t);
+    watch.offlineSince = since;
+    if (t - since < WORKER_OFFLINE_ALERT_MS) return;
+    const sinceText = `${bangkokClock(since)} (${thaiDateText(since)})${status.lastSeenMs === null ? ' · ยังไม่เคยเห็นชีพจร worker' : ''}`;
+    if (watch.offlineAlertAt === null) {
+      watch.offlineAlertAt = t;
+      await notify(`🔴 worker ค้นคว้าออฟไลน์ตั้งแต่ ${sinceText} — ข่าวกำลังออกแบบไม่มีรีเสิร์ช · ${WORKER_CHECK_HINT}`, 'worker-offline');
+    } else if (t - watch.offlineAlertAt >= OFFLINE_REPEAT_MS) {
+      watch.offlineAlertAt = t;
+      const minutes = Math.round((t - since) / 60000);
+      await notify(`🔴 worker ค้นคว้ายังออฟไลน์ (ตั้งแต่ ${sinceText} · ${minutes} นาทีแล้ว) — ข่าวกำลังออกแบบไม่มีรีเสิร์ช · ${WORKER_CHECK_HINT}`, 'worker-offline-repeat');
+    }
+  }
+
+  async function onContactFail(reason, t) {
+    watch.contactFails += 1;
+    if (watch.contactFails < CONTACT_FAIL_ALERT_AT) return;
+    if (watch.contactAlertAt !== null && t - watch.contactAlertAt < CONTACT_ALERT_REPEAT_MS) return;
+    watch.contactAlertAt = t;
+    await notify(`⚠️ บอทติดต่อ Vercel ไม่ได้ (ล้มติดกัน ${watch.contactFails} ครั้ง · ${safe(reason, 60)}) — ยังไม่รู้สถานะ worker ค้นคว้า (ไม่นับเป็นออฟไลน์) · ตรวจ Vercel/เน็ตของ Railway`, 'vercel-unreachable');
+  }
+
+  // ── 2) ล้มติดกัน ──
+  function failedStreak() {
+    const list = [...outcomes.entries()];
+    const failed = [];
+    for (let i = list.length - 1; i >= 0 && list[i][1].verdict === 'failed'; i--) failed.push(list[i]);
+    return failed; // ใหม่สุดก่อน
+  }
+
+  function evaluateStreak() {
+    const failed = failedStreak();
+    const n = failed.length;
+    if (n === 0) streakLevelAlerted = 0;
+    const level = Math.floor(n / FAIL_STREAK_STEP);
+    if (level === 0 || level <= streakLevelAlerted) return n;
+    streakLevelAlerted = level;
+    const recent = failed.slice(0, 3).map(([jobId, o]) => `${safe(jobId, 40)} (${o.reason || 'ล้ม'})`).join(' · ');
+    notify(`🔴 รีเสิร์ชล้มติดกัน ${n} ข่าว — ล่าสุด: ${recent} · ${WORKER_CHECK_HINT}`, `fail-streak-${n}`);
+    return n;
+  }
+
+  /** ผลบัตรที่บอทเห็น (hub) → นับล้มติดกัน · คืนความยาว streak ปัจจุบัน (เทสใช้) · ไม่โยน */
+  function noteOutcome(event) {
+    if (!enabled) return null;
+    try {
+      const v = outcomeVerdict(event);
+      if (!v) return null;
+      const prev = outcomes.get(event.jobId);
+      if (prev) {
+        if (prev.verdict === 'failed' || v.verdict === 'done') return failedStreak().length; // ล้มแล้วติดตัว · done ซ้ำไม่เปลี่ยน
+        prev.verdict = 'failed'; // done → failed (เช่น บัตรสำเร็จแต่บรรณาธิการล้มทีหลัง) · คงลำดับเดิมของงาน
+        prev.reason = v.reason;
+      } else {
+        outcomes.set(event.jobId, { verdict: v.verdict, reason: v.reason || null });
+        while (outcomes.size > OUTCOME_JOBS_MAX) outcomes.delete(outcomes.keys().next().value);
+      }
+      return evaluateStreak();
+    } catch (err) {
+      warn(`[ResearchWatch] 🩹 นับผลบัตรไม่สำเร็จ (ไม่กระทบข่าว): ${errText(err)}`);
+      return null;
+    }
+  }
+
+  // ── 3) สรุปรายวัน ──
+  async function readDigestState() {
+    try {
+      const res = await http.get(`${apiUrl('/api/research/bot-state')}?key=${DIGEST_STATE_KEY}`, { headers: apiHeaders(), timeout: HTTP_TIMEOUT_MS });
+      if (res?.data?.success !== true) return { ok: false };
+      return { ok: true, item: isPlainRecord(res.data.item) ? res.data.item : null };
+    } catch {
+      return { ok: false };
+    }
+  }
+
+  async function writeDigestState(expectedRevision, state) {
+    try {
+      const res = await http.post(apiUrl('/api/research/bot-state'), { key: DIGEST_STATE_KEY, expectedRevision, state }, { headers: apiHeaders(), timeout: HTTP_TIMEOUT_MS });
+      if (res?.data?.success === true && isPlainRecord(res.data.item)) return { ok: true, item: res.data.item };
+      return { ok: false, conflict: false };
+    } catch (err) {
+      return { ok: false, conflict: Number(err?.response?.status) === 409 || err?.response?.data?.errorType === 'BOT_STATE_CONFLICT' };
+    }
+  }
+
+  async function fetchDigest(slot) {
+    const query = `since=${encodeURIComponent(isoAt(slot.startMs))}&until=${encodeURIComponent(isoAt(slot.endMs))}`;
+    try {
+      const res = await http.get(`${apiUrl('/api/research/digest')}?${query}`, { headers: apiHeaders(), timeout: DIGEST_HTTP_TIMEOUT_MS });
+      if (res?.data?.success === true) return { ok: true, digest: res.data };
+      return { ok: false, reason: 'ตอบไม่สำเร็จ' };
+    } catch (err) {
+      const code = Number(err?.response?.status);
+      return { ok: false, reason: Number.isFinite(code) && code > 0 ? `HTTP ${code}` : errText(err) };
+    }
+  }
+
+  async function maybeDigest(t) {
+    const slot = digestSlotAt(t, digestHour, digestMinute);
+    if (digest.doneKey === slot.key) return 'done';
+    if (digest.key !== slot.key) {
+      digest.key = slot.key;
+      digest.attempts = 0;
+      digest.nextAt = 0;
+    }
+    if (t < digest.nextAt) return 'wait';
+    if (digest.attempts >= DIGEST_MAX_ATTEMPTS) {
+      digest.doneKey = slot.key;
+      warn(`[ResearchWatch] ⚠️ สรุปรายวัน ${slot.key} ส่งไม่ได้ครบ ${DIGEST_MAX_ATTEMPTS} ครั้ง — เลิกพยายามจนถึงรอบถัดไป`);
+      return 'gave_up';
+    }
+    digest.attempts += 1;
+    digest.nextAt = t + DIGEST_RETRY_MS;
+    const read = await readDigestState();
+    if (!read.ok) {
+      warn(`[ResearchWatch] 🩹 อ่านสถานะสรุปรายวันไม่ได้ (ครั้งที่ ${digest.attempts}) — ลองใหม่ใน ${DIGEST_RETRY_MS / 60000} นาที`);
+      return 'state_unavailable';
+    }
+    const state = isPlainRecord(read.item?.state) ? read.item.state : {};
+    if (state.lastSentKey === slot.key) {
+      digest.doneKey = slot.key;
+      info(`[ResearchWatch] ⏭️ สรุปรายวัน ${slot.key} ส่งไปแล้ว (ก่อนรีสตาร์ต/instance อื่น) — ไม่ส่งซ้ำ`);
+      return 'already_sent';
+    }
+    const claimedMs = Date.parse(String(state.claimedAt ?? ''));
+    const claimedByOther = state.status === 'sending' && state.claimKey === slot.key && (!state.instance || state.instance !== instanceName());
+    if (claimedByOther && Number.isFinite(claimedMs) && t - claimedMs < DIGEST_CLAIM_STALE_MS) {
+      info(`[ResearchWatch] ⏳ สรุปรายวัน ${slot.key} instance อื่นกำลังส่ง — รอดูรอบหน้า`);
+      return 'claimed_by_other';
+    }
+    const history = { lastSentKey: str(state.lastSentKey) || null, sentAt: str(state.sentAt) || null };
+    const revision = Number.isSafeInteger(read.item?.revision) ? read.item.revision : 0;
+    const claim = await writeDigestState(revision, { ...history, status: 'sending', claimKey: slot.key, claimedAt: isoAt(t), instance: instanceName() });
+    if (!claim.ok) {
+      info(`[ResearchWatch] ⏭️ จองส่งสรุปรายวัน ${slot.key} ไม่ได้ (${claim.conflict ? 'instance อื่นเขียนก่อน' : 'บันทึกไม่สำเร็จ'}) — ลองรอบหน้า`);
+      return claim.conflict ? 'conflict' : 'claim_failed';
+    }
+    const fetched = await fetchDigest(slot);
+    if (!fetched.ok && digest.attempts < DIGEST_MAX_ATTEMPTS) {
+      await writeDigestState(claim.item.revision, { ...history, status: 'failed', claimKey: null, failedAt: isoAt(now()), lastError: fetched.reason });
+      warn(`[ResearchWatch] 🩹 ดึงสรุปรายวัน ${slot.key} ไม่ได้ (${fetched.reason}) — ลองใหม่ใน ${DIGEST_RETRY_MS / 60000} นาที`);
+      return 'digest_failed';
+    }
+    if (!started || isShuttingDown()) {
+      // บอทกำลังปิดตัว (Railway redeploy) ระหว่างดึงสรุป — client กำลังถูกตัด ส่งไปก็ไม่ถึง → ปล่อยจองให้ instance ใหม่ส่งแทน
+      await writeDigestState(claim.item.revision, { ...history, status: 'failed', claimKey: null, failedAt: isoAt(now()), lastError: 'shutdown' });
+      return 'stopped';
+    }
+    const text = renderDigestMessage(fetched.ok ? fetched.digest : null, {
+      slot,
+      quota: watch.lastStatus ? watch.lastStatus.quota : null,
+      caseUrl,
+      error: fetched.ok ? null : fetched.reason,
+    });
+    const via = await notify(text, 'daily-digest');
+    digest.doneKey = slot.key;
+    const marked = await writeDigestState(claim.item.revision, { lastSentKey: slot.key, sentAt: isoAt(now()), status: 'sent', claimKey: null, via, instance: instanceName() });
+    if (!marked.ok) warn(`[ResearchWatch] 🩹 บันทึกว่าส่งสรุปรายวัน ${slot.key} แล้วไม่สำเร็จ — ถ้าบอทรีสตาร์ตก่อนรอบถัดไปอาจส่งซ้ำ`);
+    info(`[ResearchWatch] 📊 ส่งสรุปรายวัน ${slot.key} แล้ว (${via} · ${text.length} ตัวอักษร)`);
+    return 'sent';
+  }
+
+  // ── รอบเฝ้า (ทุก 60 วิ) — รอบก่อนยังไม่จบ = ข้าม · ไม่โยน ──
+  async function tick() {
+    if (!enabled || !started) return 'idle';
+    if (busy) return 'busy';
+    busy = true;
+    try {
+      if (isShuttingDown()) return 'shutdown';
+      const t = now();
+      const res = await fetchStatus();
+      if (!started) return 'stopped';
+      if (res.ok) await onStatus(res.status, t);
+      else await onContactFail(res.reason, t);
+      if (digestEnabled && started && !isShuttingDown()) await maybeDigest(now());
+      return 'ok';
+    } catch (err) {
+      warn(`[ResearchWatch] 🩹 รอบเฝ้าล้ม (ไม่กระทบข่าว): ${errText(err)}`);
+      return 'error';
+    } finally {
+      busy = false;
+    }
+  }
+
+  return {
+    enabled,
+
+    /** เริ่มตัวเฝ้า (ready ของบอท) · สวิตช์ปิด = false ไม่ทำอะไรเลย · เรียกซ้ำ = ไม่ตั้ง interval ซ้อน · ไม่โยน */
+    start() {
+      if (!enabled) return false;
+      if (started) return true;
+      try {
+        timer = setIntervalFn(() => tick(), WATCH_INTERVAL_MS);
+        started = true;
+        unsubscribe = subscribeCardOutcomes(client, noteOutcome);
+        const target = ownerId ? `DM ${ownerId}${adminChannelId ? ' (สำรอง: ห้อง ADMIN_LOG_CHANNEL_ID)' : ''}` : adminChannelId ? 'ห้อง ADMIN_LOG_CHANNEL_ID' : 'log อย่างเดียว';
+        info(`[ResearchWatch] 👀 เริ่มตัวเฝ้า worker ค้นคว้า (ทุก ${WATCH_INTERVAL_MS / 1000} วิ · ออฟไลน์ ≥ ${WORKER_OFFLINE_ALERT_MS / 60000} นาทีแจ้ง · ล้มติดกัน ${FAIL_STREAK_STEP} งานแจ้ง) · สรุปรายวัน ${digestEnabled ? `${pad2(digestHour)}:${pad2(digestMinute)} เวลาไทย` : 'ปิด (RESEARCH_DIGEST=0)'} · ส่งทาง ${target}`);
+        if (!ownerId && !adminChannelId) warn('[ResearchWatch] ⚠️ ไม่มีปลายทางแจ้งเตือน — ตั้ง RESEARCH_AGENT_OWNER_DISCORD_ID (DM) หรือ ADMIN_LOG_CHANNEL_ID บน Railway');
+        return true;
+      } catch (err) {
+        started = false;
+        timer = null;
+        warn(`[ResearchWatch] 🩹 เริ่มตัวเฝ้าไม่สำเร็จ (ไม่กระทบข่าว): ${errText(err)}`);
+        return false;
+      }
+    },
+
+    /** หยุดตัวเฝ้า (SIGTERM/SIGINT) — ล้าง interval + เลิกฟังผลบัตร · ไม่ได้เริ่ม = false · ไม่โยน */
+    stop() {
+      if (!started) return false;
+      started = false;
+      try { clearIntervalFn(timer); } catch { /* timer หายไปแล้ว */ }
+      timer = null;
+      if (unsubscribe) {
+        try { unsubscribe(); } catch { /* ไม่มีอะไรต้องทำ */ }
+        unsubscribe = null;
+      }
+      info('[ResearchWatch] ⏹️ หยุดตัวเฝ้า worker ค้นคว้า (บอทปิดตัว)');
+      return true;
+    },
+
+    tick,
+    noteOutcome,
+
+    /** รอข้อความแจ้งเจ้าของที่ยังส่งไม่จบ (เทส) */
+    async flush() {
+      while (pending.size > 0) {
+        // eslint-disable-next-line no-await-in-loop -- รอจนไม่เหลือ (ส่งใหม่อาจเกิดระหว่างรอ)
+        await Promise.allSettled([...pending]);
+      }
+    },
+
+    /** สถานะภายใน (เทส/ดีบัก) */
+    snapshot: () => ({
+      started,
+      offlineSince: watch.offlineSince,
+      offlineAlertAt: watch.offlineAlertAt,
+      contactFails: watch.contactFails,
+      contactAlertAt: watch.contactAlertAt,
+      webDisabled: watch.webDisabled,
+      streak: failedStreak().length,
+      digest: { ...digest },
+      settings: { ownerId, adminChannelId, digestEnabled, digestHour, digestMinute },
+    }),
+  };
+}
+
 module.exports = {
   createResearchCards,
   splitSourceUrls,
@@ -1407,6 +2071,16 @@ module.exports = {
   pickEditorRecord,
   researchAgentOfResult,
   editorJobIdFromMessage,
+  // ★ 2 ต.ค. 69 (เฝ้า worker + สรุปรายวัน · SPEC-v3 ส่วน 12 · W7): ตัวเฝ้า + สรุปรายวัน (index.js ใช้ createResearchWatchdog · ที่เหลือเทสใช้)
+  createResearchWatchdog,
+  renderDigestMessage,
+  digestSlotAt,
+  parseWatchStatus,
+  subscribeCardOutcomes,
+  watchdogConstants: Object.freeze({
+    WATCH_INTERVAL_MS, WORKER_OFFLINE_ALERT_MS, OFFLINE_REPEAT_MS, CONTACT_FAIL_ALERT_AT, CONTACT_ALERT_REPEAT_MS, FAIL_STREAK_STEP,
+    DIGEST_DEFAULT_HOUR, DIGEST_DEFAULT_MINUTE, DIGEST_MAX_CHARS, DIGEST_RETRY_MS, DIGEST_MAX_ATTEMPTS, DIGEST_CLAIM_STALE_MS, DIGEST_STATE_KEY,
+  }),
   constants: Object.freeze({
     POLL_MS, TAIL_MS, HARD_CAP_MS, STATUS_TTL_MS, MIN_TEXT_AFTER_URLS, MAX_SOURCE_URLS, MAX_RESULT_MSG_IDS,
     CARD_TITLE, SHADOW_TAG, SHADOW_LEAD, RESULT_POSTED_PREFIX, OFFLINE_TEXT, DEFAULT_QUOTA_ALERT_PCT,

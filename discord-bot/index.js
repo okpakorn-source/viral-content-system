@@ -69,6 +69,25 @@ const BOT_INSTANCE = require('os').hostname() + '_' + Math.random().toString(36)
 //   + ตัดการเชื่อมต่อ Discord เพื่อไม่ให้ตัวเก่า+ตัวใหม่ฟัง event ทับกัน (ต้นเหตุเห็น 2 ตอบช่วง deploy)
 let shuttingDown = false;
 
+// ★ 2 ต.ค. 69 (เฝ้า worker + สรุปรายวัน · SPEC-v3 ส่วน 12 · W7): ตัวเฝ้า worker ค้นคว้า (ออฟไลน์ ≥ 10 นาที) + ล้มติดกัน ≥ 3 + สรุปรายวัน 07:30
+//   → DM เจ้าของ (สำรอง: ห้อง ADMIN_LOG_CHANNEL_ID → log) · โมดูลเดียวกับบัตร (discord-bot/researchCard.js) · สวิตช์อ่านจาก env ของบอทเอง
+//   (ตรงตัว '1' แบบ envFlag · ปิด = ทุกเมธอด no-op) · สร้างตอนโหลดแบบเงียบ · เริ่มใน ready (setInterval 60 วิ) · หยุดใน gracefulShutdown
+//   ไม่ผูก event/ตัวฟังเพิ่ม · URL/กุญแจชุดเดียวกับคิว (buildQueueUrl/buildApiHeaders)
+const { createResearchWatchdog } = require('./researchCard');
+const researchWatchdog = createResearchWatchdog({
+  env: process.env,
+  http: axios,
+  client,
+  buildApiUrl: (path) => buildQueueUrl().replace('/api/queue/add', path),
+  buildApiHeaders,
+  isShuttingDown: () => shuttingDown,
+  instance: BOT_INSTANCE,
+  logger: console,
+  now: () => Date.now(),
+  setInterval,
+  clearInterval,
+});
+
 // ★ 2 ก.ย. 69 (เคสหลวงปู่ศิลา 03:49Z): บอทจำงานที่กำลังตามอยู่ไว้ที่เซิร์ฟเวอร์ (/api/bot/tracking)
 //   → Railway redeploy/รีสตาร์ต แล้วบอทตัวใหม่ตามงานต่อเอง ไม่ค้าง "1%" ตลอดไป (ดู trackingUpsert / resumeTrackedJobs)
 //   ปิดคืน: ตั้ง env BOT_RESUME_TRACKING=0 (รับเฉพาะ '0'/'1' ตรงตัว · ค่าเริ่มต้น=เปิด) → บอททำงานเหมือนเดิมทุกไบต์
@@ -135,6 +154,7 @@ const BOT_BUILD = '2026-09-03-buttons-off-warnings-on'; // ★ 3 ก.ย. 69: �
 client.once('ready', () => {
   console.log(`✅ บอทพร้อมทำงานแล้ว! ล็อกอินในชื่อ ${client.user.tag}`);
   console.log(`🟢 [BOT_BUILD=${BOT_BUILD}] instance=${BOT_INSTANCE} | คิว: เซิร์ฟเวอร์ (atomic claim) | Dedup URL: ${DEDUP_WINDOW_MS / 1000}s | resume=${BOT_RESUME_TRACKING ? 'on' : 'off'} | review=${BOT_REVIEW_REACTIONS ? 'on' : 'off'} | warnings=${BOT_RESULT_WARNINGS ? 'on' : 'off'}`);
+  researchWatchdog.start(); // ★ 2 ต.ค. 69 (W7): เริ่มตัวเฝ้า worker ค้นคว้า + สรุปรายวัน (สวิตช์ปิด = no-op · ไม่โยน · ไม่รอ)
   // ★ 2 ก.ย. 69: กู้งานที่ค้างจากก่อนรีสตาร์ต (ล้มเงียบ — ห้ามทำให้บอทล้มตอนตื่น) · คืน promise ให้เทสรอได้ (discord.js ไม่สนค่าที่คืน)
   return resumeTrackedJobs().catch((err) => {
     console.warn(`[Bot] 🩹 กู้งานค้างไม่สำเร็จ: ${String(err?.message || err).slice(0, 80)}`);
@@ -1081,6 +1101,7 @@ if (RESEARCH_AGENT) {
 async function gracefulShutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
+  researchWatchdog.stop(); // ★ 2 ต.ค. 69 (W7): ล้าง setInterval ของตัวเฝ้า (ไม่ได้เริ่ม/สวิตช์ปิด = no-op)
   console.log(`[Bot] 🛑 ได้รับ ${signal} — ปิดตัวนุ่มนวล (หยุดรับข้อความใหม่, ตัดการเชื่อมต่อ Discord)`);
   try { await client.destroy(); } catch (e) { console.log('[Bot] destroy error:', e.message); }
   // เผื่องานค้างเขียนผลลง Discord สั้นๆ แล้วออก

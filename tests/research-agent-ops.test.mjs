@@ -57,6 +57,9 @@ const REQUIRED_ENV = Object.freeze([
   // ★ 2 ต.ค. 69 (ท่อข่าวขนาน · SPEC-v3 ส่วน 11 · W6): เพดานข่าวพร้อมกัน (src/lib/services/queueConcurrency.js อ่าน · ผู้ใช้ = ตัวหยิบงานคิว + /api/queue/status)
   //   ไม่ใช่ชื่อตระกูล RESEARCH_AGENT_* จึงไม่ติดตัวสแกน envNamesRead — บังคับตัวอย่าง/ป้าย/แถวคู่มือผ่านรายการนี้แทน
   'QUEUE_NEWS_CONCURRENCY',
+  // ★ 2 ต.ค. 69 (เฝ้า worker + สรุปรายวัน · SPEC-v3 ส่วน 12 · W7): บอทอ่าน (discord-bot/researchCard.js createResearchWatchdog)
+  //   ไม่ใช่ชื่อตระกูล RESEARCH_AGENT_* เช่นกัน → บังคับตัวอย่าง/ป้าย [Railway]/แถวคู่มือผ่านรายการนี้
+  'RESEARCH_DIGEST', 'RESEARCH_DIGEST_HOUR', 'RESEARCH_DIGEST_MINUTE', 'ADMIN_LOG_CHANNEL_ID',
 ]);
 /**
  * ที่ตั้ง (ป้ายใน .env.example) = ทุกที่ที่ต้องตั้งให้ค่านั้นมีผล · Vercel = เลน B · Railway = บอทเลน C · เครื่อง = worker เลน A
@@ -89,6 +92,11 @@ const ENV_PLACES = Object.freeze({
   RESEARCH_AGENT_WORKDIR: ['เครื่อง'],
   RESEARCH_AGENT_WORKER_ID: ['เครื่อง'],
   QUEUE_NEWS_CONCURRENCY: ['Vercel'], // ★ 2 ต.ค. 69 (ท่อข่าวขนาน · SPEC-v3 ส่วน 11 · W6): ตัวหยิบงานคิว + self-heal ของ /api/queue/status บน Vercel
+  // ★ 2 ต.ค. 69 (เฝ้า worker + สรุปรายวัน · SPEC-v3 ส่วน 12 · W7): บอทเท่านั้น (route digest/bot-state บน Vercel ไม่อ่าน env เหล่านี้)
+  RESEARCH_DIGEST: ['Railway'],
+  RESEARCH_DIGEST_HOUR: ['Railway'],
+  RESEARCH_DIGEST_MINUTE: ['Railway'],
+  ADMIN_LOG_CHANNEL_ID: ['Railway'],
 });
 const PLACES = Object.freeze(['Vercel', 'Railway', 'เครื่อง']);
 /** บรรทัดในคู่มือที่ตั้งใจปิดเบราว์เซอร์ต้องมีคำนี้ (ตัวอย่างที่ไม่มี browser) */
@@ -447,6 +455,11 @@ const MUTATIONS = [
   { name: '.env.example ขาด QUEUE_NEWS_CONCURRENCY', file: 'env', find: '# QUEUE_NEWS_CONCURRENCY=8', replace: '# (ไม่มี)' },
   { name: '.env.example QUEUE_NEWS_CONCURRENCY ไม่มีป้าย Vercel', file: 'env', find: '# [Vercel] ท่อข่าวขนาน:', replace: '# ท่อข่าวขนาน:' },
   { name: 'คู่มือไม่มีแถว env QUEUE_NEWS_CONCURRENCY', file: 'doc', find: '| `QUEUE_NEWS_CONCURRENCY` |', replace: '| NEWS_CONCURRENCY |' },
+  // ── ★ 2 ต.ค. 69 (เฝ้า worker + สรุปรายวัน · SPEC-v3 ส่วน 12 · W7) — ต่อท้ายเท่านั้น (LANE_A_MUTATIONS อ้างลำดับเดิม) ──
+  { name: '.env.example ขาด RESEARCH_DIGEST_HOUR', file: 'env', find: '# RESEARCH_DIGEST_HOUR=7', replace: '# (ไม่มี)' },
+  { name: '.env.example ADMIN_LOG_CHANNEL_ID ไม่มีป้าย Railway', file: 'env', find: '# [Railway] ห้อง Discord สำรอง', replace: '# ห้อง Discord สำรอง' },
+  { name: '.env.example RESEARCH_DIGEST ติดป้าย Vercel (บอทอ่านอย่างเดียว)', file: 'env', find: '# [Railway] สรุปรายวัน', replace: '# [Vercel + Railway] สรุปรายวัน' },
+  { name: 'คู่มือไม่มีแถว env RESEARCH_DIGEST_MINUTE', file: 'doc', find: '| `RESEARCH_DIGEST_MINUTE` |', replace: '| DIGEST_MINUTE |' },
 ];
 
 /** ข้อความที่ patch แล้ว (ไม่ตีความ $ ในคำแทน) */

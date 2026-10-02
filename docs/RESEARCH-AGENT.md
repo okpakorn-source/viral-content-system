@@ -58,6 +58,10 @@ Vercel cron → /api/auto/process → autoFlowServiceText (extract → breakdown
 | `RESEARCH_AGENT_STALE_DAYS` | เครื่อง worker | 7 | เรื่องเก่ากว่าวันส่งเกินกี่วัน = ธง `STALE_NEWS` — ธงอย่างเดียวทุกอายุ ไม่หยุดข่าว (เจ้าของ#14) |
 | `RESEARCH_AGENT_QUOTA_ALERT_PCT` | เครื่อง worker + Vercel + Railway (ค่าเดียวกัน) | 15 | เตือนเมื่อโควตา Codex **คงเหลือ** ≤ ค่านี้ (เจ้าของ#16) · เครื่อง = ธง `QUOTA_LOW` · Vercel = `/api/research/status` ขึ้น `low` · Railway = บอท mention เจ้าของวันละครั้ง |
 | `RESEARCH_AGENT_OWNER_DISCORD_ID` | Railway | เจ้าของเซิร์ฟเวอร์ (guild owner) | Discord user id ที่บอท mention ตอนเตือนโควตา + ธงระบบ `BRAIN_UNAVAILABLE` · `CODEX_AUTH` · `API_FALLBACK` · `TOOL_BUDGET_MONTH` (วันละครั้งต่อธง) |
+| `RESEARCH_DIGEST` | Railway | เปิด (เมื่อบอทเปิดรีเสิร์ช) | (2 ต.ค. 69 · W7 · SPEC-v3 ส่วน 12) `0` = ปิด**สรุปรายวัน**อย่างเดียว (ตัวเฝ้า worker / แจ้งล้มติดกันยังทำงาน) · ค่าอื่น/ไม่ตั้ง = ส่งวันละครั้งตามเวลาด้านล่าง · ส่วน 17 |
+| `RESEARCH_DIGEST_HOUR` | Railway | 7 | (W7) ชั่วโมงที่ส่งสรุปรายวัน เวลาไทย 0–23 · ค่าผิดรูป = 7 · ส่วน 17 |
+| `RESEARCH_DIGEST_MINUTE` | Railway | 30 | (W7) นาทีที่ส่งสรุปรายวัน 0–59 · ค่าผิดรูป = 30 · ส่วน 17 |
+| `ADMIN_LOG_CHANNEL_ID` | Railway | ไม่มี (= log บอทอย่างเดียว) | (W7) channel id ของห้องสำรองเมื่อ DM เจ้าของไม่ได้ (เจ้าของปิด DM) หรือไม่ได้ตั้ง owner id — บอทโพสต์ที่นี่พร้อม mention เจ้าของ · ส่วน 17 |
 | `RESEARCH_AGENT_TOOL_BUDGET_USD_MONTH` | เครื่อง worker (+ เครื่องที่รันรายงาน) | 10 | เพดานค่าเครื่องมือต่อเดือน เตือนเมื่อถึง (เจ้าของ#18 — Codex ทำต่อ) · ทาง OpenAI API (ทางสำรอง/`BRAIN=api`) **หยุดจริง**เมื่อถึง (ธง `TOOL_BUDGET_MONTH`) |
 | `RESEARCH_AGENT_API_BASE` | เครื่อง worker | — | โดเมน production เช่น `https://<โดเมน>` = ค่า `API_URL` ของบอทบน Railway ตัด `/api/auto/process` ท้ายออก |
 | `CODEX_ACCOUNT` | เครื่อง worker | main | บัญชี Codex ที่ใช้ (`main` = `~\.codex` · `b`/`c`… = `~\.codex-b`…) |
@@ -78,6 +82,7 @@ Vercel cron → /api/auto/process → autoFlowServiceText (extract → breakdown
 - `RESEARCH_AGENT_QUOTA_ALERT_PCT` (ไม่ตั้ง = 15) · `RESEARCH_AGENT_OWNER_DISCORD_ID` (ไม่ตั้ง = เจ้าของเซิร์ฟเวอร์)
 - ⛔ **ห้ามตั้ง `RESEARCH_AGENT_SECRET` บน Railway** — เป็นความลับของ worker เท่านั้น บอทไม่ส่ง/ไม่ใช้ (ตั้งไว้ = บอทเตือนใน log ตอนเปิด ไม่พิมพ์ค่า) · ความลับยิ่งวางหลายที่ยิ่งเสี่ยงรั่ว
 - ปิด `RESEARCH_AGENT` บน Vercel แล้ว บอทได้คำตอบ `enabled:false` จาก `/api/research/cards` → เลิกถามงานนั้นเอง
+- (2 ต.ค. 69 · W7) **แจ้งเตือนเจ้าของ + สรุปรายวัน** เปิดพร้อมสวิตช์รีเสิร์ชของบอท — ตั้ง `RESEARCH_AGENT_OWNER_DISCORD_ID` (ส่ง DM) · ห้องสำรอง `ADMIN_LOG_CHANNEL_ID` · เวลาสรุป `RESEARCH_DIGEST_HOUR`/`RESEARCH_DIGEST_MINUTE` (07:30) · ปิดเฉพาะสรุป `RESEARCH_DIGEST=0` (ส่วน 17)
 
 **สร้าง secret ใหม่** (พิมพ์ค่าออกจอให้เจ้าของคัดลอกเอง — ห้ามวางในแชท/Discord/ไฟล์ที่ commit):
 
@@ -220,6 +225,8 @@ Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='cmd.exe'" | Wher
 | ถอยโค้ดทั้งก้อน | Vercel / git | Vercel → Deployments → deployment ก่อนรวม → Instant Rollback/Promote (เร็วสุด) · หรือ `git revert` คอมมิตที่รวม (แตะไฟล์ล็อก → ต้องมีรหัส NEWS-LOCK และเจ้าของอนุมัติ) | ทันที / deploy ใหม่ |
 | ล้างข้อมูล | Supabase | แถว `store_items` ที่ `store_name` เป็น `research-requests` · `research-cards` · `bot-posted` · `research-workers` · `research-editor` (row id ขึ้นต้น `rreq_` · `rcard_` · `bposted_` · `rworker_` · `redit_`) — **ไม่ต้องลบเพื่อถอย** (ตอนปิดสวิตช์ไม่มีใครอ่าน) ลบเฉพาะเมื่อเจ้าของต้องการ | — |
 | เลิกใช้ฉบับเสริม (คงการ์ดให้พนักงาน) | Vercel | `RESEARCH_AGENT_MODE=assist` → Redeploy (ข่าวกลับไปเขียนจากต้นฉบับพนักงานทุกไบต์ · ระเบียน `research-editor` เดิมไม่มีใครอ่านต่อ) | deployment ใหม่ขึ้น |
+| ปิดสรุปรายวัน (คงตัวเฝ้า worker + แจ้งล้มติดกัน · W7) | Railway | `RESEARCH_DIGEST=0` → restart service | restart |
+| ปิดแจ้งเตือนเจ้าของทั้งหมด (W7) | Railway | ไม่มีสวิตช์แยก — ปิดสวิตช์รีเสิร์ชของบอท (บัตรข้อเท็จจริงหยุดด้วย) หรือถอยโค้ด · อยากเงียบชั่วคราวแต่คงบัตร = ลบ `RESEARCH_AGENT_OWNER_DISCORD_ID` + `ADMIN_LOG_CHANNEL_ID` (แจ้งลง log บอทอย่างเดียว) → restart | restart |
 
 env บน Vercel มีผลกับ deployment ใหม่เท่านั้น (ต้อง Redeploy) · env ฝั่ง worker มีผลเมื่อรีสตาร์ต worker
 
@@ -377,6 +384,7 @@ node scripts/research-agent-report.mjs --env D:\อื่น\.env.local   # ใ�
 | `src/lib/research-agent/queueHold.js` · จุดเสียบใน `src/lib/services/queueService.js` (getNextPendingJobs) · `src/app/api/queue/status/route.js` (ช่อง `researchHold`) · `discord-bot/index.js` (ข้อความรอ) · `tests/research-queue-hold.test.mjs` | W3 | โหมด write: คิวชะลอหยิบงานจนรีเสิร์ชเสร็จ (ส่วน 16) |
 | `scripts/research-agent/encodingCheck.mjs` (กฎกลาง) · `scripts/research-tools/check-result.mjs` · ย่อหน้า "เขียนไฟล์ผล" ใน `taskBuilder.mjs` · รันซ้ำ/`ENCODING_BROKEN` ใน `scripts/research-agent-worker.mjs` · การ์ดเสียรายใบใน `gate.mjs` · บรรทัดเตือนใน `discord-bot/researchCard.js` · `tests/research-encoding-check.test.mjs` (fixture จริง `tests/fixtures/research-agent/encoding-*-result.json`) | W4 | กันไฟล์ผลเอเจนต์เข้ารหัสผิด — ไทยกลายเป็น `?` (ส่วน 13.1) |
 | `src/lib/services/queueConcurrency.js` (ตัวช่วยอ่าน `QUEUE_NEWS_CONCURRENCY`) · เพดานใน `src/lib/services/queueService.js` (getNextPendingJobs) · self-heal ใน `src/app/api/queue/status/route.js` · `tests/queue-parallel.test.mjs` | W6 | ท่อข่าวขนาน — เขียนข่าวพร้อมกันหลายงานบน Vercel (ส่วน 16) |
+| `createResearchWatchdog` · `renderDigestMessage` · hub ผลบัตร ใน `discord-bot/researchCard.js` · จุด start/stop ใน `discord-bot/index.js` · `src/app/api/research/digest/route.js` + `src/lib/research-agent/digest.js` · `src/app/api/research/bot-state/route.js` + `getBotState`/`saveBotState` ใน `src/lib/research-agent/store.js` · `tests/research-watchdog-digest.test.mjs` · `tests/research-web-digest.test.mjs` | W7 | แจ้งเตือนเจ้าของ (worker ออฟไลน์ · ล้มติดกัน · ติดต่อ Vercel ไม่ได้) + สรุปรายวัน DM (ส่วน 17) |
 
 ## 16. โหมด write (เฟส 2 · SPEC-v3 · เจ้าของเคาะ 1 ต.ค. 69 "เปิดเลยได้ write พนักงานจะตรวจก่อนโพสต์")
 
@@ -397,3 +405,20 @@ node scripts/research-agent-report.mjs --env D:\อื่น\.env.local   # ใ�
   - **ใครปลุก worker:** ตัวปลุกเดิม 3 ทางเท่านั้น — `/api/queue/add` ยิง worker หลังรับข่าว (1 ข่าว/การส่ง = ขนานตามจำนวนที่ส่ง) · self-heal ของ `/api/queue/status` (บอท/หน้าเว็บ poll ทุก 3 วิ · throttle 20 วิ) ปลุกเมื่อ `pending > 0` และ `processing < QUEUE_NEWS_CONCURRENCY` (เดิม `processing === 0`) · cron ทุก 1 นาที · worker ยังหยิบ 1 งานต่อครั้ง · **ไม่มี self-fetch worker→worker** (บทเรียน 508 INFINITE_LOOP 24 มิ.ย. 69)
   - **ความปลอดภัย:** atomic claim (Supabase CAS) กันสอง invocation หยิบงานเดียวกัน · นับงานที่วิ่งอยู่จากฐานจริงทุกครั้ง (ไม่มี state ในหน่วยความจำ) · งานปก/คลิป (ไม่ใช่ข่าว) คงทีละ 1 งาน/เครื่อง · เครื่องทีม (Windows) ที่ไม่เปิด `QUEUE_LOCAL_NEWS=1` = 1 เสมอ · คิวชะลอหยิบงาน (W3) ยังข้ามงานที่รอรีเสิร์ชแล้วเติมช่องด้วยงานถัดไป
   - **ข้อจำกัด:** ข่าวที่ส่งพร้อมกันเป๊ะอาจชนกันที่ claim (invocation ที่แพ้ไม่ไปหยิบงานถัดไป) → งานนั้นรอตัวปลุกรอบถัดไป (บอทปลุกซ้ำหลัง 10 วิ · self-heal 20 วิ · cron ≤ 1 นาที) · self-heal นับ `processing` รวมทุกเครื่อง (ปกบนเครื่องทีมกินช่องในการตัดสินใจปลุก แต่ไม่กินช่องจริงของ Vercel) · ปลุกเปล่าระหว่างงานถูกชะลอรอรีเสิร์ช = worker ตอบ "No pending jobs" แล้วจบ · เฝ้า rate limit ของ Anthropic/OpenAI 2–3 วันหลังเปิด · ถอย = ส่วน 8
+
+## 17. แจ้งเตือนเจ้าของ + สรุปรายวัน (W7 · SPEC-v3 ส่วน 12 · เจ้าของตอบ 2 ต.ค. 69)
+
+เจ้าของมีคอมเครื่องเดียวที่รัน worker และไม่มี worker สำรอง → บอท (Railway · โปรเซสที่รันยาวและส่ง DM ได้) ต้องแจ้งให้ไว · ทำงานเมื่อเปิดสวิตช์รีเสิร์ชของบอทเท่านั้น (ปิด = ไม่ตั้ง timer · ไม่ยิง HTTP · ไม่ log · บอทเดิมทุกไบต์) · ไม่ปรับอะไรอัตโนมัติ — 👍👎 รวมไว้ให้เจ้าของดูรายสัปดาห์แล้วสั่งปรับเอง
+
+| เหตุ | เกณฑ์ | ข้อความ | ซ้ำ |
+|---|---|---|---|
+| worker ค้นคว้าออฟไลน์ | บอทถาม `/api/research/status` ทุก 60 วิ · สถานะ offline และนับจาก `lastSeenAt` ล่าสุด ≥ 10 นาที (route ไม่มี `lastSeenAt` = นับจากครั้งแรกที่บอทเห็นออฟไลน์) | 🔴 worker ค้นคว้าออฟไลน์ตั้งแต่ <เวลา> — ข่าวกำลังออกแบบไม่มีรีเสิร์ช | ทุก 60 นาทีถ้ายังออฟไลน์ · กลับมา = 🟢 worker กลับมาแล้ว (ออฟไลน์ไป x นาที) |
+| บอทติดต่อ Vercel ไม่ได้ | `/api/research/status` ล้ม (เน็ต/HTTP ไม่ใช่ 2xx/ตอบผิดรูป) ติดกัน ≥ 3 ครั้ง — **ไม่นับเป็น worker ออฟไลน์** (สถานะ worker คงค่าล่าสุด) | ⚠️ บอทติดต่อ Vercel ไม่ได้ (ล้มติดกัน N ครั้ง · เหตุ) | ≤ 1 ครั้ง/ชม. |
+| รีเสิร์ชล้มติดกัน | ผลที่บอทเห็นจากบัตร: การ์ด `failed` · ธง `AGENT_FAILED`/`ENCODING_BROKEN`/`BRAIN_UNAVAILABLE` · บรรณาธิการ `failed` ติดกัน ≥ 3 งาน (`done` = เริ่มนับใหม่ · `skipped`/`not_ready` ไม่นับและไม่รีเซ็ต · งานเดิมนับครั้งเดียว) | 🔴 รีเสิร์ชล้มติดกัน N ข่าว — ล่าสุด: jobId 3 ตัว (เหตุ) | ที่ 6, 9 … |
+| สรุปรายวัน | ทุกวัน `RESEARCH_DIGEST_HOUR`:`RESEARCH_DIGEST_MINUTE` เวลาไทย (ค่าเริ่มต้น 07:30) ครอบช่วง "เมื่อวานเวลาเดียวกัน → วันนี้" | 📊 สรุปรีเสิร์ช <วันที่> (≤ 1,800 ตัวอักษร) | วันละครั้ง — จำใน Supabase `store_items` store `bot-state` แถว `bstate_daily-digest` (จองแบบ cas ก่อนส่ง) → รีสตาร์ต/redeploy/สองบอททับกันไม่ส่งซ้ำ · บอทล่มตอนถึงเวลา = ส่งตอนตื่นได้จนถึงรอบถัดไป |
+
+- **ส่งหาใคร:** DM `RESEARCH_AGENT_OWNER_DISCORD_ID` → DM ไม่ได้ (เจ้าของปิด DM / ไม่ได้อยู่เซิร์ฟเวอร์เดียวกับบอท) = โพสต์ห้อง `ADMIN_LOG_CHANNEL_ID` พร้อม mention เจ้าของ → ไม่ได้อีก/ไม่ได้ตั้ง = log ของบอท (Railway logs ขึ้นต้น `[ResearchWatch]`) · ไม่มี owner id = ห้องสำรอง (ไม่ mention) → log
+- **เนื้อสรุปรายวัน:** ข่าวทั้งหมด · ผ่านระบบใหม่ (แยกโหมด write/assist/shadow) · เข้าเนื้อ / ไม่ทัน / ไม่ผ่านเกณฑ์ / ล้ม / ไฟล์เข้ารหัสผิด · แก้ข้อผิดรวม / เพิ่มข้อมูลรวม · ธง ข่าวเก่า / ขัดต้นฉบับ / ยืนยันต้นทางไม่ได้ (+ ธงระบบถ้ามี) · เวลาเฉลี่ย (รอการ์ด / บรรณาธิการ / ทั้งท่อ) · ค่าเครื่องมือ (`usage.costUsd` ของการ์ดในช่วง) + ค่า AI ประมาณจาก `api_usage_logs` (ทุกงาน LLM ในช่วง ไม่ใช่เฉพาะรีเสิร์ช · Codex ใช้โควตา subscription ไม่อยู่ในตาราง) · โควตา Codex ล่าสุด (จากรอบเฝ้าล่าสุด) · 👍👎 แยกใบแรก/ใบสอง (นับเฉพาะที่กดในช่วง) + jobId ที่ได้ 👎 · ข่าวที่ควรดู ≤ 3 (👎 ก่อน แล้วข่าวที่บรรณาธิการแก้ข้อผิด · ลิงก์หน้าตรวจงาน `/generation-logs/<caseId>`) · ส่วนที่อ่านไม่ได้ขึ้น "⚠️ ข้อมูลไม่ครบ"
+- **route ใหม่ (Vercel · บอทเรียกด้วย `API_KEY` เดิม = `DISCORD_API_SECRET` · ไม่ตั้ง = 403 ปิดประตู):** `/api/research/digest` — GET `?since=&until=` (ISO · ไม่ส่ง = 24 ชม. ล่าสุด · ยาวสุด 8 วัน) อ่าน `generation_logs.pipeline_info.researchAgent` + `research-cards` (สถานะ/ธง/usage/feedback) + `api_usage_logs` (`cost_usd` ทีละ 1,000 แถว) · จำกัด 8 วิ · ส่วนที่อ่านไม่ได้/ไม่ทัน = ช่องนั้น `null` + `errors` (ไม่ 500 ทั้งก้อน) · ไม่มีเนื้อข่าว (มีแค่ชื่อข่าว ≤ 60 ตัวอักษรของข่าวที่ควรดู) · `/api/research/bot-state` — GET `?key=daily-digest` / POST `{key, expectedRevision, state}` (0 = ยังไม่มีแถว · ชน = 409 `BOT_STATE_CONFLICT` + ค่าล่าสุด)
+- **ทดสอบจริงหลัง deploy (ห้ามยิงก่อนเจ้าของอนุมัติ push):** (1) Railway logs ต้องเห็น `[ResearchWatch] 👀 เริ่มตัวเฝ้า …` หลังบอทออนไลน์ (บอกเวลาสรุปและปลายทาง) (2) `curl -H "x-api-key: <API_KEY ของบอท>" "<โดเมน>/api/research/digest"` ได้ JSON ตัวเลข `success:true` (3) ครั้งแรกหลังเปิดใช้ บอทส่งสรุปของรอบเวลาสรุปล่าสุดภายใน ~1 นาที (ยังไม่เคยมีแถว `bstate_daily-digest`) — ได้ DM = ช่องทางใช้ได้ (4) หยุด worker ด้วย `--stop` นานกว่า 10 นาที → ได้ 🔴 · เปิดกลับ (`--resume`) → ได้ 🟢
+- **ถอย:** ส่วน 8 (ปิดเฉพาะสรุป = `RESEARCH_DIGEST=0` · ไม่มีสวิตช์แยกของตัวเฝ้า = ปิดสวิตช์รีเสิร์ชของบอทหรือถอยโค้ด)

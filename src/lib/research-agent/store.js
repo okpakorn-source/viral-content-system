@@ -6,6 +6,8 @@
 //   + 'research-workers' (ชีพจร/โควตาของ worker ต่อเครื่อง — ใช้ตอบ /api/research/status และตัดสิน "ออฟไลน์")
 //   + ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.1): 'research-editor' (ผลบรรณาธิการเรียบเรียง · row 'redit_<jobId>')
 //     saveEditorResult/getEditorResult · ไม่เก็บฉบับเสริมเต็ม (พรีวิว ≤400) · บอทอ่านผ่านช่อง editor ของ GET /api/research/cards
+//   + ★ 2 ต.ค. 69 (เฝ้า worker + สรุปรายวัน · SPEC-v3 ส่วน 12 · W7): 'bot-state' (สถานะถาวรของบอท · row 'bstate_<key>' · insert/cas)
+//     getBotState/saveBotState · บอทอ่าน/เขียนผ่าน /api/research/bot-state (กันสรุปรายวันส่งซ้ำหลัง redeploy)
 // ⚠️ กับดักที่ต้องรู้: store_items.id เป็น PK ทั้งตาราง (โค้ดเดิม upsert onConflict:'id' — ytJobStore/megaJobStore ฯลฯ)
 //   ไม่ใช่ต่อ store → job_queue ใช้ jobId (q_…) เป็น id อยู่แล้ว ถ้าใช้ jobId ตรงๆ จะชน 23505 ทันที
 //   จึงเติมคำนำหน้า row id ต่อ store (rreq_ / rcard_ / bposted_ / rworker_) · ส่วน data.id = jobId ตามสัญญา 2.x ทุกไบต์
@@ -55,6 +57,36 @@ export const researchCardsRowId = (jobId) => `rcard_${jobId}`;
 export const botPostedRowId = (jobId) => `bposted_${jobId}`;
 export const researchWorkerRowId = (workerId) => `rworker_${workerId}`;
 export const researchEditorRowId = (jobId) => `redit_${jobId}`; // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 สัญญา 8.1)
+
+// ★ 2 ต.ค. 69 (เฝ้า worker + สรุปรายวัน · SPEC-v3 ส่วน 12 · W7): สถานะถาวรของบอท (ทนรีสตาร์ต/ทับกันช่วง Railway redeploy)
+//   store 'bot-state' · row id 'bstate_<key>' · data = {id: key, state: {...}, revision, createdAt, updatedAt}
+//   เขียนแบบ insert/cas เท่านั้น (saveBotState: expectedRevision 0 = ต้องยังไม่มีแถว · n = revision ปัจจุบันต้องเป็น n · ไม่ตรง = conflict)
+//   key ที่รับ = BOT_STATE_KEYS ('daily-digest' = วันที่ส่งสรุปรายวันล่าสุด + การจองส่ง) · state = JSON object ≤ 4,000 ตัวอักษร
+//   ประตู HTTP: src/app/api/research/bot-state/route.js (checkBotKey) · ผู้ใช้: discord-bot/researchCard.js createResearchWatchdog
+export const BOT_STATE_STORE = 'bot-state';
+export const BOT_STATE_KEYS = Object.freeze(['daily-digest']);
+export const BOT_STATE_MAX_CHARS = 4000;
+export const botStateRowId = (key) => `bstate_${key}`;
+
+/**
+ * ★ 2 ต.ค. 69 (W7): ตรวจข้อมูลสถานะบอทก่อนเขียน → {key, state (สำเนา JSON), expectedRevision} · ผิด = researchInputError (route แปลงเป็น 400)
+ * @param {string} key
+ * @param {object} state
+ * @param {number} expectedRevision
+ */
+export function normalizeBotStateInput(key, state, expectedRevision) {
+  if (!BOT_STATE_KEYS.includes(key)) throw researchInputError('key ของสถานะบอทไม่รู้จัก');
+  if (!isPlainObject(state)) throw researchInputError('state ต้องเป็น JSON object');
+  let json;
+  try {
+    json = JSON.stringify(state);
+  } catch {
+    throw researchInputError('state ต้องแปลงเป็น JSON ได้');
+  }
+  if (json.length > BOT_STATE_MAX_CHARS) throw researchInputError(`state ยาวเกิน ${BOT_STATE_MAX_CHARS} ตัวอักษร`);
+  if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw researchInputError('expectedRevision ต้องเป็นจำนวนเต็ม ≥ 0');
+  return { key, state: JSON.parse(json), expectedRevision };
+}
 
 export class ResearchStorageError extends Error {
   constructor(message = 'ที่เก็บข้อมูลรีเสิร์ชใช้ไม่ได้ชั่วคราว') {
@@ -570,6 +602,33 @@ export function createResearchStorage({ sb, now = () => Date.now() } = {}) {
     /** ★ 1 ต.ค. 69 (โหมด write · สัญญา 8.1): ผลบรรณาธิการของงาน | null */
     getEditorResult(jobId) {
       return getDoc(RESEARCH_EDITOR_STORE, researchEditorRowId(jobId));
+    },
+
+    /** ★ 2 ต.ค. 69 (เฝ้า worker + สรุปรายวัน · SPEC-v3 ส่วน 12 · W7): สถานะถาวรของบอท | null · key ไม่รู้จัก = researchInputError */
+    async getBotState(key) {
+      if (!BOT_STATE_KEYS.includes(key)) throw researchInputError('key ของสถานะบอทไม่รู้จัก');
+      return getDoc(BOT_STATE_STORE, botStateRowId(key));
+    },
+
+    /**
+     * ★ 2 ต.ค. 69 (W7): เขียนสถานะบอทแบบ cas (กันสอง instance ช่วง redeploy ส่งสรุปซ้ำ)
+     *   expectedRevision 0 = ต้องยังไม่มีแถว (insert · ชน 23505 = conflict) · n ≥ 1 = แถวปัจจุบันต้อง revision n (ไม่ตรง/ชน = conflict)
+     * @returns {Promise<{outcome: 'stored', item: object} | {outcome: 'conflict', item: object|null}>} item ของ conflict = ค่าล่าสุดในฐาน
+     */
+    async saveBotState(key, state, { expectedRevision = 0 } = {}) {
+      const input = normalizeBotStateInput(key, state, expectedRevision);
+      const rowId = botStateRowId(input.key);
+      const iso = isoNow();
+      if (input.expectedRevision === 0) {
+        const doc = { id: input.key, state: input.state, revision: 1, createdAt: iso, updatedAt: iso };
+        if (await insertDoc(BOT_STATE_STORE, rowId, doc, iso)) return { outcome: 'stored', item: doc };
+        return { outcome: 'conflict', item: await getDoc(BOT_STATE_STORE, rowId) };
+      }
+      const current = await getDoc(BOT_STATE_STORE, rowId);
+      if (!current || current.revision !== input.expectedRevision) return { outcome: 'conflict', item: current };
+      const doc = { ...current, id: input.key, state: input.state, revision: input.expectedRevision + 1, updatedAt: iso };
+      if (await casDoc(BOT_STATE_STORE, rowId, input.expectedRevision, doc)) return { outcome: 'stored', item: doc };
+      return { outcome: 'conflict', item: await getDoc(BOT_STATE_STORE, rowId) };
     },
   };
 }
