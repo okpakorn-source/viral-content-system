@@ -283,7 +283,12 @@ async function runJob(job) {
     } else {
       finalStatus = 'error';
       finalPayload = res.error;
-      finalLog = `❌ ถอดไม่ได้จริง (กดใหม่ไม่ช่วย) ${tag}: ${res.error?.slice(0, 70)}`;
+      // ★ 30 ก.ย. 69 (เคสล่ม pepedog89): แก้แค่ข้อความ log — ตรรกะตัดสิน (reportStatusForProcessResult/isTransient) เหมือนเดิมทุกตัวอักษร
+      //   ล้มแบบ "ชั่วคราว" แต่ server ไม่ยืนยัน retrySafe = อาจเริ่มยิง AI ไปแล้ว → ไม่ลองซ้ำเอง (กันจ่ายซ้ำ) แต่คนกดส่งใหม่ได้
+      //   (เดิมขึ้น "กดใหม่ไม่ช่วย" ทุกกรณี ขัดกับข้อความหน้าเว็บจาก humanizeErr ที่บอกพนักงานให้กดใหม่)
+      finalLog = res?.retrySafe !== true && isTransient(res.error, res.errorType)
+        ? `❌ ล้มหลังเริ่มยิง AI แล้ว — ไม่ลองซ้ำอัตโนมัติ (กันจ่ายซ้ำ) กดส่งใหม่เองได้ ${tag}: ${res.error?.slice(0, 70)}`
+        : `❌ ถอดไม่ได้จริง (กดใหม่ไม่ช่วย) ${tag}: ${res.error?.slice(0, 70)}`;
     }
   } catch (e) {
     if (e.code !== 'CLAIM_LOST') {

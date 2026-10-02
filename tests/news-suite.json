@@ -199,6 +199,12 @@
       "reason": "ใช้ clipAI/geminiClient + safetyFilter สำเนาของคลิปเอง · แดง 1/19 'video URL/file ต้องคง fallback defaults…' (ค่าเริ่มต้น fallback ของ clipAI เปลี่ยน) — ห้ามแก้ในงานข่าว ส่งเจ้าของระบบคลิป"
     },
     {
+      "file": "tests/clip-outage-30sep.test.mjs",
+      "domain": "clip",
+      "status": "green",
+      "reason": "เคสล่มระบบถอดคลิป 30 ก.ย. 69 (pepedog89) — โหลด route คลิป (clip-transcript/insight · hunt · ถอดเสียง) + clipAI/geminiClient (สำเนาของคลิป) + clipJobs/clipUrl + worker คลิปตัวจริง · ตัวจับติดเพราะ stub '@/lib/ai/modelConfig' · '../../ai/usageLogger' · './safetyFilter' ของ clipAI เพื่อตัดของหนัก ไม่ได้ทดสอบท่อข่าว"
+    },
+    {
       "file": "tests/clip-topic-ui.test.mjs",
       "domain": "clip",
       "status": "red",

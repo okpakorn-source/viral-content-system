@@ -302,6 +302,73 @@ function _repairTruncatedJson(raw) {
   return str + ']'.repeat(Math.max(0, depthB)) + '}'.repeat(Math.max(0, depthC));
 }
 
+// ★ 30 ก.ย. 69 (เคสล่ม pepedog89): ความพลาดที่เกิด "ก่อนยิง generateContent ครั้งแรก" = ยังไม่จ่ายค่าโมเดล → ติดธง retrySafe
+//   (เขียนไฟล์ชั่วคราวล้ม · อัปโหลดล้ม · รอประมวลผลไม่ทัน · ไฟล์ FAILED) — route ส่งต่อให้ worker ลองใหม่อัตโนมัติได้
+//   🔴 error จาก generateContent ห้ามติดธงนี้เด็ดขาด (รอบนั้นอาจคิดเงินไปแล้ว)
+function _markPreProvider(e) {
+  const err = e instanceof Error ? e : new Error(String(e?.message || e || 'ล้มก่อนยิงโมเดล'));
+  try { err.retrySafe = true; } catch { /* error แช่แข็ง — ไม่ติดธง = ไม่ลองซ้ำอัตโนมัติ (ฝั่งปลอดภัย) */ }
+  return err;
+}
+
+/**
+ * ★ 30 ก.ย. 69 (เคสล่ม pepedog89): เวลารอไฟล์บน Gemini ประมวลผลจน ACTIVE — อ่านจาก env ทุกครั้งที่เรียก
+ *   เดิมนับรอบ 60×2 วิ (= 2 นาที) แล้วโยน · คลิปยาวเกิน ~24.6 นาทีบีบไม่ลง 19MB (พื้นบิตเรต 60k+48k)
+ *   → ต้องเดินเส้น Files API ทุกใบ · เคสจริง FB 63 นาที 272MB รอ 2 นาทีไม่พอ (state=PROCESSING)
+ *   CLIP_GEMINI_FILE_WAIT_MS  เพดานรอ  ค่าเริ่มต้น 600000 (10 นาที) · กรอบ 30 วิ–30 นาที
+ *   CLIP_GEMINI_FILE_POLL_MS  ช่วงเช็ค  ค่าเริ่มต้น 3000 · กรอบ 200 ms–30 วิ
+ *   ค่าว่าง/ไม่ใช่ตัวเลข/≤0 = ค่าเริ่มต้น
+ * ★ 30 ก.ย. 69 (เคสล่ม pepedog89) รอบ 2 (R4): กรอบ env เด็ดขาดเสมอ (เลิกประตูหลัง NODE_ENV=test — เทสส่ง _fileWait ตรงเข้า callGeminiVideoFile แทน)
+ *   ค่าเริ่มต้นตามเครื่อง: win32 (เครื่องทีม · worker ไม่มีเพดานเวลาของแพลตฟอร์ม) = ข้างบน
+ *   ไม่ใช่ win32 (Vercel maxDuration=800) = ค่าเริ่มต้น 240000 · เพดาน 300000
+ *   — ยอดรวม โหลด+อัปโหลด+รอ+inference (timeout 280 วิ) ต้องอยู่ใต้ 800 วิ · env ยังทับได้ภายในกรอบของเครื่องนั้น
+ */
+export function resolveGeminiFileWait(env = process.env) {
+  const onTeamMachine = process.platform === 'win32';
+  const pick = (raw, def, min, max) => {
+    const n = Number(String(raw ?? '').trim() || NaN);
+    if (!Number.isFinite(n) || n <= 0) return def;
+    return Math.min(max, Math.max(min, Math.round(n)));
+  };
+  return {
+    waitMs: pick(env?.CLIP_GEMINI_FILE_WAIT_MS, onTeamMachine ? 600_000 : 240_000, 30_000, onTeamMachine ? 1_800_000 : 300_000),
+    pollMs: pick(env?.CLIP_GEMINI_FILE_POLL_MS, 3_000, 200, 30_000),
+  };
+}
+
+// ★ 30 ก.ย. 69 (เคสล่ม pepedog89): รอไฟล์ที่อัปโหลดจน ACTIVE ตามเวลา (log ความคืบหน้าทุก ~30 วิ)
+//   FAILED = โยนทันที (ไฟล์เสีย ข้อความมี "กดใหม่ไม่ช่วย" → worker ไม่วนซ้ำ) · หมดเวลา = โยนข้อความมีคำว่า timeout (worker นับเป็นชั่วคราว)
+//   ★ 30 ก.ย. 69 (เคสล่ม pepedog89) รอบ 2 (R4): override = { waitMs, pollMs } จาก _fileWait (เทสเท่านั้น · ไม่ผ่านกรอบ) — ค่าที่ไม่ใช่เลขบวกใช้ค่าจาก env แทน
+async function _waitGeminiFileActive(fileManager, name, FileState, override = null) {
+  const fromEnv = resolveGeminiFileWait();
+  const given = (n) => Number.isFinite(Number(n)) && Number(n) > 0;
+  const waitMs = override && given(override.waitMs) ? Number(override.waitMs) : fromEnv.waitMs;
+  const pollMs = override && given(override.pollMs) ? Number(override.pollMs) : fromEnv.pollMs;
+  const ACTIVE = FileState?.ACTIVE || 'ACTIVE';
+  const PROCESSING = FileState?.PROCESSING || 'PROCESSING';
+  const FAILED = FileState?.FAILED || 'FAILED';
+  const startedAt = Date.now();
+  let nextLogAt = 30_000;
+  let file = await fileManager.getFile(name);
+  while (file?.state === PROCESSING) {
+    const waited = Date.now() - startedAt;
+    if (waited >= waitMs) {
+      throw new Error(`Gemini ประมวลผลวิดีโอไม่ทันเวลา ${+(waitMs / 1000).toFixed(1)} วิ (state=PROCESSING, timeout)`);
+    }
+    if (waited >= nextLogAt) {
+      console.log(`[GeminiVideoFile] รอ Gemini ประมวลผล … ${Math.round(waited / 1000)}s`);
+      nextLogAt += 30_000;
+    }
+    await new Promise(r => setTimeout(r, Math.min(pollMs, waitMs - waited)));
+    file = await fileManager.getFile(name);
+  }
+  if (file?.state === ACTIVE) return file;
+  if (file?.state === FAILED) {
+    throw new Error('Gemini ประมวลผลไฟล์วิดีโอไม่สำเร็จ (state=FAILED) — ไฟล์เสีย กดใหม่ไม่ช่วย ต้องโหลดคลิปใหม่หรือใช้คลิปอื่น');
+  }
+  throw new Error(`Gemini ประมวลผลวิดีโอไม่สำเร็จ (state=${file?.state})`);
+}
+
 /**
  * ★ 16 มิ.ย. 69: Gemini ดู "ไฟล์วิดีโอ" ที่โหลดมาเอง (TikTok/Reels/FB) ผ่าน Files API
  *   ใช้กับคลิปที่ Gemini ดูจากลิงก์ตรงไม่ได้ (ไม่ใช่ YouTube) — อัปโหลดไฟล์ → รอประมวลผล → ให้ดู
@@ -317,6 +384,7 @@ export async function callGeminiVideoFile({
   maxAttempts = 4,
   allowModelFallback = true,
   fallbackModels = VIDEO_FALLBACK_MODELS,
+  _fileWait = null, // ★ 30 ก.ย. 69 (เคสล่ม pepedog89) รอบ 2 (R4): { waitMs, pollMs } สำหรับข้อสอบเท่านั้น (ไม่ผ่านกรอบ env) · production ไม่ส่ง
 }) {
   const apiKey = videoApiKey(); // ★ คีย์แยกสำหรับถอดคลิป (Files API ก็ใช้คีย์เดียวกัน)
   if (!apiKey) throw new Error('คีย์ Gemini สำหรับวิดีโอไม่ได้ตั้งค่า');
@@ -343,21 +411,20 @@ export async function callGeminiVideoFile({
       console.log(`[GeminiVideoFile] inline ${(videoBuffer.length / 1e6).toFixed(1)}MB, model=${model}`);
       videoPart = { inlineData: { mimeType, data: videoBuffer.toString('base64') } };
     } else {
-      await writeFile(tmpPath, videoBuffer);
-      console.log(`[GeminiVideoFile] upload ${(videoBuffer.length / 1e6).toFixed(1)}MB, model=${model}`);
-      const up = await fileManager.uploadFile(tmpPath, { mimeType, displayName: 'clip' });
-      uploadedName = up.file.name;
+      // ★ 30 ก.ย. 69 (เคสล่ม pepedog89): ช่วงนี้ยังไม่ได้ยิงโมเดล — พลาดตรงไหน (เขียนไฟล์ชั่วคราว/อัปโหลด/รอประมวลผล/FAILED)
+      //   ติดธง retrySafe = ยังไม่จ่ายค่าโมเดล (route ส่งต่อให้ worker ลองใหม่เองได้) · error จาก generateContent ข้างล่างห้ามติด
+      try {
+        await writeFile(tmpPath, videoBuffer);
+        console.log(`[GeminiVideoFile] upload ${(videoBuffer.length / 1e6).toFixed(1)}MB, model=${model}`);
+        const up = await fileManager.uploadFile(tmpPath, { mimeType, displayName: 'clip' });
+        uploadedName = up.file.name;
 
-      // รอ Gemini ประมวลผลวิดีโอจน ACTIVE (สูงสุด ~2 นาที)
-      let file = await fileManager.getFile(uploadedName);
-      let tries = 0;
-      while (file.state === FileState.PROCESSING && tries < 60) {
-        await new Promise(r => setTimeout(r, 2000));
-        file = await fileManager.getFile(uploadedName);
-        tries++;
+        // รอ Gemini ประมวลผลวิดีโอจน ACTIVE — ★ 30 ก.ย. 69 (เคสล่ม pepedog89): รอตามเวลา (ค่าเริ่มต้น 10 นาที) แทนนับรอบ 60×2 วิ (~2 นาที)
+        const file = await _waitGeminiFileActive(fileManager, uploadedName, FileState, _fileWait);
+        videoPart = { fileData: { fileUri: file.uri, mimeType: file.mimeType } };
+      } catch (e) {
+        throw _markPreProvider(e);
       }
-      if (file.state !== FileState.ACTIVE) throw new Error(`Gemini ประมวลผลวิดีโอไม่สำเร็จ (state=${file.state})`);
-      videoPart = { fileData: { fileUri: file.uri, mimeType: file.mimeType } };
     }
 
     const client = getGeminiVideoClient(); // ★ คีย์แยกสำหรับถอดคลิป

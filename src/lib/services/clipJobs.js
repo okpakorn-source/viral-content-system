@@ -1,5 +1,6 @@
 import { createStore } from '@/lib/persistStore';
 import { randomUUID } from 'crypto';
+import { cleanClipUrl, extractFirstUrl } from '@/lib/services/clipAgent/clipUrl'; // ★ 30 ก.ย. 69 (เคสล่ม pepedog89): ล้างลิงก์ก่อนเข้าคิว
 
 const CLIP_HOSTS = [
   ['youtube', ['youtube.com', 'youtu.be']],
@@ -26,9 +27,13 @@ function badRequest(errorType, message) {
 }
 
 // คิวคลิปใช้กติกาเดียวกันทั้งหน้าเว็บและเอเจนต์ — คงพฤติกรรม submit เดิม
-export async function submitClipJob({ url, kind = 'insight', tidy = false, user = '', model = '', force = false }, { strictUrl = false } = {}) {
+export async function submitClipJob({ url: rawUrl, kind = 'insight', tidy = false, user = '', model = '', force = false }, { strictUrl = false } = {}) {
   const MODEL_ALLOWED = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash'];
   const jobModel = MODEL_ALLOWED.includes(String(model)) ? String(model) : '';
+  // ★ 30 ก.ย. 69 (เคสล่ม pepedog89): ล้างลิงก์ก่อนตรวจ — วางซ้อน 2 รอบ/มีข้อความปน → เหลือลิงก์แรกลิงก์เดียว + ตัด tracking
+  //   (ใบงาน 15:04 ลิงก์ FB ซ้อนสองรอบผ่านเข้าคิว → yt-dlp Command failed) · เก็บและกันซ้ำด้วยลิงก์ที่ล้างแล้ว
+  //   ไม่ใช่ข้อความ/ไม่มีลิงก์ http(s) → '' → BAD_URL เหมือนเดิม
+  const url = typeof rawUrl === 'string' ? cleanClipUrl(extractFirstUrl(rawUrl)) : '';
   if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
     throw badRequest('BAD_URL', 'กรุณาวางลิงก์คลิป (http/https)');
   }

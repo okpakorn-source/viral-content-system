@@ -3,7 +3,7 @@ import { createStore } from '@/lib/persistStore';
 import { authorizeClipAgent } from '@/lib/services/clipAgent/auth';
 import { compactResult } from '@/lib/services/clipAgent/compactResult';
 import { readRowFresh } from '@/lib/services/clipAgent/storeRead';
-import { cleanClipUrl } from '@/lib/services/clipAgent/clipUrl';
+import { cleanClipUrl, extractFirstUrl } from '@/lib/services/clipAgent/clipUrl'; // ★ 30 ก.ย. 69 (เคสล่ม pepedog89) รอบ 4 (F6): ค้นด้วยลิงก์ห่อ/ซ้อน
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,7 +24,10 @@ export async function GET(request) {
     const store = createStore(kind === 'transcript' ? 'clip-transcripts' : 'clip-insights');
     // ระบุ id = อ่านแถวเดียว (ถูก) · ระบุ URL = ต้องกวาดทั้งคลัง (แพง ~9 MB บน Supabase) เลือกใบปักหมุดก่อน แล้วเรียงใหม่สุด
     //   คลังเก็บ URL ที่ล้างแล้ว (youtu.be/shorts → watch?v= · ตัด fbclid/utm) → เทียบทั้งตัวดิบและตัวล้าง
-    const wanted = url ? new Set([url, cleanClipUrl(url)]) : null;
+    // ★ 30 ก.ย. 69 (เคสล่ม pepedog89) รอบ 4 (F6): คิว/route ถอดเก็บ record.url = cleanClipUrl(extractFirstUrl(ลิงก์ที่วาง))
+    //   ลิงก์ซ้อน 2 รอบ · ลิงก์ห่อ l.facebook.com/l.php?u=… · ลิงก์มีข้อความปน ถูกแกะก่อนเก็บ → เอเจนต์ค้นด้วยลิงก์เดิมที่ส่งไปหาไม่เจอ
+    //   เทียบตัวที่ผ่านขั้นเดียวกันด้วย (ไม่มีลิงก์ http(s) ในข้อความ = ใช้ข้อความเดิมล้างตามเดิม)
+    const wanted = url ? new Set([url, cleanClipUrl(url), cleanClipUrl(extractFirstUrl(url) || url)]) : null;
     const record = id ? await readRowFresh(store, id)
       : (await store.getAll({ authoritative: true })).filter(row => wanted.has(row.url)).sort((a, b) =>
         Number(!!b.chosen) - Number(!!a.chosen)

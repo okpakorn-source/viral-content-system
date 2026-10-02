@@ -5,6 +5,7 @@ import { getClipVideoQueue } from '@/lib/services/clipQueue';
 import { randomUUID } from 'crypto';
 import { callAI } from '@/lib/services/clipAI/openai';
 import { MODEL_FAST } from '@/lib/ai/modelConfig';
+import { extractFirstUrl } from '@/lib/services/clipAgent/clipUrl'; // ★ 30 ก.ย. 69 (เคสล่ม pepedog89): ดึงลิงก์แรก
 
 /**
  * Clip Transcript Extractor (15 มิ.ย. 69) — เครื่องถอดบทสัมภาษณ์จากคลิป (แยกจากเวิร์กโฟลว์ข่าว 100%)
@@ -22,7 +23,8 @@ function detectClipType(url) {
 // ★ 21 มิ.ย.: ล้าง URL ให้สะอาด (ตัด &fbclid/utm/tracking ที่ทำให้ถอด/ดูคลิปพัง) — YouTube ดึง video ID ใหม่
 function cleanClipUrl(raw) {
   const u = String(raw || '').trim();
-  const yt = u.match(/(?:youtube\.com\/(?:watch\?(?:[^#]*&)?v=|shorts\/|live\/|embed\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+  // ★ 30 ก.ย. 69 (เคสล่ม pepedog89) รอบ 2 (R7): รหัส 11 ตัว "พอดี" เหมือน clipAgent/clipUrl.js ทุกตัวอักษร (สำเนา 3 ที่ต้องตรงกัน)
+  const yt = u.match(/(?:youtube\.com\/(?:watch\?(?:[^#]*&)?v=|shorts\/|live\/|embed\/)|youtu\.be\/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])/);
   if (yt) return `https://www.youtube.com/watch?v=${yt[1]}`;
   try {
     const url = new URL(u);
@@ -60,7 +62,8 @@ export async function POST(request) {
     if (!_rawUrl || typeof _rawUrl !== 'string') {
       return NextResponse.json({ success: false, error: 'กรุณาวางลิงก์คลิป', errorType: 'MISSING_URL' }, { status: 400 });
     }
-    const url = cleanClipUrl(_rawUrl); // ★ ล้าง fbclid/tracking ก่อน (กันถอด/ดูคลิปพัง)
+    // ★ 30 ก.ย. 69 (เคสล่ม pepedog89): ดึงลิงก์แรกลิงก์เดียวก่อนล้าง (ลิงก์ซ้อน 2 รอบ/มีข้อความปน) · ไม่เจอ http(s):// = ใช้ข้อความเดิม
+    const url = cleanClipUrl(extractFirstUrl(_rawUrl) || _rawUrl); // ★ ล้าง fbclid/tracking ก่อน (กันถอด/ดูคลิปพัง)
     const type = detectClipType(url);
     if (!type) {
       return NextResponse.json({ success: false, error: 'ลิงก์ไม่รองรับ — ใช้ได้เฉพาะ TikTok / YouTube / Facebook(IG)', errorType: 'UNSUPPORTED_URL' }, { status: 400 });

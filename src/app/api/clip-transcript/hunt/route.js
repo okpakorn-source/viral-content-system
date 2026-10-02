@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { createStore } from '@/lib/persistStore';
 import { runTopicHunt } from '@/lib/services/clipAI/topicHuntService';
 import { cleanClipUrl } from '../insight/route';
+import { extractFirstUrl } from '@/lib/services/clipAgent/clipUrl'; // ★ 30 ก.ย. 69 (เคสล่ม pepedog89): ดึงลิงก์แรก
 
 /**
  * POST /api/clip-transcript/hunt (8 ก.ค. 69) — "ถอด+ค้นข่าวคล้าย" → คลังค้นประเด็นยูสเซอร์
@@ -30,7 +31,8 @@ export async function POST(request) {
     if (!_rawUrl || typeof _rawUrl !== 'string') {
       return NextResponse.json({ success: false, error: 'กรุณาวางลิงก์คลิป', errorType: 'MISSING_URL' }, { status: 400 });
     }
-    const url = cleanClipUrl(_rawUrl);
+    // ★ 30 ก.ย. 69 (เคสล่ม pepedog89): ดึงลิงก์แรกลิงก์เดียวก่อนล้าง (ลิงก์ซ้อน 2 รอบ/มีข้อความปน) · ไม่เจอ http(s):// = ใช้ข้อความเดิม
+    const url = cleanClipUrl(extractFirstUrl(_rawUrl) || _rawUrl);
     const type = detectClipType(url);
     if (!type) {
       return NextResponse.json({ success: false, error: 'ลิงก์ไม่รองรับ — ใช้ได้เฉพาะ TikTok / YouTube / Facebook(IG)', errorType: 'UNSUPPORTED_URL' }, { status: 400 });
@@ -65,7 +67,13 @@ export async function POST(request) {
     });
     const insData = await insRes.json().catch(() => ({}));
     if (!insData.success) {
-      return NextResponse.json({ success: false, error: insData.error || 'ถอดเนื้อดิบไม่สำเร็จ', errorType: insData.errorType || 'INSIGHT_FAILED' }, { status: 422 });
+      // ★ 30 ก.ย. 69 (เคสล่ม pepedog89) รอบ 2 (R6): ส่ง retrySafe ของ /insight ต่อให้ worker (ใบงาน kind='hunt')
+      //   ปลอดภัย: ตรงนี้ยังไม่ได้รัน runTopicHunt (ยังไม่จ่ายค่าค้น/คัด) และ /insight ยืนยันเองแล้วว่ายังไม่จ่ายค่าโมเดล
+      //   เดิมทิ้ง field นี้ → ใบ hunt ที่ล้มก่อนจ่ายเงินไม่เคยได้ลองใหม่อัตโนมัติ
+      return NextResponse.json({
+        success: false, error: insData.error || 'ถอดเนื้อดิบไม่สำเร็จ', errorType: insData.errorType || 'INSIGHT_FAILED',
+        ...(insData?.retrySafe === true ? { retrySafe: true } : {}),
+      }, { status: 422 });
     }
     const insight = insData.data;
 
