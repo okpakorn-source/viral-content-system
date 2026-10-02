@@ -1677,7 +1677,10 @@ function loadBot({ botSrc = BOT_SRC, cardSrc = CARD_SRC, env = {}, axios, sched,
     if (name === 'discord.js') return discord;
     if (name === 'axios') return axios;
     if (name === './researchCard') return cardModule;
-    return realRequire(name); // 'os', './queue-errors' ของจริง
+    // ★ 2 ต.ค. 69 (CI แดง 069f004b/037cfd92): BOT_INSTANCE = os.hostname()+สุ่ม → ลายนิ้วมือ byte-parity ต่างกันตามเครื่อง (LAPTOP ของเจ้าของ vs runner GitHub)
+    //   → ตรึง hostname เป็นค่าคงที่ในเทส (ของเดิม: return realRequire(name); // 'os', './queue-errors' ของจริง)
+    if (name === 'os') { const os = realRequire('os'); return Object.assign(Object.create(os), { hostname: () => 'testhost' }); }
+    return realRequire(name); // './queue-errors' ของจริง
   };
   const mod = { exports: {} };
   const logs = [];
@@ -2884,14 +2887,14 @@ test('route /api/bot/posted (W2): editorMsgId ผ่านด่าน id เด
 });
 
 // ── 6.6 byte-parity โหมดอื่น (สวิตช์เปิด · shadow/assist) ──
-// ลายนิ้วมือจับจากโค้ดเฟส 1 (827336d7 · ก่อนแก้ W2 · 1 ต.ค. 69) ด้วยตัวช่วยชุดนี้ทุกตัว — รันซ้ำ 2 รอบได้ค่าเดิม (นาฬิกา/id เสมือน)
+// ลายนิ้วมือจับจากโค้ดเฟส 1 (827336d7 · ก่อนแก้ W2 · 1 ต.ค. 69) ด้วยตัวช่วยชุดนี้ทุกตัว · ★ 2 ต.ค. 69 คำนวณใหม่หลังตรึง os.hostname()=testhost (ค่าไม่ขึ้นกับเครื่อง · เทสถัดไปพิสูจน์ว่าโค้ดปัจจุบัน = ฉบับถอด W2 ทุกไบต์) — รันซ้ำ 2 รอบได้ค่าเดิม (นาฬิกา/id เสมือน)
 const PHASE1_FINGERPRINTS = Object.freeze({
-  'shadow normal': '73fb985ae366796c3af12f35a917f5dba4978bd0d6f26f56bc1fa5999741a10f',
-  'shadow resume': '59888fe0340ba6b8e3a7d0c8d6b45d41b697241e7ac24aa90537abb8219c2fc9',
-  'shadow late': '8b2efb2e9b16c49138ef370e0a17b220626eb8047a645d9755c8422c0fe2c658',
-  'assist normal': 'a88590c8cc1592d30c56b4f003b3b505b329554ecd0cbba4a63776bd99826dee',
-  'assist resume': 'f31ff9764647f85d44d2c1217871018e30b03bac7ff36acdd9925145ae4a02fb',
-  'assist late': '8af62d45527afc22da2bcbffdaafa3a11e38655f25b37e0b0baefc6eaddd062b',
+  'shadow normal': '0670734ffd6ec96b4131a22466a8fb3ade443830cb831ea11173cb108d1dd4f9',
+  'shadow resume': '4c1482bfe0156643878b79b65c798aca65fb849d57388f4b6bf8913188ad6eba',
+  'shadow late': '3bd4d291c13d0c677d3375ae1afe00a54cef4c4ff426bc16f4047180088464a9',
+  'assist normal': '6f17c6407adfada869bc945366f63443e455a48a246cdb5e371fe76f842d230e',
+  'assist resume': 'e96fe6657734bd8b0412c4ad44a0a32a9881b2abf26485622655115a2f95a0a2',
+  'assist late': 'cf66afd41b00f1463c9ed526b4ae0a91596be7b3419b56e6c77a62bc632bb292',
 });
 
 function botFingerprint(r) {
