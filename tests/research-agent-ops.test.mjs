@@ -54,6 +54,9 @@ const REQUIRED_ENV = Object.freeze([
   'RESEARCH_AGENT_HOLD_MS',
   // ★ 1 ต.ค. 69 (Research Agent v2 · ออดิตก่อน push · W5): ทางสำรอง OpenAI API ของ worker (ค่าเริ่มต้นปิด · scripts/research-agent-worker.mjs อ่าน)
   'RESEARCH_AGENT_API_FALLBACK',
+  // ★ 2 ต.ค. 69 (ท่อข่าวขนาน · SPEC-v3 ส่วน 11 · W6): เพดานข่าวพร้อมกัน (src/lib/services/queueConcurrency.js อ่าน · ผู้ใช้ = ตัวหยิบงานคิว + /api/queue/status)
+  //   ไม่ใช่ชื่อตระกูล RESEARCH_AGENT_* จึงไม่ติดตัวสแกน envNamesRead — บังคับตัวอย่าง/ป้าย/แถวคู่มือผ่านรายการนี้แทน
+  'QUEUE_NEWS_CONCURRENCY',
 ]);
 /**
  * ที่ตั้ง (ป้ายใน .env.example) = ทุกที่ที่ต้องตั้งให้ค่านั้นมีผล · Vercel = เลน B · Railway = บอทเลน C · เครื่อง = worker เลน A
@@ -85,6 +88,7 @@ const ENV_PLACES = Object.freeze({
   RESEARCH_AGENT_IDLE_MS: ['เครื่อง'],
   RESEARCH_AGENT_WORKDIR: ['เครื่อง'],
   RESEARCH_AGENT_WORKER_ID: ['เครื่อง'],
+  QUEUE_NEWS_CONCURRENCY: ['Vercel'], // ★ 2 ต.ค. 69 (ท่อข่าวขนาน · SPEC-v3 ส่วน 11 · W6): ตัวหยิบงานคิว + self-heal ของ /api/queue/status บน Vercel
 });
 const PLACES = Object.freeze(['Vercel', 'Railway', 'เครื่อง']);
 /** บรรทัดในคู่มือที่ตั้งใจปิดเบราว์เซอร์ต้องมีคำนี้ (ตัวอย่างที่ไม่มี browser) */
@@ -439,6 +443,10 @@ const MUTATIONS = [
   { name: 'คู่มือไม่มีแถว env RESEARCH_AGENT_CONCURRENCY', file: 'doc', find: '| `RESEARCH_AGENT_CONCURRENCY` |', replace: '| CONCURRENCY |' },
   { name: 'คู่มือไม่ห้ามตั้ง RESEARCH_AGENT_SECRET บน Railway', file: 'doc', find: 'ห้ามตั้ง `RESEARCH_AGENT_SECRET` บน Railway', replace: 'ตั้ง `RESEARCH_AGENT_SECRET` บน Railway ได้' },
   { name: 'คู่มือไม่บอก API_KEY ของบอท = DISCORD_API_SECRET', file: 'doc', find: '`API_KEY` บน Railway ต้องเท่ากับ `DISCORD_API_SECRET` บน Vercel', replace: '`API_KEY` บน Railway ตั้งอะไรก็ได้' },
+  // ── ★ 2 ต.ค. 69 (ท่อข่าวขนาน · SPEC-v3 ส่วน 11 · W6) — ต่อท้ายเท่านั้น (LANE_A_MUTATIONS อ้างลำดับเดิม) ──
+  { name: '.env.example ขาด QUEUE_NEWS_CONCURRENCY', file: 'env', find: '# QUEUE_NEWS_CONCURRENCY=8', replace: '# (ไม่มี)' },
+  { name: '.env.example QUEUE_NEWS_CONCURRENCY ไม่มีป้าย Vercel', file: 'env', find: '# [Vercel] ท่อข่าวขนาน:', replace: '# ท่อข่าวขนาน:' },
+  { name: 'คู่มือไม่มีแถว env QUEUE_NEWS_CONCURRENCY', file: 'doc', find: '| `QUEUE_NEWS_CONCURRENCY` |', replace: '| NEWS_CONCURRENCY |' },
 ];
 
 /** ข้อความที่ patch แล้ว (ไม่ตีความ $ ในคำแทน) */

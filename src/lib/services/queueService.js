@@ -2,6 +2,8 @@ import { createStore } from '@/lib/persistStore';
 import { v4 as uuidv4 } from 'uuid';
 import { createHash } from 'crypto';
 import { getSupabase, isSupabaseReady } from '../supabase.js';
+// ★ 2 ต.ค. 69 (ท่อข่าวขนาน · SPEC-v3 ส่วน 11 · W6): เพดานงานข่าวพร้อมกันต่อเครื่อง (env QUEUE_NEWS_CONCURRENCY) — ตัวช่วยเดียวกับ /api/queue/status
+import { getNewsConcurrency } from '@/lib/services/queueConcurrency';
 
 const QUEUE_STORE = 'job_queue';
 
@@ -584,13 +586,32 @@ export async function getNextPendingJobs(limit = 1) {
 
     // ★ Concurrency "แยกตามเครื่อง": นับเฉพาะงานที่ processing "บนเครื่องนี้" (canRunHere) — ปก/ข่าวคนละเครื่องไม่บล็อกกัน
     //   เครื่องทีม: นับปก/คลิปที่ทำอยู่ · Vercel: นับข่าวที่ทำอยู่ — ต่างเครื่องไม่เกี่ยวกัน
-    const maxConcurrency = 1;
+    // ★ 2 ต.ค. 69 (ท่อข่าวขนาน · SPEC-v3 ส่วน 11 · W6): เจ้าของสั่ง "เวลาต่อข่าวเท่าเดิมได้ แค่อยากให้ไม่ต้องต่อคิวกัน เพราะพนักงานเป็นสิบ"
+    //   เครื่องที่หยิบงานข่าวได้ (= canRunHere ของงานข่าว: ไม่ใช่ win32 หรือ QUEUE_LOCAL_NEWS=1) ใช้เพดานจาก env QUEUE_NEWS_CONCURRENCY
+    //   ผ่าน getNewsConcurrency (ไม่ตั้ง/อ่านไม่ได้/< 1 = 1 · เพดาน 10 · อ่าน env ทุกครั้งที่เรียก) · เครื่องทีมที่ไม่เปิด QUEUE_LOCAL_NEWS = 1 เสมอ
+    //   ไม่ตั้ง env = ค่าคงที่ 1 เดิม (ไม่เรียกตัวช่วย) → processingHere/availableSlots/hold/atomic claim ด้านล่างทำงานเดิมทุกไบต์
+    //   worker ยังขอ limit=1 ต่อ invocation → งานขนานมาจากตัวปลุกเดิม 3 ทาง (/api/queue/add · self-heal ของ /api/queue/status · cron)
+    //   ห้ามเพิ่ม self-fetch worker→worker (บทเรียน 508 INFINITE_LOOP 24 มิ.ย. 69) · atomic claim กันงานซ้ำข้าม invocation เหมือนเดิม
+    //   ของเดิม: const maxConcurrency = 1;
+    const maxConcurrency = (process.env.QUEUE_NEWS_CONCURRENCY !== undefined && (!isLocalMachine || localNewsOverride))
+      ? getNewsConcurrency(process.env)
+      : 1;
     const processingHere = allJobs.filter(j => j.status === 'processing' && canRunHere(j)).length;
     if (processingHere >= maxConcurrency) {
       console.log(`[QueueService] ⏸️ Concurrency limit (เครื่องนี้) ${processingHere}/${maxConcurrency} — งานเครื่องอื่นไม่นับ`);
       return [];
     }
     const availableSlots = Math.min(limit, maxConcurrency - processingHere);
+    // ★ 2 ต.ค. 69 (ท่อข่าวขนาน · SPEC-v3 ส่วน 11 · W6): เพดาน > 1 ใช้กับ "งานข่าว" เท่านั้น — งานเครื่องทีม (ปก/คลิป = ไม่ใช่ข่าว) คงทีละ 1 งาน/เครื่อง
+    //   (หยิบปนกันได้เฉพาะเครื่องทีมที่เปิด QUEUE_LOCAL_NEWS=1 หรือ Vercel ที่เปิด QUEUE_COVER_ON_VERCEL=1)
+    //   มีงานเครื่องทีม processing บนเครื่องนี้แล้ว = ไม่หยิบงานเครื่องทีมเพิ่ม · ยังว่าง = หยิบได้เฉพาะงานเก่าสุดงานเดียว (ข่าวเติมช่องที่เหลือ)
+    //   เพดาน 1 (ไม่ตั้ง env) = ไม่ใช้ตัวกรองนี้ (_teamCapOn false · ไม่อ่านอะไรเพิ่ม)
+    const _teamCapOn = maxConcurrency > 1;
+    const _teamNext = _teamCapOn && !allJobs.some(j => j.status === 'processing' && canRunHere(j) && !isNewsJob(j))
+      ? (allJobs
+        .filter(j => j.status === 'pending' && canRunHere(j) && !isNewsJob(j))
+        .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))[0] ?? null)
+      : null;
 
     // ★ 1 ต.ค. 69 (Research Agent v2 โหมด write · SPEC-v3 ส่วน 9 · W3): คิวชะลอหยิบงานข่าวที่ใบขอรีเสิร์ชยังไม่เสร็จ (research hold)
     //   เฉพาะ RESEARCH_AGENT=1 + RESEARCH_AGENT_MODE=write → ส่งงาน pending ที่ canRunHere "ทั้งหมด" (เรียงแล้ว) ให้
@@ -600,7 +621,7 @@ export async function getNextPendingJobs(limit = 1) {
     //   ของเดิม: const pendingJobs = allJobs.filter(j => j.status === 'pending' && canRunHere(j)).sort(…createdAt…).slice(0, availableSlots);
     const _raEnv = (v) => String(v ?? '').trim().replace(/^["']|["']$/g, '').trim(); // = cleanEnv ของ research-agent/modes.js
     const _pendingHere = allJobs
-      .filter(j => j.status === 'pending' && canRunHere(j))
+      .filter(j => j.status === 'pending' && canRunHere(j) && (!_teamCapOn || isNewsJob(j) || j === _teamNext)) // ★ W6 ของเดิม: .filter(j => j.status === 'pending' && canRunHere(j))
       .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
     const _pickable = (_raEnv(process.env.RESEARCH_AGENT) === '1' && _raEnv(process.env.RESEARCH_AGENT_MODE).toLowerCase() === 'write')
       ? await import('@/lib/research-agent/queueHold')

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getJobStatus, getQueueOverview, cleanupStaleJobs } from '@/lib/services/queueService';
 import { createLogger } from '@/lib/logger';
+// ★ 2 ต.ค. 69 (ท่อข่าวขนาน · SPEC-v3 ส่วน 11 · W6): เพดานงานข่าวพร้อมกัน — ตัวช่วยเดียวกับตัวหยิบงาน (queueService.getNextPendingJobs)
+import { getNewsConcurrency } from '@/lib/services/queueConcurrency';
 
 const logger = createLogger('QUEUE_STATUS');
 
@@ -28,11 +30,19 @@ export async function GET(req) {
     // ★ Self-heal (11 มิ.ย.): ลูกโซ่ worker ขาดได้ (trigger next batch ตาย / server restart)
     // → งาน pending ค้างเงียบจนกว่าจะมีคนยิง worker เอง — UI poll ทุก 3s อยู่แล้ว
     // ถ้าเห็น pending แต่ไม่มีงานวิ่ง ให้ปลุก worker เอง (throttle 20s กันยิงรัว)
+    // ★ 2 ต.ค. 69 (ท่อข่าวขนาน · SPEC-v3 ส่วน 11 · W6): ปลุกเมื่อ "ยังมีช่องว่าง" (processing < เพดานข่าว) แทน "ไม่มีงานวิ่งเลย"
+    //   เพดาน = getNewsConcurrency ตัวเดียวกับตัวหยิบงาน · throttle 20 วิเดิม · worker ที่ถูกปลุกยังหยิบ 1 งาน/ครั้ง (atomic claim กันซ้ำ)
+    //   ไม่ตั้ง QUEUE_NEWS_CONCURRENCY = 1 → processing < 1 ≡ processing === 0 (processing = จำนวนแถวจริง เป็นจำนวนเต็ม ≥ 0) = เดิมทุกไบต์
+    //   ปลุกเปล่า (ช่องบนเครื่องเต็มจริง/งานถูกชะลอรอรีเสิร์ช) = worker ตอบ "No pending jobs" แล้วจบ · ไม่มี self-fetch worker→worker
+    //   ของเดิม: if (ov.pending > 0 && ov.processing === 0) {
     if (now - _lastReviveAt > 20_000) {
       _lastReviveAt = now;
       getQueueOverview().then((ov) => {
-        if (ov.pending > 0 && ov.processing === 0) {
-          logger.info(`[Queue Status] 🚑 Self-heal: ${ov.pending} pending แต่ไม่มี worker วิ่ง — ปลุก worker`);
+        const newsMax = getNewsConcurrency(process.env); // ★ W6: ไม่ตั้ง env = 1
+        if (ov.pending > 0 && ov.processing < newsMax) {
+          logger.info(ov.processing === 0 // ★ W6: ไม่มีงานวิ่ง = ข้อความเดิมทุกไบต์ · มีงานวิ่งแต่ยังมีช่อง = บอกจำนวนที่วิ่ง/เพดาน
+            ? `[Queue Status] 🚑 Self-heal: ${ov.pending} pending แต่ไม่มี worker วิ่ง — ปลุก worker`
+            : `[Queue Status] 🚑 Self-heal: ${ov.pending} pending · วิ่งอยู่ ${ov.processing}/${newsMax} งาน — ปลุก worker หยิบงานเพิ่ม`);
           fetch(`${req.nextUrl.origin}/api/queue/worker`, { method: 'POST' }).catch(() => {});
         }
       }).catch(() => {});
