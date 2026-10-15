@@ -1,5 +1,7 @@
 // 🔏 ข้อสอบลำดับนักเขียนข่าว: Opus 4.8 → Fable 5 → GPT-5.6 Sol อย่างละ 1 request
 // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 — นักเขียนหลักเปลี่ยนเป็น claude-opus-5-5 (ลำดับ/กติกาเดิม · เพดานต่อไม้ใหม่ 150/90/90 วิ) ข้อสอบคาดค่าใหม่
+// ★ 15 ต.ค. 69 (เจ้าของสั่ง "เขียนข่าวให้เปลี่ยนเป็น claude-opus 4.8 medium"): นักเขียนหลัก opus-5-5 → claude-opus-4-8
+//   + effort 'medium' ส่งตรงต่อการเรียก (ชนะ env CLAUDE_WRITE_EFFORT) · ไม้สำรอง Fable → Sol และเพดานเวลาเดิม · ข้อ 1/1.1/12.1 กัดจุดนี้
 // รัน Router จริงด้วย fake clients แล้วรัน client policy จริงด้วย fake SDK — ไม่มี API/network
 import { readFileSync } from 'node:fs';
 import { importPatchedModule } from './helpers/temp-module.mjs';
@@ -67,16 +69,27 @@ const reset = ({ claude = [], gpt = [], available = true } = {}) => {
 
 reset();
 await callSmartAI('write', { prompt: 'x' });
-t('1 ปกติเรียก Opus 5.5 เพียงครั้งเดียว',
+t('1 ปกติเรียก Opus 4.8 เพียงครั้งเดียว ด้วย effort medium',
   globalThis.__CALLS__.length === 1
-  && globalThis.__CALLS__[0].model === 'claude-opus-5-5'
+  && globalThis.__CALLS__[0].model === 'claude-opus-4-8'
+  && globalThis.__CALLS__[0].effort === 'medium'
   && globalThis.__CALLS__[0].maxRetries === 0
   && globalThis.__CALLS__[0].retryWithoutEffort === false);
+
+// ★ 15 ต.ค. 69: effort ล็อกในโค้ดสายเขียน — env CLAUDE_WRITE_EFFORT ที่ตั้งค้างบน Vercel ต้องไม่ลด 4.8 เป็น low
+reset();
+process.env.CLAUDE_WRITE_EFFORT = 'low';
+await callSmartAI('write', { prompt: 'x' });
+delete process.env.CLAUDE_WRITE_EFFORT;
+t('1.1 env CLAUDE_WRITE_EFFORT=low ไม่ทับ effort medium ของนักเขียนหลัก',
+  globalThis.__CALLS__.length === 1
+  && globalThis.__CALLS__[0].model === 'claude-opus-4-8'
+  && globalThis.__CALLS__[0].effort === 'medium');
 
 reset({ claude: ['throw'] });
 const fableResult = await callSmartAI('write', { prompt: 'x' });
 t('2 Opus ล้มจึงเรียก Fable ครั้งเดียว',
-  globalThis.__CALLS__.map(c => c.model).join('|') === 'claude-opus-5-5|claude-fable-5'
+  globalThis.__CALLS__.map(c => c.model).join('|') === 'claude-opus-4-8|claude-fable-5'
   && fableResult.model === 'claude-fable-5'
   && globalThis.__CALLS__[1].maxRetries === 0
   && globalThis.__CALLS__[1].retryWithoutEffort === false);
@@ -84,14 +97,14 @@ t('2 Opus ล้มจึงเรียก Fable ครั้งเดียว
 reset({ claude: ['refusal'] });
 await callSmartAI('write', { prompt: 'x' });
 t('3 Claude refusal ถอย Fable โดยไม่ข้ามขั้น',
-  globalThis.__CALLS__.map(c => c.model).join('|') === 'claude-opus-5-5|claude-fable-5');
+  globalThis.__CALLS__.map(c => c.model).join('|') === 'claude-opus-4-8|claude-fable-5');
 
 reset({ claude: ['throw', 'throw'] });
 const solResult = await callSmartAI('write', { prompt: 'x' });
 const solCall = globalThis.__CALLS__[2];
 t('4 Opus+Fable ล้มจึงเรียก Sol หนึ่งครั้งแบบห้าม Terra/SDK retry',
   globalThis.__CALLS__.map(c => `${c.fn}:${c.model}`).join('|')
-    === 'claude:claude-opus-5-5|claude:claude-fable-5|gpt:gpt-5.6-sol'
+    === 'claude:claude-opus-4-8|claude:claude-fable-5|gpt:gpt-5.6-sol'
   && solCall.allowModelFallback === false
   && solCall.maxRetries === 0
   && solResult.model === 'gpt-5.6-sol');
@@ -101,7 +114,7 @@ let exhausted = false;
 try { await callSmartAI('write', { prompt: 'x' }); } catch { exhausted = true; }
 t('5 ทั้งสามล้มแล้วจบทันที ไม่มี Sol/Terra รอบเพิ่ม',
   exhausted && globalThis.__CALLS__.map(c => c.model).join('|')
-    === 'claude-opus-5-5|claude-fable-5|gpt-5.6-sol');
+    === 'claude-opus-4-8|claude-fable-5|gpt-5.6-sol');
 
 reset({ claude: ['hang', 'throw'] });
 await Promise.race([
@@ -110,7 +123,7 @@ await Promise.race([
 ]);
 t('5.1 Opus หมดเวลาเฉพาะตัวแล้ว Fable และ Sol ยังทำหน้าที่สำรองอย่างละครั้ง',
   globalThis.__CALLS__.map(c => c.model).join('|')
-    === 'claude-opus-5-5|claude-fable-5|gpt-5.6-sol'
+    === 'claude-opus-4-8|claude-fable-5|gpt-5.6-sol'
   && productionTimeoutsPresent);
 
 reset();
@@ -118,7 +131,7 @@ process.env.CLAUDE_WRITE_MODEL = 'claude-fable-5';
 process.env.CLAUDE_WRITE_FALLBACK_MODEL = 'claude-opus-5';
 await callSmartAI('write', { prompt: 'x' });
 t('6 ค่า env เก่าบน Vercel ไม่ทับลำดับนักเขียนข่าว',
-  globalThis.__CALLS__.length === 1 && globalThis.__CALLS__[0].model === 'claude-opus-5-5');
+  globalThis.__CALLS__.length === 1 && globalThis.__CALLS__[0].model === 'claude-opus-4-8');
 
 reset({ gpt: ['throw'] });
 await callSmartAI('breakdown', { prompt: 'x' });
@@ -211,12 +224,34 @@ globalThis.__CLAUDE_CLIENT__ = { messages: { create: async (body, options) => {
 } } };
 try {
   await claudeModule.callClaude({
-    prompt: 'x', model: 'claude-opus-5-5', maxRetries: 0, retryWithoutEffort: false,
+    prompt: 'x', model: 'claude-opus-4-8', maxRetries: 0, retryWithoutEffort: false,
   });
 } catch {}
 t('12 callClaude writer-mode ยิง request เดียว ส่ง maxRetries=0 และไม่ retry effort',
   globalThis.__CLAUDE_CALLS__.length === 1
   && globalThis.__CLAUDE_CALLS__[0].options.maxRetries === 0);
+
+// ★ 15 ต.ค. 69: client policy จริงของ 4.8 เมื่อ router ส่ง effort 'medium' มาด้วย — ต้องถึง API เป็น output_config.effort=medium
+//   แม้ env CLAUDE_WRITE_EFFORT=low (clamp ใน claudeClient ครอบเฉพาะ opus-5-5 จึงต้องพึ่ง effort ต่อการเรียกจาก router)
+//   · 4.8 ไม่ส่ง temperature (API 400) · ไม่ยกเพดาน max_tokens (ไม่เข้า _thinkingOn)
+globalThis.__CLAUDE_CALLS__ = [];
+globalThis.__CLAUDE_CLIENT__ = { messages: { create: async (body, options) => {
+  globalThis.__CLAUDE_CALLS__.push({ body, options });
+  return { stop_reason: 'end_turn', content: [{ type: 'text', text: '{"ok":true}' }], usage: {} };
+} } };
+process.env.CLAUDE_WRITE_EFFORT = 'low';
+let body48 = null;
+try {
+  await claudeModule.callClaude({ prompt: 'x', model: 'claude-opus-4-8', effort: 'medium', maxRetries: 0, retryWithoutEffort: false });
+  body48 = globalThis.__CLAUDE_CALLS__[0]?.body || null;
+} catch {}
+delete process.env.CLAUDE_WRITE_EFFORT;
+t('12.1 opus-4-8 + effort medium จาก router ชนะ env low · ไม่ส่ง temperature · ไม่ยกเพดาน max_tokens',
+  globalThis.__CLAUDE_CALLS__.length === 1
+  && body48?.model === 'claude-opus-4-8'
+  && body48?.output_config?.effort === 'medium'
+  && !('temperature' in (body48 || {}))
+  && body48?.max_tokens === 8000);
 
 // ── 4) Service ต้องไม่เรียก GPT รอบสองหลัง Router จบครบสามโมเดล ──
 const textService = readFileSync(new URL('../src/lib/services/summarizeServiceText.js', import.meta.url), 'utf8');

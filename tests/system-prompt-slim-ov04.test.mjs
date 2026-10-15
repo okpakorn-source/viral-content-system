@@ -236,7 +236,7 @@ async function assertWriteUntouched(callSmartAI) {
     await withEnv(env, async () => {
       reset({ claude: ['throw', 'throw'] });
       await run(callSmartAI, 'write', { textNewsLengthPolicy: true });
-      assert.deepEqual(calls().map((c) => c.args.model), ['claude-opus-5-5', 'claude-fable-5', 'gpt-5.6-sol'], 'โซ่นักเขียนเดิม');
+      assert.deepEqual(calls().map((c) => c.args.model), ['claude-opus-4-8', 'claude-fable-5', 'gpt-5.6-sol'] /* ★ 15 ต.ค. 69 นักเขียนหลัก → opus-4-8 (ของเดิม 'claude-opus-5-5') */, 'โซ่นักเขียนเดิม');
       for (const c of calls()) assert.equal(c.args.systemPrompt, undefined, `${c.args.model}: นักเขียนต้องไม่ได้ systemPrompt (${JSON.stringify(env)})`);
       assert.deepEqual(calls().map((c) => c.args.textNewsLengthPolicy), [true, true, true], 'สิทธิ์ 146 เดิมครบทุกไม้');
     });

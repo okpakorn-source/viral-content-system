@@ -198,8 +198,9 @@ async function assertRouterBehavior(source = ROUTER_SOURCE, tag = 'router') {
   assert.deepEqual(
     globalThis.__LENGTH_ROUTER_CALLS__.map((call) => [call.model, call.textNewsLengthPolicy]),
     [
+      // ★ 15 ต.ค. 69 (เจ้าของสั่ง "เขียนข่าวให้เปลี่ยนเป็น claude-opus 4.8 medium"): ไม้แรกกลับเป็น claude-opus-4-8 (ของเดิม 23 ก.ย.: ['claude-opus-5-5', true])
       // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 — ไม้แรกของ router จริง (const _primary ใน aiRouter.js)
-      ['claude-opus-5-5', true],
+      ['claude-opus-4-8', true],
       ['claude-fable-5', true],
       ['gpt-5.6-sol', true],
     ],

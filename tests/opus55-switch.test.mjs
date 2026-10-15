@@ -7,6 +7,9 @@
 //                       | news-filter | client-sampling-regex | client-thinking-regex
 //                       | price-modelconfig | price-usagelogger | cost-rates | usage-label
 //                       | cost-rates-set1   (★ 23 ก.ย. 69 ชุด 2: ย้อนแถว costRates กลับสูตร ×0.8 ของชุด 1)
+//                       | router-effort | router-effort-unwired   (★ 15 ต.ค. 69 นักเขียนหลัก → opus-4-8 effort medium)
+// ★ 15 ต.ค. 69 (เจ้าของสั่ง "เขียนข่าวให้เปลี่ยนเป็น claude-opus 4.8 medium"): จุด _primary ของนักเขียน (aiRouter claude-write)
+//   กลับเป็น claude-opus-4-8 + effort 'medium' ล็อกในโค้ด — จุดอื่น (extract/DEFAULT_WRITE_MODEL/s5/news-filter/ราคา) ยัง opus-5-5 ตามเดิม
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -25,7 +28,11 @@ const USAGE_ROUTE = '../src/app/api/usage/route.js';
 
 // [ไฟล์, สตริงในซอร์สปัจจุบัน, สตริงหลังย้อน] — ย้อนทีละจุด
 const MUTATIONS = {
-  'router-primary': [ROUTER, "const _primary = 'claude-opus-5-5';", "const _primary = 'claude-opus-4-8';"],
+  // ★ 15 ต.ค. 69: นักเขียนหลัก = opus-4-8 — mutation ย้อนกลับไป opus-5-5 ต้องแดง (ของเดิม: [ROUTER, "const _primary = 'claude-opus-5-5';", "const _primary = 'claude-opus-4-8';"])
+  //   สตริงต้นทางพ่วงบรรทัดถัดไป (_primaryEffort) เพื่อให้ replace โดนบรรทัดโค้ดจริง ไม่โดนคอมเมนต์ประวัติ "(ของเดิม: const _primary = 'claude-opus-4-8';)" ของ 23 ก.ย.
+  'router-primary': [ROUTER, "const _primary = 'claude-opus-4-8';\n      const _primaryEffort", "const _primary = 'claude-opus-5-5';\n      const _primaryEffort"],
+  'router-effort': [ROUTER, "const _primaryEffort = 'medium';", "const _primaryEffort = 'low';"],
+  'router-effort-unwired': [ROUTER, "effort: _primaryEffort,", ''],
   'router-extract': [ROUTER, "model: process.env.EXTRACT_CLAUDE_MODEL || 'claude-opus-5-5',", "model: process.env.EXTRACT_CLAUDE_MODEL || 'claude-opus-4-8',"],
   'router-extract-log': [ROUTER, "EXTRACT_CLAUDE_MODEL || 'claude-opus-5-5'}", "EXTRACT_CLAUDE_MODEL || 'claude-opus-4-8'}"],
   'client-default': [CLIENT, "process.env.CLAUDE_WRITE_MODEL || 'claude-opus-5-5';", "process.env.CLAUDE_WRITE_MODEL || 'claude-opus-4-8';"],
@@ -72,16 +79,20 @@ const withEnv = async (vars, fn) => {
   }
 };
 
-const onlyDefault = (code, re, label) => {
+// ★ 15 ต.ค. 69: + expected (ค่าเริ่มต้น NEW) — จุดนักเขียนหลักคาด OLD (ของเดิม: const onlyDefault = (code, re, label) => { ... assert.equal(hits[0], NEW, ...) })
+const onlyDefault = (code, re, label, expected = NEW) => {
   const hits = [...code.matchAll(re)].map((m) => m[1]);
   assert.equal(hits.length, 1, `${label}: ต้องเจอจุดนี้ในโค้ดจริงพอดี 1 จุด (เจอ ${hits.length})`);
-  assert.equal(hits[0], NEW, `${label}: default ต้องเป็น ${NEW} (เจอ ${hits[0]})`);
+  assert.equal(hits[0], expected, `${label}: default ต้องเป็น ${expected} (เจอ ${hits[0]})`);
 };
 
 // ═══ (a) ค่า default ทุกจุดของระบบข่าวเป็น opus-5-5 และไม่มี opus-4-8 เหลือในโค้ดจริงของ 4 ไฟล์ ═══
-test('(a) default ทั้ง 6 จุดใน 4 ไฟล์ = claude-opus-5-5 · ไม่มี claude-opus-4-8 เหลือในโค้ด (นอกคอมเมนต์ประวัติ)', () => {
+test('(a) default 5 จุดใน 4 ไฟล์ = claude-opus-5-5 · นักเขียนหลัก (_primary) = claude-opus-4-8 effort medium (★ 15 ต.ค. 69) · ไม่มี claude-opus-4-8 เหลือที่อื่น (นอกคอมเมนต์ประวัติ)', () => {
   const router = codeOnly(read(ROUTER));
-  onlyDefault(router, /const _primary = '([^']+)';/g, 'aiRouter นักเขียนหลัก (_primary)');
+  // ★ 15 ต.ค. 69 (เจ้าของสั่ง): นักเขียนหลัก = claude-opus-4-8 + effort medium ล็อกในโค้ด (ของเดิม: onlyDefault(router, /const _primary = '([^']+)';/g, 'aiRouter นักเขียนหลัก (_primary)');)
+  onlyDefault(router, /const _primary = '([^']+)';/g, 'aiRouter นักเขียนหลัก (_primary)', OLD);
+  onlyDefault(router, /const _primaryEffort = '([^']+)';/g, 'aiRouter effort นักเขียนหลัก (_primaryEffort)', 'medium');
+  assert.equal((router.match(/effort: _primaryEffort,/g) || []).length, 1, 'aiRouter: การเรียกนักเขียนหลักต้องส่ง effort: _primaryEffort พอดี 1 จุด (ถอด = env CLAUDE_WRITE_EFFORT บน Vercel ทับได้)');
   onlyDefault(router, /model: process\.env\.EXTRACT_CLAUDE_MODEL \|\| '([^']+)',/g, 'aiRouter ขั้นสกัด (claude-extract)');
   onlyDefault(router, /extract primary = \$\{process\.env\.EXTRACT_CLAUDE_MODEL \|\| '([^']+)'\}/g, 'aiRouter log ประกาศสวิตช์สกัด');
 
@@ -94,7 +105,10 @@ test('(a) default ทั้ง 6 จุดใน 4 ไฟล์ = claude-opus-5-
   const filter = codeOnly(read(FILTER));
   onlyDefault(filter, /const NEWS_FILTER_MODEL = process\.env\.NEWS_FILTER_MODEL \|\| '([^']+)';/g, 'newsFilterService NEWS_FILTER_MODEL');
 
-  for (const [label, code] of [['aiRouter', router], ['claudeClient', client], ['s5PinnedAi', s5], ['newsFilterService', filter]]) {
+  // ★ 15 ต.ค. 69: aiRouter ยกเว้นเฉพาะบรรทัด _primary ของนักเขียน (จุดเดียวที่เจ้าของสั่งกลับเป็น 4.8) — ที่อื่นยังห้ามมี OLD เหลือ
+  //   (ของเดิม: for (const [label, code] of [['aiRouter', router], ...]) assert.equal(code.includes(`'${OLD}'`), false, ...))
+  const routerSansWriter = router.replace(/const _primary = '[^']+';/, '');
+  for (const [label, code] of [['aiRouter (นอกบรรทัด _primary)', routerSansWriter], ['claudeClient', client], ['s5PinnedAi', s5], ['newsFilterService', filter]]) {
     assert.equal(code.includes(`'${OLD}'`), false, `${label}: ห้ามมี '${OLD}' เหลือในโค้ดจริง`);
   }
 });

@@ -182,6 +182,8 @@ function getStrategy(task) {
       //   ผ่าน token เฉพาะสายเขียน เพื่อไม่ให้ fallback Sol→Terra / SDK retry ของงานอื่นเปลี่ยนตาม
       //   case 'claude' เดิมคงไว้ทุกไบต์ให้ breakdown/ผู้ใช้อื่น (แผน Fable: ห้ามแก้ DEFAULT_WRITE_MODEL กลาง กันลาม fabricationGate)
       //   ของเดิม: if (isClaudeAvailable()) chain.push('claude');
+      // ★ 15 ต.ค. 69 (เจ้าของสั่ง "เขียนข่าวให้เปลี่ยนเป็น claude-opus 4.8 medium"): นักเขียนหลัก opus-5-5 → claude-opus-4-8 effort medium
+      //   ลำดับ/กติกา/เพดานเวลาเดิม (→ Fable 5 → Sol) · ดู case 'claude-write' ใน callModel
       if (isClaudeAvailable()) chain.push('claude-write');
       chain.push('writer-sol');
       defaultTemp = 0.7;
@@ -219,12 +221,19 @@ async function callModel(modelName, { prompt, temperature, maxTokens, systemProm
       // ★ 23 ก.ย. 69 (เจ้าของสั่ง): opus-4-8 → opus-5-5 (ของเดิม: const _primary = 'claude-opus-4-8';)
       //   สายนี้ไม่อ่าน env โดยตั้งใจ → ถอยกลับ = แก้ค่านี้คืนเป็น 'claude-opus-4-8'
       //   opus-5-5 คิดก่อนตอบเสมอ (ปิดไม่ได้) → callClaude ยกเพดาน max_tokens ≥16000 ให้เอง (_thinkingOn ครอบ prefix opus-5)
-      const _primary = 'claude-opus-5-5';
+      // ★ 15 ต.ค. 69 (เจ้าของสั่ง "เขียนข่าวให้เปลี่ยนเป็น claude-opus 4.8 medium"): opus-5-5 → claude-opus-4-8
+      //   (ของเดิม: const _primary = 'claude-opus-5-5';) · สายนี้ยังไม่อ่าน env → ถอยกลับ = แก้ค่านี้คืนเป็น 'claude-opus-5-5' + ถอด effort บรรทัดล่าง
+      //   effort ส่งตรงต่อการเรียก = 'medium' (claudeClient: effort ต่อการเรียกชนะ env กลาง CLAUDE_WRITE_EFFORT ที่ยังตั้งค้างบน Vercel
+      //   — clamp low→medium ของ claudeClient ครอบเฉพาะ opus-5-5 จึงต้องล็อกที่นี่) · opus-4-8 ไม่บังคับคิด (_thinkingOn ไม่ครอบ)
+      //   → max_tokens ตาม defaultMaxTokens 16000 ของสาย write เท่าเดิม · ไม้สำรอง fable-5 → sol และ WRITER_ATTEMPT_TIMEOUT_MS คงเดิมทุกไบต์
+      const _primary = 'claude-opus-4-8';
+      const _primaryEffort = 'medium';
       const _fb = 'claude-fable-5';
       try {
         return await runWriterAttempt(
           (requestSignal) => callClaude({
             prompt, temperature, maxTokens, systemPrompt, signal: requestSignal, model: _primary,
+            effort: _primaryEffort, // ★ 15 ต.ค. 69 (ของเดิม: ไม่ส่ง effort → claudeClient ใช้ env CLAUDE_WRITE_EFFORT || 'medium')
             maxRetries: 0, retryWithoutEffort: false, textNewsLengthPolicy,
             sanitizeScope,
           }),
