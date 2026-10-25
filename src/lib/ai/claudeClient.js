@@ -214,25 +214,13 @@ ${String(_previewSrc)}
     }
   }
 
-  // ★ 1 ส.ค. 69 (Sol รอบ 2): refusal อาจมาพร้อม partial content — ตัดสินจาก stop_reason ตรงๆ ก่อนแตะเนื้อ
-  if (response.stop_reason === 'refusal') {
-    console.warn(`[Claude] ⚠️ refusal (${response.stop_details?.category || 'n/a'}) — ส่งต่อตัวสำรองใน chain`);
-    throw new Error('Claude ปฏิเสธคำขอ (refusal) — ใช้ตัวสำรอง');
-  }
-
-  // หา text block (กันกรณีมี thinking block นำหน้าใน model ใหม่ๆ)
-  const content = response.content?.find?.(b => b.type === 'text')?.text || response.content?.[0]?.text;
-  
+  // Record response usage before refusal/JSON handling: fallback must not discard
+  // the tokens already reported by Anthropic. HTTP errors without usage stay uncounted.
   const inputTokens = response.usage?.input_tokens || 0;
   const outputTokens = response.usage?.output_tokens || 0;
   // ★ 15 ส.ค. 69: โชว์แคชในลอค (cacheW=เขียนแคชครั้งแรก 1.25x · cacheR=อ่านแคช 0.1x) — เกณฑ์คานารี: มุม 2-3 ต้อง cacheR ≥9,000
   const _cw = response.usage?.cache_creation_input_tokens || 0;
   const _cr = response.usage?.cache_read_input_tokens || 0;
-  console.log(`[Claude] OK: tokens input=${inputTokens}, output=${outputTokens}${(_cw || _cr) ? `, cacheW=${_cw}, cacheR=${_cr}` : ''}`);
-  if (_fullLog()) console.log(`[Claude] 📄 คำตอบเต็ม (${String(content||'').length}ch):
-${content}
-[Claude] 📄 จบคำตอบ`);
-  
   // Asynchronously log usage to DB
   // ★ Sol #2 + รอบ 2 (15 ส.ค. 69): input จริง = input + cache_creation + cache_read (เดิมนับแค่ input_tokens ทำ /cost ต่ำกว่าจริง)
   //   usageLogger คิดทุกโทเคนที่อัตรา input ปกติ → แปลงโทเคนแคชเป็น "เทียบเท่าอัตราปกติ" ก่อนส่ง (cacheW 1.25x · cacheR 0.1x)
@@ -246,8 +234,37 @@ ${content}
     model,
     inputTokens: Math.round(inputTokens + _cw * 1.25 + _cr * _cacheReadMul),
     outputTokens,
-    feature: 'callClaude'
+    feature: 'callClaude',
+    // Raw diagnostics are separate from the legacy weighted DB token count.
+    // Only IDs/counts are logged; never pass prompts, response text or API keys.
+    anthropicUsage: {
+      inputTokens,
+      cacheCreationInputTokens: _cw,
+      cacheReadInputTokens: _cr,
+      usageReported: !!response.usage,
+      requestId: response._request_id || null,
+      messageId: response.id || null,
+      stopReason: response.stop_reason || null,
+      promptMode: _blocksOk ? 'blocks' : 'text',
+      cacheBreakpoints: [
+        ...(Array.isArray(requestBody.system) ? requestBody.system : []),
+        ...(Array.isArray(requestBody.messages[0].content) ? requestBody.messages[0].content : []),
+      ].filter(b => b.cache_control).length,
+    },
   });
+
+  // ★ 1 ส.ค. 69 (Sol รอบ 2): refusal อาจมาพร้อม partial content — ตัดสินจาก stop_reason ตรงๆ ก่อนแตะเนื้อ
+  if (response.stop_reason === 'refusal') {
+    console.warn(`[Claude] ⚠️ refusal (${response.stop_details?.category || 'n/a'}) — ส่งต่อตัวสำรองใน chain`);
+    throw new Error('Claude ปฏิเสธคำขอ (refusal) — ใช้ตัวสำรอง');
+  }
+
+  // หา text block (กันกรณีมี thinking block นำหน้าใน model ใหม่ๆ)
+  const content = response.content?.find?.(b => b.type === 'text')?.text || response.content?.[0]?.text;
+  console.log(`[Claude] OK: tokens input=${inputTokens}, output=${outputTokens}${(_cw || _cr) ? `, cacheW=${_cw}, cacheR=${_cr}` : ''}`);
+  if (_fullLog()) console.log(`[Claude] 📄 คำตอบเต็ม (${String(content||'').length}ch):
+${content}
+[Claude] 📄 จบคำตอบ`);
 
   if (!content) throw new Error('Claude ไม่ส่งข้อมูลกลับ');
 
