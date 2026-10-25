@@ -30,6 +30,13 @@ const PRICING = {
   'gpt-6-astra': { input: 10.0, output: 50.0 },
   'gpt-6-sol': { input: 5.0, output: 30.0 },
   'gpt-6-luna': { input: 1.0, output: 6.0 },
+  // ★ 25 ต.ค. 69 (เจ้าของสั่งแก้ข้อ 8 ผลทดสอบท่อทีละขั้น): รุ่นที่ตัวหาราคาจับไม่ได้ = บันทึก $0 เงียบๆ
+  //   gpt-6.1-sol: ไม่มีแถวไหนจับชื่อได้ (ขั้นเลือกการ์ด CARD_PICKER_MODEL=gpt-6.1-sol) — ⚠️ TODO(ยืนยันราคาจริงจาก OpenAI) ประมาณด้วยชั้น gpt-6-sol
+  //   claude-sonnet-5-5: ราคาทางการ $2/$10 (ตาราง claude-api 6 ต.ค. 69) — เดิมจับแถว claude-sonnet-5 ได้ราคาเท่ากันโดยบังเอิญ ใส่แถวตรงตัวกันแถวนั้นเปลี่ยน
+  //   gemini-3.8-flash: ไม่มีแถวไหนจับได้ (สมองคลิป) — ⚠️ TODO(ยืนยันราคาจริงจาก Google) ยืมชั้น gemini-3.6-flash
+  'gpt-6.1-sol': { input: 5.0, output: 30.0 },
+  'claude-sonnet-5-5': { input: 2.0, output: 10.0 },
+  'gemini-3.8-flash': { input: 1.50, output: 9.00 },
   // ★ 29 ก.ค. 69 (lane2 cost-audit A1 — COST-AUDIT.md ข้อ 2-B): gemini-3.6-flash ไม่มีราคาประกาศในตารางไหนของ repo เลย
   //   (coverVisionModel.js ยกจาก 2.5→3.6 ทั้งสายปกตั้งแต่ 26 ก.ค.) ยืมราคาชั้น gemini-3.5-flash ไปก่อน (สมมติฐาน "ราคาใกล้ 3.5")
   //   ⚠️ ต้องยืนยันราคาจริงจาก Google — ถ้าต่างจากนี้ ตัวเลข /cost ของงานที่ใช้ Gemini จะคลาดเคลื่อนตาม

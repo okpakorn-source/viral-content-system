@@ -161,7 +161,9 @@ export const RISK_RULES = Object.freeze([
   { id: 'วงเหล้า', find: 'วงเหล้า', to: 'วงสังสรรค์', severity: 'medium', group: 'alcohol', sanitize: false, aiRewrite: true },
   { id: 'ดื่มสุรา', find: 'ดื่มสุรา', to: 'วงสังสรรค์', severity: 'medium', group: 'alcohol', sanitize: false, aiRewrite: true },
   // ═══ Clickbait / explicit เฉพาะ L2 (คำแทน '' = ลบ — L3A ข้ามเมื่อ suggestion ว่าง เหมือนเดิม) ═══
-  { id: 'ด่วน', find: 'ด่วน', to: '', nextBlock: ['จัด'], severity: 'medium', group: 'clickbait', sanitize: false },
+  // ★ 25 ต.ค. 69 (เจ้าของสั่งแก้ข้อ 10 ผลทดสอบท่อทีละขั้น): + prevBlock 'สาย' — "สายด่วนกู้ชีพ/สายด่วน 1669" คือเบอร์ฉุกเฉิน ไม่ใช่คำล่อคลิก
+  //   (ข่าวพยาบาลร้อยเอ็ด: L2 นับเป็นคำต้องห้ามทุกเวอร์ชัน → คะแนนตรวจลดเหลือ 92 โดยไม่มีเหตุ)
+  { id: 'ด่วน', find: 'ด่วน', to: '', prevBlock: ['สาย'], nextBlock: ['จัด'], severity: 'medium', group: 'clickbait', sanitize: false },
   { id: 'xxx', find: 'xxx', to: '', severity: 'high', group: 'explicit', sanitize: false },
   { id: 'XXX', find: 'XXX', to: '', severity: 'high', group: 'explicit', sanitize: false },
 ].map((rule) => Object.freeze(rule)));

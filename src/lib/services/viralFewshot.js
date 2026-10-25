@@ -13,6 +13,7 @@ import { isCardAuthorityR7Enabled, isCardAuthorityR8Enabled } from '../ai/cardAu
 import { isEndingPlain, isStylePackV2Enabled } from '../ai/promptModes.js'; // 🎛️ 20 ส.ค. 69 (R3): ข้อ 1 วลีลายเซ็น + ข้อ 2 ท่อนจบ — ห้ามอ่าน env 2 ตัวนี้เองจากไฟล์อื่น
 import fs from 'node:fs';
 import path from 'node:path';
+import { matchTeachers } from './teacherConceptMatch.js'; // 🧭 25 ต.ค. 69 จับคู่ครูด้วยความหมาย (โค้ดล้วน) — ถอย TEACHER_CONCEPT_MATCH=0
 
 // ★ 16 ส.ค. 69 — ตัวอ่าน env: ตัดช่องว่าง + ถอดเครื่องหมายคำพูด + ไม่สนตัวพิมพ์
 //   🔴 ใช้ได้เฉพาะ "สวิตช์ที่เกิดในแบตช์นี้" (VIRAL_SHORTLIST, VIRAL_SHORTLIST_K) เท่านั้น
@@ -169,7 +170,7 @@ async function _recordPickHistory(libCat, picks, meta = {}) {
     // ★ 16 ส.ค. 69 (ผู้ตรวจอิสระ — โจทย์เจ้าของสั่ง "ต้องตรวจย้อนได้"): เหตุผลของชั้นเฉพาะกิจยาวเฉลี่ย ~366 ตัวอักษร
     //   เพดาน 240 เดิมตัดเหลือ ~3 ใบจาก 8 = ย้อนดูไม่ได้ว่าใบไหนแข่งบ้าง → ขยายเป็น 700 เฉพาะโหมดใหม่
     //   🔴 โหมดเก่า (rotate/ai/score/top2) คงเพดาน 240 เป๊ะ — "ปิดสวิตช์ = เดิมเป๊ะ" ต้องจริงถึงสมุดประวัติด้วย
-    const isShortlist = String(meta.pickMode || '').startsWith('shortlist');
+    const isShortlist = String(meta.pickMode || '').startsWith('shortlist') || meta.pickMode === 'concept'; // 🧭 25 ต.ค. 69: เหตุผลจับคู่ความหมายยาว เก็บเต็มเหมือนโผ
     const { error: insErr } = await sb.from('store_items').insert({
       id, store_name: 'viral_pick_history',
       data: {
@@ -400,6 +401,19 @@ function _cardTeacherOn() {
     console.log(`[ViralFewshot] 🎴 CARD_TEACHER_MATCH="${v}" อ่านไม่ออก → ถือว่าปิด (ค่าที่เปิดได้: 1/true/on/yes)`);
   }
   return false;
+}
+// 🧭 25 ต.ค. 69 (เจ้าของสั่ง: "ออกแบบโค้ดจับคู่ที่วิเคราะห์ข่าวไปจับคู่กับครูได้แม่นยำ แทน AI เพราะไม่นิ่ง") — teacherConceptMatch.js
+//   ทำงานในชั้นเฉพาะกิจ (VIRAL_SHORTLIST เปิด) ก่อนตัวคัดโผเดิม: จับคู่ได้ = ครู 2 ใบคะแนนสูงสุด ไม่สุ่ม · จับไม่ได้ = ถอยตัวคัดโผ+สุ่มเดิม
+//   ค่าเริ่มต้น = เปิด · ถอย: TEACHER_CONCEPT_MATCH=0/false/off/no = ตัวคัดโผ + สุ่มถ่วงไลก์เดิมทุกไบต์
+function _teacherConceptOn() {
+  return !/^(0|false|off|no)$/.test(_envTok('TEACHER_CONCEPT_MATCH'));
+}
+// 🚫 25 ต.ค. 69 เจ้าของเคาะหลังอ่านเทียบข่าวจริง 5 ข่าว (มีครู vs การ์ดอย่างเดียว): "ปิดครูไม่ใช้ เพราะใช้การ์ดได้คำสวยกว่าเยอะ
+//   พอมีครูมาทำให้ข่าวเสีย" (นักเขียนยืมท่า/วลีจากโพสต์ครูเกือบตรงตัว เช่น "มือคู่นั้นเป็นของ", "...ทีละครั้งทำงานของมัน")
+//   ขอบเขต: เฉพาะนักเขียนสาย TEXT (teacherGuideEligible=true) · สาย URL/viral-polish คงเดิม · Style Pack ยังส่งตามเดิม
+//   ค่าเริ่มต้น = ปิดครู · เปิดคืน: VIRAL_TEACHERS=1/true/on/yes (แล้วใช้ตัวจับคู่ความหมาย/ตัวคัดโผตามสวิตช์เดิม)
+function _teachersOn() {
+  return SL_ON_RE.test(_envTok('VIRAL_TEACHERS'));
 }
 // ขนาดโผปรับได้โดยไม่ต้องแก้โค้ด (เจ้าของลอง 6/8/10 เองได้) — ค่าเริ่มต้น 8 ตามที่วัดมาแล้ว
 // 🔴 16 ส.ค. 69 (ผู้ตรวจอิสระจับได้): พื้นเดิม 2 ทำให้ env ตัวเดียวพาระบบกลับไปเป็นท่าที่เจ้าของสั่งห้าม —
@@ -810,6 +824,12 @@ async function aiMatchExamples(brief, rows, essences) {
 export async function getViralFewshotBlock({ category = '', emotionalTags = [], archetype = '', newsTitle = '', newsBrief = null, noHistory = false, teacherGuideEligible = false, cardEssence = '' } = {}) {
   const libCat = pickLibraryCategory({ category, emotionalTags, archetype });
 
+  // 🚫 25 ต.ค. 69: นักเขียนสาย TEXT ไม่ได้ครู (ค่าเริ่มต้น) — ไม่ดึงคลัง ไม่จดสมุดประวัติ · ได้ Style Pack ตามเดิม (VIRAL_STYLE_PACK=0 = ว่าง)
+  if (teacherGuideEligible && !_teachersOn()) {
+    console.log('[ViralFewshot] 🚫 ปิดคลังครู (ค่าเริ่มต้น · เปิดคืน VIRAL_TEACHERS=1) — นักเขียนได้การ์ด + Style Pack เท่านั้น');
+    return process.env.VIRAL_STYLE_PACK === '0' ? '' : getViralStylePack();
+  }
+
   let examplesBlock = '';
   try {
     // ── ขั้น 1: เอารายการโพสต์ (แคช 10 นาที) — โหมดจับคู่ต้องเห็น "ทั้งคลัง" (ข้ามหมวดได้) · โหมดเดิมเห็นแค่หมวด ──
@@ -939,7 +959,27 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
       //   ลำดับห้ามสลับ: ดึงแถว → _applyRealLikes(rows) → คัดโผ → weightedSample
       //   (ถ้าคัดก่อนทับไลก์ ตัวสุ่มจะได้ engagement_likes = 0 ทั้ง 202 ใบ เพราะในฐานข้อมูลจริงเป็น 0 หมด
       //    แล้ว weightedSample จะกลายเป็นสุ่มเท่ากันหมด = ทิ้งน้ำหนักไลก์จริงทั้งชุดโดยไม่มีใครสังเกต)
-      if (shortlistOn) {
+      // 🧭 25 ต.ค. 69: จับคู่ความหมาย (โค้ดล้วน · นิ่ง) — ได้ = ใช้ 2 ใบนี้ ไม่ผ่านตัวคัดโผ/ตัวสุ่ม · ไม่ได้/ปิดสวิตช์ = เส้นเดิมด้านล่าง
+      let conceptPicked = false;
+      // 🔴 ผู้ตรวจรอบ 2: ต้องผูก teacherGuideEligible — ไม่งั้นสาย URL (summarizeService · /content/new) ที่ prod ตั้ง VIRAL_SHORTLIST=1
+      //   เปลี่ยนจาก "คัดโผ+สุ่ม" เป็นจับคู่ความหมายทันทีที่ขึ้นระบบ (27/27 ข่าวต่างจาก HEAD) · สาย URL/polish = เส้นเดิมทุกไบต์
+      if (shortlistOn && teacherGuideEligible && _teacherConceptOn()) {
+        const cm = matchTeachers(
+          { title: newsTitle, coreStory: newsBrief?.coreStory || '', excerpt: newsBrief?.excerpt || '', cardEssence: cardEss },
+          rows || [], _loadEssences(), _hasWord,
+        );
+        if (!cm.fell) {
+          usable = cm.list;
+          pickMode = 'concept';
+          pickReason = cm.reason;
+          conceptPicked = true;
+          samplePool = usable;
+          console.log(`[ViralFewshot] 🧭 จับคู่ความหมาย: ${cm.reason}`);
+        } else {
+          console.log(`[ViralFewshot] 🧭 จับคู่ความหมายไม่ได้ (${cm.reason}) → ใช้ตัวคัดโผเดิม`);
+        }
+      }
+      if (shortlistOn && !conceptPicked) {
         const K = _shortlistK();
         const sl = shortlistExamples(
           { title: newsTitle, category, emotionalTags, archetype, libCat,
@@ -973,11 +1013,11 @@ export async function getViralFewshotBlock({ category = '', emotionalTags = [], 
         }
         samplePool = usable; // จดขนาดโผ "ที่ตัวสุ่มเห็นจริง" ลงสมุดประวัติ (ของเดิมจด 202 = อ่านผิดความหมาย)
       }
-      picks = rotate ? weightedSample(usable, 2) : usable.slice(0, 2);
+      picks = conceptPicked ? usable.slice(0, 2) : (rotate ? weightedSample(usable, 2) : usable.slice(0, 2));
     }
     if (picks.length > 0) {
       // ★ ผู้ตรวจจับได้: โหมดจับคู่เลือกข้ามหมวดได้ — หัวบล็อกห้ามประกาศหมวดผิดๆ ให้นักเขียน
-      const blockTitle = (pickMode === 'ai' || pickMode === 'score' || pickMode === 'score-fallback' || pickMode === 'shortlist')
+      const blockTitle = (pickMode === 'ai' || pickMode === 'score' || pickMode === 'score-fallback' || pickMode === 'shortlist' || pickMode === 'concept')
         ? 'โพสต์ไวรัลจริงที่จับคู่กับข่าวนี้ (โครงเรื่อง/อารมณ์ใกล้เคียง)'
         // 🔴 ถอยแล้วได้ตัวอย่างข้ามหมวด (ชั้น libCat ว่าง) → ห้ามบอกนักเขียนว่าเป็นหมวดเดียวกับข่าว
         : crossCat

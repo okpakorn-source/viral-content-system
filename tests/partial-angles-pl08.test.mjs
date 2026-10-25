@@ -30,6 +30,8 @@ const REAL = {
   '@/lib/utils/withTimeout': srcUrl('lib/utils/withTimeout.js'),
   '@/lib/utils/pipelineDeadline': srcUrl('lib/utils/pipelineDeadline.js'),
   '@/lib/utils/publishablePostText': srcUrl('lib/utils/publishablePostText.js'),
+  '@/lib/services/rawFactPresence': srcUrl('lib/services/rawFactPresence.js'), // ★ 25 ต.ค. 69 ข้อ 3: ด่านเตือนข้อมูลต้นฉบับหาย (pure · โค้ดล้วน)
+  '@/lib/services/genderNeutral': srcUrl('lib/services/genderNeutral.js'), // ★ 25 ต.ค. 69 ด่านเตือนเดาเพศ (pure · ไม่แก้เนื้อ)
 };
 const fnStub = (names) => names.map((n) => `export const ${n} = (...a) => globalThis.__PL08.${n}(...a);`).join('\n');
 const STUBS = {
@@ -141,7 +143,14 @@ function freshState(writer = {}) {
         throw new PipelineDeadlineError('write_A2');
       }
       S.calls.analyzeBilled += 1; // = ค่าเขียนที่จ่ายแล้ว 1 ครั้ง
-      const one = { style: 'แนว', title: `พาดหัว ${cardId}`, content: LONG_CONTENT(cardId) };
+      // ★ 25 ต.ค. 69 ข้อ 3: 'drop_facts' = นักเขียนตัดอายุ/จำนวนเงินจากต้นฉบับทิ้ง (ทดสอบป้าย _missingFacts)
+      // ★ 25 ต.ค. 69: 'gender_guess' = นักเขียนใส่ "เธอ" ทั้งที่ต้นฉบับไม่บอกเพศ (ทดสอบด่านแทนคำ)
+      const content = behavior === 'gender_guess'
+        ? LONG_CONTENT(cardId).replace(/ลุงสมชาย/u, 'เธอ')
+        : behavior === 'drop_facts'
+        ? LONG_CONTENT(cardId).replace(/วัย 62 ปี/gu, '').replace(/25,000 บาท/gu, 'ก้อนหนึ่ง')
+        : LONG_CONTENT(cardId);
+      const one = { style: 'แนว', title: `พาดหัว ${cardId}`, content };
       const versions = behavior === 'extra_version'
         ? [one, { ...one, title: `พาดหัวเกิน ${cardId}`, content: LONG_CONTENT(`${cardId}b`) }]
         : behavior === 'empty_title' ? [{ ...one, title: '' }] : [one];
@@ -181,7 +190,7 @@ async function withEnv(value, fn) {
 }
 
 /** รันงานจริงหนึ่งงานใต้เส้นตาย 700s (นาฬิกาหยุดนิ่ง) · คืนผล + ตัวนับ · console เงียบ */
-async function runScenario(mod, { writer = {}, mode } = {}) {
+async function runScenario(mod, { writer = {}, mode, text = THAI_BODY.repeat(2) } = {}) {
   globalThis.__PL08 = freshState(writer);
   const S = globalThis.__PL08;
   const logs = [];
@@ -192,7 +201,7 @@ async function runScenario(mod, { writer = {}, mode } = {}) {
   const { deadline } = manualPipelineDeadline(700_000);
   try {
     const run = withEnv(mode, () => runWithPipelineDeadline(deadline, () => mod.processAutoFlowText({
-      text: THAI_BODY.repeat(2),
+      text,
       sourceType: 'plain_text',
       workflowId: 'wf_pl08',
       user: { userId: 'u-pl08', userName: 'tester' },
@@ -336,4 +345,67 @@ test('mutation: ทุบเงื่อนไขรวมผล/คำเตื
   const r = await runScenario(noFloor, { writer: { card_1: 'throw', card_2: 'throw' } });
   assert.doesNotMatch(String(r.error?.message || ''), /^ผลเขียนไม่ครบทุกมุม \(0\/2 เวอร์ชัน\)/u,
     'ทุบพื้นแล้วเส้นทุกมุมล้มต้องเปลี่ยน (พิสูจน์ว่าพื้น ≥1 มุมคือสิ่งที่คงข้อความ/ขั้นเดิมไว้)');
+});
+
+// ★ 25 ต.ค. 69 (ข้อ 3 ผลทดสอบท่อทีละขั้น · ผู้ตรวจอิสระท้วง "ไม่มีเทสพิสูจน์ว่าคำเตือนไปถึงผลลัพธ์จริง"):
+//   ฉบับที่ไม่เจออายุ/จำนวนเงินจากข้อความดิบ ต้องได้ป้าย _missingFacts (รูปที่บอทอ่าน) ถึง analysisResult และเคสที่บันทึก · ฉบับครบไม่มีป้าย · สวิตช์ถอยไม่ติดป้าย
+test('H ข้อ 3: ป้าย _missingFacts ถึงผลลัพธ์จริงเฉพาะฉบับที่ตกข้อมูล · RAW_FACT_PRESENCE_WARN=0 ไม่ติดป้าย', async () => {
+  const mod = await loadAutoFlow();
+  const keep = process.env.RAW_FACT_PRESENCE_WARN;
+  try {
+    delete process.env.RAW_FACT_PRESENCE_WARN;
+    const r = await runScenario(mod, { writer: { card_2: 'drop_facts' } });
+    assert.equal(r.ok, true, r.error?.message);
+    const [v1, v2] = r.res.data.analysisResult.versions;
+    assert.equal(v1._missingFacts, undefined, 'ฉบับครบห้ามมีป้าย');
+    assert.deepEqual(v2._missingFacts?.missing, [{ type: 'age', text: 'วัย 62 ปี' }, { type: 'money', text: '25,000 บาท' }]);
+    assert.equal(v2._missingFacts.checked, true);
+    assert.deepEqual(r.S.saved[0].analysisResult.versions[1]._missingFacts, v2._missingFacts, 'ป้ายต้องถึงเคส workflow ที่บันทึก');
+    process.env.RAW_FACT_PRESENCE_WARN = '"0"';
+    const off = await runScenario(mod, { writer: { card_2: 'drop_facts' } });
+    assert.equal(off.ok, true);
+    assert.equal(off.res.data.analysisResult.versions[1]._missingFacts, undefined, 'ถอยแล้วต้องไม่ติดป้าย');
+  } finally {
+    if (keep === undefined) delete process.env.RAW_FACT_PRESENCE_WARN; else process.env.RAW_FACT_PRESENCE_WARN = keep;
+  }
+});
+
+// ★ 25 ต.ค. 69 ด่านเดาเพศ (รอบ 3 — เจ้าของเลือก "เตือนอย่างเดียว ไม่แก้เนื้อ" หลังผู้ตรวจรอบ 3 FAIL)
+//   ① ต้นฉบับใช้ "เธอ" เอง = ไม่เตือน ② ต้นฉบับมีผู้หญิง (แม่ค้า) = ป้าย "เช็คว่าหมายถึงใคร" ③ ต้นฉบับไม่บอกเพศ = ป้าย "น่าจะเดาเพศ" · ไม่แก้เนื้อทุกกรณี · ถอยได้
+test('I ด่านเดาเพศถึงผลลัพธ์จริงทั้ง 3 กรณี (รอบ 3: เตือนอย่างเดียว ไม่แก้เนื้อ) · GENDER_NEUTRAL_FIX=0 ไม่เตือน', async () => {
+  const mod = await loadAutoFlow();
+  const keep = process.env.GENDER_NEUTRAL_FIX;
+  try {
+    delete process.env.GENDER_NEUTRAL_FIX;
+    const w = { writer: { card_2: 'gender_guess' } };
+    // ① ต้นฉบับชุดหลักมี "เธอ" (แม่ค้า)
+    const same = await runScenario(mod, w);
+    const s2 = same.res.data.analysisResult.versions[1];
+    assert.match(s2.content, /เธอ/u);
+    assert.equal(s2._genderWarning, undefined);
+    assert.equal(s2._genderNeutralized, undefined);
+    // ② ต้นฉบับมีผู้หญิง (แม่ค้า) แต่ไม่ใช้ "เธอ" → เตือน ไม่แก้
+    const FEMALE_NO_PRONOUN = THAI_BODY.replace('เธอร้องไห้', 'แม่ค้าร้องไห้').repeat(2);
+    const warn = await runScenario(mod, { ...w, text: FEMALE_NO_PRONOUN });
+    assert.equal(warn.ok, true, warn.error?.message);
+    const w2 = warn.res.data.analysisResult.versions[1];
+    assert.match(w2.content, /เธอ/u, 'ห้ามแก้เนื้อเมื่อกำกวม');
+    assert.match(String(w2._genderWarning || ''), /เช็คว่า "เธอ" หมายถึงใคร/u);
+    assert.equal(warn.S.saved[0].analysisResult.versions[1]._genderWarning, w2._genderWarning, 'ป้ายต้องถึงเคสที่บันทึก');
+    // ③ ต้นฉบับไม่บอกเพศใครเลย → ไม่แก้เนื้อ (เจ้าของเลือกรอบ 3) · ติดป้าย "น่าจะเดาเพศ" ถึงเคสที่บันทึก
+    const NO_FEMALE = THAI_BODY.replace('เธอร้องไห้', 'เขาร้องไห้').replace('แม่ค้า', 'พ่อค้า').repeat(2);
+    const r = await runScenario(mod, { ...w, text: NO_FEMALE });
+    assert.equal(r.ok, true, r.error?.message);
+    const v2 = r.res.data.analysisResult.versions[1];
+    assert.match(v2.content, /เธอ/u, 'ห้ามแก้เนื้อ');
+    assert.match(String(v2._genderWarning || ''), /น่าจะเดาเพศ/u);
+    assert.equal(v2._genderNeutralized, undefined);
+    assert.equal(r.S.saved[0].analysisResult.versions[1]._genderWarning, v2._genderWarning, 'ป้ายต้องถึงเคสที่บันทึก');
+    process.env.GENDER_NEUTRAL_FIX = '0';
+    const off = await runScenario(mod, { ...w, text: NO_FEMALE });
+    assert.match(off.res.data.analysisResult.versions[1].content, /เธอ/u);
+    assert.equal(off.res.data.analysisResult.versions[1]._genderWarning, undefined);
+  } finally {
+    if (keep === undefined) delete process.env.GENDER_NEUTRAL_FIX; else process.env.GENDER_NEUTRAL_FIX = keep;
+  }
 });

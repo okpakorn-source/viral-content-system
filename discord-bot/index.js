@@ -481,17 +481,19 @@ async function pollJobUntilDone({ jobId, processingMsg, message, headers, queueU
           // แสดง pipeline steps ตามเวลาที่ผ่านไป (timing จาก real pipeline measurements)
           const elapsed = Math.round((Date.now() - pollStartTime) / 1000);
 
-          // Pipeline steps with real model/API info and accurate timing
+          // ★ 25 ต.ค. 69 (เจ้าของสั่งแก้ข้อ 9 ผลทดสอบท่อทีละขั้น): ป้ายเดิมตกยุค — มีขั้น "ดึงเนื้อหาจากเว็บ" ทั้งที่ระบบรับแต่ข้อความ
+            //   (TEXT_ONLY_MODE เปิดตั้งแต่ 16 ก.ค. 69) · ชื่อรุ่นผิดหมด (Gemini 2.0 Flash / GPT-5.5 / Claude Sonnet 4) · ไม่มีขั้นเลือกการ์ด/ตรวจแก้
+            //   → ขั้นตามท่อ TEXT จริง (autoFlowServiceText) · เวลาจากการวัดจริงข่าวพยาบาลร้อยเอ็ด (สกัด ~11 วิ · แตกประเด็น ~60 · โครง ~25 · การ์ด ~25 · เขียน ~40 · ตรวจแก้ 2–20)
+            //   ไม่ใส่ชื่อรุ่นแล้ว (model: null) — บอทอ่านสวิตช์รุ่นฝั่งเว็บไม่ได้ ใส่ไว้ก็ตกยุคอีกเมื่อเปลี่ยนรุ่น
           const PIPELINE_STEPS = [
-            { at: 0,   done: 2,   icon: '🔍', label: 'ตรวจจับแหล่งข้อมูล',                     detail: 'ตรวจสอบประเภท URL และพลัตฟอร์ม',                                  model: null },
-            { at: 2,   done: 12,  icon: '📡', label: 'ดึงเนื้อหาจากเว็บ',                      detail: 'Firecrawl → Jina → Direct fetch',                                  model: null },
-            { at: 12,  done: 26,  icon: '📰', label: 'สกัดเนื้อข่าว (AI)',                     detail: 'สกัด newsTitle + newsBody + category',                             model: 'Gemini 2.0 Flash' },
-            { at: 26,  done: 68,  icon: '🔍', label: 'วิเคราะห์มุมข่าว (AI)',                  detail: 'core story + key points + possible angles',                       model: 'GPT-5.5' },
-            // ★ 16 ส.ค. 69: ถอดคำว่า "ค้นหาข้อมูล Google" ออก — ค้นข้อมูลเสริมปิดเป็นค่าตั้งต้นแล้ว
-            //   ป้ายเดิมโฆษณาสิ่งที่ระบบไม่ได้ทำ = ทีมอ่านแล้วเข้าใจผิดว่าข่าวมีข้อมูลจากเน็ตประกอบ
-            { at: 68,  done: 160, icon: '🧬', label: 'วาง Blueprint โครงอารมณ์',                  detail: 'Emotional Blueprint (ค้นข้อมูลเสริมปิดอยู่ — ใช้เนื้อต้นฉบับอย่างเดียว)', model: 'GPT-5.5' },
-            { at: 160, done: 320, icon: '⚡', label: 'Classic + Enhanced (Parallel)',           detail: '2 Angles รันพร้อมกัน — Claude Sonnet 4 × 2',                      model: 'Claude Sonnet 4' },
-            { at: 320, done: 999, icon: '🚀', label: 'สรุปผลและบันทึก',                        detail: 'รวมผลลัพธ์ + บันทึกลงคลัง',                                        model: null },
+            { at: 0,   done: 2,   icon: '📥', label: 'รับข้อความข่าว',                         detail: 'ตรวจข้อความที่ส่งมา (ระบบรับเฉพาะข้อความ)',                         model: null },
+            { at: 2,   done: 14,  icon: '📰', label: 'สกัดเนื้อข่าว (AI)',                     detail: 'พาดหัว + เนื้อข่าว + หมวด จากข้อความดิบ',                             model: null },
+            { at: 14,  done: 75,  icon: '🔍', label: 'แตกประเด็น 4 มุม (AI)',                  detail: 'แก่นเรื่อง + ข้อเท็จจริงหลัก + มุมเล่า',                               model: null },
+            { at: 75,  done: 100, icon: '🧬', label: 'วางโครงอารมณ์ (AI)',                      detail: 'เปิด-ตึง-ปิด ของข่าว (ค้นข้อมูลเสริมปิดอยู่ — ใช้เนื้อต้นฉบับอย่างเดียว)', model: null },
+            { at: 100, done: 125, icon: '🎴', label: 'เลือกการ์ดสไตล์เขียน (AI)',                detail: 'เลือกสูตรการเล่าให้ 2 เวอร์ชัน ไม่ซ้ำกัน',                              model: null },
+            { at: 125, done: 170, icon: '✍️', label: 'เขียนข่าว 2 เวอร์ชันพร้อมกัน (AI)',          detail: 'มุมละ 1 เวอร์ชัน ตามการ์ดที่เลือกให้มุมนั้น',                          model: null }, // ★ 25 ต.ค. 69: ปิดคลังครูแล้ว (ค่าเริ่มต้น) — ห้ามโฆษณา "ตัวอย่างโพสต์ไวรัล"
+            { at: 170, done: 190, icon: '🛡️', label: 'ตรวจแก้',                                detail: 'คำเสี่ยง · ประโยคพัง · ข้อมูลต้นฉบับครบไหม · ความยาว',                  model: null },
+            { at: 190, done: 999, icon: '🚀', label: 'สรุปผลและบันทึก',                        detail: 'รวมผลลัพธ์ + บันทึกลงคลัง',                                        model: null },
           ];
 
           const stepLines = PIPELINE_STEPS.map(s => {
@@ -945,6 +947,9 @@ function buildWarningLines(version) {
     const extra = texts.length > 5 ? ` (+${texts.length - 5})` : '';
     lines.push(`⚠️ อาจตกข้อเท็จจริง: ${shown}${extra}`.slice(0, WARNING_LINE_MAX));
   }
+  // ★ 25 ต.ค. 69 ด่านเดาเพศ (genderNeutral · เจ้าของเลือก "เตือนอย่างเดียว ไม่แก้เนื้อ"): ข่าวมี "เธอ" ที่ต้นฉบับไม่ใช้ → ป้ายเตือนให้พนักงานเช็ค
+  const genderWarning = typeof version._genderWarning === 'string' ? version._genderWarning.trim() : '';
+  if (genderWarning) lines.push(`⚠️ ${genderWarning}`.slice(0, WARNING_LINE_MAX));
   const diversity = typeof version._diversityWarning === 'string' ? version._diversityWarning.trim() : '';
   if (diversity) lines.push(`⚠️ ${diversity}`.slice(0, WARNING_LINE_MAX));
   const viral = readViralScore(version._viralScore);

@@ -540,3 +540,16 @@ test('H7 ซอร์ส: breakdown sol ไม่ส่ง system สั้น /
   const writerLeak = mustReplace(TEXT_SRC, "callSmartAI('write', { prompt: multiPrompt,", "callSmartAI('write', { prompt: multiPrompt, ...slimSystem(BREAKDOWN_SYSTEM_PROMPT),", 'H7 writer');
   assert.throws(() => assertTextWiring(writerLeak));
 });
+
+// ★ 25 ต.ค. 69 (ข้อ 1 ผลทดสอบท่อทีละขั้น): กฎห้ามเดาเพศต้องอยู่ในขั้นที่ส่งข้อความเล่าต่อให้นักเขียน (แตกประเด็น + วางโครง) เท่านั้น
+test('I1 กฎห้ามเดาเพศ: BREAKDOWN + BLUEPRINT มีบรรทัดเดียวกัน ก่อนกฎเหล็ก · ขั้นอื่นไม่มี', () => {
+  const genderLine = /ห้ามเดาเพศจากชื่อ อาชีพ หรือบทบาท[^\n]*"เจ้าตัว" แทน เธอ\/เขา\/ผู้หญิง\/ผู้ชาย/u;
+  for (const name of ['BREAKDOWN_SYSTEM_PROMPT', 'BLUEPRINT_SYSTEM_PROMPT']) {
+    const sys = TSP[name];
+    assert.match(sys, genderLine, `${name}: ต้องมีกฎห้ามเดาเพศ`);
+    assert.ok(sys.indexOf('ห้ามเดาเพศจากชื่อ') < sys.indexOf(TSP.IRON_RULES_1_TO_4), `${name}: กฎต้องอยู่ก่อนก้อนกฎเหล็ก`);
+  }
+  for (const name of ['EXTRACT_SYSTEM_PROMPT', 'NEWS_DNA_SYSTEM_PROMPT', 'RESEARCH_SYSTEM_PROMPT']) {
+    assert.doesNotMatch(TSP[name], genderLine, `${name}: ไม่ต้องมี (ไม่ส่งข้อความเล่าต่อให้นักเขียน)`);
+  }
+});

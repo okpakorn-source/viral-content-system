@@ -199,7 +199,10 @@ ${_p}
     try {
       console.log(`[callAI] Trying model=${currentModel}`);
       const requestSignal = preparePipelineSignal(signal, `openai:${currentModel}`, 15_000);
-      const isNewModel = currentModel.startsWith('gpt-5') || currentModel.startsWith('o1') || currentModel.startsWith('o3');
+      // ★ 25 ต.ค. 69 (เจ้าของสั่งแก้ข้อ 7 ผลทดสอบท่อทีละขั้น): + ตระกูล gpt-6 (gpt-6-astra / gpt-6.1-sol ฯลฯ) — เดิมถูกนับเป็นรุ่นเก่า
+      //   → ส่ง temperature + max_tokens → 400 ทุกครั้ง → callAI ตกไป gpt-5.6-terra เงียบๆ (ตั้ง CARD_PICKER_MODEL=gpt-6.1-sol แล้วได้ terra)
+      //   ของเดิม: currentModel.startsWith('gpt-5') || currentModel.startsWith('o1') || currentModel.startsWith('o3')
+      const isNewModel = currentModel.startsWith('gpt-5') || currentModel.startsWith('gpt-6') || currentModel.startsWith('o1') || currentModel.startsWith('o3');
 
       // ★ 1 ส.ค. 69 (ออดิต): gpt-4o/gpt-4o-mini รับ completion สูงสุด 16384 — ส่งเพดานดิบ (เช่น 24000) ทำไม้สองตาย 400 ทุกครั้ง
       const _legacyCap = (currentModel === 'gpt-4o' || currentModel === 'gpt-4o-mini') ? 16384 : null;

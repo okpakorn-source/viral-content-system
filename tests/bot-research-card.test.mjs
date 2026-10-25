@@ -2888,13 +2888,16 @@ test('route /api/bot/posted (W2): editorMsgId ผ่านด่าน id เด
 
 // ── 6.6 byte-parity โหมดอื่น (สวิตช์เปิด · shadow/assist) ──
 // ลายนิ้วมือจับจากโค้ดเฟส 1 (827336d7 · ก่อนแก้ W2 · 1 ต.ค. 69) ด้วยตัวช่วยชุดนี้ทุกตัว · ★ 2 ต.ค. 69 คำนวณใหม่หลังตรึง os.hostname()=testhost (ค่าไม่ขึ้นกับเครื่อง · เทสถัดไปพิสูจน์ว่าโค้ดปัจจุบัน = ฉบับถอด W2 ทุกไบต์) — รันซ้ำ 2 รอบได้ค่าเดิม (นาฬิกา/id เสมือน)
+// ★ 25 ต.ค. 69 (ข้อ 9 ผลทดสอบท่อทีละขั้น — เจ้าของสั่งแก้ป้ายขั้นตอนบอท): ข้อความความคืบหน้าเปลี่ยนป้ายขั้น → transcript เปลี่ยน → ลายนิ้วมือใหม่ทั้ง 6
+//   พิสูจน์ก่อนอัปเดต: logs/delays/clientOpts/handlerCounts/pending เท่าเดิมทุกไบต์ทั้ง 6 ฉาก · transcript ต่างเฉพาะป้ายขั้น (ป้ายเก่า 5 ชื่อหายหมด)
+//   ค่าเดิม: shadow normal=0670734ffd6e · shadow resume=4c1482bfe015 · shadow late=3bd4d291c13d · assist normal=6f17c6407adf · assist resume=e96fe6657734 · assist late=cf66afd41b00
 const PHASE1_FINGERPRINTS = Object.freeze({
-  'shadow normal': '0670734ffd6ec96b4131a22466a8fb3ade443830cb831ea11173cb108d1dd4f9',
-  'shadow resume': '4c1482bfe0156643878b79b65c798aca65fb849d57388f4b6bf8913188ad6eba',
-  'shadow late': '3bd4d291c13d0c677d3375ae1afe00a54cef4c4ff426bc16f4047180088464a9',
-  'assist normal': '6f17c6407adfada869bc945366f63443e455a48a246cdb5e371fe76f842d230e',
-  'assist resume': 'e96fe6657734bd8b0412c4ad44a0a32a9881b2abf26485622655115a2f95a0a2',
-  'assist late': 'cf66afd41b00f1463c9ed526b4ae0a91596be7b3419b56e6c77a62bc632bb292',
+  'shadow normal': '02d133e4cca45b3667d36f3182ffc53af98a84ad59739540ec917926007ba2d1',
+  'shadow resume': '53c8265adbac99816c9896c6e59be07953135f1494748f9dec3a679102dc4aec',
+  'shadow late': '595020aa1fee5eca5e7e8e9fc8e98be979687fd2b1765dd04f3c3a0e5a887fff',
+  'assist normal': '5b12e332d9c3058f57d0f1c98d950e2db75efa8b276ce8626dcb4672a11ef6ff',
+  'assist resume': '181c6aacdd98bea5257c0dad0316fafb9468480678c6b1f71081b27fa9810bf8',
+  'assist late': '7cb88757d92d20796137afb0ee958f848a8b97bff42419ee541008d203f504c9',
 });
 
 function botFingerprint(r) {

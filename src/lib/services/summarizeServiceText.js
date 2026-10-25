@@ -18,6 +18,7 @@ import { buildNarrativePayload, formatNarrativePayload, checkNarrativeSimilarity
 import { clusterMatch, findClusterScore, mapCategory, EMOTION_CLUSTERS, CONFLICT_CLUSTERS } from '@/lib/ai/semanticClusters';
 import { randomUUID } from 'node:crypto';
 import { rethrowPipelineDeadline } from '@/lib/utils/pipelineDeadline';
+import { writerKeepFactsRuleLine } from '@/lib/services/rawFactPresence'; // ★ 25 ต.ค. 69 กฎใบสั่งเขียน "ข้อเท็จจริงหลักต้องอยู่ครบ" (ถอย WRITER_KEEP_FACTS_RULE=0)
 import { riskPromptWriterLines, riskPromptWriterShortLine } from '@/lib/ai/riskWords'; // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S2 · เจ้าของอนุมัติ): คำแทนในกฎ FACEBOOK SAFETY มาจากตารางกลาง (ถอย RISK_WORDS_LEGACY=1)
 import { slimSystem, EXTRACT_SYSTEM_PROMPT, BREAKDOWN_SYSTEM_PROMPT, BLUEPRINT_SYSTEM_PROMPT, NEWS_DNA_SYSTEM_PROMPT, RESEARCH_SYSTEM_PROMPT, CARD_PICKER_SYSTEM_PROMPT } from '@/lib/ai/taskSystemPrompts'; // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S8 · เจ้าของอนุมัติ) — OV-04: system สั้นเฉพาะงานให้ทุก call ที่ไม่ใช่งานเขียน (เดิมไม่ส่ง = ได้ DNA นักเขียน + กฎ 180 คำ + รายการคำเสี่ยง ~5,958 ตัวอักษร/นัด) · งานเขียน callSmartAI('write') ไม่แตะ · ถอย SYSTEM_PROMPT_SLIM=0 = args เดิมทุกไบต์
 import { buildBreakdownPrompt } from '@/lib/ai/factSourcePolicy'; // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S9 · เจ้าของอนุมัติ) — PL-23: พรอมต์แตกประเด็นเรียกเนื้อที่สกัดแล้วว่า "เนื้อที่สกัดแล้ว" + แนบ RAW จริง (rawSourceText) เป็นแหล่งความจริงหลัก (>12k ตัดพร้อมบอก) · ถอย NARRATIVE_LEGACY=1 = ห่วงโซ่ .replace เดิมทุกไบต์
@@ -1847,6 +1848,11 @@ Quote ตรงรวมห้ามเกิน 10% — ห้ามเปล�
       '- ★ ข่าวสุขภาพ/อาหาร/ยา: ถ้าต้นฉบับบอกว่าเป็นคำบอกเล่าหรือคำแนะนำ ต้องเก็บที่มานั้นไว้ในประโยคเดียวกัน ห้ามเขียนให้กลายเป็นคำแนะนำทั่วไปของผู้เขียน และปริมาณ/โดส/จำนวนหน่วยของอาหาร เครื่องดื่ม ยา หรือวิตามิน ใช้ได้เฉพาะเมื่อต้นฉบับระบุจำนวนและหน่วยนั้นจริง ไม่แน่ใจให้ตัดจำนวนออก ห้ามกะหรือเติมเอง\n' +
       '- ★ เรื่องเวลานอน: คำว่า “ทุกคืน” ใช้ได้เฉพาะเมื่อต้นฉบับระบุคำนี้ตรงๆ ห้ามเติมเพื่อทำพาดหัวหรือเนื้อหาให้แรงขึ้น\n' +
       '- ★ จากข้อความดิบ ห้ามเสกอุปกรณ์/ท่าทางเพื่อสร้างประโยคแบบ "ภาพ..." เช่น ต้นฉบับมีแค่ "กวาดลาน" ห้ามเติม "ภาพเด็กถือไม้กวาด" ให้เล่าตรงตามกริยาที่มีเท่านั้น\n' +
+      // ★ 25 ต.ค. 69 (เจ้าของสั่งแก้ข้อ 3 ผลทดสอบท่อทีละขั้น): นักเขียนตัดวันเวลา/คำชมเชยของต้นฉบับทิ้งแล้วใส่ประโยคปิดที่แต่งเองแทน
+      //   + เปลี่ยน "ประสานให้ญาติโทร" เป็น "สั่งให้ญาติโทร" · คู่กับด่านโค้ด rawFactPresence (autoFlowServiceText)
+      //   รอบ 2 (ผู้ตรวจอิสระ): ข้อความดิบ 90% ไม่มีวันที่ → "ต้องมีวันที่เสมอ" เสี่ยงดันให้แต่งวันที่ ⇒ "ระบุ = คงไว้ · ไม่ระบุ = ห้ามเติม"
+      //   · ตัวอย่างกริยาเป็นแบบทั่วไป ไม่ผูกเคสข่าว · ถอย: WRITER_KEEP_FACTS_RULE=0/off/false/no (ทนอัญประกาศ/ช่องว่าง)
+      writerKeepFactsRuleLine() +
       '- ⚠️ ห้ามตั้งคำถามปิดท้ายเด็ดขาด ห้ามจบด้วย "คุณคิดยังไง?", "เห็นด้วยไหม?" หรือคำถามใดๆ\n\n' +
       formalModeRule +
       '=== 🔍 QUALITY + WRITING STYLE (MANDATORY) ===\n' +

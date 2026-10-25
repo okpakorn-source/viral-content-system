@@ -495,3 +495,14 @@ test('F5 summarizeServiceText/summarizeService: บล็อก FACEBOOK SAFETY 
     assert.match(src, /import \{ riskPromptWriterLines, riskPromptWriterShortLine \} from '@\/lib\/ai\/riskWords';/u);
   }
 });
+
+// ★ 25 ต.ค. 69 (ข้อ 10 ผลทดสอบท่อทีละขั้น): "สายด่วน" = เบอร์ฉุกเฉิน ไม่ใช่คำล่อคลิก — ข่าวพยาบาลร้อยเอ็ดโดนนับทุกเวอร์ชัน
+test('K1 กฎ ด่วน: ไม่จับ "สายด่วน" · ยังจับ "ด่วน!" / "ข่าวด่วน" · ยกเว้น "ด่วนจัด" เดิม', () => {
+  const ids = (s) => findRiskWords(s).map((h) => h.rule.id);
+  assert.ok(!ids('พร้อมประสานให้ญาติโทรแจ้งสายด่วนกู้ชีพ').includes('ด่วน'));
+  assert.ok(!ids('โทรสายด่วน 1669').includes('ด่วน'));
+  assert.ok(ids('ด่วน! เกิดเหตุกลางเมือง').includes('ด่วน'));
+  assert.ok(ids('ข่าวด่วนวันนี้').includes('ด่วน'));
+  assert.ok(!ids('ต้องรีบด่วนจัด').includes('ด่วน'));
+  assert.deepEqual(rw.getRiskRule('ด่วน').prevBlock, ['สาย']);
+});

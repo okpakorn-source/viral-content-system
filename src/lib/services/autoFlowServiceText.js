@@ -32,6 +32,8 @@ import { isLegacyLengthOn, NEW_LENGTH_CFG } from '@/lib/ai/legacyLengthRules';
 //   (ปลายทาง dependency — ไม่เกิด circular import) เพื่อให้ log ฝั่งนี้ตรงกับที่ฝั่งเขียนใช้จริงเสมอ
 import { assignAngleClosings, closingTailMatches } from '@/lib/input-engine/narrativePayloadText';
 import { breakdownRawSourceArgs } from '@/lib/ai/factSourcePolicy'; // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S9 · เจ้าของอนุมัติ) — PL-23: ส่ง RAW จริง (ข้อความที่ผู้ใช้วาง) เข้าขั้นแตกประเด็นเป็นแหล่งความจริงหลัก · ถอย NARRATIVE_LEGACY=1 = args เดิมทุกไบต์
+import { annotateMissingRawFacts } from '@/lib/services/rawFactPresence'; // ★ 25 ต.ค. 69 ข้อ 3: ติดป้ายฉบับที่ไม่เจอวันที่/อายุ/จำนวนเงินจากต้นฉบับ (โค้ดล้วน · ถอย RAW_FACT_PRESENCE_WARN=0)
+import { neutralizeGuessedGender } from '@/lib/services/genderNeutral'; // ★ 25 ต.ค. 69 ด่านเดาเพศชั้นสุดท้าย: ข่าวมี "เธอ" ที่ต้นฉบับไม่ใช้ → ป้ายเตือน ไม่แก้เนื้อ (ถอย GENDER_NEUTRAL_FIX=0)
 import { isCardAuthorityR6Enabled } from '@/lib/ai/cardAuthority'; // 🎛️ สวิตช์ปลดหาง "ห้ามขึ้นต้นด้วยวันที่" (19 ส.ค. 69) — ห้ามอ่าน env CARD_AUTH* เอง ต้อง import จากไฟล์กลางเท่านั้น
 import {
   getActivePipelineDeadline,
@@ -1165,6 +1167,32 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
       }
       throw lengthError;
     }
+  }
+
+  // ★ 25 ต.ค. 69 ด่านเดาเพศ — รอบ 3 เจ้าของเลือก "เตือนอย่างเดียว ไม่แก้เนื้อ" (ผู้ตรวจรอบ 3: แทน "เจ้าตัว" ชี้ผิดคนเมื่อเรื่องมีหลายคน)
+  //   ข่าวมี "เธอ" ที่ต้นฉบับไม่ใช้ → ติดป้าย _genderWarning (บอทโชว์ใต้ข่าว) · ต้นฉบับใช้ "เธอ" เอง = ไม่เตือน · เนื้อข่าวไม่ถูกแก้
+  //   ทำหลังด่านความยาว · โค้ดล้วน · พังเงียบ = ข้าม · ถอย GENDER_NEUTRAL_FIX=0
+  try {
+    const genderFix = neutralizeGuessedGender(finalVersions, groundingSourceText);
+    finalVersions = genderFix.versions;
+    if (genderFix.warned.length > 0) {
+      addLog('Quality', `⚠️ ข่าวใช้ "เธอ" แต่ต้นฉบับไม่ใช้ (${genderFix.case === 'female' ? 'ต้นฉบับมีผู้หญิง' : 'ต้นฉบับไม่บอกเพศ'} — ไม่แก้ ให้พนักงานเช็ค): #${genderFix.warned.join(', #')}`);
+    }
+  } catch (genderErr) {
+    addLog('Quality', `⏭️ ข้ามด่านเตือนเดาเพศ: ${genderErr?.message || genderErr}`);
+  }
+
+  // ★ 25 ต.ค. 69 (ข้อ 3): วันที่/อายุ/จำนวนเงินจากข้อความดิบไม่เจอในฉบับไหน → ติดป้าย version._missingFacts
+  //   บอทโชว์ "⚠️ อาจตกข้อเท็จจริง: …" ใต้ข่าวชิ้นนั้นเอง (ไม่ใช้เลขเวอร์ชันในคำเตือนรวม — ฉบับอาจถูกกัก/สลับลำดับ)
+  //   เช็คหลังด่านความยาว + ด่าน Sol = เห็นเนื้อสุดท้ายที่พนักงานได้จริง · ไม่แก้เนื้อ ไม่เรียก AI · พังเงียบ = ข้าม · ถอย RAW_FACT_PRESENCE_WARN=0
+  try {
+    const rawFactCheck = annotateMissingRawFacts(finalVersions, groundingSourceText);
+    finalVersions = rawFactCheck.versions;
+    if (rawFactCheck.flagged.length > 0) {
+      addLog('Quality', `⚠️ ไม่เจอข้อมูลจากต้นฉบับ ${rawFactCheck.flagged.length} ฉบับ — ${rawFactCheck.flagged.map((f) => `#${f.version}: ${f.missing.map((m) => m.text).join('/')}`).join(' | ')}`);
+    }
+  } catch (rawFactErr) {
+    addLog('Quality', `⏭️ ข้ามด่านข้อมูลต้นฉบับหาย: ${rawFactErr?.message || rawFactErr}`);
   }
 
   ({ classic: classicVersionCount, enhanced: enhancedVersionCount } = countFinalVersionSources(finalVersions));
