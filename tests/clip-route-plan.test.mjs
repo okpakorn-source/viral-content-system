@@ -16,7 +16,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 
 const { planClipRoute, workerChip } = await import(
   new URL('../src/app/clip-transcript/ui/statusMeta.js', import.meta.url).href
@@ -77,18 +77,46 @@ test('เครื่องแอดมินดับ + Facebook/IG: ปุ่�
   }
 });
 
-test('ปุ่มสำรองที่กดได้ ต้องเตือนว่าของไม่ผ่านผู้ตรวจ (กันหยิบของกากไปใช้)', () => {
+test('ปุ่มสำรองที่กดได้ ต้องเตือนข้อจำกัดของ Vercel (คลิปยาวอาจดูไม่ครบ)', () => {
+  // ★ 26 ต.ค. 69: เครื่องยนต์ใหม่ไม่มีผู้ตรวจ/ตัวซ่อม AI ทั้งสองทาง — ความต่างจริงคือเวลาและที่เก็บไฟล์ของ Vercel
   const r = planClipRoute(YT, false);
-  assert.match(r.backup.why, /ตรวจ|ซ่อม/, 'ต้องเตือนว่าไม่ผ่านการตรวจ');
+  assert.match(r.backup.why, /ไม่ครบ/);
+  assert.doesNotMatch(r.backup.why, /ผู้ตรวจ|ตัวซ่อม/, 'ห้ามอ้างสิ่งที่ไม่มีแล้ว');
+});
+
+// ── สถานะเครื่อง "ไม่ทราบ" ไม่ใช่ "ดับ" (P13) ───────────────────────────────
+test('ไม่รู้สถานะเครื่อง: ปุ่มหลักเข้าคิวตามปกติ ไม่ขึ้นว่าดับ · ปุ่มสำรองปิดก่อน แล้วเปิดเมื่อไม่รู้ต่อเนื่องนาน (FB/IG ปิดเสมอ)', () => {
+  // ผู้ตรวจอิสระ 26 ต.ค.: "ไม่ทราบ" อาจยาวนาน (ไม่มีแถวชีพจร/ฐานสะดุด) — ปิดปุ่มสำรองตาย = ไม่มีทางถอดเลย
+  //   แต่เปิดทันทีก็ผิดกติกา 27 ส.ค. (หน้าเพิ่งโหลด/ชีพจรสะดุดแวบเดียว เครื่องอาจเปิดอยู่)
+  for (const unknown of [null, undefined]) {
+    for (const u of CLIPS) {
+      const meta = /facebook|fb\.watch|instagram/.test(u);
+      const short = planClipRoute(u, unknown);
+      assert.equal(short.mode, 'queue-unknown');
+      assert.equal(short.primary.action, 'queue');
+      assert.doesNotMatch(short.primary.label, /ดับ/, 'ไม่รู้ ≠ ดับ');
+      assert.equal(short.backup.enabled, false, 'ยังไม่นานพอ ห้ามเปิดปุ่มสำรอง');
+      if (!meta) assert.match(short.backup.why, /เกิน 2 นาที/);
+      const long = planClipRoute(u, unknown, { unknownLong: true });
+      assert.equal(long.backup.enabled, !meta);
+      if (!meta) assert.match(long.backup.why, /เฉพาะเมื่อแน่ใจว่าเครื่องดับ/);
+    }
+  }
+  // เครื่องพร้อม = ปิดเสมอ ไม่ว่าจะส่ง unknownLong มาหรือไม่
+  assert.equal(planClipRoute(YT, true, { unknownLong: true }).backup.enabled, false);
 });
 
 // ── ลิงก์ที่ไม่ใช่คลิป ────────────────────────────────────────────────────
-test('ลิงก์ข่าวเว็บ: ปุ่มหลักเปลี่ยนเป็นวิจัยข่าว (ไม่ต้องเพิ่มปุ่มที่ 3)', () => {
-  const r = planClipRoute(NEWS, true);
-  assert.equal(r.primary.action, 'news-hunt');
-  assert.equal(r.backup.enabled, false, 'ลิงก์ข่าวไม่มีของให้ถอดสำรอง');
-  assert.equal(planClipRoute(NEWS, false).primary.action, 'news-hunt', 'เครื่องดับก็ยังวิจัยข่าวได้');
+test('ลิงก์เว็บข่าว: กดไม่ได้ และบอกว่าระบบนี้ถอดเฉพาะคลิป (เลิกวิจัยลิงก์ข่าว 26 ต.ค. 69)', () => {
+  for (const alive of [true, false, null]) {
+    const r = planClipRoute(NEWS, alive);
+    assert.equal(r.primary.enabled, false);
+    assert.equal(r.primary.action, 'none');
+    assert.match(r.primary.why, /เฉพาะคลิป/);
+    assert.equal(r.backup.enabled, false, 'ลิงก์ข่าวไม่มีของให้ถอดสำรอง');
+  }
 });
+
 
 test('ยังไม่วางลิงก์: ปุ่มหลักยังกดได้ (จะขึ้นเตือนให้วางลิงก์) · ปุ่มสำรองปิด', () => {
   for (const v of ['', '   ', null, undefined]) {
@@ -100,7 +128,7 @@ test('ยังไม่วางลิงก์: ปุ่มหลักยั
 
 test('ทุกสถานะที่มีลิงก์ ต้องมีคำอธิบายให้พนักงานอ่านออกทั้งสองปุ่ม', () => {
   for (const u of [...CLIPS, NEWS]) {
-    for (const alive of [true, false]) {
+    for (const alive of [true, false, null]) {
       const r = planClipRoute(u, alive);
       assert.ok(r.primary.why.length > 10, `${u}/${alive} ปุ่มหลักต้องมีเหตุผล`);
       assert.ok(r.backup.why.length > 5, `${u}/${alive} ปุ่มสำรองต้องมีเหตุผล`);
@@ -168,14 +196,11 @@ test('🔴 ทั้งหน้าต้องมีทางเดียวท
 });
 
 // ── ด่านฝั่งเซิร์ฟเวอร์: คลาวด์ห้ามถอดคลิปเอง ────────────────────────────
-test('🔴 /hunt บนคลาวด์ต้องเข้าคิวเครื่องแอดมินทุกแพลตฟอร์ม (ไม่ใช่แค่ FB/IG)', () => {
-  const src = readFileSync(new URL('../src/app/api/clip-transcript/hunt/route.js', import.meta.url), 'utf8');
-  const gate = src.slice(src.indexOf("if (process.platform !== 'win32'"), src.indexOf('const jobs = createStore'));
-  assert.doesNotMatch(gate, /type === 'meta'/, "ด่านต้องไม่จำกัดแค่ FB/IG — YouTube/TikTok ก็ต้องเข้าคิว");
-  assert.match(gate, /!_fromWorker/, 'ต้องคงข้อยกเว้นให้เวิร์กเกอร์ ไม่งั้นคิวซ้อนคิวไม่รู้จบ');
-  // ยืนยันว่าเส้นยิงเข้า insight อยู่ "หลัง" ด่าน — ไม่งั้นจ่ายเงินก่อนถึงด่าน
-  assert.ok(src.indexOf("if (process.platform !== 'win32'") < src.indexOf('/api/clip-transcript/insight`'),
-    'ด่านต้องมาก่อนจุดที่เรียกถอด');
+// ★ 26 ต.ค. 69 (เฟส 4): /hunt และ /news-hunt ถูกลบทั้ง route (เลิกค้นข่าวคล้าย) — เหลือทางถอดคลิปทางเดียวคือ /insight
+test('🔴 route ค้นข่าวคล้าย/ถอดเสียงถูกลบแล้ว ไม่เหลือทางลัดไปถอดคลิป', () => {
+  for (const gone of ['hunt/route.js', 'news-hunt/route.js', 'route.js']) {
+    assert.equal(existsSync(new URL(`../src/app/api/clip-transcript/${gone}`, import.meta.url)), false, gone);
+  }
 });
 
 test('🔴 ทุกทางที่พาไปถอดคลิปได้ ต้องผ่านคิว ยกเว้นปุ่มสำรองทางเดียว', () => {
@@ -184,4 +209,14 @@ test('🔴 ทุกทางที่พาไปถอดคลิปได้
   assert.equal(direct, 1, `หน้านี้ยิง /insight ตรง ${direct} จุด — ต้องเหลือจุดเดียว (ในตัว extractInsight)`);
   const queued = [...PAGE.matchAll(/submitToQueue\(/g)].length;
   assert.ok(queued >= 4, `ทางที่ผ่านคิวต้องมีอย่างน้อย 4 (ปุ่มหลัก + ถอดใหม่ในคลัง 2 จุด + ทำใหม่ในบอร์ด) เจอ ${queued}`);
+});
+
+test('หน้าเว็บส่งสถานะเครื่องแบบ 3 ค่า (ไม่ทราบ = null) และปุ่มหลักปิดตามแผน', () => {
+  assert.match(PAGE, /const workerKnown = !unknownSince && !!worker\?\.known;/);
+  assert.match(PAGE, /planClipRoute\(url, workerKnown \? !!worker\.alive : null, \{ unknownLong: unknownSince > 0 && nowMs - unknownSince >= UNKNOWN_BACKUP_MS \}\)/);
+  assert.match(PAGE, /const UNKNOWN_BACKUP_MS = 2 \* 60 \* 1000;/);
+  assert.match(ZONE, /disabled=\{[^}]*!route\.primary\.enabled/);
+  const fn = PAGE.slice(PAGE.indexOf('const runPrimary'), PAGE.indexOf('const runBackup'));
+  assert.match(fn, /if \(!route\.primary\.enabled\) \{ setErr\(route\.primary\.why\); return; \}/);
+  assert.doesNotMatch(PAGE, /news-hunt|extractNewsHunt|extractHunt|\/api\/clip-transcript\/hunt/, 'เลิกค้นข่าวคล้ายบนหน้าเว็บแล้ว');
 });

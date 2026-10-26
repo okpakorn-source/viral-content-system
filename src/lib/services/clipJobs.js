@@ -1,6 +1,36 @@
 import { createStore } from '@/lib/persistStore';
+import { getSupabase, isSupabaseReady } from '@/lib/supabase';
 import { randomUUID } from 'crypto';
 import { cleanClipUrl, extractFirstUrl } from '@/lib/services/clipAgent/clipUrl'; // ★ 30 ก.ย. 69 (เคสล่ม pepedog89): ล้างลิงก์ก่อนเข้าคิว
+
+/**
+ * ลำดับคิวของใบงานที่ยังรอ — ใช้ร่วม job-status และ clip-agent/status
+ *   ★ 25 ต.ค. 69 (P1): Supabase นับด้วย count — เดิม getAll ทั้งคิว (รวมผลถอดเต็ม ~4.7 MB) ทุกรอบที่งานรอคิว
+ *   ★ 26 ต.ค. 69 (เฟส 4): ย้ายมาเป็นตัวกลาง เพราะ clip-agent/status ยังดึงทั้งคิวอยู่ (เอเจนต์ long-poll ทุก 2 วิ)
+ *   ไฟล์ (แล็บ/เทส) อ่านทั้งคิวเหมือนเดิม · ฐานสะดุด = โยน error ติดธง transient (ผู้เรียกตอบ 503/500 เอง)
+ */
+export async function queuePosition(job, { store = null, excludeId = '' } = {}) {
+  // excludeId = แถวชีพจรของ worker ที่อยู่ในคิวเดียวกัน (ผู้เรียกส่ง HEARTBEAT_ID มา) — ห้ามนับเป็นงาน
+  if (!isSupabaseReady()) {
+    const all = (await (store || createStore('clip-jobs')).getAll()).filter((j) => j && j.id !== excludeId);
+    const ahead = all.filter((j) => j.status === 'pending' && new Date(j.createdAt) < new Date(job.createdAt)).length;
+    const processing = all.filter((j) => j.status === 'processing').length;
+    return ahead + processing + 1;
+  }
+  const count = (q) => q.then(({ count: n, error }) => {
+    if (error) throw Object.assign(new Error(`นับคิวไม่สำเร็จชั่วคราว: ${error.message}`), { transient: true });
+    return n || 0;
+  });
+  const base = () => {
+    const q = getSupabase().from('store_items').select('id', { count: 'exact', head: true }).eq('store_name', 'clip-jobs');
+    return excludeId ? q.neq('id', excludeId) : q;
+  };
+  const [ahead, processing] = await Promise.all([
+    count(base().filter('data->>status', 'eq', 'pending').filter('data->>createdAt', 'lt', job.createdAt)),
+    count(base().filter('data->>status', 'eq', 'processing')),
+  ]);
+  return ahead + processing + 1;
+}
 
 const CLIP_HOSTS = [
   ['youtube', ['youtube.com', 'youtu.be']],
@@ -27,7 +57,11 @@ function badRequest(errorType, message) {
 }
 
 // คิวคลิปใช้กติกาเดียวกันทั้งหน้าเว็บและเอเจนต์ — คงพฤติกรรม submit เดิม
-export async function submitClipJob({ url: rawUrl, kind = 'insight', tidy = false, user = '', model = '', force = false }, { strictUrl = false } = {}) {
+export async function submitClipJob({ url: rawUrl, kind = 'insight', user = '', model = '', force = false }, { strictUrl = false } = {}) {
+  // ★ 26 ต.ค. 69 (เฟส 4 · เจ้าของเคาะ): เหลือโหมดเดียว = ถอดคลิปเป็นเนื้อข่าวช่องเดียว — โหมดบทสัมภาษณ์/ค้นข่าวคล้ายเลิกใช้
+  if (kind === 'transcript' || kind === 'hunt') {
+    throw badRequest('KIND_RETIRED', 'โหมดถอดบทสัมภาษณ์/ค้นข่าวคล้ายเลิกใช้แล้ว — ส่งเป็นงานถอดคลิปปกติ (ได้พาดหัว + เนื้อข่าว)');
+  }
   const MODEL_ALLOWED = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash'];
   const jobModel = MODEL_ALLOWED.includes(String(model)) ? String(model) : '';
   // ★ 30 ก.ย. 69 (เคสล่ม pepedog89): ล้างลิงก์ก่อนตรวจ — วางซ้อน 2 รอบ/มีข้อความปน → เหลือลิงก์แรกลิงก์เดียว + ตัด tracking
@@ -45,7 +79,7 @@ export async function submitClipJob({ url: rawUrl, kind = 'insight', tidy = fals
   const store = createStore('clip-jobs');
   const all = await store.getAll();
   // กันซ้ำทุกงาน active โดยเทียบชนิดและโมเดลด้วย แม้ส่ง force ก็คืนงานที่กำลังทำ
-  const normKind = kind === 'transcript' ? 'transcript' : kind === 'hunt' ? 'hunt' : 'insight';
+  const normKind = 'insight';
   const isActive = (j) => j.status === 'pending' || j.status === 'processing' || j.status === 'retry_wait';
   const recent = all.find(j => j.url === url && isActive(j)
     && (j.kind || 'insight') === normKind
@@ -61,7 +95,7 @@ export async function submitClipJob({ url: rawUrl, kind = 'insight', tidy = fals
   }
   const jobId = randomUUID();
   await store.add({
-    id: jobId, url, platform, kind: normKind, tidy: !!tidy,
+    id: jobId, url, platform, kind: normKind,
     user: String(user || 'ไม่ระบุชื่อ').slice(0, 40),
     ...(jobModel ? { model: jobModel } : {}),
     ...(force ? { force: true } : {}),

@@ -1,5 +1,23 @@
 import { NextResponse } from 'next/server';
 import { createStore } from '@/lib/persistStore';
+import { getSupabase, isSupabaseReady } from '@/lib/supabase';
+import { queuePosition } from '@/lib/services/clipJobs';
+import { HEARTBEAT_ID } from '../workerHeartbeat';
+
+const TABLE = 'store_items';
+const STORE_NAME = 'clip-jobs';
+
+// ★ 25 ต.ค. 69 (P1/P2): อ่านใบเดียว และแยก "ไม่พบใบ" (404) ออกจาก "ฐานสะดุด" (throw → 503)
+//   เดิม findById กลืน error ทุกแบบเป็น null → ฐานสะดุดชั่วคราวกลายเป็น "ไม่พบงานในคิว" แล้วหน้าเว็บเลิกติดตาม
+async function readJob(id) {
+  if (!isSupabaseReady()) return createStore(STORE_NAME).findById(id);
+  const { data, error } = await getSupabase().from(TABLE)
+    .select('data').eq('id', id).eq('store_name', STORE_NAME).maybeSingle();
+  if (error) throw Object.assign(new Error(`อ่านสถานะงานไม่สำเร็จชั่วคราว: ${error.message}`), { transient: true });
+  return data?.data || null;
+}
+
+// ★ 25 ต.ค. 69 (P1): ลำดับคิวนับด้วย count (ตัวกลาง queuePosition ใน clipJobs — ใช้ร่วมกับ clip-agent/status)
 
 /**
  * GET /api/clip-transcript/job-status?id=xxx (24 มิ.ย.) — UI poll สถานะงานคลิปในคิว
@@ -12,18 +30,12 @@ export async function GET(request) {
   try {
     const id = new URL(request.url).searchParams.get('id');
     if (!id) return NextResponse.json({ success: false, error: 'ต้องระบุ id' }, { status: 400 });
-    const store = createStore('clip-jobs');
-    const job = await store.findById(id);
+    const job = await readJob(id);
     if (!job) {
       return NextResponse.json({ success: false, error: 'ไม่พบงานในคิว (อาจถูกล้าง — ส่งใหม่ได้)', errorType: 'JOB_NOT_FOUND' }, { status: 404 });
     }
     let position = 0;
-    if (job.status === 'pending') {
-      const all = await store.getAll();
-      const ahead = all.filter(j => j.status === 'pending' && new Date(j.createdAt) < new Date(job.createdAt)).length;
-      const processing = all.filter(j => j.status === 'processing').length;
-      position = ahead + processing + 1;
-    }
+    if (job.status === 'pending') position = await queuePosition(job, { excludeId: HEARTBEAT_ID });
     return NextResponse.json({
       success: true, status: job.status, position,
       result: job.status === 'done' ? job.result : null,
@@ -43,6 +55,9 @@ export async function GET(request) {
     });
   } catch (error) {
     console.error('[ClipJobStatus]', error.message);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    if (error.transient) {
+      return NextResponse.json({ success: false, error: `${error.message} — งานยังทำอยู่ ลองเช็คใหม่อีกครั้ง`, errorType: 'JOB_STATUS_TEMPORARILY_UNAVAILABLE' }, { status: 503 });
+    }
+    return NextResponse.json({ success: false, error: error.message, errorType: 'JOB_STATUS_ERROR' }, { status: 500 });
   }
 }

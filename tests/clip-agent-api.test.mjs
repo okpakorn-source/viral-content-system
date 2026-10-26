@@ -177,17 +177,23 @@ test('submit 202 has the complete response shape and persists defaults in the re
   assert.deepEqual(body, { ok: true, jobId: body.jobId, status: 'pending', position: 1, platform: 'youtube', dup: false, statusUrl: `/api/clip-agent/status?id=${body.jobId}` });
   const saved = await jobs.findById(body.jobId);
   assert.equal(saved.kind, 'insight');
-  assert.equal(saved.tidy, false);
+  assert.equal(saved.tidy, undefined, 'tidy เลิกใช้พร้อมโหมดบทสัมภาษณ์ (26 ต.ค. 69)');
   assert.equal(saved.force, undefined);
   assert.equal(saved.user, 'codex-agent');
   assert.equal(saved.url, clipUrl);
   assert.ok(existsSync(join(tempRoot, 'data', 'clip-jobs.json')));
-  const transcript = await responseBody(await submit(submitRequest({ url: 'https://www.tiktok.com/@test/video/123', kind: 'transcript', force: true, user: 'agent-user' })), 202);
-  assert.equal(transcript.platform, 'tiktok');
-  const savedTranscript = await jobs.findById(transcript.jobId);
-  assert.equal(savedTranscript.kind, 'transcript');
-  assert.equal(savedTranscript.force, true);
-  assert.equal(savedTranscript.user, 'agent-user');
+  const forced = await responseBody(await submit(submitRequest({ url: 'https://www.tiktok.com/@test/video/123', kind: 'insight', force: true, user: 'agent-user' })), 202);
+  assert.equal(forced.platform, 'tiktok');
+  const savedForced = await jobs.findById(forced.jobId);
+  assert.equal(savedForced.kind, 'insight');
+  assert.equal(savedForced.force, true);
+  assert.equal(savedForced.user, 'agent-user');
+  // ★ 26 ต.ค. 69 (เฟส 4): โหมดถอดบทสัมภาษณ์เลิกใช้ — บอกเหตุผลชัด ไม่สร้างใบงาน
+  const before = (await jobs.getAll({ authoritative: true })).length;
+  const retired = await responseBody(await submit(submitRequest({ url: 'https://www.tiktok.com/@test/video/456', kind: 'transcript' })), 400);
+  assert.equal(retired.errorType, 'KIND_RETIRED');
+  assert.match(retired.error, /เลิกใช้/);
+  assert.equal((await jobs.getAll({ authoritative: true })).length, before);
 });
 
 test('active jobs deduplicate across force and all retry states without an age window', async () => {
@@ -219,27 +225,38 @@ test('legacy submit retains entire success, duplicate, BAD_URL and unsupported r
   });
 });
 
-test('legacy submit keeps hunt/model separation and permissive tidy/user/kind normalization', async () => {
-  const first = await responseBody(await legacySubmit(submitRequest({ url: clipUrl, kind: 'hunt', model: 'gemini-3.7-flash', tidy: 'yes', user: 'ก'.repeat(70) })));
+test('legacy submit keeps model separation and user/kind normalization · hunt/transcript retired (hostname ตรวจเข้ม 25 ต.ค. 69)', async () => {
+  // ★ 26 ต.ค. 69 (เฟส 4): โหมดค้นข่าวคล้าย/บทสัมภาษณ์เลิกใช้ — 400 KIND_RETIRED ไม่สร้างใบงาน
+  for (const kind of ['hunt', 'transcript']) {
+    const retired = await responseBody(await legacySubmit(submitRequest({ url: clipUrl, kind })), 400);
+    assert.equal(retired.success, false);
+    assert.equal(retired.errorType, 'KIND_RETIRED');
+  }
+  assert.deepEqual(await jobs.getAll({ authoritative: true }), []);
+  const first = await responseBody(await legacySubmit(submitRequest({ url: clipUrl, model: 'gemini-3.7-flash', user: 'ก'.repeat(70) })));
   const saved = await jobs.findById(first.jobId);
-  assert.equal(saved.kind, 'hunt');
+  assert.equal(saved.kind, 'insight');
   assert.equal(saved.model, 'gemini-3.7-flash');
-  assert.equal(saved.tidy, true);
+  assert.equal(saved.tidy, undefined);
   assert.equal(saved.user, 'ก'.repeat(40));
-  const second = await responseBody(await legacySubmit(submitRequest({ url: clipUrl, kind: 'hunt', model: 'gemini-3.6-flash' })));
+  const second = await responseBody(await legacySubmit(submitRequest({ url: clipUrl, model: 'gemini-3.6-flash' })));
   assert.notEqual(second.jobId, first.jobId);
-  const third = await responseBody(await legacySubmit(submitRequest({ url: clipUrl, kind: 'nonsense', model: 'disallowed', user: 123, tidy: 0 })));
+  const third = await responseBody(await legacySubmit(submitRequest({ url: clipUrl, kind: 'nonsense', model: 'disallowed', user: 123 })));
   assert.notEqual(third.jobId, first.jobId);
   const normalized = await jobs.findById(third.jobId);
   assert.equal(normalized.kind, 'insight');
   assert.equal(normalized.model, undefined);
   assert.equal(normalized.user, '123');
-  assert.equal(normalized.tidy, false);
   const unnamed = await responseBody(await legacySubmit(submitRequest({ url: `${clipUrl}-unnamed`, user: '' })));
   assert.equal((await jobs.findById(unnamed.jobId)).user, 'ไม่ระบุชื่อ');
-  const permissive = await responseBody(await legacySubmit(submitRequest({ url: 'https://example.org/?next=youtube.com', force: 'yes' })));
-  assert.equal(permissive.platform, 'youtube');
-  assert.equal((await jobs.findById(permissive.jobId)).force, true);
+  // ★ 25 ต.ค. 69 (P6): หน้าเว็บตรวจ hostname จริงแบบเดียวกับ API เอเจนต์ — ลิงก์ที่แค่มีชื่อแพลตฟอร์มปนใน query ต้องไม่เข้าคิว
+  //   (เดิมรับ https://example.org/?next=youtube.com เป็น youtube แล้ว yt-dlp บนเครื่องทีมไปโหลดปลายทางนั้น)
+  assert.deepEqual(await responseBody(await legacySubmit(submitRequest({ url: 'https://example.org/?next=youtube.com', force: 'yes' })), 400), {
+    success: false, error: 'ลิงก์ไม่รองรับ — ใช้ได้เฉพาะ TikTok / YouTube / Facebook(IG)', errorType: 'UNSUPPORTED_URL',
+  });
+  const forced = await responseBody(await legacySubmit(submitRequest({ url: 'https://m.youtube.com/watch?v=forced123', force: 'yes' })));
+  assert.equal(forced.platform, 'youtube');
+  assert.equal((await jobs.findById(forced.jobId)).force, true);
 });
 
 test('legacy cleanup keeps the >50 threshold and removes oldest terminal rows only', async () => {
@@ -626,4 +643,24 @@ test('compact result surfaces lowQuality flags, counts array receipts, keeps pen
   const clean = compactResult(caseRow());
   assert.equal(clean.lowQuality, false);
   assert.equal(clean.qualityNote, null);
+});
+
+// ★ 25 ต.ค. 69 (เครื่องยนต์ช่องเดียว · ผู้ตรวจอิสระจับ): ผลย่อสำหรับเอเจนต์ต้องมีเนื้อข่าวช่องเดียวและจุดที่ควรเช็ค
+test('compactResult: ใบแบบเนื้อข่าวช่องเดียวส่ง body + checks · ใบเก่าที่ไม่มี body ใช้ rawData', () => {
+  const single = compactResult({
+    id: 'single-1', url: 'https://vt.tiktok.com/x/', platform: 'tiktok', title: 'พาดหัว',
+    insight: {
+      engine: 'clip-single', headline: 'พาดหัว', body: 'เนื้อข่าวช่องเดียว\n\nย่อหน้าสอง', rawData: 'เนื้อข่าวช่องเดียว\n\nย่อหน้าสอง',
+      checks: [{ level: 'check', kind: 'name', text: 'ชื่อ "ก" ไม่พบในคลิป' }, { level: 'fixed', kind: 'quote', text: 'แก้คำพูด' }, { kind: 'x' }],
+    },
+  });
+  assert.equal(single.body, 'เนื้อข่าวช่องเดียว\n\nย่อหน้าสอง');
+  assert.deepEqual(single.checks, [
+    { level: 'check', kind: 'name', text: 'ชื่อ "ก" ไม่พบในคลิป' },
+    { level: 'fixed', kind: 'quote', text: 'แก้คำพูด' },
+  ]);
+  assert.equal(single.brain.engine, 'clip-single');
+  const old = compactResult({ id: 'old-1', insight: { headline: 'เก่า', rawData: 'เนื้อดิบเดิม' } });
+  assert.equal(old.body, 'เนื้อดิบเดิม');
+  assert.deepEqual(old.checks, []);
 });

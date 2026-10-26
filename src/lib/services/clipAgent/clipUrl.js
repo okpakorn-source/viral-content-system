@@ -1,12 +1,14 @@
 /**
  * ล้างลิงก์คลิปให้เป็นรูปเดียวกับที่คลังเก็บ (Fable 8 ก.ย. 69)
- *   คลัง clip-insights / clip-transcripts เก็บ record.url = cleanClipUrl(raw) (ดู src/app/api/clip-transcript/insight/route.js:150
- *   และ src/app/api/clip-transcript/route.js:23) → เอเจนต์ส่ง youtu.be/shorts/ลิงก์ติด fbclid มาค้น ต้องล้างก่อนเทียบ
+ *   คลัง clip-insights เก็บ record.url = cleanClipUrl(raw) (ดู cleanClipUrl ใน src/app/api/clip-transcript/insight/route.js)
+ *   → เอเจนต์ส่ง youtu.be/shorts/ลิงก์ติด fbclid มาค้น ต้องล้างก่อนเทียบ
+ *   (คลังบทถอดเก่า clip-transcripts ก็เก็บด้วยตรรกะเดียวกัน — route ถอดบทสัมภาษณ์ถูกลบในเฟส 4 · 26 ต.ค. 69 แต่ข้อมูลเก่ายังอ่านได้)
  *   สำเนาตรรกะเดียวกับต้นทาง (ต้นทางอยู่ในไฟล์ route ที่ import แล้วลากของหนักมาด้วย จึงไม่ import ตรง) — ถ้าแก้ต้นทาง ให้แก้ที่นี่ด้วย
  * ★ 30 ก.ย. 69 (เคสล่ม pepedog89): รหัสคลิป YouTube ต้องยาว 11 ตัว "พอดี" (ตัวถัดไปต้องไม่ใช่ตัวอักษรรหัส)
  *   ตอนนี้คิวคลิป (submitClipJob) ล้างลิงก์ด้วยฟังก์ชันนี้ก่อนเก็บ/กันซ้ำ — แบบเดิมตัดรหัสที่ยาวเกินเหลือ 11 ตัวเงียบๆ
  *   ทำให้ลิงก์คนละใบถูกนับเป็นใบซ้ำ (เทส clip-agent-api ล็อกว่าต้องแยกใบ) · รหัสจริงของ YouTube ยาว 11 ตัวเสมอ = ลิงก์จริงได้ผลเดิมทุกไบต์
- *   ★ 30 ก.ย. 69 (เคสล่ม pepedog89) รอบ 2 (R7): สำเนาใน insight/route.js และ clip-transcript/route.js แก้ให้ตรงกันแล้ว — ทั้ง 3 สำเนาต้องเหมือนกันทุกตัวอักษร
+ *   ★ 30 ก.ย. 69 (เคสล่ม pepedog89) รอบ 2 (R7): สำเนาใน insight/route.js แก้ให้ตรงกันแล้ว — ทั้ง 2 สำเนาต้องเหมือนกันทุกตัวอักษร
+ *     (เดิมมี 3 สำเนา · clip-transcript/route.js ถูกลบในเฟส 4 · 26 ต.ค. 69)
  */
 export function cleanClipUrl(raw) {
   const u = String(raw || '').trim();

@@ -1,6 +1,5 @@
 export const maxDuration = 800; // เผื่อดาวน์โหลด/บีบ/อัปโหลดคลิปยาว แต่ inference ถอดคลิปถูกล็อกไว้หนึ่งครั้งต่อคำขอ
 import { NextResponse } from 'next/server';
-import { extractClipInsight, extractInsightFromVideoBuffer } from '@/lib/services/clipInsightService';
 import { createStore } from '@/lib/persistStore';
 import { getClipVideoQueue } from '@/lib/services/clipQueue';
 import { pickCasesToPurge, CLIP_CASE_KEEP, archiveRowId, CLIP_ARCHIVE_STORE } from '@/lib/services/clipArchive';
@@ -8,10 +7,16 @@ import { extractFirstUrl } from '@/lib/services/clipAgent/clipUrl'; // ★ 30 �
 import { randomUUID } from 'crypto';
 
 // โหลดไฟล์วิดีโอ TikTok (tikwm) — ใช้บนคลาวด์ได้
-async function downloadTiktokBuffer(url) {
-  const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`);
+//   ★ 25 ต.ค. 69 (เครื่องยนต์ช่องเดียว): ส่ง meta มาด้วย = เก็บชื่อคลิปกับความยาวที่ tikwm ให้มาอยู่แล้ว (เดิมทิ้ง)
+//     ชื่อคลิปเป็นหลักฐานชื่อคนให้ตัวตรวจ · ความยาวใช้วางแผนช่วงที่จะดู
+async function downloadTiktokBuffer(url, meta = null) {
+  const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`, { signal: AbortSignal.timeout(60_000) });
   const data = await res.json();
   const playUrl = data?.data?.hdplay || data?.data?.play;
+  if (meta && data?.data) {
+    meta.caption = String(data.data.title || '').trim();
+    meta.durationSec = Math.round(Number(data.data.duration) || 0);
+  }
   // ★ 30 ก.ย. 69 (เคสล่ม pepedog89) รอบ 2 (R3): ข้อความ "ถาวร" ต้องบอกชัดที่ต้นทาง — worker (isTransient) ถือข้อความที่ไม่รู้จักเป็นชั่วคราว
   //   เดิม 'tikwm: ไม่พบลิงก์วิดีโอ' / 'วิดีโอใหญ่เกิน 150MB' หลุดเป็นชั่วคราว → ลองซ้ำ 80 รอบ (~4 ชม.) ทั้งที่คลิปถูกลบ/เป็นโพสต์รูป/ใหญ่เกิน
   //   (ใหญ่เกิน = โหลด 150MB+ ซ้ำทุกรอบ) · fetch ล้มจากเน็ตปล่อยข้อความเดิม (fetch failed = ชั่วคราว ถูกแล้ว)
@@ -27,7 +32,8 @@ async function downloadTiktokBuffer(url) {
     if (/rate[\s_-]?limit|\bapi limit\b|\blimit\b(?! in)|too many|busy|try again/i.test(msg)) throw new Error(`tikwm แน่นชั่วคราว (rate limit: ${msg.slice(0, 80)})`);
     throw new Error(`tikwm: ไม่พบวิดีโอ (ลิงก์เสีย/โพสต์รูป/ถูกลบ${data?.msg ? ': ' + String(data.msg).slice(0, 80) : ''}) — กดใหม่ไม่ช่วย`);
   }
-  const vres = await fetch(playUrl);
+  const vres = await fetch(playUrl, { signal: AbortSignal.timeout(300_000) });
+  if (vres?.ok === false) throw new Error(`tikwm โหลดไฟล์วิดีโอไม่สำเร็จ (HTTP ${vres.status}) แน่นชั่วคราว ลองใหม่ได้`);
   const buf = Buffer.from(await vres.arrayBuffer());
   if (buf.length < 10000) throw new Error('วิดีโอเล็กเกินไป');
   if (buf.length > 150 * 1e6) throw new Error('วิดีโอใหญ่เกิน 150MB — กดใหม่ไม่ช่วย');
@@ -39,7 +45,7 @@ async function downloadTiktokBuffer(url) {
 //   → เลข 503/429 โผล่โดยบังเอิญ worker (isTransient) ตีเป็นชั่วคราว วนลองซ้ำ · errorType หลุดเป็นเลข exit code
 //   ใหม่: หมดเวลา 180 วิ (ถูก kill) = บอก timeout (ชั่วคราว) · อื่นๆ = บรรทัดสุดท้ายของ stderr (ข้อความ ERROR ของ yt-dlp)
 //   ตัดลิงก์/พาธ/เลขยาวทิ้ง (เลขสถานะ HTTP 3 หลัก เช่น "HTTP Error 429" คงไว้ = ชั่วคราวถูกต้อง) · code = CLIP_DOWNLOAD_FAILED
-//   ถาวร/ชั่วคราวให้ข้อความตัดสินที่ worker เหมือนเดิม (retrySafe ยังติดที่ _loadClipBuffer — ยังไม่จ่ายค่าโมเดล)
+//   ถาวร/ชั่วคราวให้ข้อความตัดสินที่ worker เหมือนเดิม (retrySafe ยังติดที่ _loadClipForSingle — ยังไม่จ่ายค่าโมเดล)
 // ★ 30 ก.ย. 69 (เคสล่ม pepedog89) รอบ 3 (M1): ตัดสิน "ถาวร/ชั่วคราว" ที่นี่เอง — ห้ามส่งบรรทัด stderr ดิบให้ worker เดาจากคำ
 //   รอบ 2 ส่งบรรทัด ERROR ของ yt-dlp ตรงๆ → error ถาวรที่บังเอิญมีคำ parse/unavailable ("Cannot parse data; please report this issue…"
 //   · "Failed to parse JSON" · "Video unavailable") ถูก isTransient (ล็อก) ตีเป็นชั่วคราว → วนลองซ้ำ 80 รอบ
@@ -97,7 +103,9 @@ function _ytDlpTimeoutMs(env = process.env) {
 
 // โหลดไฟล์วิดีโอ Facebook/IG/YouTube (yt-dlp) — เครื่องทีม Windows เท่านั้น
 //   ★ 26 มิ.ย.: รับ fmt ได้ (YouTube ใช้ ≤480p กันไฟล์ใหญ่/อัปนาน · FB/IG ใช้ค่าเดิม)
-async function downloadMetaBuffer(url, fmt) {
+//   ★ 25 ต.ค. 69 (เครื่องยนต์ช่องเดียว): ส่ง meta มาด้วย = ให้ yt-dlp เขียนข้อมูลคลิป (info.json) รอบเดียวกับที่โหลด
+//     แล้วเก็บชื่อ/คำบรรยาย/ความยาวคลิปลง meta (ไม่ยิงเพิ่ม · อ่านไม่ได้ = ข้ามเงียบ ไม่ล้มงาน)
+async function downloadMetaBuffer(url, fmt, meta = null) {
   if (process.platform !== 'win32') throw new Error('Facebook/IG/YouTube โหลดวิดีโอได้เฉพาะเครื่องทีม (Windows)');
   const { execFile } = await import('child_process');
   const { promisify } = await import('util');
@@ -118,6 +126,7 @@ async function downloadMetaBuffer(url, fmt) {
   // ★ 25 ส.ค. 69 (ยังไม่ push): --merge-output-format mp4 — จำเป็นเมื่อสูตรเป็น DASH (ภาพ+เสียงคนละสตรีม)
   //   ไม่กระทบกรณีไฟล์รวมอยู่แล้ว (yt-dlp ข้ามขั้นรวมเอง)
   const args = ['-f', fmt || 'mp4/best[ext=mp4]/best', '--merge-output-format', 'mp4', '-o', out, '--no-warnings', '--no-playlist'];
+  if (meta) args.push('--write-info-json');
   if (existsSync(cookies)) args.push('--cookies', cookies);
   args.push(url);
   try {
@@ -127,6 +136,14 @@ async function downloadMetaBuffer(url, fmt) {
     if (!existsSync(out)) throw new Error('โหลดวิดีโอ Meta ไม่สำเร็จ');
     const buf = await readFile(out);
     if (buf.length < 10000) throw new Error('วิดีโอเล็กเกินไป');
+    if (meta) {
+      try {
+        const info = JSON.parse(await readFile(join(dir, 'video.info.json'), 'utf8'));
+        meta.caption = [info.title, info.description].map((s) => String(s || '').trim()).filter(Boolean)
+          .filter((s, i, a) => a.indexOf(s) === i).join('\n').slice(0, 1500);
+        meta.durationSec = Math.round(Number(info.duration) || 0);
+      } catch { /* ไม่มี info.json = ไม่มีแคปชั่น/ความยาว (ท่อหลักหาความยาวจากไฟล์เอง) */ }
+    }
     return buf;
   } finally {
     // ★ 30 ก.ย. 69 (เคสล่ม pepedog89) รอบ 3 (M2): ลบทั้งโฟลเดอร์ (.part/DASH/.ytdl)
@@ -139,47 +156,8 @@ async function downloadMetaBuffer(url, fmt) {
   }
 }
 
-// ★ 14 ส.ค. 69: Google ตัดสิทธิ์เส้น Files API (generateContent อ้างไฟล์ = 403 ทุกคีย์) เหลือแนบ inline ≤19MB —
-//   คลิปใหญ่กว่านั้น (เจอจริง: FB 85MB) บีบอัดด้วย ffmpeg (แปลงไฟล์ธรรมดา ไม่ใช่ generative — ไม่ขัดกฎห้ามเจนภาพ)
-//   ให้พอดีเพดานก่อนส่ง: 360p + บิตเรตคำนวณจากความยาวคลิป · ไม่มี ffmpeg/บีบแล้วยังเกิน → คืนไฟล์เดิม (เส้น Files API เดิม)
-const INLINE_MAX_BYTES = 19 * 1024 * 1024;
-async function _fitForInline(buf, url) {
-  if (buf.length <= INLINE_MAX_BYTES) return buf;
-  try {
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const { join } = await import('path');
-    const { tmpdir } = await import('os');
-    const { writeFile, readFile, unlink } = await import('fs/promises');
-    const execFileAsync = promisify(execFile);
-    await execFileAsync('ffmpeg', ['-version'], { timeout: 10_000 }); // เช็คว่าเครื่องมี ffmpeg (PATH)
-    const durSec = (await getClipDurationSec(url)) || 900; // หาความยาวไม่ได้ = เผื่อ 15 นาที
-    const audioK = 48;
-    const videoK = Math.max(60, Math.floor(((INLINE_MAX_BYTES * 8 * 0.93) / 1000) / durSec) - audioK);
-    const inP = join(tmpdir(), `fit_in_${Date.now()}.mp4`);
-    const outP = join(tmpdir(), `fit_out_${Date.now()}.mp4`);
-    await writeFile(inP, buf);
-    try {
-      await execFileAsync('ffmpeg', ['-y', '-i', inP, '-vf', 'scale=-2:360', '-c:v', 'libx264', '-preset', 'veryfast',
-        '-b:v', `${videoK}k`, '-maxrate', `${videoK}k`, '-bufsize', `${videoK * 2}k`,
-        '-c:a', 'aac', '-b:a', `${audioK}k`, '-ac', '1', '-movflags', '+faststart', outP],
-        { timeout: 600_000, maxBuffer: 1024 * 1024 * 20 });
-      const out = await readFile(outP);
-      if (out.length >= 10000 && out.length <= INLINE_MAX_BYTES) {
-        console.log(`[ClipInsight] 🗜️ บีบอัดคลิปใหญ่ ${(buf.length / 1e6).toFixed(1)}MB → ${(out.length / 1e6).toFixed(1)}MB (${videoK}k/360p ยาว ~${Math.round(durSec / 60)} นาที)`);
-        return out;
-      }
-      console.warn(`[ClipInsight] 🗜️ บีบแล้วยังเกินเพดาน (${(out.length / 1e6).toFixed(1)}MB) → ใช้ไฟล์เดิม`);
-      return buf;
-    } finally { await unlink(inP).catch(() => {}); await unlink(outP).catch(() => {}); }
-  } catch (e) {
-    console.warn(`[ClipInsight] 🗜️ บีบอัดไม่ได้ (${String(e.message).slice(0, 60)}) → ใช้ไฟล์เดิม`);
-    return buf;
-  }
-}
-
-// ★ 24 มิ.ย.: หาความยาวคลิป (วินาที) ด้วย yt-dlp — ใช้ตัดสินใจ "คลิปยาว→แยกทุกประเด็น"
-//   คืน 0 ถ้าหาไม่ได้ (ไม่มี yt-dlp/cloud) → ระบบจะใช้โหมด single (คลิปสั้น) เป็นค่าปลอดภัย ไม่ทำของเดิมพัง
+// ★ 24 มิ.ย.: หาความยาวคลิป (วินาที) ด้วย yt-dlp — เครื่องยนต์ช่องเดียวใช้วางแผนช่วงที่จะดู (YouTube)
+//   คืน 0 ถ้าหาไม่ได้ (ไม่มี yt-dlp/cloud) → ไล่ทางอื่นต่อ (YouTube Data API → ถามความยาวจาก AI)
 async function getClipDurationSec(url) {
   try {
     if (process.platform !== 'win32') return 0;
@@ -204,42 +182,31 @@ async function getClipDurationSec(url) {
 }
 
 /**
- * POST /api/clip-transcript/insight (16 มิ.ย. 69) — ถอดประเด็นข่าวจากคลิป → "ข้อมูลดิบ"
- *  • YouTube → Gemini ดูคลิปจริง (ภาพ+เสียง) | ล้ม → fallback ถอดเสียง + LLM
- *  • TikTok/FB → ถอดเสียง + LLM
- * ★ แยกจากเวิร์กโฟลว์ข่าว 100% — เรียกตัววิเคราะห์ตรงๆ ไม่แตะคิว/worker/ไลน์เขียน
+ * POST /api/clip-transcript/insight — ถอดคลิปเป็น "เนื้อข่าวช่องเดียว" (เครื่องยนต์ clipSingle · 25–26 ต.ค. 69)
+ *  ดูคลิปครบทุกช่วงด้วย Gemini → เขียนเนื้อข่าวช่องเดียว → ตรวจด้วยโค้ด → เก็บคลัง
+ * ★ แยกจากเวิร์กโฟลว์ข่าว 100%
  */
+// ★ 25 ต.ค. 69 (P6): ตัดสินแพลตฟอร์มจาก hostname จริง — เดิมจับคำ "facebook.com" ตรงไหนของลิงก์ก็ได้
+//   (http://192.168.1.1/?facebook.com ผ่านเป็น meta แล้ว yt-dlp ไปโหลดปลายทางในวงแลน) · กันซ้ำชั้นสองหลังหน้า submit
 function detectClipType(url) {
-  if (/youtube\.com|youtu\.be/i.test(url)) return 'youtube';
-  if (/tiktok\.com/i.test(url)) return 'tiktok';
-  if (/facebook\.com|fb\.watch|instagram\.com/i.test(url)) return 'meta';
+  let host = '';
+  try { host = new URL(url).hostname.toLowerCase(); } catch { return null; }
+  const on = (d) => host === d || host.endsWith(`.${d}`);
+  if (on('youtube.com') || on('youtu.be')) return 'youtube';
+  if (on('tiktok.com')) return 'tiktok';
+  if (on('facebook.com') || on('fb.watch') || on('instagram.com')) return 'meta';
   return null;
 }
 
 // ★ 22 มิ.ย.: แปลง error ดิบให้คนเข้าใจ — กรณี Gemini แน่นชั่วคราว (503) บอกให้กดใหม่ ไม่ใช่ "parse ไม่ได้" งงๆ
-// ★ 30 ก.ย. 69 (เคสล่ม pepedog89) รอบ 4 (F2): รับตัวเลือก { retrySafe } = ค่าที่ POST คำนวณแล้วว่าจะส่งให้ worker หรือไม่
-//   ไม่ส่งตัวเลือก = ข้อความเดิมทุกตัวอักษร · ส่ง retrySafe:false = ข้อความที่ไม่สัญญาว่าระบบจะลองใหม่เอง (ตอนนี้ใช้ในสาขา state=PROCESSING)
-function humanizeErr(raw, { retrySafe } = {}) {
+// ★ 26 ต.ค. 69 (เฟส 4 · ผู้ตรวจ): ลบสาขา state=PROCESSING/FAILED + ตัวเลือก { retrySafe } — เป็นข้อความของ Files API ใน clipAI ที่ลบแล้ว
+//   เครื่องยนต์ช่องเดียว (clipGeminiVideo) ไม่ผ่าน Files API จึงไม่มีทางเกิดข้อความนี้อีก
+function humanizeErr(raw) {
   const m = String(raw || '');
   // ★ 30 ก.ย. 69 (เคสล่ม pepedog89) รอบ 3 (M1): ข้อความจากตัวโหลดคลิป (yt-dlp · tikwm) ตัดสินถาวร/ชั่วคราวไว้แล้วที่ต้นทาง → คืนทั้งก้อน ห้ามแปลง
   //   เดิมสาขาข้างล่างเขียนทับ: "Unsupported URL" → "Gemini เปิดดูคลิปนี้ไม่ได้" (โทษผิดตัว) · "(… timeout …)" → ข้อความเก่า ~4.5 นาที
   //   · "Video unavailable"/"rate limit" → "Gemini มีคนใช้งานหนัก" (คำตัดสินหาย worker ตีกลับด้าน) — ต้องอยู่ก่อนทุกสาขา
   if (/^(?:yt-dlp โหลดวิดีโอไม่สำเร็จ|tikwm)/.test(m)) return m;
-  // ★ 30 ก.ย. 69 (เคสล่ม pepedog89) รอบ 2 (R5): ข้อความจากเส้น Files API (clipAI/geminiClient รอไฟล์ ACTIVE) ต้องมาก่อนสาขา timeout ทั่วไป
-  //   เดิมถูกแปลงเป็นข้อความเก่า "ระบบขยายเวลาเป็น ~4.5 นาทีแล้ว" (ผิด) และคำว่า timeout หายไป — worker (isTransient) เลยพึ่งแค่ค่าเริ่มต้น
-  //   ตอนนี้คงคำว่า timeout ให้ worker จับตรงๆ = ชั่วคราว (ล้มก่อนยิงโมเดล → route ติด retrySafe → ลองใหม่อัตโนมัติ)
-  //   FAILED = ไฟล์บน Gemini เสีย ลองใหม่กี่ครั้งก็ไม่ผ่าน → คง "กดใหม่ไม่ช่วย" (worker นับเป็นถาวร)
-  if (/state=PROCESSING/.test(m)) {
-    // ★ 30 ก.ย. 69 (เคสล่ม pepedog89) รอบ 3 (L4): ถ้อยคำเป็นกลาง — รอบ 2 สัญญา "ระบบจะลองใหม่อัตโนมัติ" ทุกกรณี
-    //   แต่ถอดตรง (ไม่ผ่านคิว) หรือเครื่องยนต์ใหม่จ่ายไปแล้ว (ไม่มี retrySafe) ระบบจะไม่ลองใหม่เอง · คงคำ timeout ให้ worker จับเป็นชั่วคราว
-    // ★ 30 ก.ย. 69 (เคสล่ม pepedog89) รอบ 4 (F2): คำขอนี้ไม่ส่ง retrySafe (เครื่องยนต์ใหม่จ่ายแล้ว/ไม่รู้ยอด) → worker จะไม่ลองซ้ำแน่นอน
-    //   ข้อความรอบ 3 ยังพูดว่า "ระบบจะลองใหม่ให้เอง" = สัญญาเกินจริง → บอกตรงๆ ว่าไม่ลองซ้ำเอง (กันจ่ายซ้ำ) ให้กดส่งใหม่เอง · คงคำ timeout
-    if (retrySafe === false) return 'Gemini ใช้เวลาประมวลผลไฟล์วิดีโอนานเกินที่รอ (timeout) — ระบบไม่ลองซ้ำเอง (กันจ่ายซ้ำ) กดส่งใหม่เองได้';
-    return 'Gemini ใช้เวลาประมวลผลไฟล์วิดีโอนานเกินที่รอ (timeout) — ถ้าส่งผ่านคิวเครื่องทีม ระบบจะลองใหม่ให้เอง · ถ้าถอดตรงให้กดส่งเข้าคิว';
-  }
-  if (/state=FAILED/.test(m)) {
-    return 'Gemini ประมวลผลไฟล์วิดีโอไม่สำเร็จ (ไฟล์บน Gemini เสีย) — กดใหม่ไม่ช่วย ต้องโหลดคลิปใหม่หรือใช้คลิปอื่น';
-  }
   // ★ 25 มิ.ย.: แยก 2 กรณีให้ผู้ใช้รู้ — (ก) ระบบเรา timeout เอง (คลิปยาว/ช้า)  (ข) Gemini แน่นจริง
   // (ก) timeout/deadline = คลิปยาวเกินเวลาที่ตั้ง (ไม่ใช่ Gemini ล่ม) → บอกตรงๆ + ทางออก
   if (/deadline|timed out|timeout|ETIMEDOUT|aborted|\b504\b/i.test(m)) {
@@ -280,197 +247,98 @@ function _markRetrySafe(e) {
 }
 
 /**
- * ★ 30 ก.ย. 69 (เคสล่ม pepedog89): โหลดคลิป TikTok/FB/IG + บีบให้พอดีแนบตรง "ครั้งเดียวต่อคำขอ"
- *   เดิมประตูถอดไม่เคยส่งไฟล์ให้เครื่องยนต์ใหม่ (videoBuffer = undefined → BAD_INPUT 0 token)
- *   → คลิป FB/IG/TikTok ตกเครื่องยนต์เดิม 100% (528/528 ใบ) · ตอนนี้โหลดที่นี่ที่เดียว แล้วส่งไฟล์เดียวกันให้ทั้งสองเครื่องยนต์
- *   โหลด (yt-dlp/tikwm) หรือบีบล้ม = ยังไม่ได้ยิง AI → ติดธง retrySafe ที่นี่ (ประตูถอดห้ามมีตัวจับ error — ด่านเทสกันยิงซ้ำ)
- *   🔴 วางไว้ก่อนตัวโหลด YouTube ตั้งใจ: ช่วงตัวโหลด YouTube → ประตูถอด มีด่านเทสห้ามยิง Gemini และต้องคืน null
+ * ★ 25 ต.ค. 69 (เครื่องยนต์ช่องเดียว · เจ้าของเคาะ "ตัดเปลี่ยนทันที"): โหลดคลิป + แคปชั่น + ความยาว "ครั้งเดียวต่อคำขอ"
+ *   TikTok/FB/IG = ไฟล์ (ไม่บีบที่นี่ — ท่อหลักผ่าท่อนให้เองเมื่อยาว/ใหญ่) · YouTube = ใช้ลิงก์ (Gemini ดูลิงก์ + ช่วงเวลา)
+ *   โหลดล้ม = ยังไม่ได้ยิง AI → ติดธง retrySafe เหมือนตัวโหลดเดิม
  */
-async function _loadClipBuffer(url, type) {
+async function _loadClipForSingle(url, type) {
+  if (type === 'youtube') {
+    const meta = { buffer: null, caption: '', durationSec: 0 };
+    try {
+      const r = await fetch(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(8_000) });
+      if (r.ok) meta.caption = String((await r.json())?.title || '').trim();
+    } catch { /* ไม่มีชื่อคลิปก็ถอดได้ */ }
+    // ★ ผู้ตรวจอิสระ 25 ต.ค. (รอบ 1–2): ความยาว YouTube ไล่จากถูก/เร็วไปแพง — หน้า watch → yt-dlp (เครื่องทีม) → YouTube Data API
+    //   ยังไม่ได้อีก = เครื่องยนต์ถามความยาวจาก AI แบบคำตอบสั้นก่อนแบ่งช่วง (ไม่ถอดทั้งคลิปรวดเดียว)
+    meta.durationSec = await _youtubeLengthFromPage(url);
+    if (!meta.durationSec) meta.durationSec = await getClipDurationSec(url);
+    if (!meta.durationSec) meta.durationSec = await _youtubeLengthFromApi(url);
+    return meta;
+  }
   try {
-    const raw = type === 'tiktok' ? await downloadTiktokBuffer(url) : await downloadMetaBuffer(url);
-    return await _fitForInline(raw, url); // >19MB บีบก่อน · บีบไม่ลง = คืนไฟล์เดิม (เดินเส้น Files API)
+    const meta = { caption: '', durationSec: 0 };
+    const buffer = type === 'tiktok' ? await downloadTiktokBuffer(url, meta) : await downloadMetaBuffer(url, undefined, meta);
+    return { buffer, caption: meta.caption, durationSec: meta.durationSec };
   } catch (e) {
     throw _markRetrySafe(e);
   }
 }
 
-async function transcribeFor(url, type) {
-  if (type === 'youtube') {
-    const { transcribeYoutube } = await import('@/lib/services/youtubeService');
-    const r = await transcribeYoutube({ url });
-    return r.success ? (r.rawText || r.text || '') : '';
-  }
-  if (type === 'tiktok') {
-    const { transcribeTiktok } = await import('@/lib/services/tiktokService');
-    const r = await transcribeTiktok({ url });
-    return r.success ? (r.rawText || r.text || '') : '';
-  }
-  if (type === 'meta') {
-    const { transcribeMetaReel } = await import('@/lib/services/metaReelsService');
-    const r = await transcribeMetaReel({ url });
-    return r.success ? (r.rawText || r.text || '') : '';
-  }
-  return '';
-}
-
-/**
- * ★ 27 ส.ค. 69: โหลดคลิป YouTube บนเครื่องทีม — สำเร็จคืนไฟล์ · ล้มคืน null (ไม่โยน)
- *
- * เจอสดตอนตรวจระบบ: YouTube ขึ้นด่านกันบอท ("Sign in to confirm you're not a bot")
- * yt-dlp โหลดไม่ได้เลยทุกลิงก์ ทั้งที่ 3 ชม.ก่อนยังปกติ → งานคลิป YouTube ล้มหมด
- * แต่เส้น "ให้ Gemini ดูลิงก์เอง" ยังทำงานได้ (ทดสอบยิงจริงผ่าน) → ใช้เป็นเส้นสำรอง
- *
- * 🔴 ทำไมต้องแยกออกมาเป็นฟังก์ชันนี้: buildInsight ห้ามมี try/catch (ด่านของผู้ตรวจกันยิง Gemini
- *    ซ้ำสองรอบในคำขอเดียว = จ่ายเงินซ้ำ) · ตัวนี้จับเฉพาะ "ความพลาดตอนโหลดไฟล์" ซึ่งยังไม่ได้ยิง
- *    Gemini เลยแม้แต่ครั้งเดียว จึงไม่ขัดกฎนั้น
- */
-async function _tryDownloadYouTube(url, fmt) {
+/** ความยาวคลิป YouTube จากหน้า watch ("lengthSeconds") · อ่านไม่ได้ = 0 */
+async function _youtubeLengthFromPage(url) {
   try {
-    return await _fitForInline(await downloadMetaBuffer(url, fmt), url);
-  } catch (dlErr) {
-    console.warn('[clip-insight] โหลด YouTube บนเครื่องทีมไม่สำเร็จ → ถอยไปให้ Gemini ดูลิงก์เอง:',
-      String(dlErr?.message || dlErr).slice(0, 160));
-    return null;
-  }
-}
-
-// ★ 22 มิ.ย.: รวมตรรกะสกัด "ข้อมูลดิบ" ไว้ในฟังก์ชันเดียว (ดูคลิป→fallback ถอดเสียง) — โยน error ที่มี .code
-//   เพื่อให้ห่อด้วยคิวได้สะอาด (ไม่ปน NextResponse กับงานหนัก)
-// ★ 14 ส.ค. 69 (เจ้าของสั่งเทียบสองโมเดล): model (optional) — ไม่ส่ง = VIDEO_MODEL ตามเดิมเป๊ะ
-/**
- * 🚪 ประตูเดียวของการถอดคลิป — เครื่องยนต์ใหม่ก่อน ล้มแล้วถอยไปเครื่องยนต์เดิม
- *   (เจ้าของสั่ง 27 ส.ค. 69) · หนึ่งคำขอ = เริ่มงานที่นี่ครั้งเดียวเท่านั้น
- */
-async function buildInsightWithBrain({ url, type, model = '', durationSec = 0, acc = null }) {
-  const brainOn = _brainPipelineEnabled(durationSec);
-  // ★ 30 ก.ย. 69 (เคสล่ม pepedog89): TikTok/FB/IG โหลด+บีบ "ครั้งเดียว" แล้วส่งไฟล์เดียวกันให้ทั้งสองเครื่องยนต์ (ห้ามโหลดซ้ำ)
-  //   ล้มตอนโหลด = error ติดธง retrySafe มาจากตัวโหลดเอง (ที่นี่ห้ามมีตัวจับ error) · YouTube คงเดิม (เครื่องยนต์ใหม่ใช้ลิงก์)
-  const videoBuffer = type === 'youtube' ? undefined : await _loadClipBuffer(url, type);
-  if (brainOn) {
-    if (videoBuffer && videoBuffer.length > INLINE_MAX_BYTES) {
-      // เครื่องยนต์ใหม่รับไฟล์แนบตรง ≤19MB เท่านั้น — คลิปยาวที่บีบไม่ลง ต้องไปเครื่องยนต์เดิมที่เดินเส้น Files API ได้
-      console.warn(`[clip-insight] ข้ามเครื่องยนต์ใหม่: ไฟล์ >19MB (${(videoBuffer.length / 1e6).toFixed(1)}MB) ต้องเดิน Files API → ใช้เครื่องยนต์เดิม`);
-    } else {
-      const fromBrain = await _tryBrainPipeline({ url, type, model, durationSec, videoBuffer, acc });
-      if (fromBrain) return fromBrain;                       // ✅ เครื่องยนต์ใหม่สำเร็จ
-    }
-  }
-  const legacy = await buildInsight({ url, type, model, videoBuffer }); // 🔁 ตัวสำรอง = เครื่องยนต์เดิม (ไฟล์เดียวกัน)
-  if (legacy && typeof legacy === 'object' && brainOn) {
-    legacy.brainFallback = true;   // ติดธงให้รู้ว่ารอบนี้ไม่ได้ผ่านการตรวจสอบ
-  }
-  return legacy;
-}
-
-async function buildInsight({ url, type, model = '', videoBuffer = null }) { // ★ 30 ก.ย. 69 (เคสล่ม pepedog89): รับไฟล์ที่ผู้เรียกโหลดแล้ว (ข้อ 1)
-  // ★ 25 มิ.ย.: ใช้ insight เดียว (enhanced) เสมอ — Gemini "ตัดสินเอง" (content-aware) ว่าคลิปมีหลายประเด็นไหม
-  //   มีหลายประเด็น → ใส่ subStories (เนื้อดิบแยกประเด็น) เพิ่มจาก rawData รวม · เรื่องเดียว → subStories ว่าง
-  //   เลิกพึ่ง getClipDurationSec (ยึด yt-dlp = พังบนคลาวด์ → เคยได้ single เสมอ) — ตอนนี้ทำงานทั้ง cloud+โลคัล
-  // ★ 26 มิ.ย. (ผู้ใช้สั่ง): ใช้ "Gemini ดูคลิปจริง" เท่านั้น — ปิด fallback ถอดเสียง+OpenAI
-  //   เหตุผล: Gemini ดูคลิป (เห็นภาพ+ตัวหนังสือบนจอ+ฟังเสียง) ถอดข้อมูลดิบมีประสิทธิภาพกว่ามาก
-  //   ถ้า Gemini แน่น → โยน error ให้ผู้ใช้ "รอ/กดใหม่" ดีกว่าได้ผลด้อยจาก transcript ล้วน
-  //   (ฟังก์ชัน transcript ยังอยู่ในโค้ด เผื่อเปิดใช้ภายหลัง — แค่ไม่เรียกในเส้นทาง insight)
-  if (type === 'youtube') {
-    // หนึ่งคำขอเลือกทางเดียวเท่านั้น เพื่อไม่ให้ URL inference และ file inference ซ้อนกัน:
-    //   - Windows ทีมงาน: โหลดคลิปแล้วส่งไฟล์ให้ Gemini หนึ่งครั้ง
-    //   - cloud: ส่ง URL ให้ Gemini หนึ่งครั้ง
-    // ★ 25 ส.ค. 69 (ยังไม่ push): YouTube เลิกให้ไฟล์รวมภาพ+เสียงในไฟล์เดียว (เหลือ 360p ที่ตอนนี้ 403)
-    //   สูตรเดิม (best[...] ล้วน) จึงตายด้วย "Requested format is not available" — ยิงจริงตาย 15/15 ลิงก์
-    //   → เติมท่า DASH (bv*+ba = โหลดภาพกับเสียงแยกแล้วรวมด้วย ffmpeg) ไว้หน้าสุด
-    //   ⚠️ ต้องใช้คู่กับ yt-dlp ≥ 2026.08 (เครื่องทีม runtime-r133 อัปแล้ว 25 ส.ค. · สำรอง .bak-2026aug25)
-    const YT_FMT = 'bv*[height<=480]+ba/b[height<=480]/bv*+ba/b';
-    const urlPassthrough = () => extractClipInsight({ url, platform: 'youtube', ...(model ? { model } : {}) });
-    // ★ 27 ส.ค. 69 (เจอสดตอนตรวจระบบ): YouTube ขึ้นด่านกันบอท — yt-dlp บนเครื่องทีมโหลดไม่ได้เลย
-    //   ("Sign in to confirm you're not a bot") ทั้งที่ก่อนหน้า 3 ชม. ยังโหลดได้ปกติ
-    //   แต่เส้น URL passthrough (ให้ Gemini ดูลิงก์เอง) **ยังทำงานได้** — ทดสอบยิงจริงผ่าน
-    //   → เครื่องทีมโหลดพลาดเมื่อไหร่ ให้ถอยไปใช้ URL passthrough แทน ห้ามล้มทั้งงาน
-    //   (YouTube เป็นแพลตฟอร์มเดียวที่มีเส้นสำรองแบบนี้ · FB/IG/TikTok ไม่มี)
-    if (process.platform === 'win32') {
-      // 🔴 กฎเดิมที่ห้ามผิด: หนึ่งคำขอ = ยิง Gemini ครั้งเดียว (ห้ามยิงไฟล์แล้วยิง URL ซ้ำ = จ่ายสองรอบ)
-      //    ตัวจับความพลาดของ "การโหลดไฟล์" อยู่ใน _tryDownloadYouTube (นอกฟังก์ชันนี้) เพื่อไม่ให้มี
-      //    try/catch ในเส้นตัดสินใจนี้เลย — ด่านของผู้ตรวจที่ห้าม catch จึงยังทำงานเหมือนเดิมทุกประการ
-      const buf = await _tryDownloadYouTube(url, YT_FMT);
-      if (buf) return await extractInsightFromVideoBuffer(buf, 'video/mp4', model); // ยิง Gemini ครั้งเดียว
-      const out = await urlPassthrough();                                           // โหลดพลาด = ยังไม่เคยยิง → ยิงครั้งเดียวเช่นกัน
-      if (out && typeof out === 'object') out.degradedTo = 'url-passthrough';        // ให้ใบงานรู้ว่าใช้เส้นสำรอง
-      return out;
-    }
-    return await urlPassthrough(); // cloud: URL passthrough เท่านั้น
-  }
-  // TikTok/FB/IG → โหลดไฟล์ให้ Gemini "ดูจริง" (เห็นภาพ+ตัวหนังสือบนจอ) — ไม่มี fallback ถอดเสียง
-  // ★ 30 ก.ย. 69 (เคสล่ม pepedog89): ใช้ไฟล์ที่ผู้เรียกโหลด+บีบมาแล้ว (ห้ามโหลดซ้ำ) · ไม่ส่งมา = โหลดเองเหมือนเดิม
-  //   (★ 14 ส.ค.: >19MB บีบก่อนแนบ inline — ขั้นบีบอยู่ใน _loadClipBuffer)
-  const buf = videoBuffer || await _loadClipBuffer(url, type);
-  return await extractInsightFromVideoBuffer(buf, 'video/mp4', model);
-}
-
-/**
- * 🧠 เครื่องยนต์ใหม่เป็นตัวหลัก · เครื่องยนต์เดิมเป็นตัวสำรองอัตโนมัติ (เจ้าของสั่ง 27 ส.ค. 69)
- *   "เสียบโค้ดใหม่ให้รันได้เลย แต่เอาเครื่องยนต์เดิมเป็นตัวสำรอง เวลามีปัญหาให้กลับไปเหมือนเดิมก่อน"
- *
- * สวิตช์ (ตั้งใน .env.local):
- *   CLIP_BRAIN_PIPELINE=0        ปิดเครื่องยนต์ใหม่ทั้งหมด → กลับไปใช้ของเดิม 100% (ถอยฉุกเฉิน)
- *   CLIP_BRAIN_MIN_SEC=600       ใช้เครื่องยนต์ใหม่เฉพาะคลิปยาวเกินกี่วินาที (ค่าเริ่มต้น 0 = ทุกคลิป)
- *
- * 🔴 ตัวสำรองทำงานเมื่อ: เครื่องยนต์ใหม่คืน ok:false ทุกกรณี (โควตาหมด · เซิร์ฟเวอร์ล่ม · โหลดคลิปพลาด ฯลฯ)
- *    ผลจากเครื่องยนต์เดิมจะติดธง brainFallback ไว้ให้รู้ว่ารอบนี้ไม่ได้ผ่านการตรวจสอบ
- */
-function _brainPipelineEnabled(durationSec) {
-  if (process.env.CLIP_BRAIN_PIPELINE === '0') return false;
-  const min = parseInt(process.env.CLIP_BRAIN_MIN_SEC || '0', 10);
-  if (Number.isFinite(min) && min > 0) {
-    const d = Number(durationSec) || 0;
-    if (d > 0 && d < min) return false;   // คลิปสั้นกว่าเกณฑ์ → ใช้ของเดิม (ประหยัด)
-  }
-  return true;
-}
-
-/** เรียกเครื่องยนต์ใหม่แบบไม่โยน — สำเร็จคืน insight · ล้มคืน null (ให้ผู้เรียกถอยไปของเดิม) */
-// ★ 30 ก.ย. 69 (เคสล่ม pepedog89): จดโทเคนที่เครื่องยนต์ใหม่ใช้ไปก่อนล้มลง acc.brainSpentTokens
-//   POST ใช้ตัดสิน retrySafe — ใช้ไป > 0 = อาจจ่ายค่าโมเดลแล้ว ห้ามให้ worker ลองซ้ำอัตโนมัติ
-//   ยอดเพี้ยน/พังผิดคาด (ไม่รู้ยอด) = จด -1 ถือว่าอาจจ่ายแล้ว (ฝั่งปลอดภัย)
-// ★ 30 ก.ย. 69 (เคสล่ม pepedog89) รอบ 2 (R2): ยอดที่ใช้ตัดสิน = บิลจริง ไม่ใช่ spentTokens อย่างเดียว
-//   spentTokens (= brain.costs) นับเฉพาะรอบที่ "รับผล" และ >100 token → รอบที่ถูกบิลแต่ล้ม (MAX_TOKENS/BAD_JSON/หมดเวลาฝั่งเรา) นับ 0
-//   brain.usage.totalTokens รวม "ทุก attempt" ที่ Gemini คืน usage (= บิลจริงรวม retry — clipBrainPipeline.js onUsage)
-//   ยอดบิล 0 จะนับว่า "ยังไม่จ่าย" (จด 0) เฉพาะล้มก่อนถึงผู้ให้บริการ (ไม่มีคีย์/ไฟล์เสีย/ใหญ่เกิน/ไม่มีต้นทาง)
-//   ล้มแบบอื่นโดยไม่มี usage (เน็ตหลุด/หมดเวลาระหว่างรอคำตอบ) = อาจถูกบิลแล้ว → จด -1 ห้าม retrySafe
-async function _tryBrainPipeline({ url, type, model, durationSec, videoBuffer, acc = null }) {
-  try {
-    const { runClipBrainPipeline } = await import('@/lib/services/clipBrain/clipBrainPipeline');
-    const r = await runClipBrainPipeline({
-      url, isYouTube: type === 'youtube', videoBuffer, durationSec, model, caption: '',
+    const r = await fetch(url, {
+      headers: { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36', 'accept-language': 'th,en;q=0.8' },
+      signal: AbortSignal.timeout(10_000),
     });
-    if (r.ok && r.insight) return r.insight;
-    const billed = Math.max(Number(r.spentTokens) || 0, Number(r.brain?.usage?.totalTokens) || 0);
-    const PRE_PROVIDER = new Set(['BAD_INPUT', 'TOO_LARGE', 'NO_KEY', 'PIPE_NO_SOURCE']);
-    if (acc) acc.brainSpentTokens = billed > 0 ? billed : (PRE_PROVIDER.has(String(r.errorType)) ? 0 : -1);
-    console.warn(`[clip-insight] เครื่องยนต์ใหม่ล้ม (${r.errorType}) ใช้ไป ${billed} token (บิลรวมทุกรอบ) → ถอยไปเครื่องยนต์เดิม:`,
-      String(r.error || '').slice(0, 160));
-    return null;
-  } catch (e) {
-    if (acc) acc.brainSpentTokens = -1; // ไม่รู้ว่าใช้ไปเท่าไร → ถือว่าอาจจ่ายแล้ว
-    console.warn('[clip-insight] เครื่องยนต์ใหม่พังผิดคาด → ถอยไปเครื่องยนต์เดิม:', String(e?.message || e).slice(0, 160));
-    return null;
-  }
+    if (!r.ok) return 0;
+    const m = (await r.text()).match(/"lengthSeconds":"(\d+)"/);
+    return m ? Math.round(Number(m[1]) || 0) : 0;
+  } catch { return 0; }
 }
 
-// ★ (เลิกใช้ชั่วคราว 26 มิ.ย. — เก็บไว้เผื่อเปิด fallback ถอดเสียงภายหลัง)
-async function _buildInsightTranscriptFallback({ url, type }) {
-  const rawText = await transcribeFor(url, type);
-  if (!rawText || rawText.length < 40) {
-    const e = new Error('ดูคลิป/ถอดเสียงไม่สำเร็จ — คลิปอาจไม่มีเสียง หรือ Facebook/IG ทำได้เฉพาะเครื่องทีม'); e.code = 'CLIP_FAILED'; throw e;
-  }
-  return await extractClipInsight({ url, platform: 'transcript', rawText });
+/** ความยาวคลิป YouTube จาก YouTube Data API v3 (YOUTUBE_API_KEY ที่ระบบมีอยู่แล้ว · 1 หน่วยโควตา) · อ่านไม่ได้ = 0 */
+async function _youtubeLengthFromApi(url) {
+  try {
+    const key = process.env.YOUTUBE_API_KEY;
+    const id = String(url).match(/[?&]v=([A-Za-z0-9_-]{11})/)?.[1];
+    if (!key || !id) return 0;
+    const r = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${id}&key=${encodeURIComponent(key)}`, { signal: AbortSignal.timeout(8_000) });
+    if (!r.ok) return 0;
+    const iso = String((await r.json())?.items?.[0]?.contentDetails?.duration || '');
+    const m = iso.match(/^P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/);
+    if (!m) return 0;
+    return ((Number(m[1]) || 0) * 86400) + ((Number(m[2]) || 0) * 3600) + ((Number(m[3]) || 0) * 60) + (Number(m[4]) || 0);
+  } catch { return 0; }
+}
+
+// ล้มก่อนถึงผู้ให้บริการ AI = ยังไม่จ่ายเงิน — ใช้จดยอดลง acc เพื่อวินิจฉัยเท่านั้น
+//   (ความผิดพลาดของเครื่องยนต์ไม่ติดธง retrySafe อยู่แล้ว · retrySafe มาจากตัวโหลดคลิปเท่านั้น)
+const SINGLE_PRE_PROVIDER = new Set(['BAD_INPUT', 'DURATION_UNKNOWN', 'NO_FFMPEG', 'SEG_NO_INPUT', 'SEG_NO_PLAN', 'SEG_NO_FFMPEG', 'SEG_TOO_MANY', 'SEG_ALL_FAILED', 'SEG_ERROR', 'NO_KEY']);
+
+async function _logClipUsage(usage) {
+  if (process.env.CLIP_USAGE_LOG === '0') return;
+  try { (await import('@/lib/ai/usageLogger')).logApiUsage(usage); } catch { /* มิเตอร์พลาดต้องไม่ล้มงาน */ }
+}
+
+/** 🚪 ประตูเดียวของการถอดคลิป (25 ต.ค. 69) — เครื่องยนต์ช่องเดียว · หนึ่งคำขอ = เริ่มงานที่นี่ครั้งเดียว · ไม่มีเครื่องยนต์สำรอง */
+async function buildInsightSingle({ url, type, model = '', acc = null }) {
+  const src = await _loadClipForSingle(url, type);
+  const { runClipSinglePipeline } = await import('@/lib/services/clipSingle/pipeline');
+  const r = await runClipSinglePipeline({
+    url, type, videoBuffer: src.buffer, caption: src.caption, durationSec: src.durationSec, model, onUsage: _logClipUsage,
+  });
+  if (r.ok && r.insight) return r.insight;
+  const spent = Number(r.spentTokens) || 0;
+  if (acc) acc.brainSpentTokens = spent > 0 ? spent : (SINGLE_PRE_PROVIDER.has(String(r.errorType)) ? 0 : -1);
+  const err = new Error(r.error || 'ถอดคลิปไม่สำเร็จ');
+  err.code = r.errorType || 'SINGLE_FAILED';
+  throw err;
 }
 
 // ★ 8 ก.ค.: ด่านตรวจคุณภาพก่อนเก็บคลัง — เช็คง่ายๆ ไม่เรียก AI (เคยมีเคส rawData ว่าง 0 ตัวอักษรหลุดเข้าคลัง
 //   จาก JSON ถูกตัดท้ายแล้วซ่อมไม่ครบ) — คืน [] = ผ่าน, ไม่ผ่านคืนรายการปัญหา
 const RAWDATA_MIN_CHARS = 300;
+// ★ 25 ต.ค. 69: เนื้อข่าวช่องเดียว "ยาวตามเนื้อคลิป" — คลิปสั้นมาก/เนื้อน้อยได้เนื้อสั้นโดยชอบธรรม จึงใช้เกณฑ์ต่ำกว่า
+const SINGLE_BODY_MIN_CHARS = 120;
+const minRawChars = (insight) => (insight?.engine === 'clip-single' ? SINGLE_BODY_MIN_CHARS : RAWDATA_MIN_CHARS);
 function insightQualityIssues(insight) {
   const issues = [];
   const raw = String(insight?.rawData || '');
-  if (raw.length < RAWDATA_MIN_CHARS) issues.push(`เนื้อดิบสั้นผิดปกติ (${raw.length} ตัวอักษร)`);
+  if (raw.length < minRawChars(insight)) issues.push(`เนื้อดิบสั้นผิดปกติ (${raw.length} ตัวอักษร)`);
+  // ★ ผู้ตรวจอิสระ 25 ต.ค.: บางช่วงของคลิปดูไม่สำเร็จ = เนื้อข่าวไม่ครบ → ติดธง (คลังกันซ้ำจะไม่คืนใบนี้ให้ลิงก์เดิม)
+  const missed = (Array.isArray(insight?.checks) ? insight.checks : []).filter((c) => c?.kind === 'segment').length;
+  if (insight?.engine === 'clip-single' && missed) issues.push(`ดูคลิปไม่สำเร็จ ${missed} ช่วง เนื้อข่าวจึงไม่ครบ`);
   if (!String(insight?.headline || '').trim()) issues.push('ไม่มีหัวข้อข่าว');
   return issues;
 }
@@ -502,9 +370,11 @@ export async function POST(request) {
       try {
         const store = createStore('clip-insights');
         const all = await store.getAll();
+        // ★ 25 ต.ค. 69 (P9): ไม่คืนผลจากเครื่องยนต์สำรองที่ไม่ผ่านด่านตรวจ (brainFallback) · ใบที่ปักหมุดขึ้นก่อน
         const hit = all
-          .filter(c => c.url === url && !c.lowQuality && String(c.insight?.rawData || '').length >= RAWDATA_MIN_CHARS)
-          .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
+          .filter(c => c.url === url && !c.lowQuality && !c.insight?.brainFallback
+            && String(c.insight?.rawData || '').length >= minRawChars(c.insight))
+          .sort((a, b) => Number(!!b.chosen) - Number(!!a.chosen) || new Date(b.createdAt) - new Date(a.createdAt))[0];
         if (hit) {
           console.log(`[ClipInsight] ⚡ ผลจากคลัง (เคยถอดแล้ว ${hit.createdAt}): ${url.slice(0, 60)}`);
           return NextResponse.json({ success: true, data: { id: hit.id, platform: hit.platform, ...hit.insight, cached: true, cachedAt: hit.createdAt } });
@@ -518,16 +388,11 @@ export async function POST(request) {
     const startedAt = Date.now();
     let insight;
     const attempts = 1;
-    // ความยาวคลิป — ใช้เฉพาะตอนตั้งเกณฑ์ CLIP_BRAIN_MIN_SEC เท่านั้น (ไม่ตั้ง = ไม่ต้องเสียเวลาถาม yt-dlp)
-    //   รู้ไม่ได้ = 0 → ปล่อยผ่านเข้าเครื่องยนต์ใหม่ (มันถามความยาวจาก AI เองอยู่แล้ว)
-    let durationSec = 0;
-    if (parseInt(process.env.CLIP_BRAIN_MIN_SEC || '0', 10) > 0) {
-      durationSec = await getClipDurationSec(url).catch(() => 0);
-    }
-    // ★ 30 ก.ย. 69 (เคสล่ม pepedog89): สมุดจดของคำขอนี้ — เครื่องยนต์ใหม่ใช้โทเคนไปเท่าไรก่อนล้ม (ใช้ตัดสิน retrySafe ด้านล่าง)
+    // ★ 30 ก.ย. 69 (เคสล่ม pepedog89): สมุดจดของคำขอนี้ — เครื่องยนต์ใช้โทเคนไปเท่าไรก่อนล้ม (ใช้ตัดสิน retrySafe ด้านล่าง)
     const acc = { brainSpentTokens: 0 };
     try {
-      insight = await getClipVideoQueue().run(() => buildInsightWithBrain({ url, type, model: modelOverride, durationSec, acc }), { label: `insight:${type}${modelOverride ? `@${modelOverride}` : ''}` });
+      // ★ 25 ต.ค. 69: ตัดเปลี่ยนเป็นเครื่องยนต์ "เนื้อข่าวช่องเดียว" (เจ้าของเคาะ) — ความยาวคลิปหาเองในตัวโหลด
+      insight = await getClipVideoQueue().run(() => buildInsightSingle({ url, type, model: modelOverride, acc }), { label: `insight:${type}${modelOverride ? `@${modelOverride}` : ''}` });
     } catch (e) {
       const code = e.code || 'INSIGHT_FAILED';
       // ★ 30 ก.ย. 69 (เคสล่ม pepedog89): บอก worker ว่า "ล้มก่อนจ่ายค่าโมเดล" → ลองใหม่อัตโนมัติได้โดยไม่จ่ายซ้ำ
@@ -535,8 +400,7 @@ export async function POST(request) {
       //   เดิมไม่มี route ไหนตั้ง retrySafe → retry อัตโนมัติของ worker ไม่เคยเกิดจริง (log ตั้งแต่ 22 ส.ค. retry 0 ครั้ง)
       //   กรณีอื่นไม่ใส่ field นี้เลย (worker อ่านไม่เจอ = ไม่ลองซ้ำ)
       const retrySafe = e?.retrySafe === true && acc.brainSpentTokens === 0;
-      // ★ 30 ก.ย. 69 (เคสล่ม pepedog89) รอบ 4 (F2): ข้อความเลือกจาก retrySafe ที่คำนวณแล้ว (ไม่ส่ง = ไม่สัญญาว่าระบบจะลองใหม่ให้เอง)
-      return NextResponse.json({ success: false, error: humanizeErr(e.message, { retrySafe }), errorType: code, ...(retrySafe ? { retrySafe: true } : {}) }, { status: 422 });
+      return NextResponse.json({ success: false, error: humanizeErr(e.message), errorType: code, ...(retrySafe ? { retrySafe: true } : {}) }, { status: 422 });
     }
 
     // ด่านตรวจคุณภาพแบบไม่เสียรอบเพิ่ม: ผลไม่ครบให้ติดธงไว้ พนักงานเป็นผู้ตัดสินใจกดถอดใหม่เอง

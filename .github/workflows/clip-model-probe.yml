@@ -1,5 +1,9 @@
 # ตรวจรายชื่อโมเดล Gemini ที่คีย์ production ใช้ได้จริง (14 ส.ค. 69)
 # ใช้คู่กับโหมด ?list= ของ /api/clip-transcript/gemini-health — กันตั้งชื่อรุ่นผิดแล้วถอดล้มทั้งระบบ
+# ★ 26 ต.ค. 69 (ระบบถอดคลิปเฟส 4): โหมด ?probe= (ยิง Gemini จริง) ต้องมีกุญแจ worker ตั้งแต่ 25 ต.ค. (P6)
+#   → ส่ง header x-clip-worker-secret จาก secret CLIP_WORKER_SECRET (ไม่ตั้ง secret = probe ได้ 401 แล้วหยุดทันที)
+#   · ค่า query ส่งผ่าน env ไม่แปะลงสคริปต์ตรงๆ (กันคำสั่งแทรกใน shell)
+#   · ใช้ --data-raw ไม่ใช่ --data — --data ที่ขึ้นต้นด้วย @ จะอ่านไฟล์บน runner (เช่น @/proc/self/environ) แล้วแปะลง URL
 name: clip-model-probe
 
 on:
@@ -15,10 +19,17 @@ jobs:
     timeout-minutes: 12
     steps:
       - name: ยิง gemini-health ตาม query (รอ deploy โค้ดรุ่นใหม่ขึ้นก่อนอัตโนมัติ)
+        env:
+          QUERY: ${{ inputs.query }}
+          CLIP_WORKER_SECRET: ${{ secrets.CLIP_WORKER_SECRET }}
         run: |
           for i in $(seq 1 25); do
-            resp=$(curl -sS -m 35 "https://viral-content-system.vercel.app/api/clip-transcript/gemini-health?${{ inputs.query }}" || true)
+            resp=$(curl -sS -m 35 -G -H "x-clip-worker-secret: ${CLIP_WORKER_SECRET}" \
+              "https://viral-content-system.vercel.app/api/clip-transcript/gemini-health" --data-raw "${QUERY}" || true)
             echo "รอบ $i: $resp"
+            if echo "$resp" | grep -q 'PROBE_UNAUTHORIZED'; then
+              echo "❌ โหมด probe ต้องมีกุญแจ worker — ตั้ง secret CLIP_WORKER_SECRET ให้ตรงกับ Vercel ก่อน"; exit 1
+            fi
             if echo "$resp" | grep -qE '"models"|"model"'; then
               echo "✅ ได้ผลจากโค้ดรุ่นใหม่แล้ว (ด้านบน)"; exit 0
             fi

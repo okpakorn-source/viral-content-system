@@ -29,6 +29,10 @@ const WORKER_SECRET = process.env.CLIP_WORKER_SECRET || process.env.DISCORD_API_
 const HEARTBEAT_MS = Number(process.env.CLIP_WORKER_HEARTBEAT_MS) || 60_000;
 const REPORT_TIMEOUT_MS = 12_000;
 const REPORT_MAX_ATTEMPTS = 3;
+// ★ 25 ต.ค. 69 (P2): ผลสุดท้ายต้องส่งถึงให้ได้ — ลองซ้ำนานรวม ~2 นาที ครอบช่วง :3900 ดับแล้วชุบใหม่ (~5 วิ)
+//   และช่วงฐานตัดการเชื่อมต่อชั่วคราว (60 วิ) · เดิม 3 ครั้งใน ~1.5 วิ: 21 ต.ค. ใบ d537cca8 เลิกส่ง 1 วิหลัง :3900 ดับ
+//   ทั้งที่ฟื้นใน 4 วิ → หน้าเว็บค้าง "กำลังทำ" 20 นาที · heartbeat ยังใช้ 1 ครั้งเหมือนเดิม
+const FINAL_REPORT_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000, 30_000, 30_000];
 // ★ 8 ก.ย. 69 (เจ้าของ: คลิปยาวเป็นชั่วโมง ไม่เอาเพดาน): เพดานรอเซิร์ฟเวอร์ตั้งผ่าน env CLIP_WORKER_PROCESS_TIMEOUT_MS
 //   เดิมฝัง 16 นาที → คลิปยาวถูกตัดสายทั้งที่ :3900 ยังทำอยู่ (ขึ้น "fetch failed" แต่ใบงานถูกบันทึกทีหลัง)
 //   ต่ำกว่า 60 วิ/ไม่ใช่ตัวเลข = ใช้ 16 นาทีเดิม · เครื่องแอดมินตั้ง 3 ชั่วโมง (lease ต่ออายุเองทุก heartbeat)
@@ -92,16 +96,15 @@ async function pullJob() {
 }
 
 async function processJob(job, { signal } = {}) {
-  // transcript → /api/clip-transcript | insight → /api/clip-transcript/insight
-  // ★ 8 ก.ค.: เพิ่ม kind 'hunt' (ถอด+ค้นข่าวคล้าย) + ส่ง user เก็บเป็น metadata คลัง
-  const endpoint = job.kind === 'transcript' ? '/api/clip-transcript'
-    : job.kind === 'hunt' ? '/api/clip-transcript/hunt'
-    : '/api/clip-transcript/insight';
-  const body = job.kind === 'transcript' ? { url: job.url, tidy: !!job.tidy }
-    : job.kind === 'hunt' ? { url: job.url, user: job.user || '', _fromWorker: true }
-    // (★ 14 ส.ค. 69: ถอด smooth ออก · ส่ง model ต่อเมื่อเป็นใบงานเทสสองโมเดล — ใบงานปกติไม่มีฟิลด์นี้)
-    // (★ 26 ส.ค. 69: ปุ่ม "ทำใหม่" ติด force มากับใบงาน → ส่งต่อให้ /insight ถอดใหม่ ไม่คืนของเดิมในคลัง)
-    : { url: job.url, user: job.user || '', ...(job.force ? { force: true } : {}), ...(job.model ? { model: job.model, force: true } : {}) };
+  // ★ 26 ต.ค. 69 (เฟส 4): เหลือ /api/clip-transcript/insight ทางเดียว — โหมดบทสัมภาษณ์ (transcript) และค้นข่าวคล้าย (hunt) ถูกลบ
+  //   ใบงานเก่าที่ค้างในคิวด้วยชนิดนั้น = จบเป็นไม่สำเร็จพร้อมบอกเหตุ (ไม่ยิงอะไร ไม่วนลองใหม่)
+  if (job.kind === 'transcript' || job.kind === 'hunt') {
+    return { ok: false, error: 'โหมดนี้เลิกใช้แล้ว (ถอดบทสัมภาษณ์/ค้นข่าวคล้าย) — กดส่งใหม่เป็นงานถอดคลิปปกติ', errorType: 'KIND_RETIRED', retrySafe: false };
+  }
+  const endpoint = '/api/clip-transcript/insight';
+  // (★ 14 ส.ค. 69: ถอด smooth ออก · ส่ง model ต่อเมื่อเป็นใบงานเทสสองโมเดล — ใบงานปกติไม่มีฟิลด์นี้)
+  // (★ 26 ส.ค. 69: ปุ่ม "ทำใหม่" ติด force มากับใบงาน → ส่งต่อให้ /insight ถอดใหม่ ไม่คืนของเดิมในคลัง)
+  const body = { url: job.url, user: job.user || '', ...(job.force ? { force: true } : {}), ...(job.model ? { model: job.model, force: true } : {}) };
   const r = await fetch(`${BASE}${endpoint}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal,
     ...(longDispatcher ? { dispatcher: longDispatcher } : {}), // ★ timeout ยาว — กัน fetch failed ที่ 5 นาที
@@ -190,18 +193,20 @@ async function postWorkerState(id, status, payload, claimToken) {
   return data;
 }
 
-async function report(id, status, payload, claimToken, { maxAttempts = REPORT_MAX_ATTEMPTS } = {}) {
+async function report(id, status, payload, claimToken, { maxAttempts = REPORT_MAX_ATTEMPTS, delaysMs = null } = {}) {
+  // delaysMs (ถ้าส่ง) = ระยะพักก่อนลองครั้งถัดไป → จำนวนครั้งรวม = delaysMs.length + 1 (ยังมีเพดานเสมอ)
+  const attempts = Array.isArray(delaysMs) ? delaysMs.length + 1 : maxAttempts;
   let lastError = null;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
       // eslint-disable-next-line no-await-in-loop -- retry ต้องเรียงลำดับและมีเพดาน
       return await postWorkerState(id, status, payload, claimToken);
     } catch (error) {
       lastError = error;
       if (error.code === 'CLAIM_LOST' || (error.status && error.status < 500 && error.status !== 429)) throw error;
-      if (attempt < maxAttempts) {
+      if (attempt < attempts) {
         // eslint-disable-next-line no-await-in-loop -- backoff แบบ bounded
-        await sleep(500 * (2 ** (attempt - 1)));
+        await sleep(Array.isArray(delaysMs) ? delaysMs[attempt - 1] : 500 * (2 ** (attempt - 1)));
       }
     }
   }
@@ -294,7 +299,8 @@ async function runJob(job) {
     if (e.code !== 'CLAIM_LOST') {
       // fetch/timeout ไม่ยืนยันว่าฝั่งเซิร์ฟเวอร์หยุด AI แล้ว จึงห้าม retry อัตโนมัติซ้อนรอบเดิม
       finalStatus = 'error';
-      finalPayload = `${e.message} · ระบบหยุดไว้เพื่อกันเสียค่า API ซ้ำ กรุณาตรวจแล้วส่งใหม่ด้วยตนเอง`;
+      // ★ 25 ต.ค. 69 (P2): บอกทางไปต่อ — ใบที่ถอดเสร็จแล้วอยู่ในคลัง ส่งลิงก์เดิมซ้ำได้ผลเดิมโดยไม่เสียเงิน
+      finalPayload = `${e.message} · ระบบไม่ลองซ้ำเองเพื่อกันเสียค่า API ซ้ำ · ส่งลิงก์เดิมใหม่ได้ ถ้ารอบเดิมถอดเสร็จแล้วระบบจะคืนผลจากคลัง`;
       finalLog = `❌ การเชื่อมต่อไม่ยืนยันผล จึงไม่ลองซ้ำอัตโนมัติ (${tag}): ${e.message?.slice(0, 70)}`;
     }
   } finally {
@@ -309,14 +315,14 @@ async function runJob(job) {
   if (!finalStatus) return;
 
   try {
-    await report(job.id, finalStatus, finalPayload, job.claimToken);
+    await report(job.id, finalStatus, finalPayload, job.claimToken, { delaysMs: FINAL_REPORT_DELAYS_MS });
     log(finalLog);
   } catch (error) {
     if (error.code === 'CLAIM_LOST') {
       log(`🛑 ไม่ส่งผล ${tag}: lease เปลี่ยนเจ้าของแล้ว`);
     } else {
       // ห้ามเปลี่ยนงานที่ทำสำเร็จเป็น retry เพียงเพราะรายงานสะดุด มิฉะนั้นจะเสียค่า AI ซ้ำทันที
-      log(`⚠️ รายงานผล ${tag} ไม่สำเร็จหลังลอง ${REPORT_MAX_ATTEMPTS} ครั้ง: ${error.message} — เมื่อ lease หมดระบบจะหยุดงานนี้ ไม่ถอดใหม่อัตโนมัติ`);
+      log(`⚠️ รายงานผล ${tag} ไม่สำเร็จหลังลอง ${FINAL_REPORT_DELAYS_MS.length + 1} ครั้ง (~2 นาที): ${error.message} — เมื่อ lease หมดระบบจะหยุดงานนี้ ไม่ถอดใหม่อัตโนมัติ`);
     }
   }
 }

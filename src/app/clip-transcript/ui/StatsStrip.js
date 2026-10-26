@@ -8,7 +8,7 @@
  *     และ "ต้องระบุจำนวนใบกำกับเสมอ" กันเข้าใจผิดว่าเป็นสถิติทั้งคลัง
  * ค่าที่คำนวณไม่ได้ (เช่น cases ว่าง / ไม่มีใบไหนมี elapsedMs) → ซ่อนชิปนั้นไปเลย ไม่โชว์ 0 มั่ว
  */
-import { platformIcon, getBrainMeta, fmtDurSec } from './statusMeta';
+import { platformIcon, fmtDurSec, cardView } from './statusMeta';
 
 const C = { text: '#e5e7eb', line: '#374151', bg: '#111827' };
 
@@ -93,22 +93,13 @@ export default function StatsStrip({ counts, casesTotal, cases }) {
       );
     }
 
-    // แยกผลตรวจสมอง: นับ brain.status แต่ละค่า — ใบไม่มี brain ไม่นับ (ระบบใหม่เท่านั้นที่มีสมองตรวจ)
-    const brainCounts = {};
-    let brainTotal = 0;
-    for (const c of list) {
-      const status = c?.insight?.brain?.status;
-      if (!status) continue;
-      brainTotal += 1;
-      brainCounts[status] = (brainCounts[status] || 0) + 1;
-    }
-    if (brainTotal > 0) {
-      const parts = Object.keys(brainCounts)
-        .map((status) => `${getBrainMeta(status)?.emoji || '•'}${brainCounts[status]}`)
-        .join(' ');
+    // ★ 26 ต.ค. 69: เลิกสมองตรวจ — นับใบระบบใหม่ที่ตัวตรวจด้วยโค้ดขึ้นจุดเช็ค (ใบรุ่นเก่าไม่มีจุดเช็ค ไม่นับ)
+    const single = list.filter((c) => !cardView(c).legacy);
+    if (single.length > 0) {
+      const withChecks = single.filter((c) => cardView(c).checks.length > 0).length;
       recentStatChips.push(
-        <Chip key="r-brain" title={`นับเฉพาะใบที่มีผลตรวจสมอง จาก ${n} ใบล่าสุด`}>
-          🧠 ตรวจแล้ว {brainTotal}: {parts}
+        <Chip key="r-checks" title={`นับเฉพาะใบระบบเนื้อข่าวช่องเดียว จาก ${n} ใบล่าสุด`}>
+          🔎 มีจุดเช็ค {withChecks}/{single.length} ใบ
         </Chip>
       );
     }

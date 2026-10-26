@@ -10,8 +10,12 @@ export async function POST(request) {
     const denied = authorizeClipAgent(request);
     if (denied) return denied;
     const body = await request.json().catch(() => null);
+    // ★ 26 ต.ค. 69 (เฟส 4): โหมดถอดบทสัมภาษณ์เลิกใช้ — บอกเหตุผลชัด แทน BAD_REQUEST ทั่วไป
+    if (body && typeof body === 'object' && body.kind === 'transcript') {
+      return NextResponse.json({ ok: false, errorType: 'KIND_RETIRED', error: 'โหมดถอดบทสัมภาษณ์เลิกใช้แล้ว — ส่ง kind=insight (ได้พาดหัว + เนื้อข่าว + จุดที่ควรเช็ค)' }, { status: 400 });
+    }
     if (!body || typeof body !== 'object' || Array.isArray(body)
-      || (body.kind !== undefined && !['insight', 'transcript'].includes(body.kind))
+      || (body.kind !== undefined && body.kind !== 'insight')
       || (body.force !== undefined && typeof body.force !== 'boolean')
       || (body.user !== undefined && typeof body.user !== 'string')) {
       return NextResponse.json({ ok: false, errorType: 'BAD_REQUEST', error: 'ข้อมูลไม่ถูกต้อง — ระบุ kind, force และ user ตามรูปแบบ API' }, { status: 400 });

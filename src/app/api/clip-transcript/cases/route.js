@@ -9,8 +9,9 @@ import { createStore } from '@/lib/persistStore';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// kind → ชื่อ store (กันค่ามั่ว: รับแค่ 3 ค่า) — ★ 8 ก.ค.: เพิ่ม hunt = คลังค้นประเด็นยูสเซอร์
-const storeName = (kind) => (kind === 'insight' ? 'clip-insights' : kind === 'hunt' ? 'user-topic-hunts' : 'clip-transcripts');
+// kind → ชื่อ store (กันค่ามั่ว: insight = คลังถอดคลิป · ค่าอื่น = คลังบทถอดเก่า clip-transcripts)
+//   ★ 26 ต.ค. 69 (เฟส 4): ตัด kind=hunt (คลังค้นประเด็น user-topic-hunts) — ค้นข่าวคล้ายเลิกใช้ ไม่มีหน้าไหนเรียกแล้ว
+const storeName = (kind) => (kind === 'insight' ? 'clip-insights' : 'clip-transcripts');
 
 export async function GET(request) {
   try {
@@ -82,10 +83,10 @@ export async function DELETE(request) {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
     const store = createStore(storeName(searchParams.get('kind')));
+    // ★ 25 ต.ค. 69 (P6): ปิดคำสั่งลบทั้งคลัง (id=all) — endpoint เปิดสาธารณะ ใครยิงก็ลบ 400 ใบรวมใบปักหมุดได้
+    //   หน้าเว็บไม่เคยใช้ · ลบได้ทีละใบเท่านั้น
     if (id === 'all') {
-      const all = await store.getAll();
-      for (const c of all) await store.remove(c.id).catch(() => {});
-      return NextResponse.json({ success: true, removed: all.length });
+      return NextResponse.json({ success: false, error: 'ลบทั้งคลังในคำสั่งเดียวไม่ได้แล้ว — ลบได้ทีละใบ', errorType: 'BULK_DELETE_DISABLED' }, { status: 400 });
     }
     if (!id) return NextResponse.json({ success: false, error: 'ต้องระบุ id', errorType: 'CASES_ERROR' }, { status: 400 });
     const result = await store.remove(id);

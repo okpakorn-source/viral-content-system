@@ -27,11 +27,15 @@ function btnStyle(color) {
   };
 }
 
-/** ปุ่มยกเลิก — ยืนยันก่อนเสมอ (พิมพ์เขียวข้อ 2: cancel→onCancel ยืนยันก่อนด้วย confirm()) */
-function CancelButton({ id, onCancel }) {
+/** ปุ่มยกเลิก — ยืนยันก่อนเสมอ (พิมพ์เขียวข้อ 2: cancel→onCancel ยืนยันก่อนด้วย confirm())
+ *  ★ 26 ต.ค. 69 (P13): งานที่เครื่องกำลังถอดอยู่ หยุดกลางทางไม่ได้ — บอกตามจริงก่อนกด */
+function CancelButton({ id, status, onCancel }) {
   if (!onCancel) return null;
+  const msg = status === 'processing'
+    ? 'ยกเลิกงานนี้? เครื่องกำลังถอดอยู่ รอบนี้จะทำต่อจนจบ (ค่าใช้จ่ายรอบนี้เกิดแล้ว และผลอาจยังเข้าคลัง) แต่จะไม่ลองใหม่อีก'
+    : 'ยกเลิกงานนี้? งานจะออกจากคิวทันที ยังไม่เสียค่าถอด';
   return (
-    <button onClick={() => { if (window.confirm('ยกเลิกงานนี้? (หยุดถอด/หยุดลองใหม่ทันที)')) onCancel(id); }} style={btnStyle('#ef4444')}>
+    <button onClick={() => { if (window.confirm(msg)) onCancel(id, status); }} style={btnStyle('#ef4444')}>
       🚫 ยกเลิก
     </button>
   );
@@ -76,9 +80,16 @@ function MyJobCard({ myJob, nowMs, onCancel, onRetry, onViewResult }) {
             <div style={{ marginTop: 4, fontSize: 11.5, color: C.muted }}>สถานะนี้ไม่ใช่การถอดซ้ำ — ระบบเริ่มประมวลผลเมื่อรับงานได้เท่านั้น ไม่วนถอดซ้ำอัตโนมัติ</div>
           </div>
         )}
-        {myJob.status === 'done' && <div>✅ ถอดเสร็จแล้ว — ผลอยู่ในคลังแล้ว</div>}
+        {myJob.status === 'done' && <div>✅ ถอดเสร็จแล้ว — ผลอยู่ในคลังแล้ว (กด 👁️ ดูผล เพื่อเปิดการ์ดนี้)</div>}
         {myJob.status === 'error' && <div>❌ {myJob.error || 'ถอดไม่สำเร็จ'}</div>}
         {myJob.status === 'cancelled' && <div>🚫 ยกเลิกงานนี้แล้ว</div>}
+        {/* ★ 26 ต.ค. 69 (P12): อ่านสถานะพลาดติดกันไม่ใช่งานล้ม — ติดตามต่อให้เอง */}
+        {myJob.connWarn && !myJob._pollEnded && !['done', 'error', 'cancelled'].includes(myJob.status) && (
+          <div style={{ marginTop: 4, fontSize: 12, color: '#fbbf24' }}>⚠️ เช็คสถานะไม่ได้ชั่วคราว — งานอาจยังทำอยู่ ระบบเช็คต่อให้เอง ไม่ต้องส่งใหม่</div>
+        )}
+        {myJob._pollEnded && !['done', 'error', 'cancelled'].includes(myJob.status) && (
+          <div style={{ marginTop: 4, fontSize: 12, color: '#fbbf24' }}>⏹️ หยุดเช็คสถานะอัตโนมัติแล้ว — งานยังทำต่อ ผลจะเข้าคลังเองเมื่อเสร็จ รีเฟรชหน้าเพื่อเช็คต่อ</div>
+        )}
       </div>
 
       {actions.length > 0 && (
@@ -89,7 +100,7 @@ function MyJobCard({ myJob, nowMs, onCancel, onRetry, onViewResult }) {
           {actions.includes('retry') && onRetry && (
             <button onClick={() => onRetry(myJob)} style={btnStyle('#22c55e')}>🔁 ทำใหม่</button>
           )}
-          {actions.includes('cancel') && <CancelButton id={myJob.jobId} onCancel={onCancel} />}
+          {actions.includes('cancel') && <CancelButton id={myJob.jobId} status={myJob.status} onCancel={onCancel} />}
         </div>
       )}
     </div>
@@ -131,27 +142,30 @@ function QueueRow({ job, currentUser, myJobId, nowMs, onCancel, onRetry, onViewR
           {actions.includes('retry') && onRetry && (
             <button onClick={() => onRetry(job)} title="ทำใหม่" style={btnStyle('#22c55e')}>🔁 ทำใหม่</button>
           )}
-          {actions.includes('cancel') && <CancelButton id={job.id} onCancel={onCancel} />}
+          {actions.includes('cancel') && <CancelButton id={job.id} status={job.status} onCancel={onCancel} />}
         </div>
       )}
     </div>
   );
 }
 
-/** ── แถว "เพิ่งจบ" (done/error/cancelled) — เล็ก กระชับ ไม่มีปุ่ม ── */
-function RecentRow({ job }) {
+/** ── แถว "เพิ่งจบ" (done/error/cancelled) — เล็ก กระชับ · ★ 26 ต.ค. 69 (P20): ใบที่เสร็จมีปุ่มดูผล ── */
+function RecentRow({ job, onViewResult }) {
   const timeStr = fmtClock(job.doneAt || job.cancelledAt || job.createdAt);
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 12px', fontSize: 11.5, color: C.muted }}>
       <StatusPill status={job.status} size={11.5} />
       <span style={{ flex: '1 1 140px', minWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {shortUrl(job.url, 36)}
+        {job.user ? `👤 ${job.user} · ` : ''}{shortUrl(job.url, 36)}
       </span>
       {timeStr && <span style={{ whiteSpace: 'nowrap' }}>{timeStr}</span>}
       {job.status === 'error' && job.error && (
         <span title={job.error} style={{ color: '#f87171', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {job.error}
         </span>
+      )}
+      {job.status === 'done' && onViewResult && (
+        <button onClick={() => onViewResult(job)} style={{ ...btnStyle('#38bdf8'), padding: '2px 8px', fontSize: 11.5 }}>👁️ ดูผล</button>
       )}
     </div>
   );
@@ -195,7 +209,7 @@ export default function JobBoard({ myJob = null, queue = null, nowMs = 0, curren
               <div>
                 <div style={{ fontSize: 11, color: C.muted, marginBottom: 4, paddingLeft: 2 }}>เพิ่งจบ</div>
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  {recent.map((j) => <RecentRow key={j.id} job={j} />)}
+                  {recent.map((j) => <RecentRow key={j.id} job={j} onViewResult={onViewResult} />)}
                 </div>
               </div>
             )}

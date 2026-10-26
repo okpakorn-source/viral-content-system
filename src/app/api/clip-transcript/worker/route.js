@@ -1,6 +1,5 @@
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { NextResponse } from 'next/server';
-import { createStore } from '@/lib/persistStore';
 import { getSupabase, isSupabaseReady } from '@/lib/supabase';
 import { touchWorkerHeartbeat, isHeartbeatRow } from '../workerHeartbeat';
 
@@ -22,6 +21,8 @@ const LEASE_MS = 20 * 60 * 1000; // ยาวกว่า processJob watchdog 16
 
 const RETRY_DELAY_MS = 3 * 60 * 1000;
 const MAX_ATTEMPTS = 80;
+// ★ 25 ต.ค. 69 (P1): ใบที่ worker หยิบได้มีแค่ 3 สถานะนี้ — ดึงเฉพาะแถวพวกนี้แทนการโหลดคิวทั้งก้อน
+const CLAIMABLE_STATUSES = ['pending', 'retry_wait', 'processing'];
 
 function protocolAccepted(request) {
   return request?.headers?.get?.(WORKER_PROTOCOL_HEADER) === WORKER_PROTOCOL;
@@ -87,7 +88,8 @@ function transitionForClaim(candidate, kind, nowIso) {
         leaseExpiresAt: null,
         lastHeartbeatAt: null,
         statusNote: '',
-        error: 'งานเดิมหมดเวลายืนยันเจ้าของ โดยยังไม่ทราบว่ารอบเดิมจบหรือไม่ ระบบจึงหยุดไว้เพื่อกันเสียค่า API ซ้ำ · ตรวจผลเดิมก่อนแล้วค่อยส่งใหม่',
+        // ★ 25 ต.ค. 69 (P2): บอกตามจริงว่าเครื่องทีมเงียบไป + บอกทางไปต่อ (ใบที่ถอดเสร็จแล้วอยู่ในคลัง ส่งซ้ำได้ผลเดิมฟรี)
+        error: 'เครื่องทีมเงียบไประหว่างถอดเกิน 20 นาที (อาจดับหรือรีสตาร์ท) ระบบไม่ถอดซ้ำเองเพื่อกันเสียค่า API ซ้ำ · ส่งลิงก์เดิมใหม่ได้ ถ้ารอบเดิมถอดเสร็จแล้วระบบจะคืนผลจากคลัง',
         doneAt: nowIso,
         updatedAt: nowIso,
       },
@@ -150,15 +152,31 @@ async function claimCandidate(candidate, kind, nowIso) {
   return transition.terminal ? { terminal: true } : { terminal: false, job: updated };
 }
 
+// ★ 25 ต.ค. 69 (P2): แยก "ไม่พบใบ" ออกจาก "อ่านฐานไม่สำเร็จ"
+//   เดิม error ทุกแบบคืน null → ฐานสะดุดชั่วคราวกลายเป็น 409 CLAIM_LOST → worker ทิ้งผลที่จ่ายเงินแล้ว
+//   (log เครื่องทีม: "lease เปลี่ยนเจ้าของแล้ว" 3 ครั้ง ทุกครั้งอยู่กลางช่วงฐานสะดุด) · ตอนนี้อ่านพลาด = throw → 500 → worker ลองส่งใหม่
 async function readSupabaseJob(id) {
   const { data, error } = await getSupabase()
     .from(TABLE)
     .select('data')
     .eq('id', id)
     .eq('store_name', STORE_NAME)
-    .single();
-  if (error || !data?.data) return null;
-  return data.data;
+    .maybeSingle();
+  if (error) throw new Error(`อ่านงานถอดคลิปไม่สำเร็จ (ฐานคิวสะดุดชั่วคราว): ${error.message}`);
+  return data?.data || null;
+}
+
+// ★ 25 ต.ค. 69 (P1): เดิม getAll ทั้ง store ทุก 5 วิ (ใบที่เสร็จแล้วพกผลถอดเต็ม — วัดได้ 51 ใบ 4.7 MB)
+//   → ฐานหมดเวลา 7,679 ครั้งใน log · ตอนนี้ดึงเฉพาะใบที่หยิบได้ (ปกติ 0–5 ใบ ไม่มีผลถอด)
+//   อ่านพลาด = throw (ห้ามเดาว่าคิวว่าง — เหมือน getAll แบบ authoritative เดิม)
+async function listClaimableJobs() {
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('data')
+    .eq('store_name', STORE_NAME)
+    .filter('data->>status', 'in', `(${CLAIMABLE_STATUSES.join(',')})`);
+  if (error) throw new Error(`อ่านคิวงานถอดคลิปไม่สำเร็จ: ${error.message}`);
+  return (data || []).map((row) => row?.data).filter(Boolean);
 }
 
 async function updateOwnedSupabase(id, claimToken, mutate, { requireActiveLease = false } = {}) {
@@ -229,9 +247,8 @@ export async function GET(request) {
   touchWorkerHeartbeat({ host: request.headers.get('x-clip-worker-host') || '', version: WORKER_PROTOCOL });
 
   try {
-    const store = createStore(STORE_NAME);
     // production ห้าม fallback ไปอ่านไฟล์ cache เก่า เพราะอาจทำให้หยิบงานซ้ำข้ามเครื่อง
-    const all = (await store.getAll({ authoritative: true })).filter((x) => !isHeartbeatRow(x));
+    const all = (await listClaimableJobs()).filter((x) => !isHeartbeatRow(x));
     const nowMs = Date.now();
     const nowIso = new Date(nowMs).toISOString();
     const candidates = all
@@ -251,7 +268,6 @@ export async function GET(request) {
           id: job.id,
           url: job.url,
           kind: job.kind,
-          tidy: job.tidy,
           platform: job.platform,
           user: job.user || '',
           model: job.model || '',

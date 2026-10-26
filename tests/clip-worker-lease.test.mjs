@@ -58,7 +58,7 @@ function makeReadBarrier(target) {
   };
 }
 
-function makeSupabaseHarness(initialJobs, { beforeUpdate = null, beforeGetAll = null } = {}) {
+function makeSupabaseHarness(initialJobs, { beforeUpdate = null, beforeGetAll = null, failReads = null } = {}) {
   const rows = new Map(initialJobs.map(job => [job.id, {
     id: job.id,
     store_name: 'clip-jobs',
@@ -114,6 +114,8 @@ function makeSupabaseHarness(initialJobs, { beforeUpdate = null, beforeGetAll = 
         if (operator === 'is') return value === null ? actual == null : actual === value;
         if (operator === 'eq') return actual === value;
         if (operator === 'gt') return actual > value;
+        // ★ 25 ต.ค. 69 (P1): worker ดึงเฉพาะใบที่หยิบได้ด้วย filter('data->>status','in','(a,b)') แบบ PostgREST
+        if (operator === 'in') return String(value).replace(/^\(|\)$/g, '').split(',').includes(actual);
         throw new Error(`unsupported fake operator: ${operator}`);
       });
     }
@@ -122,10 +124,38 @@ function makeSupabaseHarness(initialJobs, { beforeUpdate = null, beforeGetAll = 
       return columns === 'id' ? { id: row.id } : { data: clone(row.data) };
     }
 
+    readFailure() {
+      return failReads && failReads() ? { data: null, error: { message: 'fetch failed: upstream timeout' } } : null;
+    }
+
     async single() {
+      const failure = this.readFailure();
+      if (failure) return failure;
       const matched = [...rows.values()].filter(row => this.matches(row));
       if (matched.length !== 1) return { data: null, error: { message: 'not found' } };
       return { data: this.selected(matched[0], this.columns), error: null };
+    }
+
+    // ★ 25 ต.ค. 69 (P2): แบบ supabase-js — ไม่พบแถว = data:null ไม่มี error · error มีเฉพาะอ่านฐานพลาดจริง
+    async maybeSingle() {
+      const failure = this.readFailure();
+      if (failure) return failure;
+      const matched = [...rows.values()].filter(row => this.matches(row));
+      if (matched.length > 1) return { data: null, error: { message: 'multiple rows' } };
+      return { data: matched[0] ? this.selected(matched[0], this.columns) : null, error: null };
+    }
+
+    // select แบบรายการ (await ตัว query ตรงๆ) — จุดที่ GET อ่านคิว จึงเรียก beforeGetAll ตรงนี้แทน store.getAll เดิม
+    async executeSelect() {
+      if (beforeGetAll) await beforeGetAll();
+      const failure = this.readFailure();
+      if (failure) return failure;
+      const matched = [...rows.values()].filter(row => this.matches(row));
+      return { data: matched.map(row => this.selected(row, this.columns)), error: null };
+    }
+
+    then(resolve, reject) {
+      return this.executeSelect().then(resolve, reject);
     }
 
     async executeUpdate(columns) {
@@ -138,8 +168,10 @@ function makeSupabaseHarness(initialJobs, { beforeUpdate = null, beforeGetAll = 
 
   const supabase = { from() { return new Query(); } };
   let localTail = Promise.resolve();
+  let getAllCalls = 0;
   const store = {
     async getAll() {
+      getAllCalls += 1;
       if (beforeGetAll) await beforeGetAll();
       return [...rows.values()].map(row => clone(row.data));
     },
@@ -160,6 +192,7 @@ function makeSupabaseHarness(initialJobs, { beforeUpdate = null, beforeGetAll = 
   return {
     store,
     supabase,
+    get getAllCalls() { return getAllCalls; },
     getJob(id = 'clip-1') { return clone(rows.get(id)?.data); },
     setJob(job) {
       const row = rows.get(job.id);
@@ -174,10 +207,11 @@ async function loadRoute({
   source = ROUTE_SOURCE,
   beforeUpdate,
   beforeGetAll,
+  failReads,
   supabaseReady = true,
   workerSecret = WORKER_SECRET,
 }) {
-  const fake = makeSupabaseHarness(jobs, { beforeUpdate, beforeGetAll });
+  const fake = makeSupabaseHarness(jobs, { beforeUpdate, beforeGetAll, failReads });
   let tokenNumber = 0;
   const NextResponse = {
     json(body, init = {}) {
@@ -221,7 +255,7 @@ async function loadRoute({
   try {
     const url = `data:text/javascript;base64,${Buffer.from(transformed).toString('base64')}`;
     const loaded = await import(url);
-    return { ...loaded, ...fake };
+    return { ...loaded, ...fake, fake };
   } finally {
     delete globalThis.__clipWorkerRouteHarness;
   }
@@ -951,4 +985,100 @@ test('worker pause flag: file present = paused, absent/unset = running', async (
     if (saved === undefined) delete process.env.CLIP_WORKER_PAUSE_FILE; else process.env.CLIP_WORKER_PAUSE_FILE = saved;
     rm(dir, { recursive: true, force: true });
   }
+});
+
+// ── ★ 25 ต.ค. 69 เฟส 0 (P1/P2): คิวเลิกดึงทั้งก้อน + ฐานสะดุดต้องไม่กลายเป็นเสียสิทธิ์งาน ──
+
+async function assertClaimReadsOnlyClaimableRows(source = ROUTE_SOURCE) {
+  const heavyDone = makeJob({
+    id: 'done-heavy', status: 'done', doneAt: new Date().toISOString(),
+    result: { rawData: 'x'.repeat(50_000) },
+    createdAt: new Date(Date.now() - 120_000).toISOString(),
+  });
+  const route = await loadRoute({ jobs: [heavyDone, makeJob()], source });
+  const body = await responseBody(await route.GET(makeRequest()));
+  assert.equal(body.job?.id, 'clip-1', 'ต้องหยิบใบ pending ได้ตามปกติ');
+  assert.equal(route.fake.getAllCalls, 0, 'GET ต้องไม่โหลดคิวทั้งก้อน (ใบที่เสร็จแล้วพกผลถอดเต็ม)');
+}
+
+async function assertTransientReadIsNotClaimLost(source = ROUTE_SOURCE) {
+  let failing = true;
+  const route = await loadRoute({
+    jobs: [makeJob({
+      status: 'processing', claimToken: 'owner-token',
+      startedAt: new Date().toISOString(),
+      leaseExpiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+    })],
+    source,
+    failReads: () => failing,
+  });
+  const first = await route.POST(makeRequest({
+    id: 'clip-1', status: 'done', claimToken: 'owner-token', result: { rawData: 'ผลถอด' },
+  }));
+  assert.equal(first.status, 500, 'ฐานสะดุดชั่วคราวต้องตอบ 500 ให้ worker ลองใหม่ ไม่ใช่ 409 CLAIM_LOST');
+  assert.notEqual((await responseBody(first)).errorType, 'CLAIM_LOST');
+  assert.equal(route.getJob().status, 'processing', 'ใบต้องยังรอผลอยู่ ไม่ถูกเปลี่ยนสถานะ');
+
+  failing = false;
+  const second = await route.POST(makeRequest({
+    id: 'clip-1', status: 'done', claimToken: 'owner-token', result: { rawData: 'ผลถอด' },
+  }));
+  assert.equal(second.status, 200, 'พอฐานกลับมา ส่งผลเดิมซ้ำต้องผ่าน');
+  assert.equal(route.getJob().status, 'done');
+}
+
+test('P1: worker GET อ่านเฉพาะใบที่หยิบได้ ไม่โหลดคิวทั้งก้อน', async () => {
+  await assertClaimReadsOnlyClaimableRows();
+});
+
+test('mutation P1: กลับไปโหลดคิวทั้งก้อนแล้วเทสต์ต้องแดง', async () => {
+  const mutated = replaceOnce(
+    ROUTE_SOURCE,
+    'const all = (await listClaimableJobs()).filter((x) => !isHeartbeatRow(x));',
+    'const all = (await createStore(STORE_NAME).getAll({ authoritative: true })).filter((x) => !isHeartbeatRow(x));',
+    'restore full-store getAll',
+  );
+  await assert.rejects(() => assertClaimReadsOnlyClaimableRows(mutated), /ไม่โหลดคิวทั้งก้อน/);
+});
+
+test('P2: อ่านฐานพลาดตอนส่งผล = 500 ลองใหม่ได้ ไม่ใช่ CLAIM_LOST', async () => {
+  await assertTransientReadIsNotClaimLost();
+});
+
+test('mutation P2: กลืน error อ่านฐานเป็น null แล้วเทสต์ต้องแดง', async () => {
+  const mutated = replaceOnce(
+    ROUTE_SOURCE,
+    "  if (error) throw new Error(`อ่านงานถอดคลิปไม่สำเร็จ (ฐานคิวสะดุดชั่วคราว): ${error.message}`);\n  return data?.data || null;",
+    '  if (error || !data?.data) return null;\n  return data.data;',
+    'swallow transient read error',
+  );
+  await assert.rejects(() => assertTransientReadIsNotClaimLost(mutated), /ไม่ใช่ 409 CLAIM_LOST/);
+});
+
+test('P2: ผลสุดท้ายลองส่งซ้ำตามตารางยาว (~2 นาที) แต่หยุดทันทีเมื่อ CLAIM_LOST', async () => {
+  const worker = await loadWorker();
+  let calls = 0;
+  await withFetch(async () => {
+    calls += 1;
+    return fakeFetchResponse(calls < 5 ? 503 : 200, calls < 5 ? { success: false, error: 'server restarting' } : { success: true });
+  }, () => worker.report('clip-1', 'done', { rawData: 'ok' }, 'owner-token', { delaysMs: [1, 1, 1, 1, 1] }));
+  assert.equal(calls, 5, 'ต้องลองต่อจนเครื่องทีมกลับมา');
+
+  calls = 0;
+  await withFetch(async () => {
+    calls += 1;
+    return fakeFetchResponse(409, { success: false, errorType: 'CLAIM_LOST', error: 'lost' });
+  }, async () => {
+    await assert.rejects(() => worker.report('clip-1', 'done', { rawData: 'ok' }, 'owner-token', { delaysMs: [1, 1, 1] }));
+  });
+  assert.equal(calls, 1, 'CLAIM_LOST ต้องหยุดทันที ไม่ส่งทับเจ้าของใหม่');
+
+  const delays = WORKER_SOURCE.match(/const FINAL_REPORT_DELAYS_MS = \[([^\]]+)\]/);
+  assert.ok(delays, 'ต้องมีตารางลองส่งผลสุดท้าย');
+  const totalMs = delays[1].split(',').map((s) => Number(s.trim().replace(/_/g, ''))).reduce((a, b) => a + b, 0);
+  assert.ok(totalMs >= 90_000 && totalMs <= 180_000, `รวมเวลาลองส่งต้องครอบ :3900 ฟื้น + ฐานตัด 60 วิ แต่มีเพดาน (ได้ ${totalMs} ms)`);
+  assert.ok(
+    WORKER_SOURCE.includes('await report(job.id, finalStatus, finalPayload, job.claimToken, { delaysMs: FINAL_REPORT_DELAYS_MS });'),
+    'การส่งผลสุดท้ายต้องใช้ตารางยาว',
+  );
 });

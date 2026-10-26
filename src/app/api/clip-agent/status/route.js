@@ -4,7 +4,8 @@ import { createStore } from '@/lib/persistStore';
 import { authorizeClipAgent } from '@/lib/services/clipAgent/auth';
 import { compactResult } from '@/lib/services/clipAgent/compactResult';
 import { readRowFresh } from '@/lib/services/clipAgent/storeRead';
-import { isHeartbeatRow } from '@/app/api/clip-transcript/workerHeartbeat';
+import { queuePosition } from '@/lib/services/clipJobs';
+import { isHeartbeatRow, HEARTBEAT_ID } from '@/app/api/clip-transcript/workerHeartbeat';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -49,12 +50,16 @@ export async function GET(request) {
         throw error;
       }
     }
-    // ลำดับคิวต้องเห็นทั้งคิว — อ่านทั้งตารางครั้งเดียวเฉพาะตอนงานยังรอคิว
+    // ★ 26 ต.ค. 69 (เฟส 4): ลำดับคิวนับด้วย count (ตัวกลางเดียวกับ job-status) — เดิมดึงทั้งคิวทุกครั้งที่งานยังรอ
+    //   นับคิวสะดุดชั่วคราว ≠ อ่านสถานะไม่ได้ → ตอบสถานะตามปกติ ลำดับคิวเป็น null (ผู้ตรวจเฟส 4: เดิมหลุดเป็น 500 ทั้งก้อน
+    //   หลังเอเจนต์รอ long-poll มานาน) · error อื่นที่ไม่ใช่ transient ยังโยนต่อเป็น 500 เหมือนเดิม
     let position = 0;
     if (job.status === 'pending') {
-      const all = (await store.getAll()).filter((row) => !isHeartbeatRow(row));
-      position = all.filter((row) => row.status === 'processing'
-        || (row.status === 'pending' && new Date(row.createdAt) < new Date(job.createdAt))).length + 1;
+      position = await queuePosition(job, { store, excludeId: HEARTBEAT_ID }).catch((error) => {
+        if (!error?.transient) throw error;
+        console.warn('[ClipAgent:status] queue count', error.message);
+        return null;
+      });
     }
     // worker คืนผลแบบแบนและไม่มี URL ส่วนใบคลังมี insight ซ้อนอยู่ — รองรับทั้งสองแบบ
     const compactInput = { ...job.result, url: job.result?.url ?? job.url, platform: job.result?.platform ?? job.platform };

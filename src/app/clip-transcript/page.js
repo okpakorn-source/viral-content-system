@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import JobBoard from './ui/JobBoard';
 import StatsStrip from './ui/StatsStrip';
 import InsightCard from './ui/InsightCard';
-import { detectLink, platformIcon as platIcon, getBrainMeta, fmtDurSec, fmtClock, planClipRoute, workerChip } from './ui/statusMeta';
+import { detectLink, platformIcon as platIcon, fmtDurSec, fmtClock, planClipRoute, workerChip, cardView, resultToRec } from './ui/statusMeta';
 
 // โทนทั้งหน้า (พิมพ์เขียวข้อ 8) — สีเน้นเดียว #38bdf8 · เขียว/เหลือง/แดงสงวนให้สถานะ
 const C = {
@@ -24,21 +24,22 @@ async function safeJson(r) {
 }
 
 const PAGE_SIZE = 12;
+const MY_JOB_KEY = 'clip_my_job';
+const MY_JOB_TTL_MS = 6 * 60 * 60 * 1000; // ★ 26 ต.ค. 69 (P20): รีเฟรชหน้าแล้ว "งานของฉัน" ไม่หาย (จำไว้ 6 ชม.)
+const UNKNOWN_BACKUP_MS = 2 * 60 * 1000;  // ไม่รู้สถานะเครื่องแอดมินต่อเนื่องเท่านี้ ปุ่มสำรองจึงเปิด (กติกา 27 ส.ค. "คอมดับค่อยกดสำรอง")
+const DONE_TITLE = { done: '✅ ถอดเสร็จ', error: '❌ ถอดไม่สำเร็จ' };
+// ชื่อแท็บ (P20): บอกว่างานเสร็จตอนผู้ใช้ไปทำอย่างอื่น — แยกไว้นอกคอมโพเนนต์ (กฎ react-hooks ห้ามแก้ค่าภายนอกในตัวคอมโพเนนต์)
+function setTabTitle(t) { if (t && typeof document !== 'undefined') document.title = t; }
+const tabHidden = () => typeof document !== 'undefined' && document.hidden;
 
 export default function ClipTranscriptPage() {
   const [url, setUrl] = useState('');
-  const [tidy, setTidy] = useState(true);
   const [err, setErr] = useState('');       // กล่องแดง = ข้อผิดพลาดจริงเท่านั้น
   const [notice, setNotice] = useState('');  // กล่องฟ้า = แจ้งข่าวดี/สถานะ (แยกจาก err — แก้บั๊กเดิมที่ปนกัน)
 
   // ผู้ใช้ (เดิมไม่มี UI ตั้งค่า — ช่อง 👤 ในคลังเลยว่าง)
   const [currentUser, setCurrentUser] = useState('');
   const [editUser, setEditUser] = useState(false);
-
-  // ถอดบทสัมภาษณ์
-  const [loading, setLoading] = useState(false);
-  const [out, setOut] = useState(null);
-  const [view, setView] = useState('tidy');
 
   // ถอดประเด็น
   const [insight, setInsight] = useState(null);
@@ -55,23 +56,18 @@ export default function ClipTranscriptPage() {
   const [submitting, setSubmitting] = useState(false);
   const [queueList, setQueueList] = useState(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  // เวลาที่เริ่ม "ไม่รู้สถานะเครื่องแอดมิน" (ไม่มีชีพจร/อ่านคิวไม่ได้) · 0 = รู้สถานะ — ใช้หน่วงก่อนเปิดปุ่มสำรอง
+  const [unknownSince, setUnknownSince] = useState(0);
 
   // ไฟ Gemini
   const [gem, setGem] = useState(null);
 
-  // ค้นประเด็น (hunt)
-  const [hunting, setHunting] = useState(false);
-  const [huntPhase, setHuntPhase] = useState(0);
-  const [hunt, setHunt] = useState(null);
-  const [huntCases, setHuntCases] = useState([]);
-  const [huntOpen, setHuntOpen] = useState(false);
-  const [huntExpanded, setHuntExpanded] = useState(null);
-  const [huntFilter, setHuntFilter] = useState('all');
-
   // refs กัน polling รั่วหลัง unmount (แก้บั๊ก setInterval/pollJob เดิมไม่มี cleanup)
   const aliveRef = useRef(true);
-  const pollRef = useRef(null);
-  useEffect(() => { aliveRef.current = true; return () => { aliveRef.current = false; if (pollRef.current) clearInterval(pollRef.current); }; }, []);
+  // ★ 26 ต.ค. 69 (P12): ลูปติดตามผูกกับเลขงาน — ส่งงานใหม่แล้วลูปเก่าเลิกเอง ไม่เขียนทับการ์ดงานใหม่
+  const activeJobRef = useRef(null);
+  const baseTitleRef = useRef('');
+  useEffect(() => { aliveRef.current = true; return () => { aliveRef.current = false; activeJobRef.current = null; }; }, []);
 
   const link = useMemo(() => detectLink(url), [url]);
 
@@ -83,25 +79,28 @@ export default function ClipTranscriptPage() {
       if (d.success) { setInsightCases(d.cases || []); if (typeof d.total === 'number') setInsightTotal(d.total); }
     } catch {}
   };
-  const loadHuntCases = async () => {
-    try {
-      const r = await fetch('/api/clip-transcript/cases?kind=hunt&limit=40', { cache: 'no-store' });
-      const d = await r.json();
-      if (!aliveRef.current) return;                       // UI-02
-      if (d.success) setHuntCases(d.cases || []);
-    } catch {}
-  };
   const loadQueueList = async () => {
-    try { const r = await fetch('/api/clip-transcript/queue-list', { cache: 'no-store' }); const d = await r.json(); if (d.success && aliveRef.current) setQueueList(d); } catch {}
+    let known = false;
+    try {
+      const r = await fetch('/api/clip-transcript/queue-list', { cache: 'no-store' });
+      const d = await r.json();
+      if (!aliveRef.current) return;
+      if (d.success) { setQueueList(d); known = !!d.worker?.known; }
+    } catch {}
+    // ★ ผู้ตรวจอิสระรอบ 2: อ่านคิวไม่ได้ หรือไม่มีชีพจร = ไม่รู้สถานะ (ไม่ใช้ภาพเก่าที่บอกว่าเครื่องพร้อม)
+    if (aliveRef.current) setUnknownSince((p) => (known ? 0 : p || Date.now()));
   };
 
   useEffect(() => {
     // อ่านชื่อผู้ใช้หลัง mount เท่านั้น (localStorage ไม่มีตอน render ฝั่งเซิร์ฟเวอร์ — อ่านตอน render จะทำให้ hydration เพี้ยน)
     const saved = (typeof window !== 'undefined' && localStorage.getItem('clip_user')) || '';
     if (saved) queueMicrotask(() => { if (aliveRef.current) setCurrentUser(saved); });
-    loadInsightCases(0); loadHuntCases(); loadQueueList();
+    baseTitleRef.current = document.title;
+    const restoreTitle = () => setTabTitle(baseTitleRef.current);
+    window.addEventListener('focus', restoreTitle);
+    loadInsightCases(0); loadQueueList();
     const qTimer = setInterval(loadQueueList, 10000);
-    return () => clearInterval(qTimer);
+    return () => { clearInterval(qTimer); window.removeEventListener('focus', restoreTitle); };
   }, []);
 
   // ไฟ Gemini ทุก 45 วิ
@@ -119,14 +118,15 @@ export default function ClipTranscriptPage() {
     return () => { stop = true; clearInterval(t); };
   }, []);
 
-  // นาฬิกาวินาที — เดินเฉพาะตอนมีงานรอนับถอยหลัง (ลดงานเรนเดอร์)
+  // นาฬิกาวินาที — เดินเฉพาะตอนมีงานรอนับถอยหลัง หรืองานของฉันกำลังถอด (★ P13: เดิม "ถอดมาแล้ว" ไม่เดิน)
   useEffect(() => {
-    const needClock = (queueJob && queueJob.status === 'retry_wait') ||
-      (queueList && queueList.active && queueList.active.some(j => j.status === 'retry_wait'));
+    const needClock = (queueJob && (queueJob.status === 'retry_wait' || queueJob.status === 'processing')) ||
+      (queueList && queueList.active && queueList.active.some(j => j.status === 'retry_wait')) ||
+      unknownSince > 0; // นับเวลาไม่รู้สถานะเครื่อง เพื่อเปิดปุ่มสำรองเมื่อครบ 2 นาที
     if (!needClock) return;
     const t = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(t);
-  }, [queueJob, queueList]);
+  }, [queueJob, queueList, unknownSince]);
 
   const saveUser = (v) => {
     const name = String(v || '').trim().slice(0, 40);
@@ -138,199 +138,202 @@ export default function ClipTranscriptPage() {
   const platformIcon = (p) => platIcon(p);
 
   // signature (key, text) — ตรงกับสัญญา onCopy(key,text) ของ InsightCard (แก้บั๊ก UI-01 คัดลอกกลับด้าน)
-  const copy = (key, text) => { navigator.clipboard?.writeText(text); setCopied(key); setTimeout(() => setCopied(''), 2000); };
-
-  // ── กลไก API (คงพฤติกรรมเดิมทุกเส้น) ──
-  const extract = async () => {
-    if (!url.trim()) { setErr('วางลิงก์คลิปก่อน'); return; }
-    setLoading(true); setErr(''); setNotice(''); setOut(null);
-    try {
-      const r = await fetch('/api/clip-transcript', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), tidy }) });
-      const d = await safeJson(r);
-      if (!aliveRef.current) return;
-      if (!d.success) setErr(d.error || 'ถอดไม่สำเร็จ');
-      else { setOut(d.data); setView(d.data.tidyText ? 'tidy' : 'raw'); }
-    } catch (e) { if (aliveRef.current) setErr(e.message); }
-    if (aliveRef.current) setLoading(false);
+  // ★ 26 ต.ค. 69: ขึ้น ✓ เฉพาะเมื่อคัดลอกสำเร็จจริง (เดิมขึ้นเสมอแม้เบราว์เซอร์ปฏิเสธ — พนักงานวางแล้วได้ของเก่า)
+  const copy = (key, text) => {
+    const fail = () => setErr('คัดลอกอัตโนมัติไม่สำเร็จ — ลากเลือกข้อความในเนื้อข่าวแล้วกด Ctrl+C');
+    const p = navigator.clipboard?.writeText(text);
+    if (!p) { fail(); return; }
+    p.then(() => { if (!aliveRef.current) return; setCopied(key); setTimeout(() => setCopied(''), 2000); }, fail);
   };
 
-  const extractInsight = async (force = false, targetUrl = null) => {
+  // ── กลไก API ──
+  // ★ 26 ต.ค. 69: เลิกโหมดถอดบทสัมภาษณ์ + ค้นข่าวคล้าย/วิจัยลิงก์ข่าว (เจ้าของเคาะ) — เหลือถอดคลิปเป็นเนื้อข่าวช่องเดียวอย่างเดียว
+  // ★ P20: ต้องมีชื่อผู้ส่งก่อน (คลังเดิม 361/400 ใบ "ไม่ระบุชื่อ") — ตั้งครั้งเดียว จำไว้ในเครื่อง
+  const needUser = () => {
+    if (currentUser) return false;
+    setErr('ตั้งชื่อผู้ใช้ก่อนส่งงาน (ช่อง 👤 มุมขวาบน) — ชื่อจะติดไปกับงานในคลัง ตั้งครั้งเดียวเครื่องจำไว้');
+    setEditUser(true);
+    return true;
+  };
+
+  const extractInsight = async (force = false, targetUrl = null, opts = {}) => {
     const target = (targetUrl != null ? targetUrl : url).trim();  // UI-03: รับ URL ตรง กันใช้ state เก่าตอน "ถอดใหม่" จากคลัง
     if (!target) { setErr('วางลิงก์คลิปก่อน'); return; }
+    if (needUser()) return;
     if (targetUrl != null) setUrl(target);
-    setInsightLoading(true); setErr(''); setNotice(''); setInsight(null); setQueueJob(null);
+    // 🔴 ผู้ตรวจอิสระรอบ 2: ไม่แตะการ์ด/ลูปของงานในคิว — ถอดสำรองล้มแล้วงานในคิวยังติดตามต่อได้
+    setInsightLoading(true); setErr(''); setNotice(opts.notice || ''); setInsight(null);
     try {
       const r = await fetch('/api/clip-transcript/insight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: target, force: !!force, user: currentUser }) });
       const d = await safeJson(r);
       if (!aliveRef.current) return;
-      if (d.success) { setInsight(d.data); loadInsightCases(0); setInsightOffset(0); }
+      if (d.success) { setInsight({ ...resultToRec(d.data, target), _from: 'backup' }); loadInsightCases(0); setInsightOffset(0); }
       else if (/Gemini มีคนใช้งานหนัก|แน่นชั่วคราว|503|overload/i.test(String(d.error || ''))) {
         setNotice('⏳ ตอนนี้ Gemini แน่น ถอดทันทีไม่ผ่าน — กด "ส่งเข้าคิว" ให้เครื่องทีมลองเมื่อรับงาน (ปิดหน้าได้ ถ้าล้มระบบจะไม่วนถอดซ้ำอัตโนมัติ)');
       }
-      else setErr(d.error || 'ถอดประเด็นไม่สำเร็จ');
+      else setErr(d.error || 'ถอดคลิปไม่สำเร็จ');
     } catch (e) { if (aliveRef.current) setErr(e.message); }
     if (aliveRef.current) setInsightLoading(false);
   };
 
-  // 🅿️ ปุ่มจอดไว้ (เจ้าของสั่ง 27 ส.ค. 69 "ทั้งหน้าเหลือ 2 ปุ่ม") — ฟังก์ชันยังอยู่ครบ
-  //    อยากได้คืนเมื่อไหร่ เติมปุ่มเรียก extract() / extractHunt() กลับเข้าแถวปุ่มได้ทันที ไม่ต้องเขียนใหม่
-  //
-  //    🔴 27 ส.ค. 69 — ถอด "ขั้นที่ 1 ยิง /insight ตรง" ออกจาก extractHunt แล้ว
-  //       เดิมมันยิงถอดสดก่อนเพื่อโชว์ความคืบหน้าเป็น 2 ขั้น แต่ /hunt ยิง /insight ให้เองอยู่แล้ว (ซ้ำซ้อน)
-  //       และมันเป็น "ช่องลัดไป Vercel" ที่ค้างไว้ให้คนมาเติมปุ่มคืนแล้วเผลอเปิดใช้โดยไม่รู้ตัว
-  //       ตอนนี้ /hunt มีด่านของตัวเอง: อยู่บนคลาวด์ → เข้าคิวเครื่องแอดมินให้เอง (hunt/route.js)
-  const extractHunt = async () => {
-    if (!url.trim()) { setErr('วางลิงก์คลิปก่อน'); return; }
-    setHunting(true); setHuntPhase(1); setErr(''); setNotice(''); setHunt(null); setQueueJob(null);
-    try {
-      setHuntPhase(2);
-      const r2 = await fetch('/api/clip-transcript/hunt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), user: currentUser }) });
-      const d2 = await safeJson(r2);
-      if (!aliveRef.current) return;
-      if (d2.success && d2.queued) {
-        setHuntPhase(3);
-        let tries = 0;
-        if (pollRef.current) clearInterval(pollRef.current);
-        pollRef.current = setInterval(async () => {
-          tries++;
-          try {
-            const q = await (await fetch(`/api/clip-transcript/job-status?id=${d2.jobId}`, { cache: 'no-store' })).json();
-            if (!aliveRef.current) { clearInterval(pollRef.current); return; }   // UI-02: callback ที่ค้างกลาง await
-            if (q.status === 'done') { clearInterval(pollRef.current); setHunt(q.result || null); setHuntPhase(0); setHunting(false); loadHuntCases(); loadInsightCases(0); }
-            else if (q.status === 'error') { clearInterval(pollRef.current); setErr(q.error || 'ถอด+ค้นไม่สำเร็จ'); setHuntPhase(0); setHunting(false); }
-            else if (q.status === 'cancelled') { clearInterval(pollRef.current); setNotice('🚫 งานถูกยกเลิกแล้ว'); setHuntPhase(0); setHunting(false); }
-            else if (tries > 80) { clearInterval(pollRef.current); setNotice('⏱️ งานยังทำต่อเบื้องหลัง — เสร็จแล้วผลจะโผล่ใน "คลังค้นประเด็น" ด้านล่างเอง'); setHuntPhase(0); setHunting(false); }
-          } catch {}
-        }, 15000);
-        return;
-      }
-      if (d2.success) { setHunt(d2.data); loadHuntCases(); loadInsightCases(0); }
-      else setErr(d2.error || 'ค้นข่าวคล้ายไม่สำเร็จ');
-    } catch (e) { if (aliveRef.current) setErr(e.message); }
-    if (aliveRef.current) { setHuntPhase(0); setHunting(false); }
+  const rememberJob = (jobId, jobUrl) => {
+    try { localStorage.setItem(MY_JOB_KEY, JSON.stringify({ jobId, url: jobUrl, at: Date.now() })); } catch {}
+  };
+  const markTitle = (status) => {
+    if (DONE_TITLE[status] && tabHidden()) setTabTitle(`${DONE_TITLE[status]} · ${baseTitleRef.current || 'ระบบถอดคลิป'}`);
   };
 
-  const extractNewsHunt = async () => {
-    if (!url.trim()) { setErr('วางลิงก์ข่าวก่อน'); return; }
-    if (link.isClip) { setErr('ลิงก์นี้เป็นคลิป — ใช้ปุ่ม "คลิป → ค้นข่าวคล้าย" แทน (ปุ่มข่าวสำหรับลิงก์ข่าวเว็บ)'); return; }
-    setHunting(true); setHuntPhase(2); setErr(''); setNotice(''); setHunt(null); setQueueJob(null);
-    try {
-      const r = await fetch('/api/clip-transcript/news-hunt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), user: currentUser }) });
-      const d = await safeJson(r);
-      if (!aliveRef.current) return;
-      if (d.success) { setHunt(d.data); loadHuntCases(); }
-      else setErr(d.error || 'วิจัยลิงก์ข่าวไม่สำเร็จ');
-    } catch (e) { if (aliveRef.current) setErr(e.message); }
-    if (aliveRef.current) { setHuntPhase(0); setHunting(false); }
-  };
-
-  const huntMore = async (c) => {
-    setHunting(true); setHuntPhase(2); setErr(''); setNotice('');
-    try {
-      const endpoint = c.sourceType === 'article' ? '/api/clip-transcript/news-hunt' : '/api/clip-transcript/hunt';
-      const r = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: c.sourceUrl, user: currentUser, caseId: c.id }) });
-      const d = await safeJson(r);
-      if (!aliveRef.current) return;
-      if (d.success && d.queued) setNotice('⏳ ส่งเครื่องทีมค้นเพิ่มแล้ว — ผลรวมเข้าเคสเดิมในคลังเอง');
-      else if (d.success) { setHunt(d.data); loadHuntCases(); }
-      else setErr(d.error || 'ค้นเพิ่มไม่สำเร็จ');
-    } catch (e) { if (aliveRef.current) setErr(e.message); }
-    if (aliveRef.current) { setHuntPhase(0); setHunting(false); }
-  };
-
-  const submitToQueue = async (forceUrl = null, force = false) => {
+  const submitToQueue = async (forceUrl = null, force = false, opts = {}) => {
     const target = (forceUrl || url).trim();
     if (!target) { setErr('วางลิงก์คลิปก่อน'); return; }
-    setSubmitting(true); setErr(''); setNotice(''); setQueueJob(null);
+    if (needUser()) return;
+    setSubmitting(true); setErr(''); setNotice('');
     try {
-      const r = await fetch('/api/clip-transcript/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: target, kind: 'insight', tidy, user: currentUser, force: !!force }) });
+      const r = await fetch('/api/clip-transcript/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: target, kind: 'insight', user: currentUser, force: !!force }) });
       const d = await safeJson(r);
       if (!aliveRef.current) return;
+      // 🔴 ผู้ตรวจอิสระ 26 ต.ค.: ส่งไม่สำเร็จต้องไม่ทำการ์ด/ลูปของงานที่กำลังถอดอยู่หาย — ล้างเฉพาะหลังส่งสำเร็จ
       if (!d.success) { setErr(d.error || 'ส่งเข้าคิวไม่สำเร็จ'); setSubmitting(false); return; }
+      setTabTitle(baseTitleRef.current);
+      // ★ P13: ข้อความแจ้ง (เช่น "เครื่องแอดมินดับ") ตั้งหลังส่งสำเร็จ — เดิมตั้งก่อนแล้วถูกล้างทันทีจนไม่เคยขึ้น
       if (d.dup) setNotice('คลิปนี้อยู่ในคิวอยู่แล้ว — ติดตามสถานะได้ที่บอร์ดงานด้านล่าง');
+      else if (opts.notice) setNotice(opts.notice);
       setQueueJob({ jobId: d.jobId, status: d.status || 'pending', position: d.position, platform: d.platform, url: target });
+      rememberJob(d.jobId, target);
       loadQueueList();
       pollJob(d.jobId, target);
     } catch (e) { if (aliveRef.current) setErr(e.message); }
     if (aliveRef.current) setSubmitting(false);
   };
 
+  /**
+   * ติดตามงาน 1 ใบจนจบ — ★ 26 ต.ค. 69 (P12)
+   *   · ผูกกับเลขงาน: มีงานใหม่มาแทน (activeJobRef เปลี่ยน) = ลูปนี้เลิกเอง
+   *   · อ่านพลาด (ฐานสะดุด 503/เน็ตหลุด) ไม่ใช่งานล้ม — ติดตามต่อ พลาด 3 ครั้งติดค่อยเตือนว่าเชื่อมต่อไม่ได้
+   *   · "ไม่พบงาน" (404) ติดกัน 2 ครั้งจึงถือว่าใบหายจริง
+   *   · ตั๋วต่อการเรียก: เรียกซ้ำด้วยเลขงานเดิม (ส่งลิงก์ซ้ำได้ dup) ลูปเก่าเลิก ไม่ยิงซ้อนสองลูป
+   */
   const pollJob = async (jobId, jobUrl = '') => {
+    const ticket = { jobId };
+    activeJobRef.current = ticket;
+    const mine = () => aliveRef.current && activeJobRef.current === ticket;
+    const patch = (p) => setQueueJob(j => (j && j.jobId === jobId ? { ...j, ...p } : j));
+    let fails = 0, notFound = 0;
     for (let i = 0; i < 2000; i++) {
-      if (!aliveRef.current) return;
+      if (!mine()) return;
       let st = 'pending';
       try {
-        const r = await fetch('/api/clip-transcript/job-status?id=' + jobId, { cache: 'no-store' });
+        const r = await fetch('/api/clip-transcript/job-status?id=' + encodeURIComponent(jobId), { cache: 'no-store' });
         const d = await safeJson(r);
-        if (!aliveRef.current) return;
-        if (!aliveRef.current) return;   // UI-02: กันอัปเดต state หลังผู้ใช้ปิดหน้า (in-flight callback)
-        if (!d.success) { setQueueJob(j => ({ ...j, status: 'error', error: d.error || 'หางานในคิวไม่เจอ' })); return; }
-        st = d.status;
-        setQueueJob({ jobId, status: d.status, position: d.position, platform: d.platform, result: d.result, error: d.error, statusNote: d.statusNote, lastError: d.lastError, attempts: d.attempts, nextRetryAt: d.nextRetryAt, startedAt: d.startedAt, url: jobUrl });
-        if (d.status === 'done') { setInsight(d.result); loadInsightCases(0); return; }
-        if (d.status === 'error' || d.status === 'cancelled') return;
-      } catch {}
-      await new Promise(res => setTimeout(res, st === 'retry_wait' ? 15000 : 4000));
+        if (!mine()) return;
+        if (d.success) {
+          fails = 0; notFound = 0; st = d.status;
+          setQueueJob({ jobId, status: d.status, position: d.position, platform: d.platform, error: d.error, statusNote: d.statusNote, lastError: d.lastError, attempts: d.attempts, nextRetryAt: d.nextRetryAt, startedAt: d.startedAt, url: jobUrl, connWarn: false });
+          if (d.status === 'done') {
+            // การ์ดของคลิปอื่นที่ผู้ใช้เปิดดูอยู่ (ถอดสำรอง/กดดูผล) ไม่ถูกผลงานคิวทับ (ผลงานคิวกด "ดูผล" ได้จากการ์ดงานของฉัน/คลัง)
+            setInsight((cur) => (cur?._from && cur.url !== jobUrl ? cur : resultToRec(d.result, jobUrl)));
+            loadInsightCases(0); markTitle('done'); return;
+          }
+          if (d.status === 'error' || d.status === 'cancelled') { markTitle(d.status === 'error' ? 'error' : ''); return; }
+        } else if (r.status === 404 && ++notFound >= 2) {
+          patch({ status: 'error', error: d.error || 'ไม่พบงานในคิว (อาจถูกล้าง — ส่งใหม่ได้)' });
+          try { localStorage.removeItem(MY_JOB_KEY); } catch {}
+          return;
+        } else if (r.status !== 404 && ++fails >= 3) patch({ connWarn: true });
+      } catch { if (++fails >= 3) patch({ connWarn: true }); }
+      await new Promise(res => setTimeout(res, st === 'retry_wait' ? 15000 : fails >= 3 ? 10000 : 4000));
     }
-    if (aliveRef.current) setQueueJob(j => ({ ...(j || {}), _pollEnded: true }));
+    if (mine()) patch({ _pollEnded: true });
   };
 
+  // ★ P20: งานที่ส่งไว้ก่อนรีเฟรช — ติดตามต่อ (เสร็จแล้วก็ได้ผลกลับมาแสดง) · อ่าน localStorage หลัง mount เท่านั้น
+  useEffect(() => {
+    try {
+      const mine = JSON.parse(localStorage.getItem(MY_JOB_KEY) || 'null');
+      if (mine?.jobId && Date.now() - (Number(mine.at) || 0) < MY_JOB_TTL_MS) {
+        queueMicrotask(() => {
+          if (!aliveRef.current) return;
+          setQueueJob({ jobId: mine.jobId, status: 'pending', url: mine.url || '' });
+          pollJob(mine.jobId, mine.url || '');
+        });
+      } else if (mine) localStorage.removeItem(MY_JOB_KEY);
+    } catch {}
+  }, []);
+
   // ── handlers ให้ JobBoard ──
-  const onCancel = async (jobId) => {
+  const onCancel = async (jobId, status) => {
     try {
       const r = await fetch('/api/clip-transcript/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: jobId }) });
       const d = await safeJson(r);
       if (!aliveRef.current) return;
+      if (d.success) setQueueJob(j => (j && j.jobId === jobId ? { ...j, status: 'cancelled' } : j));
       if (!d.success) setErr(d.error || 'ยกเลิกไม่สำเร็จ');
-      else setNotice('🚫 ยกเลิกงานแล้ว');
+      // ★ P13: งานที่เครื่องกำลังถอด หยุดกลางทางไม่ได้ — บอกตามจริง
+      else if ((d.previousStatus || status) === 'processing') setNotice('🚫 ยกเลิกแล้ว — เครื่องกำลังถอดรอบนี้อยู่จึงทำต่อจนจบ (ผลอาจยังเข้าคลัง) แต่จะไม่ลองใหม่อีก');
+      else setNotice('🚫 ยกเลิกงานแล้ว — ออกจากคิว ยังไม่เสียค่าถอด');
     } catch (e) { if (aliveRef.current) setErr(e.message); }
     loadQueueList();
   };
   const onRetry = (job) => { if (job?.url) submitToQueue(job.url, true); };
   const onViewResult = async (job) => {
     try {
-      const r = await fetch('/api/clip-transcript/job-status?id=' + (job.jobId || job.id), { cache: 'no-store' });
+      const r = await fetch('/api/clip-transcript/job-status?id=' + encodeURIComponent(job.jobId || job.id), { cache: 'no-store' });
       const d = await safeJson(r);
       if (!aliveRef.current) return;
-      if (d.success && d.result) { setInsight(d.result); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+      if (d.success && d.result) { setInsight({ ...resultToRec(d.result, job.url), _from: 'view' }); window.scrollTo({ top: 0, behavior: 'smooth' }); }
       else setNotice('งานนี้ยังไม่มีผลให้แสดง');
     } catch (e) { if (aliveRef.current) setErr(e.message); }
   };
+  // ยืนยันการลบอยู่ในการ์ดแล้ว (เดิมถามซ้ำสองชั้น)
   const deleteInsightCase = async (id) => {
-    if (!confirm('ลบเคสนี้ออกจากคลัง?')) return;
-    await fetch('/api/clip-transcript/cases?kind=insight&id=' + id, { method: 'DELETE' });
+    try {
+      const r = await fetch('/api/clip-transcript/cases?kind=insight&id=' + encodeURIComponent(id), { method: 'DELETE' });
+      const d = await safeJson(r);
+      if (!aliveRef.current) return;
+      if (d.success) setNotice('🗑️ ลบใบนี้ออกจากคลังแล้ว');
+      else setErr(d.error || 'ลบไม่สำเร็จ');
+    } catch (e) { if (aliveRef.current) setErr(e.message); }
     loadInsightCases();
   };
+  // ★ P10: เดิมส่งไม่ระบุคลัง → ไปหาในคลังบทสัมภาษณ์ ได้ 404 แล้วกลืนเงียบ ใบที่ตั้งใจปักจึงไม่ถูกกันลบ
   const pinInsightCase = async (id, chosen) => {
-    try { await fetch('/api/clip-transcript/cases', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, chosen }) }); loadInsightCases(); } catch {}
+    try {
+      const r = await fetch('/api/clip-transcript/cases?kind=insight', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, chosen }) });
+      const d = await safeJson(r);
+      if (!aliveRef.current) return;
+      if (!d.success) setErr(d.error || 'ปักหมุดไม่สำเร็จ');
+      else setNotice(d.warning || (chosen ? '📌 ปักใบนี้แล้ว — ส่งลิงก์เดิมจะได้ใบนี้คืน และไม่ถูกลบตอนล้างคลัง' : 'ปลดปักแล้ว'));
+    } catch (e) { if (aliveRef.current) setErr(e.message); }
+    loadInsightCases();
   };
   const gotoPage = (offset) => { const o = Math.max(0, offset); setInsightOffset(o); loadInsightCases(o); };
 
-  // myJob ให้ JobBoard (จาก queueJob)
-  const busy = loading || insightLoading || hunting;
+  const busy = insightLoading;
   // ★★ 27 ส.ค. 69 (เจ้าของสั่ง — ทับกติกา 26 ส.ค.):
   //    "บังคับรันในเครื่องทีมเท่านั้น เหลือ 2 ปุ่มพอ · ถ้าคอมฉันดับ ค่อยกดปุ่มสำรอง (Vercel)"
   //    🔴 เลิกสลับไปคลาวด์อัตโนมัติ — ปุ่มหลักไปเครื่องแอดมินเสมอ · คลาวด์ต้องกดเอง
   const worker = queueList?.worker;
-  const route = planClipRoute(url, !!worker?.alive);
-  const wchip = workerChip(worker);
+  // ★ P13: "ไม่ทราบสถานะ" ไม่ใช่ "ดับ" — ส่ง null ให้ตรรกะกลางแยกเอง
+  //   ไม่รู้ต่อเนื่องเกิน 2 นาที (UNKNOWN_BACKUP_MS) จึงเปิดปุ่มสำรอง — ตอนหน้าเพิ่งโหลด/ชีพจรสะดุดแวบเดียวยังปิด
+  const workerKnown = !unknownSince && !!worker?.known;
+  const route = planClipRoute(url, workerKnown ? !!worker.alive : null, { unknownLong: unknownSince > 0 && nowMs - unknownSince >= UNKNOWN_BACKUP_MS });
+  const machineDown = route.mode === 'queue-offline' || route.mode === 'queue-blocked';
+  const wchip = workerChip(unknownSince ? null : worker); // อ่านคิวไม่ได้ = ชิปบอก "ไม่ทราบสถานะ" ไม่ค้างภาพเก่า
 
-  /** ปุ่ม 1 — ทางหลัก: เข้าคิวเครื่องแอดมินเสมอ (ลิงก์ข่าวเว็บเปลี่ยนเป็นวิจัยข่าวให้) */
+  /** ปุ่ม 1 — ทางหลัก: เข้าคิวเครื่องแอดมินเสมอ */
   const runPrimary = () => {
     if (!url.trim()) { setErr('วางลิงก์คลิปก่อน'); return; }
-    if (route.primary.action === 'news-hunt') return extractNewsHunt();
-    if (!worker?.alive) setNotice('🔴 เครื่องแอดมินดับอยู่ — ส่งเข้าคิวไว้แล้ว เปิดเครื่องเมื่อไหร่จะถอดให้เองทันที (งานไม่หาย)');
-    return submitToQueue();
+    if (!route.primary.enabled) { setErr(route.primary.why); return; }
+    return submitToQueue(null, false, machineDown
+      ? { notice: '🔴 เครื่องแอดมินดับอยู่ — ส่งเข้าคิวไว้แล้ว เปิดเครื่องเมื่อไหร่จะถอดให้เองทันที (งานไม่หาย)' } : {});
   };
   /** ปุ่ม 2 — สำรอง: ต้องกดเอง และกดได้เฉพาะตอนเครื่องแอดมินดับจริง */
   const runBackup = () => {
     if (!route.backup.enabled) return;
-    setNotice('☁️ ถอดสำรองบน Vercel — ของชุดนี้ไม่ผ่านผู้ตรวจและตัวซ่อม (Vercel รันสมองไม่ได้) ใช้ตรวจสอบก่อนเอาไปใช้');
-    return extractInsight();
+    return extractInsight(false, null, { notice: '☁️ ถอดสำรองบน Vercel — เครื่องยนต์เดียวกับเครื่องแอดมิน แต่คลิปยาวอาจดูไม่ครบ เช็ค "จุดที่ควรเช็ค" ก่อนใช้' });
   };
   const primaryLabel = () => {
     if (submitting) return '⏳ กำลังส่ง…';
-    if (hunting) return '⏳ กำลังวิจัย…';
     return route.primary.label;
   };
 
@@ -370,7 +373,7 @@ export default function ClipTranscriptPage() {
           </div>
         </div>
         <p style={{ fontSize: 13, color: C.muted, margin: '0 0 18px' }}>
-          วางลิงก์คลิป (YouTube / TikTok / Facebook / IG) หรือลิงก์ข่าวเว็บ → ถอดประเด็นเป็นข้อมูลพร้อมใช้ · แยกจากระบบทำข่าว 100%
+          วางลิงก์คลิป (YouTube / TikTok / Facebook / IG) → ได้พาดหัว + เนื้อข่าวครบทุกประเด็นในช่องเดียว พร้อมจุดที่ควรเช็ค · แยกจากระบบทำข่าว 100%
         </p>
 
         {/* โซน 1 — งานใหม่ */}
@@ -384,8 +387,8 @@ export default function ClipTranscriptPage() {
               {link.label && <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11.5, color: C.muted, background: C.card, padding: '2px 8px', borderRadius: 999, border: `1px solid ${C.line}` }}>{link.label}</span>}
             </div>
             {/* ปุ่ม 1 — ทางหลัก: เครื่องแอดมินเสมอ */}
-            <button onClick={runPrimary} disabled={busy || submitting} data-testid="btn-primary"
-              style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: (busy || submitting) ? '#334155' : (worker?.alive ? C.accent : '#f59e0b'), color: (busy || submitting) ? C.muted : '#04263b', fontWeight: 800, fontSize: 14, cursor: (busy || submitting) ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
+            <button onClick={runPrimary} disabled={busy || submitting || !route.primary.enabled} data-testid="btn-primary" title={route.primary.why}
+              style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: (busy || submitting || !route.primary.enabled) ? '#334155' : (machineDown ? '#f59e0b' : C.accent), color: (busy || submitting || !route.primary.enabled) ? C.muted : '#04263b', fontWeight: 800, fontSize: 14, cursor: (busy || submitting) ? 'wait' : !route.primary.enabled ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
               {primaryLabel()}
             </button>
           </div>
@@ -405,16 +408,13 @@ export default function ClipTranscriptPage() {
               }}>
               {insightLoading ? '⏳ กำลังถอดสำรอง…' : route.backup.label}
             </button>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: C.muted, marginLeft: 'auto' }}>
-              <input type="checkbox" checked={tidy} onChange={e => setTidy(e.target.checked)} /> เรียบเรียงให้อ่านลื่น
-            </label>
           </div>
 
           {/* บอกล่วงหน้าว่าลิงก์นี้จะไปทางไหน — พนักงานไม่ต้องเดา */}
           {url.trim() && (
             <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <div style={{ fontSize: 12, color: worker?.alive ? C.muted : '#fbbf24' }}>
-                {worker?.alive ? '🖥️' : '⏳'} {route.primary.why}
+              <div style={{ fontSize: 12, color: (machineDown || !route.primary.enabled) ? '#fbbf24' : C.muted }}>
+                {!route.primary.enabled ? '⚠️' : machineDown ? '⏳' : '🖥️'} {route.primary.why}
               </div>
               <div style={{ fontSize: 12, color: route.backup.enabled ? '#fbbf24' : C.muted }}>
                 ☁️ {route.backup.why}
@@ -441,31 +441,11 @@ export default function ClipTranscriptPage() {
         </div>
 
         {/* โซน 3 — ผลลัพธ์ */}
-        {/* ผลถอดบทสัมภาษณ์ (out) */}
-        {out && (
-          <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 16, marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 15, fontWeight: 700 }}>🎙️ ผลถอดบทสัมภาษณ์</span>
-              {out.tidyText && (
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button onClick={() => setView('tidy')} style={tabBtn(view === 'tidy')}>เรียบเรียง</button>
-                  <button onClick={() => setView('raw')} style={tabBtn(view === 'raw')}>ดิบ</button>
-                </div>
-              )}
-              <button onClick={() => copy('out', view === 'tidy' && out.tidyText ? out.tidyText : out.rawText)} style={{ ...tabBtn(false), marginLeft: 'auto' }}>{copied === 'out' ? '✓ คัดลอกแล้ว' : '📋 คัดลอก'}</button>
-            </div>
-            <div style={{ fontSize: 13.5, lineHeight: 1.7, whiteSpace: 'pre-wrap', background: C.sub, borderRadius: 8, padding: 12, maxHeight: 420, overflowY: 'auto' }}>
-              {view === 'tidy' && out.tidyText ? out.tidyText : out.rawText}
-            </div>
-          </div>
-        )}
-
-        {/* ผลถอดประเด็นสด */}
-        {insightLoading && <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 20, marginBottom: 16, textAlign: 'center', color: C.muted, fontSize: 13.5 }}>⏳ Gemini กำลังดูคลิปและถอดประเด็น…</div>}
+        {insightLoading && <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 20, marginBottom: 16, textAlign: 'center', color: C.muted, fontSize: 13.5 }}>⏳ Gemini กำลังดูคลิปและเขียนเนื้อข่าว…</div>}
         {insight && (
           <div style={{ marginBottom: 16 }}>
             <InsightCard
-              rec={insight.insight ? insight : { insight, url, platform: insight.platform }}
+              rec={insight}
               live
               copiedKey={copied}
               onCopy={copy}
@@ -474,16 +454,14 @@ export default function ClipTranscriptPage() {
           </div>
         )}
 
-        {/* คลังถอดประเด็น (พับ default) */}
-        <Section title={`📚 คลังถอดประเด็น${insightTotal ? ` (${insightTotal})` : ''}`} open={insightOpen} onToggle={() => setInsightOpen(o => !o)} C={C}>
-          {insightCases.length === 0 && <div style={{ fontSize: 13, color: C.muted, padding: '4px 2px' }}>ยังไม่มีเคสในคลัง</div>}
-          {/* ★ 26 ส.ค. 69 (เจ้าของแจ้ง): เดิมกางเต็มทุกใบเรียงลงมา เลื่อนหายาก
-              → เป็นลิสต์สั้นให้กดเลือกก่อน กางทีละใบ (แบบเดียวกับคลังค้นประเด็น) */}
+        {/* คลังผลถอดคลิป (พับ default) */}
+        <Section title={`📚 คลังผลถอดคลิป${insightTotal ? ` (${insightTotal})` : ''}`} open={insightOpen} onToggle={() => setInsightOpen(o => !o)} C={C}>
+          {insightCases.length === 0 && <div style={{ fontSize: 13, color: C.muted, padding: '4px 2px' }}>ยังไม่มีใบในคลัง</div>}
+          {/* ★ 26 ส.ค. 69 (เจ้าของแจ้ง): เดิมกางเต็มทุกใบเรียงลงมา เลื่อนหายาก → เป็นลิสต์สั้นให้กดเลือกก่อน กางทีละใบ */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {insightCases.map(rec => {
               const open = insightExpanded === rec.id;
-              const ins = rec.insight || {};
-              const bm = getBrainMeta(ins.brain?.status);
+              const cv = cardView(rec);
               return (
                 <div key={rec.id} style={{ border: `1px solid ${open ? C.accent + '66' : C.line}`, borderRadius: 10, overflow: 'hidden' }}>
                   <button
@@ -491,17 +469,17 @@ export default function ClipTranscriptPage() {
                     style={{ width: '100%', textAlign: 'left', padding: '11px 13px', background: open ? 'rgba(56,189,248,.06)' : 'transparent', border: 'none', color: C.text, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', gap: 10, alignItems: 'flex-start' }}
                   >
                     <span style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.5, display: 'block' }}>
-                        {platformIcon(rec.platform)} {ins.headline || rec.title || rec.url}
+                      <span style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.5, display: 'block', overflowWrap: 'anywhere' }}>
+                        {platformIcon(rec.platform)} {cv.headline}
                       </span>
                       <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 5, fontSize: 11.5, color: C.muted }}>
-                        {ins.category && <span>📂 {ins.category}</span>}
                         {rec.clipDurationSec > 0 && <span>⏱️ {fmtDurSec(rec.clipDurationSec)}</span>}
                         <span>🕒 {fmtClock(rec.createdAt)}</span>
                         {rec.user && <span>👤 {rec.user}</span>}
-                        {bm && <span style={{ color: bm.color }}>{bm.emoji} {ins.brain.status}</span>}
+                        {cv.checks.length > 0 && <span style={{ color: '#fbbf24' }}>🔎 เช็ค {cv.checks.length} จุด</span>}
                         {rec.lowQuality && <span style={{ color: '#f59e0b' }}>⚠️ ไม่สมบูรณ์</span>}
                         {rec.chosen && <span style={{ color: '#fbbf24' }}>📌 ปักไว้</span>}
+                        {cv.legacy && <span>ใบรุ่นเก่า</span>}
                       </span>
                     </span>
                     <span style={{ color: C.muted, flexShrink: 0, fontSize: 12 }}>{open ? '▲ ย่อ' : '▼ เปิด'}</span>
@@ -524,125 +502,9 @@ export default function ClipTranscriptPage() {
             </div>
           )}
         </Section>
-
-        {/* แถบขั้นตอน hunt ระหว่างทำ */}
-        {hunting && huntPhase > 0 && (
-          <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14, marginBottom: 16, fontSize: 13, color: C.muted }}>
-            {huntPhase === 1 && '① กำลังอ่านต้นทาง / ถอดเนื้อดิบ…'}
-            {huntPhase === 2 && '② กำลังวิเคราะห์ DNA แนวข่าว + ค้นข่าวคล้าย…'}
-            {huntPhase === 3 && '③ เครื่องทีมกำลังถอด + ค้น (ปิดหน้าได้ ผลเข้าคลังเอง)…'}
-          </div>
-        )}
-
-        {/* ผลค้นประเด็นสด */}
-        {hunt && (
-          <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 16, marginBottom: 16 }}>
-            {renderHuntCase(hunt, 'live')}
-          </div>
-        )}
-
-        {/* คลังค้นประเด็น (พับ default) */}
-        <Section title={`🧭 คลังค้นประเด็น${huntCases.length ? ` (${huntCases.length})` : ''}`} open={huntOpen} onToggle={() => setHuntOpen(o => !o)} C={C}>
-          <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-            {[['all', 'ทั้งหมด'], ['clip', '🎬 คลิป'], ['article', '📰 ลิงก์ข่าว']].map(([k, lb]) => (
-              <button key={k} onClick={() => setHuntFilter(k)} style={{ padding: '4px 12px', borderRadius: 999, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', border: `1px solid ${huntFilter === k ? C.accent : C.line}`, background: 'transparent', color: huntFilter === k ? C.accent : C.muted }}>{lb}</button>
-            ))}
-          </div>
-          {huntCases.filter(c => huntFilter === 'all' || (huntFilter === 'article' ? c.sourceType === 'article' : c.sourceType !== 'article')).map(c => (
-            <div key={c.id} style={{ border: `1px solid ${C.line}`, borderRadius: 10, marginBottom: 10, overflow: 'hidden' }}>
-              <button onClick={() => setHuntExpanded(huntExpanded === c.id ? null : c.id)} style={{ width: '100%', textAlign: 'left', padding: '10px 13px', background: 'transparent', border: 'none', color: C.text, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 600, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                <span>{c.sourceType === 'article' ? '📰' : '🎬'} {c.title || c.sourceUrl}</span>
-                <span style={{ color: C.muted }}>{huntExpanded === c.id ? '▲' : '▼'}</span>
-              </button>
-              {huntExpanded === c.id && <div style={{ padding: '0 13px 13px' }}>{renderHuntCase(c, c.id)}</div>}
-            </div>
-          ))}
-          {huntCases.length === 0 && <div style={{ fontSize: 13, color: C.muted }}>ยังไม่มีเคสค้นประเด็น</div>}
-        </Section>
       </div>
     </div>
   );
-
-  // ── hunt rendering (คงของเดิม คอมโพเนนต์ใหม่ยังไม่ครอบส่วนนี้) ──
-  function resultKind(r) {
-    if (r.tag === 'same' || r.tag === 'follow') return { group: 'same', level: 0 };
-    const lvl = [1, 2, 3].includes(Number(r.level)) ? Number(r.level) : 3;
-    return { group: 'dna', level: lvl };
-  }
-  function levelText(lv) { return lv === 1 ? 'ใกล้' : lv === 2 ? 'กลาง' : 'กว้าง'; }
-  function huntCaseText(c) {
-    if (!c) return '';
-    const d = (c.styleProfile || {}).dna || {};
-    const results = c.results || [];
-    const dnaR = results.filter(r => resultKind(r).group === 'dna');
-    const sameR = results.filter(r => resultKind(r).group === 'same');
-    const rowTxt = (r, i) => `${i + 1}. [${r.score}/10 · ${r.type}${resultKind(r).group === 'dna' ? ' · ' + levelText(resultKind(r).level) : ''}] ${r.title}\n   ${r.url}${r.reason ? `\n   เหตุผล: ${r.reason}` : ''}`;
-    const lines = [
-      `${c.sourceType === 'article' ? '📰 เคสวิจัยลิงก์ข่าว' : '🎬 เคสค้นประเด็นจากคลิป'}: ${c.title || ''}`,
-      `ลิงก์ต้นทาง: ${c.sourceUrl || ''}`,
-      `DNA แนวข่าว: ${d.who || '-'} · ${d.what || '-'} · ${d.core || '-'} · ${d.emotion || '-'}`,
-      '', `=== ${c.sourceType === 'article' ? 'ผลวิจัยเชิงลึก' : 'เนื้อดิบจากคลิป'} ===`, c.insight?.rawData || '-',
-      '', `=== ข่าวแนวเดียวกัน — คนละคน (${dnaR.length}) ===`, ...dnaR.map(rowTxt),
-    ];
-    if (sameR.length) { lines.push('', `=== ข่าวคนเดิม/ตามต่อ (${sameR.length}) ===`, ...sameR.map(rowTxt)); }
-    return lines.join('\n');
-  }
-  function huntRow(r, key) {
-    const k = resultKind(r);
-    const meta = k.group === 'same'
-      ? { label: '👤 คนเดิม/ตามต่อ', color: '#fbbf24' }
-      : { 1: { label: '🎯 ใกล้', color: '#34d399' }, 2: { label: '🧬 กลาง', color: '#22d3ee' }, 3: { label: '🌐 กว้าง', color: '#c084fc' } }[k.level];
-    return (
-      <div key={key} style={{ display: 'flex', gap: 7, alignItems: 'baseline', flexWrap: 'wrap', fontSize: 12.5 }}>
-        <span style={{ fontSize: 10.5, padding: '2px 8px', borderRadius: 20, background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontWeight: 800 }}>{r.score}</span>
-        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: meta.color + '22', color: meta.color, fontWeight: 700 }}>{meta.label}</span>
-        <a href={r.url} target="_blank" rel="noopener noreferrer" title={r.reason || ''} style={{ color: C.accent, textDecoration: 'none', fontWeight: 600 }}>{r.title}</a>
-        <span style={{ fontSize: 10.5, color: C.muted }}>{r.source}</span>
-        <button onClick={() => copy(key, `${r.title}\n${r.url}`)} style={{ padding: '1px 8px', borderRadius: 6, border: 'none', background: C.sub, color: copied === key ? '#22c55e' : C.muted, fontSize: 10.5, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === key ? '✓' : '📋'}</button>
-      </div>
-    );
-  }
-  function renderHuntCase(c, kp) {
-    const d = (c.styleProfile || {}).dna || {};
-    const isArticle = c.sourceType === 'article';
-    const results = c.results || [];
-    const dnaR = results.filter(r => resultKind(r).group === 'dna');
-    const sameR = results.filter(r => resultKind(r).group === 'same');
-    return (
-      <div>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
-          <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, fontWeight: 700, background: C.sub, color: isArticle ? '#60a5fa' : '#a78bfa' }}>{isArticle ? '📰 จากลิงก์ข่าว' : '🎬 จากคลิป'}</span>
-          {c.insight?.category && <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, background: C.sub, color: C.muted }}>📂 {c.insight.category}</span>}
-          <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, background: 'rgba(34,197,94,0.12)', color: '#22c55e', fontWeight: 700 }}>คนละคน {dnaR.length}{sameR.length ? ` · คนเดิม ${sameR.length}` : ''}</span>
-          <button onClick={() => copy(kp + '-all', huntCaseText(c))} style={{ padding: '4px 11px', borderRadius: 8, border: `1px solid ${C.line}`, background: 'transparent', color: copied === kp + '-all' ? '#22c55e' : C.accent, fontSize: 11.5, cursor: 'pointer', fontFamily: 'inherit' }}>{copied === kp + '-all' ? '✓ คัดลอกแล้ว' : '📋 คัดลอกทั้งเคส'}</button>
-          <button onClick={() => huntMore(c)} disabled={hunting} style={{ padding: '4px 11px', borderRadius: 8, border: `1px solid ${C.line}`, background: 'transparent', color: '#2dd4bf', fontSize: 11.5, cursor: hunting ? 'wait' : 'pointer', fontFamily: 'inherit' }}>{hunting ? '⏳…' : '🔁 ค้นเพิ่ม'}</button>
-        </div>
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>{c.title} <a href={c.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11.5, color: C.accent, fontWeight: 400 }}>🔗 เปิด</a></div>
-        {(d.who || d.what || d.core || d.emotion) && (
-          <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 10 }}>🧬 DNA: {[d.who, d.what, d.core, d.emotion].filter(Boolean).join(' · ')}</div>
-        )}
-        {c.insight?.rawData && (
-          <details style={{ marginBottom: 10 }} open={isArticle}>
-            <summary style={{ fontSize: 12, color: C.muted, cursor: 'pointer' }}>{isArticle ? '🔬 ผลวิจัยเชิงลึก' : '📄 เนื้อดิบ'} ({c.insight.rawData.length} ตัวอักษร)</summary>
-            <div style={{ fontSize: 12.5, lineHeight: 1.7, whiteSpace: 'pre-wrap', background: C.sub, borderRadius: 8, padding: 11, maxHeight: 240, overflowY: 'auto', marginTop: 6 }}>{c.insight.rawData}</div>
-          </details>
-        )}
-        <div style={{ borderTop: `1px solid ${C.line}`, paddingTop: 10 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, color: '#34d399', marginBottom: 7 }}>🎯 ข่าวแนวเดียวกัน — คนละคน ({dnaR.length})</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-            {dnaR.map((r, i) => huntRow(r, kp + '-d' + i))}
-            {!dnaR.length && <div style={{ fontSize: 12, color: C.muted }}>ยังไม่เจอที่ผ่านเกณฑ์ — กด &quot;ค้นเพิ่ม&quot; ให้สมองคิดคีย์ชุดใหม่</div>}
-          </div>
-          {sameR.length > 0 && (
-            <div style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: '#fbbf24', marginBottom: 6 }}>👤 ข่าวคนเดิม/ตามต่อ ({sameR.length})</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, opacity: 0.9 }}>{sameR.map((r, i) => huntRow(r, kp + '-s' + i))}</div>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
 }
 
 // ── helper components ──
@@ -656,7 +518,4 @@ function Section({ title, open, onToggle, C, children }) {
     </div>
   );
 }
-// 🅿️ สไตล์ปุ่มรอง — จอดไว้คู่กับปุ่มที่ถอดออก 27 ส.ค. 69 (ดูหมายเหตุ 🅿️ ข้างบน)
-const ghostBtn = (busy) => ({ padding: '8px 14px', borderRadius: 9, border: '1px solid #374151', background: 'transparent', color: '#9ca3af', fontSize: 12.5, fontWeight: 600, cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit' });
-const tabBtn = (active) => ({ padding: '5px 12px', borderRadius: 8, fontSize: 12.5, cursor: 'pointer', fontFamily: 'inherit', border: `1px solid ${active ? '#38bdf8' : '#374151'}`, background: 'transparent', color: active ? '#38bdf8' : '#9ca3af', fontWeight: 600 });
 const pageBtn = (disabled, C) => ({ padding: '6px 14px', borderRadius: 8, fontSize: 12.5, cursor: disabled ? 'default' : 'pointer', fontFamily: 'inherit', border: `1px solid ${C.line}`, background: 'transparent', color: disabled ? '#4b5563' : C.text, opacity: disabled ? 0.5 : 1 });

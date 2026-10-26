@@ -3,7 +3,7 @@
  * ผูกกับค่าสถานะจริงในโค้ดหลังบ้าน:
  *   pending/processing/retry_wait/done/error  → worker/route.js + submit/route.js
  *   cancelled                                 → cancel/route.js (เพิ่ม 26 ส.ค. 69 — เดิมลบใบทิ้ง)
- * เทส: tests/clip-ui-status-meta.test.mjs
+ * เทส: tests/clip-route-plan.test.mjs · tests/clip-phase3-ui.test.mjs · tests/clip-topic-ui.test.mjs (cardView)
  */
 
 export const STATUS_META = {
@@ -29,15 +29,47 @@ export function jobActions(job) {
   return [];
 }
 
-/** ป้ายสถานะสมองตรวจหลังถอด (insight.brain.status — ค่าจริง 4 ค่าจาก clipVerify/run-newpipe) */
-export const BRAIN_META = {
-  'สะอาด':      { emoji: '✅', color: '#22c55e', bg: 'rgba(34,197,94,.12)',   note: 'ตรวจกับเฉลยแล้ว ไม่พบจุดผิด' },
-  'ซ่อมแล้ว':   { emoji: '🩹', color: '#38bdf8', bg: 'rgba(56,189,248,.12)',  note: 'พบจุดผิดและซ่อมอัตโนมัติแล้ว' },
-  'มีข้อสังเกต': { emoji: '👀', color: '#fbbf24', bg: 'rgba(251,191,36,.12)',  note: 'มีจุดเล็กน้อย ไม่ร้ายแรง' },
-  'ต้องตรวจ':   { emoji: '⚠️', color: '#f97316', bg: 'rgba(249,115,22,.12)',  note: 'เหลือจุดร้ายแรง คนควรตรวจก่อนใช้' },
+/**
+ * ★ 26 ต.ค. 69 (เจ้าของเคาะ "เนื้อข่าวช่องเดียว"): มุมมองการ์ดผล — ใบใหม่และใบเก่าในคลังแสดงหน้าตาเดียวกัน
+ *   ใบใหม่ (engine clip-single): body + checks จากตัวตรวจด้วยโค้ด
+ *   ใบเก่า: ใช้เนื้อเดิมที่ครบที่สุด (ก้อนรวม rawData → เรื่องหลัก → ภาพรวม) ไม่ถอดใหม่ · ไม่มีจุดเช็ค
+ */
+export const CHECK_KIND_LABEL = {
+  segment: 'ช่วงคลิปหาย', quote: 'คำพูด', name: 'ชื่อ', number: 'ตัวเลข', coverage: 'ประเด็นอาจตกหล่น', gender: 'คำเรียกเพศ', legacy: 'ผลตรวจระบบเดิม',
 };
-export function getBrainMeta(status) {
-  return (status && BRAIN_META[status]) || null;
+const txt = (v) => (typeof v === 'string' ? v.trim() : '');
+const arr = (v) => (Array.isArray(v) ? v : []);
+export function cardView(rec) {
+  const r = rec || {};
+  const ins = r.insight || {};
+  const legacy = !(ins.engine === 'clip-single' || txt(ins.body));
+  const headline = txt(ins.headline) || txt(r.title) || txt(r.url) || '(ไม่มีพาดหัว)';
+  const body = txt(ins.body) || txt(ins.rawData) || txt(ins.mainStory) || txt(ins.topicsV2?.mainStory) || txt(ins.overview);
+  const list = arr(ins.checks).filter((c) => c && txt(c.text));
+  const checks = list.filter((c) => c.level !== 'fixed');
+  // 🔴 ผู้ตรวจอิสระ 26 ต.ค.: ใบเก่าห้ามทิ้งข้อมูลที่มีอยู่ — ธง "ต้องตรวจ" ของระบบเดิมยังเป็นจุดเช็ค
+  //   และเนื้อแยกประเด็นเดิม (~27% ของคำไม่อยู่ในก้อนรวม) พับไว้ใต้เนื้อ ไม่ปนในช่องหลัก ไม่อยู่ในข้อความคัดลอก
+  if (legacy && ins.brain?.status === 'ต้องตรวจ') checks.push({ level: 'check', kind: 'legacy', text: 'ระบบเดิมตรวจแล้วติดธง "ต้องตรวจ" — เช็คกับคลิปก่อนใช้' });
+  const extras = legacy
+    ? [...arr(ins.subStories).map((s) => ({ title: txt(s?.topic), text: txt(s?.rawData) || txt(s?.summary) })),
+      ...arr(ins.topicsV2?.stories).map((s) => ({ title: txt(s?.topic), text: txt(s?.story) })),
+      ...arr(ins.topics).map((t) => ({ title: txt(t?.title), text: txt(t?.summary) }))].filter((x) => x.text)
+    : [];
+  return {
+    headline, body, legacy, checks, extras,
+    fixed: list.filter((c) => c.level === 'fixed'),
+    copyText: [headline, body].filter(Boolean).join('\n\n'),
+  };
+}
+
+/** แปลงผลถอด (ข้อมูลแบนจาก /insight หรือ job.result) เป็นใบแบบคลัง — ลิงก์มาจากใบงาน ไม่ใช่ช่องกรอก (P12) */
+export function resultToRec(result, url = '') {
+  const d = result || {};
+  return {
+    id: d.id, url: url || d.url || '', platform: d.platform, insight: d,
+    clipDurationSec: d.clipDurationSec, lowQuality: d.lowQuality, qualityNote: d.qualityNote,
+    cached: d.cached, cachedAt: d.cachedAt,
+  };
 }
 
 /* ── เวลา ── */
@@ -67,7 +99,6 @@ export function fmtClock(iso) {
 }
 
 /* ── ลิงก์ (regex ชุดเดียวกับของเดิมใน page.js — ห้ามเปลี่ยนพฤติกรรม) ── */
-const RE_CLIP = /youtube\.com|youtu\.be|tiktok\.com|facebook\.com|fb\.watch|instagram\.com/i;
 const RE_META = /facebook\.com|fb\.watch|instagram\.com/i;
 const RE_TIKTOK = /tiktok\.com/i;
 const RE_YT = /youtube\.com|youtu\.be/i;
@@ -81,19 +112,9 @@ export function detectLink(url) {
   if (/^https?:\/\//i.test(u)) return { platform: 'article', isClip: false, label: '📰 ลิงก์ข่าว/เว็บ' };
   return { platform: null, isClip: false, label: '' };
 }
-export function isClipUrl(url) { return RE_CLIP.test(String(url || '')); }
-export function isMetaUrl(url) { return RE_META.test(String(url || '')); }
 
 export function platformIcon(p) {
   return { youtube: '▶️', tiktok: '🎵', meta: '📘', article: '📰' }[p] || '🎬';
-}
-
-/** แนะนำเส้นทางหลักจากลิงก์: insight (คลิป) / news-hunt (ลิงก์ข่าว) / null */
-export function recommendAction(url) {
-  const d = detectLink(url);
-  if (d.isClip) return 'insight';
-  if (d.platform === 'article') return 'news-hunt';
-  return null;
 }
 
 /**
@@ -108,51 +129,64 @@ export function recommendAction(url) {
  *          จะใช้คลาวด์ต้อง "กดปุ่มสำรองเอง" เท่านั้น และกดได้เฉพาะตอนเครื่องแอดมินดับจริง
  *
  * คืนแผน 2 ปุ่มให้หน้าเว็บวาดตรงๆ (หน้าเว็บไม่ต้องตัดสินใจเอง — ตรรกะอยู่ที่เดียว เทสได้):
- *   primary = { action:'queue'|'news-hunt'|'none', label, enabled, why }
+ *   primary = { action:'queue'|'none', label, enabled, why }
  *   backup  = { action:'cloud'|'none', label, enabled, why }
  */
 const CLOUD_CAPABLE = new Set(['youtube', 'tiktok']);
 const MACHINE = 'เครื่องแอดมิน';
 
-export function planClipRoute(url, workerAlive) {
+/**
+ * workerAlive: true = พร้อม · false = ดับจริง · null/undefined = ยังไม่รู้ (★ 26 ต.ค. P13: เดิมนับ "ไม่ทราบ" เป็น "ดับ")
+ * ★ 26 ต.ค. 69: เลิกค้นข่าวคล้าย/วิจัยลิงก์ข่าว (เจ้าของเคาะ) — ลิงก์เว็บข่าวกดไม่ได้ บอกเหตุผลแทน
+ */
+export function planClipRoute(url, workerAlive, { unknownLong = false } = {}) {
   const d = detectLink(url);
-  const alive = !!workerAlive;
+  const state = workerAlive === true ? 'alive' : workerAlive === false ? 'dead' : 'unknown';
+  const backupLabel = '☁️ ถอดสำรอง (Vercel)';
 
   // ยังไม่วางลิงก์ / ลิงก์ที่อ่านไม่ออก — ปุ่มยังกดได้ (จะขึ้นเตือนให้วางลิงก์)
   if (!d.platform) {
     return {
       mode: 'not-clip', platform: null, isClip: false,
       primary: { action: 'queue', label: `🎯 ถอดด้วย${MACHINE}`, enabled: true, why: '' },
-      backup: { action: 'none', enabled: false, label: '☁️ ถอดสำรอง (Vercel)', why: 'วางลิงก์คลิปก่อน' },
+      backup: { action: 'none', enabled: false, label: backupLabel, why: 'วางลิงก์คลิปก่อน' },
     };
   }
 
-  // ลิงก์ข่าวเว็บ ไม่ใช่คลิป — ปุ่มหลักเปลี่ยนหน้าที่เป็น "วิจัยลิงก์ข่าว" (ไม่ต้องเพิ่มปุ่มที่ 3)
   if (!d.isClip) {
     return {
       mode: 'not-clip', platform: d.platform, isClip: false,
-      primary: { action: 'news-hunt', label: '📰 วิจัยลิงก์ข่าว', enabled: true, why: 'ลิงก์นี้เป็นข่าวเว็บ ไม่ใช่คลิป — ปุ่มหลักจะวิจัยข่าวให้แทน' },
-      backup: { action: 'none', enabled: false, label: '☁️ ถอดสำรอง (Vercel)', why: 'ใช้กับลิงก์คลิปเท่านั้น' },
+      primary: { action: 'none', label: `🎯 ถอดด้วย${MACHINE}`, enabled: false, why: 'ลิงก์นี้เป็นเว็บข่าว ไม่ใช่คลิป — ระบบนี้ถอดได้เฉพาะคลิป TikTok / YouTube / Facebook / IG' },
+      backup: { action: 'none', enabled: false, label: backupLabel, why: 'ใช้กับลิงก์คลิปเท่านั้น' },
     };
   }
 
   // ── ลิงก์คลิป: ปุ่มหลักไปเครื่องแอดมินเสมอ ────────────────────────────
-  const primary = alive
-    ? { action: 'queue', label: `🎯 ถอดด้วย${MACHINE}`, enabled: true, why: `${MACHINE}พร้อม — ถอดได้ทุกช่องทาง ผ่านผู้ตรวจครบ คุณภาพสูงสุด` }
-    : { action: 'queue', label: `📥 ส่งเข้าคิว (${MACHINE}ดับอยู่)`, enabled: true, why: `${MACHINE}ดับอยู่ — กดแล้วงานจะรอในคิว เปิดเครื่องเมื่อไหร่ถอดให้เองทันที (งานไม่หาย)` };
+  const primary = {
+    alive: { action: 'queue', label: `🎯 ถอดด้วย${MACHINE}`, enabled: true, why: `${MACHINE}พร้อม — ถอดได้ทุกช่องทาง คลิปยาวผ่าเป็นช่วงดูครบทุกช่วง` },
+    dead: { action: 'queue', label: `📥 ส่งเข้าคิว (${MACHINE}ดับอยู่)`, enabled: true, why: `${MACHINE}ดับอยู่ — กดแล้วงานจะรอในคิว เปิดเครื่องเมื่อไหร่ถอดให้เองทันที (งานไม่หาย)` },
+    unknown: { action: 'queue', label: `🎯 ถอดด้วย${MACHINE}`, enabled: true, why: `ยังเช็คสถานะ${MACHINE}ไม่ได้ — กดแล้วงานเข้าคิวตามปกติ` },
+  }[state];
 
   // ── ปุ่มสำรอง: เปิดให้กดเฉพาะตอนเครื่องแอดมินดับจริง ─────────────────
-  const backupLabel = '☁️ ถอดสำรอง (Vercel)';
+  // 🔴 ผู้ตรวจอิสระ 26 ต.ค.: "ไม่ทราบ" อาจยาวนาน (ไม่มีแถวชีพจร/ฐานสะดุด) — ห้ามปิดทางสำรองตาย
+  //   แต่ก็ห้ามเปิดทันที (ตอนหน้าเพิ่งโหลด/ชีพจรสะดุดแวบเดียว เครื่องอาจเปิดอยู่ — กติกาเจ้าของ 27 ส.ค. "คอมดับค่อยกดสำรอง")
+  //   → เปิดเมื่อหน้าแจ้งว่าไม่ทราบต่อเนื่องนานพอ (unknownLong) พร้อมคำเตือน
   let backup;
-  if (alive) {
+  if (state === 'alive') {
     backup = { action: 'none', enabled: false, label: backupLabel, why: `${MACHINE}ยังเปิดอยู่ — ปุ่มนี้มีไว้ตอนเครื่องดับเท่านั้น` };
   } else if (!CLOUD_CAPABLE.has(d.platform)) {
     backup = { action: 'none', enabled: false, label: backupLabel, why: `ลิงก์ Facebook/IG ต้องโหลดไฟล์จาก${MACHINE} — Vercel ทำแทนไม่ได้ ต้องรอเปิดเครื่อง` };
+  } else if (state === 'unknown') {
+    backup = unknownLong
+      ? { action: 'cloud', enabled: true, label: backupLabel, why: `⚠️ เช็คสถานะ${MACHINE}ไม่ได้มานานแล้ว — ปกติใช้ปุ่มหลัก กดปุ่มนี้เฉพาะเมื่อแน่ใจว่าเครื่องดับ (Vercel เวลาและที่เก็บไฟล์จำกัด คลิปยาวอาจดูไม่ครบ)` }
+      : { action: 'none', enabled: false, label: backupLabel, why: `กำลังเช็คสถานะ${MACHINE} — ส่งเข้าคิวไว้ก่อน ถ้าเช็คไม่ได้เกิน 2 นาที ปุ่มนี้จะเปิดให้กด` };
   } else {
-    backup = { action: 'cloud', enabled: true, label: backupLabel, why: '⚠️ ของสำรองไม่ผ่านผู้ตรวจและตัวซ่อม (Vercel รันสมองไม่ได้) — ใช้เฉพาะตอนจำเป็น' };
+    backup = { action: 'cloud', enabled: true, label: backupLabel, why: '⚠️ ใช้เครื่องยนต์เดียวกัน แต่ Vercel มีเวลาและที่เก็บไฟล์จำกัด คลิปยาวอาจดูไม่ครบ — ใช้เฉพาะตอนเครื่องแอดมินดับ' };
   }
 
-  return { mode: alive ? 'queue' : (backup.enabled ? 'queue-offline' : 'queue-blocked'), platform: d.platform, isClip: true, primary, backup };
+  const mode = state === 'alive' ? 'queue' : state === 'unknown' ? 'queue-unknown' : (backup.enabled ? 'queue-offline' : 'queue-blocked');
+  return { mode, platform: d.platform, isClip: true, primary, backup };
 }
 
 /** ข้อความ + สีของชิปสถานะเครื่องแอดมินบนหัวหน้า */

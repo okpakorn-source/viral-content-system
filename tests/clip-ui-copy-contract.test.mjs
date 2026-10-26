@@ -17,28 +17,17 @@ const ts = require('typescript');
 const React = require('react');
 
 const SRC = new URL('../src/app/clip-transcript/ui/InsightCard.js', import.meta.url);
+// ★ 26 ต.ค. 69: การ์ดช่องเดียวใช้ตรรกะกลาง cardView จริง (โมดูลล้วน ไม่มี JSX) — ไม่ปลอม กันเทสผ่านทั้งที่ของจริงพัง
+const statusMeta = await import('../src/app/clip-transcript/ui/statusMeta.js');
 
-/** แปลง JSX เป็น JS แล้วรันในกล่องปิด (เปลี่ยน import ที่ไม่เกี่ยวเป็นของปลอม) */
+/** แปลง JSX เป็น JS แล้วรันในกล่องปิด */
 function loadInsightCard() {
   const code = readFileSync(SRC, 'utf8');
   const out = ts.transpileModule(code, {
     compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText;
 
-  const fakeModules = {
-    react: React,
-    './statusMeta': {
-      platformIcon: () => '🎬', fmtDurSec: () => '1:00 นาที', fmtMs: () => '30 วิ', fmtClock: () => '26 ส.ค. 12:00',
-      getBrainMeta: () => null,
-    },
-    '@/lib/services/clipNewsReadyText': {
-      buildClipNewsReadyText: (ins) => `เนื้อพร้อมใช้: ${ins?.rawData || ''}`,
-      buildClipSubStoryText: (s) => `ก้อนย่อย: ${s?.rawData || ''}`,
-    },
-    './BrainBox': { __esModule: true, default: () => null },
-    './TopicCard': { __esModule: true, default: () => null },
-    '@/lib/services/clipBrain/topicMetrics': { countThaiWords: () => 0 },
-  };
+  const fakeModules = { react: React, './statusMeta': statusMeta };
   const sandboxModule = { exports: {} };
   const localRequire = (name) => {
     if (name in fakeModules) return fakeModules[name];
@@ -104,13 +93,13 @@ const REC = {
   },
 };
 
-test('ปุ่ม "คัดลอกเนื้อพร้อมใช้" ต้องส่ง (key, ข้อความจริง) เข้า onCopy — ไม่ใช่สลับกัน', () => {
+test('ปุ่ม "คัดลอกพาดหัว+เนื้อข่าว" ต้องส่ง (key, ข้อความจริง) เข้า onCopy — ไม่ใช่สลับกัน', () => {
   const InsightCard = loadInsightCard();
   const calls = [];
   const tree = renderTree(InsightCard, { rec: REC, live: true, copiedKey: '', onCopy: (a, b) => calls.push([a, b]) });
 
-  const found = clickButton(tree, (t) => /คัดลอกเนื้อพร้อมใช้/.test(t));
-  assert.ok(found.hit, 'ต้องเจอปุ่มคัดลอกเนื้อพร้อมใช้ในการ์ด');
+  const found = clickButton(tree, (t) => /คัดลอกพาดหัว\+เนื้อข่าว/.test(t));
+  assert.ok(found.hit, 'ต้องเจอปุ่มคัดลอกพาดหัว+เนื้อข่าวในการ์ด');
   assert.equal(calls.length, 1, 'กดหนึ่งครั้งต้องเรียก onCopy หนึ่งครั้ง');
 
   const [key, text] = calls[0];
@@ -122,9 +111,10 @@ test('ปุ่ม "คัดลอกเนื้อพร้อมใช้" �
   assert.ok(!key.includes('เนื้อดิบของจริง'),
     `อาร์กิวเมนต์ที่ 1 ต้องเป็นคีย์ปุ่ม ไม่ใช่เนื้อข่าว แต่ได้: ${key.slice(0, 60)}`);
   assert.ok(key.length < 60, 'คีย์ปุ่มต้องสั้น (เป็น id ไม่ใช่เนื้อ)');
+  assert.equal(text, 'หัวข้อทดสอบ\n\nเนื้อดิบของจริงที่ต้องเข้าคลิปบอร์ด', 'ข้อความที่คัดลอก = พาดหัว บรรทัดว่าง เนื้อข่าว');
 });
 
-test('ปุ่มคัดลอกคำพูด ก็ต้องส่ง (key, ข้อความ) ตามสัญญาเดียวกัน', () => {
+test('ปุ่มคัดลอกทุกปุ่มในการ์ด ต้องส่ง (key, ข้อความ) ตามสัญญาเดียวกัน', () => {
   const InsightCard = loadInsightCard();
   const calls = [];
   const tree = renderTree(InsightCard, { rec: REC, live: true, copiedKey: '', onCopy: (a, b) => calls.push([a, b]) });

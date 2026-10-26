@@ -94,6 +94,12 @@ export function compactResult(caseRecord, kind = 'insight') {
     lowQuality: saved.lowQuality === true || insight.lowQuality === true,
     qualityNote: text(saved.qualityNote) ?? text(insight.qualityNote),
     headline: text(insight.headline),
+    // ★ 25 ต.ค. 69 (เครื่องยนต์ช่องเดียว): เนื้อข่าวช่องเดียว + จุดที่ควรเช็ค — ใบเก่าไม่มี body ใช้ rawData แทน
+    body: text(insight.body) ?? text(insight.rawData),
+    checks: list(insight.checks).map((value) => {
+      const check = record(value);
+      return { level: text(check.level), kind: text(check.kind), text: text(check.text) };
+    }).filter((check) => check.text),
     overview: text(insight.overview),
     mainStory: text(topicsV2.mainStory) ?? text(insight.mainStory),
     keyPoints: list(insight.keyPoints).map(pointText).filter(Boolean),

@@ -48,7 +48,8 @@ export async function POST(request) {
       statusNote: '🚫 ผู้ใช้ยกเลิกงานนี้',
     });
     console.log(`[ClipCancel] 🚫 ยกเลิกงานคลิป ${String(id).slice(0, 10)} (สถานะเดิม ${job.status})`);
-    return NextResponse.json({ success: true, cancelled: id, cancelledAt: nowIso });
+    // ★ 26 ต.ค. 69 (P13): บอกสถานะเดิม — งานที่เครื่องกำลังถอด (processing) หยุดกลางทางไม่ได้ หน้าเว็บต้องแจ้งตามจริง
+    return NextResponse.json({ success: true, cancelled: id, cancelledAt: nowIso, previousStatus: job.status });
   } catch (e) {
     return NextResponse.json({ success: false, error: e.message, errorType: 'CANCEL_ERROR' }, { status: 500 });
   }

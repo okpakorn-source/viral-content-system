@@ -70,26 +70,12 @@ after(() => {
 
 // ── โมดูลแทนของหนัก (ตัวควบคุมอยู่ที่ globalThis.__co30 ซึ่งแต่ละข้อสอบตั้งใหม่) ─────────
 const STUBS = {
-  'insight-service': `
-    const S = () => globalThis.__co30;
-    export async function extractClipInsight(args) {
-      S().legacy.push({ kind: 'url', args });
-      if (S().legacyFail) throw S().legacyFail();
-      return { ...S().legacyResult };
-    }
-    export async function extractInsightFromVideoBuffer(buf, mimeType, model) {
-      S().legacy.push({ kind: 'file', buf, mimeType, model });
-      if (S().legacyImpl) return S().legacyImpl(buf, mimeType, model); // รอบ 2: ให้เดินเข้า callGeminiVideoFile ตัวจริงได้
-      if (S().legacyFail) throw S().legacyFail();
-      return { ...S().legacyResult };
-    }
-    export async function classifyTranscript() { return null; }
-  `,
-  brain: `
-    export async function runClipBrainPipeline(args) {
+  // ★ 25 ต.ค. 69: เครื่องยนต์ "เนื้อข่าวช่องเดียว" (ตัดเปลี่ยนแทน brain+legacy) — ตัวแทนเก็บอาร์กิวเมนต์ที่ประตูหลักส่งมา
+  single: `
+    export async function runClipSinglePipeline(args) {
       const s = globalThis.__co30;
-      s.brain.push(args);
-      return typeof s.brainResult === 'function' ? s.brainResult(args) : s.brainResult;
+      s.single.push(args);
+      return typeof s.singleResult === 'function' ? s.singleResult(args) : s.singleResult;
     }
   `,
   persist: `
@@ -113,22 +99,7 @@ const STUBS = {
     export function archiveRowId(id) { return 'archive-' + id; }
   `,
   supabase: 'export function isSupabaseReady() { return false; } export function getSupabase() { return null; }',
-  'topic-hunt': "export async function runTopicHunt() { throw new Error('runTopicHunt ต้องไม่ถูกเรียกในข้อสอบนี้'); }",
-  'clip-openai': "export async function callAI() { throw new Error('callAI ต้องไม่ถูกเรียกในข้อสอบนี้'); }",
   'model-config': "export const MODEL_FAST = 'stub-fast';",
-  // ถอดเสียง YouTube (ของจริงเป็นไฟล์ล็อกระบบข่าว — แทนด้วยตัวเก็บลิงก์ที่ได้รับ ไม่แตะไฟล์จริง)
-  'youtube-service': `
-    export async function transcribeYoutube({ url }) {
-      globalThis.__co30.transcribed.push(url);
-      return { success: true, rawText: 'บทถอดเสียงยูทูบทดสอบที่ยาวพอผ่านเกณฑ์สี่สิบตัวอักษรขึ้นไปแน่นอนครับผม', title: 'ยูทูบทดสอบ' };
-    }
-  `,
-  'tiktok-service': `
-    export async function transcribeTiktok({ url }) {
-      globalThis.__co30.transcribed.push(url);
-      return { success: true, rawText: 'บทถอดเสียงทดสอบที่ยาวพอผ่านเกณฑ์สี่สิบตัวอักษรขึ้นไปแน่นอนครับผม', title: 'แคปชั่นทดสอบ' };
-    }
-  `,
   genai: `
     export class GoogleGenerativeAI {
       constructor() {}
@@ -220,23 +191,16 @@ const STUBS = {
   `,
 };
 const STUB_BY_SPECIFIER = {
-  '@/lib/services/clipInsightService': 'insight-service',
-  '@/lib/services/clipBrain/clipBrainPipeline': 'brain',
+  '@/lib/services/clipSingle/pipeline': 'single',
   '@/lib/persistStore': 'persist',
   '@/lib/services/clipQueue': 'queue',
   '@/lib/services/clipArchive': 'archive',
   '@/lib/supabase': 'supabase',
-  '@/lib/services/clipAI/topicHuntService': 'topic-hunt',
-  '@/lib/services/clipAI/openai': 'clip-openai',
   '@/lib/ai/modelConfig': 'model-config',
-  '@/lib/services/tiktokService': 'tiktok-service',
-  '@/lib/services/youtubeService': 'youtube-service',
   '@google/generative-ai': 'genai',
   '@google/generative-ai/server': 'genai-server',
   child_process: 'child-process',
 };
-// import สัมพัทธ์ของ clipAI/geminiClient.js (ตัวบันทึกค่าใช้จ่าย/ตัวกรองคำ) — แทนเฉพาะเมื่อผู้ import คือไฟล์นั้น
-const GEMINI_RELATIVE_STUBS = { '../../ai/usageLogger': 'usage-logger', './safetyFilter': 'safety-filter' };
 // ★ รอบ 4 (F1): fs/promises ที่ route ถอดคลิปโหลด (dynamic import ใน downloadMetaBuffer/_fitForInline/สำเนา NDJSON) — แทนเฉพาะเมื่อผู้ import คือ insight/route.js
 const INSIGHT_ROUTE_STUBS = { 'fs/promises': 'fs-promises' };
 const STUB_URLS = Object.fromEntries(Object.entries(STUBS)
@@ -247,16 +211,12 @@ const SRC = ${JSON.stringify(new URL('../src/', import.meta.url).href)};
 const NEXT_SERVER = ${JSON.stringify(new URL('../node_modules/next/server.js', import.meta.url).href)};
 const STUB_URLS = ${JSON.stringify(STUB_URLS)};
 const BY_SPEC = ${JSON.stringify(STUB_BY_SPECIFIER)};
-const GEMINI_REL = ${JSON.stringify(GEMINI_RELATIVE_STUBS)};
 const INSIGHT_ONLY = ${JSON.stringify(INSIGHT_ROUTE_STUBS)};
 const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 const hasExt = (s) => /[.][a-z]+$/i.test(s);
 export async function resolve(specifier, context, nextResolve) {
   if (specifier === 'next/server') return nextResolve(NEXT_SERVER, context);
   if (has(BY_SPEC, specifier)) return { url: STUB_URLS[BY_SPEC[specifier]], shortCircuit: true };
-  if (String(context.parentURL || '').includes('/clipAI/geminiClient.js') && has(GEMINI_REL, specifier)) {
-    return { url: STUB_URLS[GEMINI_REL[specifier]], shortCircuit: true };
-  }
   if (String(context.parentURL || '').includes('/clip-transcript/insight/route.js') && has(INSIGHT_ONLY, specifier)) {
     return { url: STUB_URLS[INSIGHT_ONLY[specifier]], shortCircuit: true };
   }
@@ -274,20 +234,15 @@ export async function resolve(specifier, context, nextResolve) {
 register(`data:text/javascript,${encodeURIComponent(LOADER)}`, import.meta.url);
 
 const insightRoute = await import(new URL('../src/app/api/clip-transcript/insight/route.js', import.meta.url).href);
-const transcriptRoute = await import(new URL('../src/app/api/clip-transcript/route.js', import.meta.url).href);
-const huntRoute = await import(new URL('../src/app/api/clip-transcript/hunt/route.js', import.meta.url).href);
 const { submitClipJob } = await import(new URL('../src/lib/services/clipJobs.js', import.meta.url).href);
 const { extractFirstUrl, cleanClipUrl } = await import(new URL('../src/lib/services/clipAgent/clipUrl.js', import.meta.url).href);
-const gemini = await import(new URL('../src/lib/services/clipAI/geminiClient.js', import.meta.url).href);
 const resultRoute = await import(new URL('../src/app/api/clip-agent/result/route.js', import.meta.url).href); // ★ รอบ 4 (F6): ค้นผลด้วยลิงก์เดิม
 
 // ── สถานะควบคุมของแต่ละข้อสอบ ─────────────────────────────────────────────
 const brainOk = () => ({ ok: true, insight: { headline: 'หัวข่าวจากเครื่องยนต์ใหม่', rawData: 'ก'.repeat(400) }, spentTokens: 5000 });
-// ผลล้มทรงเดียวกับ clipBrainPipeline.fail(): spentTokens = รอบที่ "รับผล" · brain.usage.totalTokens = บิลจริงรวมทุก attempt
-const brainFail = (spentTokens, errorType = 'PIPE_MAP_FAILED', billedTokens = spentTokens) => ({
-  ok: false, errorType, error: 'แผนที่ประเด็นล้ม', spentTokens,
-  brain: { usage: { inputTokens: billedTokens, outputTokens: 0, cachedTokens: 0, totalTokens: billedTokens } },
-});
+// ★ 25 ต.ค. 69: ผลของเครื่องยนต์ช่องเดียว (ประตูหลักเรียกตัวนี้ตัวเดียว ไม่มีเครื่องยนต์สำรอง)
+const singleOk = () => ({ ok: true, spentTokens: 4000, insight: { engine: 'clip-single', headline: 'หัวข่าวช่องเดียว', body: 'ก'.repeat(400), rawData: 'ก'.repeat(400), checks: [] } });
+const singleFail = (spentTokens, errorType = 'WATCH_FAILED', error = 'Gemini ดูคลิปไม่สำเร็จ') => ({ ok: false, errorType, error, spentTokens });
 
 // yt-dlp ปลอม: เขียนไฟล์ขนาดที่กำหนดลงพาธ -o จริง (route อ่านไฟล์เองตามปกติ) · ffmpeg = ไม่มีในเครื่อง (บีบไม่ได้ ใช้ไฟล์เดิม)
 //   ★ รอบ 3 (M2): เก็บ options ของ execFile (เพดานเวลา) · ทิ้ง "ไฟล์ระหว่างทาง" ข้างไฟล์ปลายทางแบบ yt-dlp จริง
@@ -312,6 +267,7 @@ function fakeExec(cmd, args, opts = {}) {
 function freshState(overrides = {}) {
   globalThis.__co30 = {
     brain: [], brainResult: brainOk(),
+    single: [], singleResult: singleOk(),
     legacy: [], legacyResult: { headline: 'หัวข่าวจากเครื่องยนต์เดิม', rawData: 'ข'.repeat(400) }, legacyFail: null, legacyImpl: null,
     exec: fakeExec, execCalls: [], downloads: 0, downloadedUrls: [], downloadBytes: MB, downloadFail: null, downloadLeftovers: [],
     gen: { calls: [], fail: null },
@@ -350,17 +306,6 @@ async function post(route, path, body) {
 }
 const postInsight = (body) => post(insightRoute, '/api/clip-transcript/insight', body);
 
-const OVER_INLINE = Buffer.alloc(19 * MB + 1, 5); // ใหญ่กว่าเพดานแนบตรง 19MB → callGeminiVideoFile เดินเส้น Files API
-const callFileApi = (extra = {}) => gemini.callGeminiVideoFile({
-  prompt: 'ถอดคลิปทดสอบ', videoBuffer: OVER_INLINE, maxAttempts: 1, allowModelFallback: false, ...extra,
-});
-const rejectionOf = (promise) => promise.then(() => null, (error) => error);
-// ★ รอบ 2 (R4): เวลารอสั้นในข้อสอบส่งผ่าน _fileWait ของ callGeminiVideoFile เท่านั้น (env ถูกกรอบเด็ดขาดเสมอ ไม่มีประตูหลัง NODE_ENV=test)
-const fileWait = (waitMs, pollMs) => ({ _fileWait: { waitMs, pollMs } });
-function fileWaitEnv(waitMs, pollMs) {
-  process.env.CLIP_GEMINI_FILE_WAIT_MS = String(waitMs);
-  process.env.CLIP_GEMINI_FILE_POLL_MS = String(pollMs);
-}
 
 // worker ตัวจริง (scripts/clip-worker.mjs) โหลดแบบเดียวกับ tests/clip-worker-lease.test.mjs — ตัดเฉพาะลูป/undici/scheduler
 function replaceOnce(source, before, afterText, label) {
@@ -420,196 +365,83 @@ async function runJobAgainst(worker, processStatus, processBody, { kind = 'insig
   };
 }
 
-// ═══ ข้อ 1: เครื่องยนต์ใหม่ต้องได้ไฟล์คลิป (เดิม FB/IG/TikTok ตกเครื่องยนต์เดิม 528/528 ใบ) ═══════════
-test('ข้อ 1: ลิงก์ FB บนเครื่องทีม → เครื่องยนต์ใหม่ได้ videoBuffer ตัวที่โหลดมา (1MB) และโหลดคลิปครั้งเดียว', async () => {
+// ═══ ข้อ 1 → 25 ต.ค. 69: ประตูหลักส่งไฟล์ "ตัวที่โหลดมา" ให้เครื่องยนต์ช่องเดียวครั้งเดียว · ไม่มีเครื่องยนต์สำรองแล้ว ══════
+test('ข้อ 1: ลิงก์ FB บนเครื่องทีม → เครื่องยนต์ช่องเดียวได้ videoBuffer ตัวที่โหลดมา (1MB) และโหลดคลิปครั้งเดียว', async () => {
   const s = globalThis.__co30;
   const { status, body } = await postInsight({ url: FB_ONE });
   assert.equal(status, 200);
   assert.equal(body.success, true);
-  assert.equal(body.data.headline, 'หัวข่าวจากเครื่องยนต์ใหม่');
+  assert.equal(body.data.headline, 'หัวข่าวช่องเดียว');
+  assert.equal(body.data.engine, 'clip-single');
   assert.equal(s.downloads, 1, 'yt-dlp ต้องถูกเรียกโหลดครั้งเดียว');
   const ytArgs = s.execCalls.find((c) => /yt-dlp/i.test(c.cmd)).args;
   const outPath = resolvePath(ytArgs[ytArgs.indexOf('-o') + 1]);
   assert.ok(outPath.startsWith(resolvePath(tempRoot)) && outPath !== resolvePath(tempRoot), `R8: ไฟล์ชั่วคราวของ yt-dlp ต้องอยู่ในโฟลเดอร์ข้อสอบ (ได้ ${outPath})`);
-  assert.equal(s.brain.length, 1);
-  assert.ok(Buffer.isBuffer(s.brain[0].videoBuffer), 'เครื่องยนต์ใหม่ต้องได้ไฟล์ ไม่ใช่ undefined (ต้นเหตุ BAD_INPUT 0 token)');
-  assert.equal(s.brain[0].videoBuffer.length, MB);
-  assert.equal(s.brain[0].isYouTube, false);
-  assert.equal(s.brain[0].url, FB_ONE);
-  assert.equal(s.legacy.length, 0, 'เครื่องยนต์ใหม่สำเร็จ = ไม่ต้องเรียกเครื่องยนต์เดิม');
-  assert.equal(body.data.brainFallback, undefined);
+  assert.ok(ytArgs.includes('--write-info-json'), 'ต้องขอข้อมูลคลิป (ชื่อ/ความยาว) ในรอบโหลดเดียวกัน');
+  assert.equal(s.single.length, 1);
+  assert.ok(Buffer.isBuffer(s.single[0].videoBuffer));
+  assert.equal(s.single[0].videoBuffer.length, MB);
+  assert.equal(s.single[0].type, 'meta');
+  assert.equal(s.single[0].url, FB_ONE);
+  assert.equal(s.brain.length, 0, 'เครื่องยนต์เก่าต้องไม่ถูกเรียกแล้ว');
+  assert.equal(s.legacy.length, 0, 'ไม่มีเครื่องยนต์สำรองแล้ว');
 });
 
-test('ข้อ 1: เครื่องยนต์ใหม่ล้ม → เครื่องยนต์เดิมได้บัฟเฟอร์ "ตัวเดียวกัน" ไม่โหลดซ้ำ และติดธง brainFallback', async () => {
-  const s = freshState({ brainResult: brainFail(0) });
+test('ข้อ 1: เครื่องยนต์ช่องเดียวล้ม → 422 ทันที ไม่ถอยไปเครื่องยนต์เดิม ไม่โหลดซ้ำ', async () => {
+  const s = freshState({ singleResult: singleFail(3000) });
   const { status, body } = await postInsight({ url: FB_ONE });
-  assert.equal(status, 200);
-  assert.equal(body.data.headline, 'หัวข่าวจากเครื่องยนต์เดิม');
-  assert.equal(body.data.brainFallback, true);
-  assert.equal(s.downloads, 1, 'ห้ามโหลดคลิปซ้ำตอนถอยไปเครื่องยนต์เดิม');
-  assert.equal(s.brain.length, 1);
-  assert.equal(s.legacy.length, 1);
-  assert.equal(s.legacy[0].kind, 'file');
-  assert.equal(s.legacy[0].buf, s.brain[0].videoBuffer, 'ต้องเป็นบัฟเฟอร์ตัวเดียวกัน (อ้างอิงเดียวกัน)');
-  assert.equal(s.legacy[0].buf.length, MB);
-});
-
-test('ข้อ 1: ไฟล์ >19MB (บีบไม่ลง) → ข้ามเครื่องยนต์ใหม่ทั้งหมด ไปเครื่องยนต์เดิม (Files API) พร้อมธง brainFallback', async () => {
-  const s = freshState({ downloadBytes: 20 * MB });
-  const { status, body } = await postInsight({ url: FB_ONE });
-  assert.equal(status, 200);
-  assert.equal(s.brain.length, 0, 'เครื่องยนต์ใหม่รับแนบตรง ≤19MB เท่านั้น — ห้ามเรียกเลย');
+  assert.equal(status, 422);
+  assert.equal(body.success, false);
+  assert.equal(body.errorType, 'WATCH_FAILED');
   assert.equal(s.downloads, 1);
-  assert.ok(s.execCalls.some((c) => /ffmpeg/i.test(c.cmd)), 'ต้องลองบีบก่อน (บีบไม่ได้ = ใช้ไฟล์เดิม)');
-  assert.equal(s.legacy.length, 1);
-  assert.equal(s.legacy[0].buf.length, 20 * MB);
-  assert.equal(body.data.brainFallback, true);
+  assert.equal(s.single.length, 1);
+  assert.equal(s.legacy.length, 0);
+  assert.equal(s.brain.length, 0);
 });
 
-test('ข้อ 1: YouTube คงเดิม — เครื่องยนต์ใหม่ได้ลิงก์ (isYouTube:true) ไม่มีบัฟเฟอร์ และไม่โหลดไฟล์ล่วงหน้า', async () => {
+test('ข้อ 1: ไฟล์ >19MB → ส่งไฟล์เดิมทั้งก้อนให้เครื่องยนต์ช่องเดียว (ผ่าท่อนเอง) · ไม่บีบที่ประตู ไม่ไป Files API', async () => {
+  const s = freshState({ downloadBytes: 20 * MB });
+  const { status } = await postInsight({ url: FB_ONE });
+  assert.equal(status, 200);
+  assert.equal(s.single.length, 1);
+  assert.equal(s.single[0].videoBuffer.length, 20 * MB);
+  assert.ok(!s.execCalls.some((c) => /ffmpeg/i.test(c.cmd)), 'ประตูหลักไม่ต้องบีบเอง');
+  assert.equal(s.files.uploads.length, 0);
+  assert.equal(s.legacy.length, 0);
+});
+
+test('ข้อ 1: YouTube → เครื่องยนต์ช่องเดียวได้ลิงก์ ไม่มีบัฟเฟอร์ ไม่โหลดไฟล์ · ความยาวจาก yt-dlp --get-duration', async () => {
   const s = globalThis.__co30;
   const { status } = await postInsight({ url: 'https://youtu.be/dQw4w9WgXcQ?si=abc' });
   assert.equal(status, 200);
-  assert.equal(s.brain.length, 1);
-  assert.equal(s.brain[0].isYouTube, true);
-  assert.equal(s.brain[0].videoBuffer, undefined);
-  assert.equal(s.brain[0].url, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
-  assert.equal(s.downloads, 0, 'YouTube ห้ามโหลดไฟล์ก่อนเครื่องยนต์ใหม่');
+  assert.equal(s.single.length, 1);
+  assert.equal(s.single[0].type, 'youtube');
+  assert.equal(s.single[0].videoBuffer, null);
+  assert.equal(s.single[0].url, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+  assert.equal(s.single[0].durationSec, 3792, 'fake yt-dlp --get-duration = 1:03:12');
+  assert.equal(s.downloads, 0, 'YouTube ห้ามโหลดไฟล์');
 });
 
-test('ข้อ 1: TikTok (tikwm) ก็ส่งไฟล์เข้าเครื่องยนต์ใหม่ · ปิดเครื่องยนต์ใหม่ = เครื่องยนต์เดิมได้ไฟล์เดิม ไม่ติดธง', async () => {
+test('ข้อ 1: TikTok (tikwm) ส่งไฟล์ + ชื่อคลิป + ความยาวจาก tikwm ให้เครื่องยนต์ช่องเดียว', async () => {
   const s = globalThis.__co30;
   const video = Buffer.alloc(2 * MB, 3);
   const fetched = [];
   globalThis.fetch = async (u) => {
     fetched.push(String(u));
-    if (String(u).includes('tikwm.com')) return new Response(JSON.stringify({ data: { play: 'https://cdn.tiktok.test/v.mp4' } }));
+    if (String(u).includes('tikwm.com')) return new Response(JSON.stringify({ data: { play: 'https://cdn.tiktok.test/v.mp4', title: 'ลุงสมชายขายก๋วยเตี๋ยว', duration: 95 } }));
     return new Response(video);
   };
   const { status } = await postInsight({ url: 'https://www.tiktok.com/@a/video/123' });
   assert.equal(status, 200);
-  assert.equal(s.brain.length, 1);
-  assert.equal(s.brain[0].videoBuffer.length, 2 * MB);
+  assert.equal(s.single.length, 1);
+  assert.equal(s.single[0].videoBuffer.length, 2 * MB);
+  assert.equal(s.single[0].caption, 'ลุงสมชายขายก๋วยเตี๋ยว');
+  assert.equal(s.single[0].durationSec, 95);
   assert.equal(fetched.length, 2, 'ถาม tikwm 1 + โหลดไฟล์ 1 เท่านั้น');
-
-  const off = freshState();
-  process.env.CLIP_BRAIN_PIPELINE = '0';
-  const { status: offStatus, body } = await postInsight({ url: FB_ONE });
-  assert.equal(offStatus, 200);
-  assert.equal(off.brain.length, 0);
-  assert.equal(off.downloads, 1);
-  assert.equal(off.legacy[0].buf.length, MB);
-  assert.equal(body.data.brainFallback, undefined, 'ปิดเครื่องยนต์ใหม่เอง = ไม่ใช่การถอย จึงไม่ติดธง');
 });
 
-// ═══ ข้อ 2: Files API รอประมวลผลตามเวลา (เดิมรอได้แค่ 60×2 วิ แล้วโยน state=PROCESSING) ═════════════
-test('ข้อ 2: Files API — PROCESSING 3 รอบแล้ว ACTIVE → สำเร็จ ยิง generateContent ครั้งเดียว และลบไฟล์บน Gemini', async () => {
-  const s = freshState();
-  s.files.states = ['PROCESSING', 'PROCESSING', 'PROCESSING', 'ACTIVE'];
-  const out = await settleWithin(callFileApi(fileWait(2000, 5)), 'ต้องสำเร็จเมื่อไฟล์ ACTIVE (ช่วงโพลจาก _fileWait)', 1_500);
-  assert.equal(out.rawData, 'เนื้อจากไฟล์');
-  assert.equal(s.files.uploads.length, 1);
-  const uploadPath = resolvePath(s.files.uploads[0].path);
-  assert.ok(uploadPath.startsWith(resolvePath(tempRoot)) && uploadPath !== resolvePath(tempRoot), `R8: ไฟล์ชั่วคราวที่อัปโหลดต้องอยู่ในโฟลเดอร์ข้อสอบ (ได้ ${uploadPath})`);
-  assert.equal(s.files.polls, 4, 'เช็คสถานะจนเจอ ACTIVE');
-  assert.equal(s.gen.calls.length, 1, 'generateContent ครั้งเดียว');
-  assert.deepEqual(s.files.deleted, ['files/co30']);
-});
-
-test('ข้อ 2: PROCESSING ตลอด (_fileWait รอ 60ms โพล 5ms ชนะ env) → โยน timeout + retrySafe · ไม่ยิง generateContent · ลบไฟล์ทิ้ง', async () => {
-  const s = freshState();
-  s.files.states = ['PROCESSING'];
-  fileWaitEnv(1_800_000, 30_000); // env เพดานสูงสุด — _fileWait ของข้อสอบต้องชนะ (ไม่งั้นรอ 30 นาที)
-  const startedAt = Date.now();
-  const err = await settleWithin(rejectionOf(callFileApi(fileWait(60, 5))), 'ต้องโยนเมื่อหมดเวลารอ', 1_500);
-  assert.ok(err instanceof Error, 'ต้องล้ม');
-  assert.match(err.message, /timeout/, 'ข้อความต้องมีคำว่า timeout (worker isTransient นับเป็นชั่วคราว)');
-  assert.equal(err.retrySafe, true, 'ยังไม่ยิงโมเดล = retrySafe');
-  assert.equal(s.gen.calls.length, 0, 'ห้ามยิง generateContent');
-  assert.ok(s.files.polls >= 3, `ต้องเช็คซ้ำตามช่วงโพล (เช็ค ${s.files.polls} ครั้ง)`);
-  assert.ok(Date.now() - startedAt >= 55, 'ต้องรอจริงราวเวลาที่กำหนด');
-  assert.deepEqual(s.files.deleted, ['files/co30'], 'รอไม่ทันก็ต้องลบไฟล์บน Gemini');
-});
-
-test('ข้อ 2: สถานะ FAILED → โยนทันที ข้อความมี "กดใหม่ไม่ช่วย" + retrySafe (ไม่รอ ไม่ยิงโมเดล)', async () => {
-  const s = freshState();
-  s.files.states = ['FAILED'];
-  const err = await settleWithin(rejectionOf(callFileApi(fileWait(5000, 1000))), 'FAILED ต้องโยนทันทีโดยไม่รอรอบโพล', 800);
-  assert.ok(err instanceof Error);
-  assert.match(err.message, /กดใหม่ไม่ช่วย/);
-  assert.equal(err.retrySafe, true);
-  assert.equal(s.files.polls, 1);
-  assert.equal(s.gen.calls.length, 0);
-});
-
-test('ข้อ 2: อัปโหลดล้ม (ก่อนยิงโมเดล) → retrySafe · error จาก generateContent (ไฟล์และ inline) → ห้ามติด retrySafe', async () => {
-  const s = freshState();
-  s.files.uploadFail = () => new Error('upload failed: ECONNRESET');
-  const uploadErr = await settleWithin(rejectionOf(callFileApi(fileWait(2000, 5))), 'อัปโหลดล้มต้องโยน', 1_500);
-  assert.match(uploadErr.message, /upload failed/);
-  assert.equal(uploadErr.retrySafe, true);
-  assert.equal(s.gen.calls.length, 0);
-
-  const g = freshState();
-  g.gen.fail = () => Object.assign(new Error('500 internal provider error'), { status: 500 });
-  const providerErr = await settleWithin(rejectionOf(callFileApi()), 'provider error ต้องโยน', 1_500);
-  assert.match(providerErr.message, /internal provider error/);
-  assert.notEqual(providerErr.retrySafe, true, 'หลังเริ่มยิงโมเดลอาจคิดเงินแล้ว — ห้ามติดธง');
-  assert.equal(g.gen.calls.length, 1);
-
-  const inline = freshState();
-  inline.gen.fail = () => Object.assign(new Error('500 internal provider error'), { status: 500 });
-  const inlineErr = await settleWithin(rejectionOf(callFileApi({ videoBuffer: Buffer.alloc(20_000, 2) })), 'inline ต้องโยน', 1_500);
-  assert.notEqual(inlineErr.retrySafe, true);
-  assert.equal(inline.files.uploads.length, 0, 'ไฟล์เล็กแนบตรง ไม่อัปโหลด');
-});
-
-test('ข้อ 2 (R4): กรอบค่า env ตามเครื่อง — win32 10 นาที (เพดาน 30 นาที) · คลาวด์ 4 นาที (เพดาน 5 นาที) · พื้น 30 วิ/200ms · ไม่มีประตูหลัง NODE_ENV=test', () => {
-  const r = gemini.resolveGeminiFileWait;
-  // เครื่องทีม (Windows · worker ไม่มีเพดานเวลาของแพลตฟอร์ม)
-  setPlatform('win32');
-  assert.deepEqual(r({}), { waitMs: 600_000, pollMs: 3_000 });
-  assert.deepEqual(r({ CLIP_GEMINI_FILE_WAIT_MS: '60', CLIP_GEMINI_FILE_POLL_MS: '5' }), { waitMs: 30_000, pollMs: 200 });
-  assert.deepEqual(r({ CLIP_GEMINI_FILE_WAIT_MS: '99999999', CLIP_GEMINI_FILE_POLL_MS: '99999999' }), { waitMs: 1_800_000, pollMs: 30_000 });
-  assert.deepEqual(r({ CLIP_GEMINI_FILE_WAIT_MS: 'abc', CLIP_GEMINI_FILE_POLL_MS: '' }), { waitMs: 600_000, pollMs: 3_000 });
-  assert.deepEqual(r({ CLIP_GEMINI_FILE_WAIT_MS: '0', CLIP_GEMINI_FILE_POLL_MS: '-5' }), { waitMs: 600_000, pollMs: 3_000 });
-  assert.deepEqual(r({ CLIP_GEMINI_FILE_WAIT_MS: '900000', CLIP_GEMINI_FILE_POLL_MS: '5000' }), { waitMs: 900_000, pollMs: 5_000 });
-  // คลาวด์ (Vercel maxDuration=800 — โหลด+อัปโหลด+รอ+inference 280 วิ ต้องอยู่ใต้ 800 วิ)
-  setPlatform('linux');
-  assert.deepEqual(r({}), { waitMs: 240_000, pollMs: 3_000 });
-  assert.deepEqual(r({ CLIP_GEMINI_FILE_WAIT_MS: '900000', CLIP_GEMINI_FILE_POLL_MS: '5000' }), { waitMs: 300_000, pollMs: 5_000 }, 'เพดานคลาวด์ 5 นาที');
-  assert.deepEqual(r({ CLIP_GEMINI_FILE_WAIT_MS: '120000' }), { waitMs: 120_000, pollMs: 3_000 }, 'env ทับได้ภายในกรอบ');
-  assert.deepEqual(r({ CLIP_GEMINI_FILE_WAIT_MS: '60', CLIP_GEMINI_FILE_POLL_MS: '5' }), { waitMs: 30_000, pollMs: 200 });
-  assert.deepEqual(r({ CLIP_GEMINI_FILE_WAIT_MS: 'abc' }), { waitMs: 240_000, pollMs: 3_000 });
-  // ไม่มีประตูหลัง: NODE_ENV ใดๆ ก็ถูกกรอบเท่ากัน ทั้งสองเครื่อง
-  for (const platform of ['win32', 'linux']) {
-    setPlatform(platform);
-    for (const NODE_ENV of ['test', 'production', 'development']) {
-      assert.deepEqual(r({ NODE_ENV, CLIP_GEMINI_FILE_WAIT_MS: '60', CLIP_GEMINI_FILE_POLL_MS: '5' }), { waitMs: 30_000, pollMs: 200 },
-        `${platform} NODE_ENV=${NODE_ENV} ต้องไม่ปลดพื้นขั้นต่ำ`);
-    }
-  }
-  // ค่าเริ่มต้นอ่าน process.env จริงเมื่อไม่ส่งอาร์กิวเมนต์
-  setPlatform('linux');
-  fileWaitEnv(45_000, 1_000);
-  assert.deepEqual(r(), { waitMs: 45_000, pollMs: 1_000 });
-});
-
-test('ข้อ 2 (R4): env 60ms/5ms ถูกยกเป็นพื้นเสมอแม้ NODE_ENV=test — PROCESSING 2 รอบแล้ว ACTIVE ต้องสำเร็จ ไม่ timeout ที่ 60ms', async () => {
-  const s = freshState();
-  s.files.states = ['PROCESSING', 'PROCESSING', 'ACTIVE'];
-  process.env.NODE_ENV = 'test'; // เดิมเป็นประตูหลังปลดพื้น — ตอนนี้ต้องไม่มีผล
-  fileWaitEnv(60, 5);
-  const startedAt = Date.now();
-  const out = await settleWithin(callFileApi(), 'ต้องรอเกิน 60ms ได้ (พื้น 30 วิ) และโพลตามพื้น 200ms', 3_000);
-  assert.equal(out.rawData, 'เนื้อจากไฟล์');
-  assert.ok(Date.now() - startedAt >= 390, 'ช่วงโพลต้องถูกยกเป็นพื้น 200ms (2 รอบ ≥ ~400ms)');
-  assert.equal(s.gen.calls.length, 1);
-});
-
+// ═══ ข้อ 2 (Files API ของ clipAI) ลบพร้อมเครื่องยนต์เดิมในเฟส 4 (26 ต.ค. 69) ═════════════
 // ═══ ข้อ 3: retrySafe ต้องไปถึง worker จริง (เดิมไม่มี route ไหนตั้ง → retry อัตโนมัติ 0 ครั้งตั้งแต่ 22 ส.ค.) ════
-const preProviderFailure = () => Object.assign(
-  new Error('Gemini ประมวลผลวิดีโอไม่ทันเวลา 600 วิ (state=PROCESSING, timeout)'), { retrySafe: true });
 
 test('ข้อ 3: yt-dlp ล้ม (ยังไม่ยิง AI) → 422 พร้อม retrySafe:true และไม่แตะเครื่องยนต์ใดเลย', async () => {
   const s = freshState({ downloadFail: () => Object.assign(new Error('Command failed: yt-dlp.exe ERROR: Unable to download webpage'), { code: 1 }) });
@@ -629,53 +461,48 @@ test('ข้อ 3: tikwm ล้ม (เน็ต) → 422 พร้อม retryS
   assert.equal(body.retrySafe, true);
 });
 
-test('ข้อ 3: เครื่องยนต์ใหม่ล้มก่อนถึงผู้ให้บริการ (NO_KEY · 0 token) + เครื่องยนต์เดิมล้มก่อนยิงโมเดล → retrySafe:true', async () => {
-  freshState({ brainResult: brainFail(0, 'NO_KEY'), legacyFail: preProviderFailure });
+test('ข้อ 3 → 25 ต.ค. 69: เครื่องยนต์ช่องเดียวล้มก่อนถึงผู้ให้บริการ (ไม่มี ffmpeg · 0 token) → 422 ไม่มี retrySafe (ลองซ้ำไม่ช่วย ต้องแก้เครื่อง)', async () => {
+  freshState({ singleResult: singleFail(0, 'NO_FFMPEG', 'เครื่องนี้ไม่มี ffmpeg — ผ่าไฟล์คลิปยาว/ใหญ่ไม่ได้') });
   const { status, body } = await postInsight({ url: FB_ONE });
   assert.equal(status, 422);
-  assert.equal(body.retrySafe, true);
+  assert.equal(body.errorType, 'NO_FFMPEG');
+  assert.equal(Object.hasOwn(body, 'retrySafe'), false);
 });
 
-test('ข้อ 3: เครื่องยนต์ใหม่ใช้โทเคนไปแล้ว (1234) หรือพังผิดคาด แล้วเครื่องยนต์เดิมล้มก่อนยิงโมเดล → ไม่มี retrySafe (กันจ่ายซ้ำ)', async () => {
-  freshState({ brainResult: brainFail(1234), legacyFail: preProviderFailure });
+test('ข้อ 3 → 25 ต.ค. 69: เครื่องยนต์ช่องเดียวใช้โทเคนไปแล้ว หรือพังผิดคาด → ไม่มี retrySafe (กันจ่ายซ้ำ)', async () => {
+  freshState({ singleResult: singleFail(1234) });
   const spent = await postInsight({ url: FB_ONE });
   assert.equal(spent.status, 422);
   assert.equal(Object.hasOwn(spent.body, 'retrySafe'), false, 'ใช้โทเคนไปแล้ว = ห้ามให้ worker ลองซ้ำอัตโนมัติ');
 
-  freshState({ brainResult: () => { throw new Error('สมองพังกลางทาง'); }, legacyFail: preProviderFailure });
+  freshState({ singleResult: () => { throw new Error('เครื่องยนต์พังกลางทาง'); } });
   const crashed = await postInsight({ url: FB_ONE });
   assert.equal(crashed.status, 422);
   assert.equal(Object.hasOwn(crashed.body, 'retrySafe'), false, 'ไม่รู้ยอดที่ใช้ไป = ถือว่าอาจจ่ายแล้ว');
 });
 
-// ═══ รอบ 2 · R2: ยอดที่ตัดสิน retrySafe ต้องเป็น "บิลจริง" (brain.usage.totalTokens) ไม่ใช่ spentTokens อย่างเดียว ═══
-test('R2: บิลจริงของเครื่องยนต์ใหม่ (usage รวมทุก attempt) กัน retrySafe · ยอด 0 ยอมเฉพาะล้มก่อนถึงผู้ให้บริการ', async () => {
-  const cases = [
-    // [ผลของเครื่องยนต์ใหม่, ต้องมี retrySafe ไหม, เหตุผล]
-    [brainFail(0, 'BAD_JSON', 5000), false, 'ถูกบิล 5000 token แต่ตอบ JSON เสีย — spentTokens 0 แต่จ่ายไปแล้ว'],
-    [brainFail(0, 'MAX_TOKENS', 32000), false, 'ถูกบิลเต็มเพดานแล้วโดนตัด'],
-    [brainFail(0, 'NETWORK', 0), false, 'เน็ตหลุดระหว่างรอคำตอบ — ไม่มี usage แต่อาจถูกบิลแล้ว'],
-    [brainFail(0, 'PIPE_MAP_FAILED', 0), false, 'ล้มหลังยิงแล้วโดยไม่รู้ยอด'],
-    [{ ok: false, errorType: 'TIMEOUT', error: 'หมดเวลา', spentTokens: 0 }, false, 'ไม่มีใบเสร็จ usage เลย'],
-    [brainFail(0, 'BAD_INPUT', 0), true, 'ไฟล์เล็ก/ว่าง — ไม่ถึงผู้ให้บริการ'],
-    [brainFail(0, 'TOO_LARGE', 0), true, 'ไฟล์ใหญ่เกินแนบตรง — ไม่ถึงผู้ให้บริการ'],
-    [brainFail(0, 'NO_KEY', 0), true, 'ไม่มีคีย์ — ไม่ถึงผู้ให้บริการ'],
-    [brainFail(0, 'PIPE_NO_SOURCE', 0), true, 'ไม่มีต้นทาง — ไม่ถึงผู้ให้บริการ'],
-    [brainFail(0, 'BAD_INPUT', 300), false, 'ชนิดก่อนถึงผู้ให้บริการแต่มี usage จริง = บิลชนะ'],
-  ];
-  for (const [brainResult, wantRetrySafe, why] of cases) {
-    const s = freshState({ brainResult, legacyFail: preProviderFailure });
+// ═══ R2 → 25 ต.ค. 69: ความพลาดของเครื่องยนต์ช่องเดียวไม่ให้ worker ลองซ้ำเองทุกกรณี — retrySafe มาจากตัวโหลดคลิปเท่านั้น ═══
+test('R2 → 25 ต.ค. 69: เครื่องยนต์ช่องเดียวล้มทุกแบบ = ไม่มี retrySafe · ตัวโหลดล้ม = มี retrySafe', async () => {
+  for (const [result, why] of [
+    [singleFail(5000, 'WRITER_FAILED'), 'ดูคลิปแล้ว คนเขียนล้ม — จ่ายไปแล้ว'],
+    [singleFail(0, 'BUSY'), 'Gemini แน่น ไม่มีใบเสร็จ — อาจถูกบิลแล้ว'],
+    [singleFail(0, 'DURATION_UNKNOWN'), 'อ่านความยาวไม่ได้ — ลองซ้ำก็ไม่ได้'],
+    [singleFail(0, 'EMPTY_CLIP'), 'คลิปไม่มีเนื้อหา'],
+  ]) {
+    const s = freshState({ singleResult: result });
     const { status, body } = await postInsight({ url: FB_ONE });
     assert.equal(status, 422, why);
-    assert.equal(s.brain.length, 1, `${why}: ต้องลองเครื่องยนต์ใหม่ก่อน`);
-    assert.equal(s.legacy.length, 1, `${why}: ต้องถอยไปเครื่องยนต์เดิม`);
-    assert.equal(Object.hasOwn(body, 'retrySafe'), wantRetrySafe, `${brainResult.errorType}: ${why}`);
-    if (wantRetrySafe) assert.equal(body.retrySafe, true);
+    assert.equal(s.single.length, 1, why);
+    assert.equal(Object.hasOwn(body, 'retrySafe'), false, `${result.errorType}: ${why}`);
   }
+  const s = freshState({ downloadFail: () => Object.assign(new Error('Command failed: yt-dlp.exe ERROR: [facebook] x: HTTP Error 503: Service Unavailable'), { code: 1, stderr: 'ERROR: [facebook] x: HTTP Error 503: Service Unavailable\n' }) });
+  const { body } = await postInsight({ url: FB_ONE });
+  assert.equal(body.retrySafe, true, 'โหลดคลิปล้ม = ยังไม่ยิง AI ลองใหม่อัตโนมัติได้');
+  assert.equal(s.single.length, 0);
 });
 
 test('ข้อ 3: error จากผู้ให้บริการ (ไม่ติดธง) → ไม่มี retrySafe', async () => {
-  freshState({ brainResult: brainFail(0), legacyFail: () => Object.assign(new Error('Gemini 503 high demand'), { status: 503 }) });
+  freshState({ singleResult: singleFail(0, 'BUSY', 'Gemini 503 high demand') });
   const { status, body } = await postInsight({ url: FB_ONE });
   assert.equal(status, 422);
   assert.equal(Object.hasOwn(body, 'retrySafe'), false);
@@ -705,56 +532,14 @@ test('ข้อ 3 (ปลายทาง): ผลจริงของ /insight 
   const run = await runJobAgainst(worker, insight.status, insight.body);
   assert.deepEqual(run.statuses, ['retry'], 'ล้มก่อนจ่ายเงิน + ชั่วคราว = ลองใหม่อัตโนมัติ');
 
-  const provider = freshState({ brainResult: brainFail(0), legacyFail: () => new Error('Gemini 503 high demand') });
+  const provider = freshState({ singleResult: singleFail(2000, 'WRITER_FAILED', 'เขียนเนื้อข่าวไม่สำเร็จ: Gemini 503 high demand') });
   const paid = await postInsight({ url: FB_ONE });
-  assert.equal(provider.legacy.length, 1);
+  assert.equal(provider.single.length, 1);
   const runPaid = await runJobAgainst(worker, paid.status, paid.body);
   assert.deepEqual(runPaid.statuses, ['error'], 'ล้มหลังยิงโมเดล = ห้ามลองซ้ำเอง');
 });
 
-// ═══ รอบ 2 · R5: ข้อความจาก Files API ผ่าน humanizeErr ต้องคงความหมาย (timeout = ชั่วคราว · FAILED = ถาวร) ═══
-//   คลิป >19MB (บีบไม่ลง) → ข้ามเครื่องยนต์ใหม่ → เครื่องยนต์เดิมเดินเข้า callGeminiVideoFile "ตัวจริง" (error และธงมาจากฟังก์ชันจริง)
-test('R5: Files API รอไม่ทัน (state=PROCESSING) → POST /insight → worker ตัวจริงลองใหม่ (retry) · ข้อความคงคำ timeout ไม่ใช่ข้อความเก่า ~4.5 นาที', async () => {
-  const s = freshState({ downloadBytes: 20 * MB });
-  s.files.states = ['PROCESSING'];
-  s.legacyImpl = (buf) => gemini.callGeminiVideoFile({
-    prompt: 'ถอดคลิปทดสอบ', videoBuffer: buf, maxAttempts: 1, allowModelFallback: false, _fileWait: { waitMs: 60, pollMs: 5 },
-  });
-  const insight = await postInsight({ url: FB_ONE });
-  assert.equal(insight.status, 422);
-  assert.equal(s.brain.length, 0, 'ไฟล์ >19MB ต้องข้ามเครื่องยนต์ใหม่');
-  assert.equal(s.legacy.length, 1);
-  assert.equal(s.files.uploads.length, 1, 'ต้องเดินเส้น Files API จริง');
-  assert.equal(s.gen.calls.length, 0, 'รอไม่ทัน = ยังไม่ยิงโมเดล');
-  assert.equal(insight.body.retrySafe, true, 'ล้มก่อนยิงโมเดล + เครื่องยนต์ใหม่ไม่ได้ใช้โทเคน');
-  assert.match(insight.body.error, /timeout/, 'ต้องคงคำ timeout ให้ worker จับตรงๆ');
-  // ★ รอบ 3 (L4): ถ้อยคำเป็นกลาง — ไม่สัญญา "ลองใหม่อัตโนมัติ" ทุกกรณี (ถอดตรง/เครื่องยนต์ใหม่จ่ายแล้ว ระบบจะไม่ลองเอง)
-  assert.match(insight.body.error, /ถ้าส่งผ่านคิวเครื่องทีม ระบบจะลองใหม่ให้เอง · ถ้าถอดตรงให้กดส่งเข้าคิว/);
-  assert.doesNotMatch(insight.body.error, /ลองใหม่อัตโนมัติ/, 'L4: ห้ามสัญญาว่าระบบจะลองใหม่อัตโนมัติทุกกรณี');
-  assert.doesNotMatch(insight.body.error, /4\.5 นาที|ถอดประเด็นข่าว/, 'ห้ามเป็นข้อความเก่าของ timeout ทั่วไป');
-  const worker = await settleWithin(loadWorker(), 'โหลด worker ตัวจริงต้องเสร็จ', 5_000);
-  const run = await runJobAgainst(worker, insight.status, insight.body);
-  assert.deepEqual(run.statuses, ['retry']);
-  assert.match(run.finalLog, /⏳ สะดุดชั่วคราว/);
-});
-
-test('R5: ไฟล์บน Gemini FAILED → POST /insight → worker ตัวจริงหยุด (error) · ข้อความบอก "กดใหม่ไม่ช่วย" แบบคนอ่าน ไม่ใช่ state ดิบ', async () => {
-  const s = freshState({ downloadBytes: 20 * MB });
-  s.files.states = ['FAILED'];
-  s.legacyImpl = (buf) => gemini.callGeminiVideoFile({
-    prompt: 'ถอดคลิปทดสอบ', videoBuffer: buf, maxAttempts: 1, allowModelFallback: false, _fileWait: { waitMs: 5_000, pollMs: 5 },
-  });
-  const insight = await postInsight({ url: FB_ONE });
-  assert.equal(insight.status, 422);
-  assert.equal(s.gen.calls.length, 0);
-  assert.equal(insight.body.retrySafe, true, 'ยังไม่จ่ายค่าโมเดล (แต่ข้อความตัดสินว่าไม่ควรลองซ้ำ)');
-  assert.match(insight.body.error, /กดใหม่ไม่ช่วย/);
-  assert.doesNotMatch(insight.body.error, /state=|timeout/, 'ต้องแปลงเป็นข้อความคนอ่าน');
-  const worker = await settleWithin(loadWorker(), 'โหลด worker ตัวจริงต้องเสร็จ', 5_000);
-  const run = await runJobAgainst(worker, insight.status, insight.body);
-  assert.deepEqual(run.statuses, ['error']);
-  assert.match(run.finalLog, /❌ ถอดไม่ได้จริง \(กดใหม่ไม่ช่วย\)/);
-});
+// ═══ รอบ 2 · R5 (ถอด 25 ต.ค. 69): เส้น Files API อยู่ในเครื่องยนต์เดิมที่ถูกตัดออกจากประตูหลักแล้ว (ไฟล์ใหญ่ผ่าท่อนแนบตรงแทน) — พฤติกรรมของ callGeminiVideoFile ยังคุมด้วยข้อสอบ ข้อ 2 จนกว่าจะลบเครื่องยนต์เดิม ═══
 
 // ═══ รอบ 2 · R3: ข้อความจากตัวโหลดต้องบอก "ถาวร/ชั่วคราว" ถูกต้องที่ต้นทาง (isTransient ของ worker ถูกล็อก) ═══
 // error ของ execFile ทรงเดียวกับ node จริง: "Command failed: <บรรทัดคำสั่ง>\n<stderr>" + code/killed/signal/stderr
@@ -801,7 +586,7 @@ test('R3: ตัวโหลดล้ม → POST /insight จริง → work
     const insight = await postInsight({ url: c.url });
     assert.equal(insight.status, 422, c.name);
     assert.equal(insight.body.retrySafe, true, `${c.name}: ล้มตอนโหลด = ยังไม่จ่ายค่าโมเดล`);
-    assert.equal(s.brain.length + s.legacy.length, 0, `${c.name}: ห้ามแตะเครื่องยนต์ใด`);
+    assert.equal(s.brain.length + s.legacy.length + s.single.length, 0, `${c.name}: ห้ามแตะเครื่องยนต์ใด`);
     const run = await runJobAgainst(worker, insight.status, insight.body);
     assert.deepEqual(run.statuses, [c.want], `${c.name}: worker ต้องรายงาน ${c.want} (ได้ ${run.statuses}) · ข้อความ: ${insight.body.error}`);
     for (const text of [insight.body.error, run.errors[0]]) {
@@ -837,60 +622,8 @@ test('R3: ข้อความ yt-dlp ที่ส่งต่อ = บรร�
   }
 });
 
-// ═══ รอบ 2 · R6: /hunt ต้องส่ง retrySafe ของ /insight ต่อ (เดิมทิ้ง → ใบ hunt ที่ล้มก่อนจ่ายเงินไม่เคยได้ลองใหม่) ═══
-async function postHunt(body) {
-  const { NextRequest } = await import('next/server'); // route อ่าน request.nextUrl.origin — ต้องเป็น NextRequest จริง
-  const res = await settleWithin(huntRoute.POST(new NextRequest('http://localhost/api/clip-transcript/hunt', {
-    method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body),
-  })), 'POST /hunt ต้องตอบกลับ', 10_000);
-  return { status: res.status, body: await res.json() };
-}
-// fetch ภายในของ /hunt → POST /insight ตัวจริงในโปรเซสเดียวกัน (ไม่ออกเน็ต)
-function routeInsightFetch(calls) {
-  return async (u, init = {}) => {
-    const url = String(u);
-    if (url === 'http://localhost/api/clip-transcript/insight') {
-      calls.push(JSON.parse(init.body));
-      return insightRoute.POST(new Request(url, init));
-    }
-    throw new Error(`ข้อสอบนี้ห้ามออกเน็ต: ${url}`);
-  };
-}
-
-test('R6: /hunt บนเครื่องทีม — /insight ล้มก่อนจ่ายเงิน (retrySafe) → /hunt ส่ง retrySafe ต่อ → worker ตัวจริง (ใบ hunt) ลองใหม่', async () => {
-  const s = freshState({ downloadFail: () => ytDlpError({ stderr: 'ERROR: [facebook] 1084395141170409: Unable to download webpage: HTTP Error 503: Service Unavailable\n' }) });
-  const calls = [];
-  globalThis.fetch = routeInsightFetch(calls);
-  const hunt = await postHunt({ url: FB_ONE, user: 'ทดสอบ', _fromWorker: true });
-  assert.equal(calls.length, 1, '/hunt ต้องยิง /insight ภายในครั้งเดียว');
-  assert.equal(calls[0].url, FB_ONE);
-  assert.equal(s.downloads, 1);
-  assert.equal(hunt.status, 422);
-  assert.equal(hunt.body.success, false);
-  assert.equal(hunt.body.retrySafe, true, '/insight ยืนยันว่ายังไม่จ่าย + runTopicHunt ยังไม่รัน = ส่งต่อได้');
-  assert.equal(hunt.body.errorType, 'CLIP_DOWNLOAD_FAILED');
-  const worker = await settleWithin(loadWorker(), 'โหลด worker ตัวจริงต้องเสร็จ', 5_000);
-  const run = await runJobAgainst(worker, hunt.status, hunt.body, { kind: 'hunt' });
-  assert.deepEqual(run.processUrls, ['http://clip-worker.test/api/clip-transcript/hunt']);
-  assert.deepEqual(run.statuses, ['retry'], 'ใบ hunt ที่ล้มก่อนจ่ายเงินแบบชั่วคราว = ลองใหม่อัตโนมัติ');
-});
-
-test('R6: /hunt — /insight ล้มหลังเริ่มจ่าย (ไม่มี retrySafe) → /hunt ต้องไม่เติม retrySafe เอง → worker หยุด (error)', async () => {
-  freshState({ brainResult: brainFail(0, 'BAD_JSON', 5000), legacyFail: preProviderFailure });
-  const calls = [];
-  globalThis.fetch = routeInsightFetch(calls);
-  const paid = await postHunt({ url: FB_ONE, _fromWorker: true });
-  assert.equal(calls.length, 1);
-  assert.equal(paid.status, 422);
-  assert.equal(Object.hasOwn(paid.body, 'retrySafe'), false);
-  const worker = await settleWithin(loadWorker(), 'โหลด worker ตัวจริงต้องเสร็จ', 5_000);
-  const run = await runJobAgainst(worker, paid.status, paid.body, { kind: 'hunt' });
-  assert.deepEqual(run.statuses, ['error']);
-});
-
-// ═══ รอบ 2 · R7: cleanClipUrl มี 3 สำเนา (clipUrl.js · insight route · transcript route) — ต้องได้ผลเดียวกันทุกไบต์ ═══
-//   สำเนาของ transcript route ไม่ได้ export → ทดสอบผ่าน POST /api/clip-transcript ตัวจริง (ตัวถอดเสียง YouTube ถูก stub เก็บลิงก์ที่ได้รับ)
-test('R7: cleanClipUrl ทั้ง 3 สำเนาได้ผลเดียวกันทุกไบต์ — ลิงก์ YouTube จริง (11 ตัว) ได้ผลเดิม · รหัสยาวผิดรูปไม่ถูกตัดเหลือ 11 ตัว', async () => {
+// ═══ รอบ 2 · R7: cleanClipUrl มี 2 สำเนา (clipUrl.js · insight route) — ต้องได้ผลเดียวกันทุกไบต์ (★ 26 ต.ค. 69: ตัวถอดเสียงถูกลบพร้อมสำเนาที่ 3)
+test('R7: cleanClipUrl ทั้ง 2 สำเนา (ตัวกลาง + ประตู insight) ได้ผลเดียวกันทุกไบต์ — ลิงก์ YouTube จริง (11 ตัว) ได้ผลเดิม · รหัสยาวผิดรูปไม่ถูกตัดเหลือ 11 ตัว', async () => {
   const cases = [
     // ลิงก์จริง (รหัส 11 ตัว) — ผลต้องเหมือนก่อนแก้ทุกไบต์
     ['https://youtu.be/Vf8UDY5EC9Q?si=abc', 'https://www.youtube.com/watch?v=Vf8UDY5EC9Q'],
@@ -909,10 +642,6 @@ test('R7: cleanClipUrl ทั้ง 3 สำเนาได้ผลเดีย
   for (const [raw, want] of cases) {
     assert.equal(cleanClipUrl(raw), want, `clipAgent/clipUrl.js: ${raw}`);
     assert.equal(insightRoute.cleanClipUrl(raw), want, `insight/route.js: ${raw}`);
-    const s = freshState();
-    const { status } = await post(transcriptRoute, '/api/clip-transcript', { url: raw });
-    assert.equal(status, 200, raw);
-    assert.deepEqual(s.transcribed, [want], `clip-transcript/route.js: ${raw}`);
   }
 });
 
@@ -972,37 +701,32 @@ test('ข้อ 4: submitClipJob — ลิงก์ซ้อน 2 รอบ (�
   await assert.rejects(submitClipJob({ url: 12 }), (e) => e.errorType === 'BAD_URL');
 });
 
+// ★ 25 ต.ค. 69 (P6): ประตูหลักตัดสินแพลตฟอร์มจาก hostname จริง (กันชั้นสองหลังหน้า submit)
+test('P6: POST /insight ปฏิเสธลิงก์ที่แค่มีชื่อแพลตฟอร์มปน (วงแลน/localhost/เว็บอื่น) โดยไม่โหลดและไม่เรียกเครื่องยนต์', async () => {
+  for (const bad of ['http://192.168.1.1/?facebook.com', 'http://127.0.0.1:3000/x?v=youtube.com', 'https://evil.example/tiktok.com/video/1']) {
+    const s = freshState();
+    const { status, body } = await postInsight({ url: bad });
+    assert.equal(status, 400, bad);
+    assert.equal(body.errorType, 'UNSUPPORTED_URL', bad);
+    assert.equal(s.downloads, 0, `${bad}: ห้ามสั่ง yt-dlp`);
+    assert.equal(s.single.length, 0, `${bad}: ห้ามเรียกเครื่องยนต์`);
+  }
+  const ok = freshState();
+  assert.equal((await postInsight({ url: 'https://m.facebook.com/watch/?v=1084395141170409' })).status, 200);
+  assert.equal(ok.single[0].type, 'meta');
+});
+
 test('ข้อ 4: POST /insight รับลิงก์ซ้อน → yt-dlp และเครื่องยนต์ใหม่ได้ลิงก์เดียว · ลิงก์ YouTube ไม่มี https ยังใช้ได้เหมือนเดิม', async () => {
   const s = globalThis.__co30;
   const { status } = await postInsight({ url: FB_TWICE });
   assert.equal(status, 200);
   assert.deepEqual(s.downloadedUrls, [FB_ONE], 'yt-dlp ต้องได้ลิงก์เดียว (เดิมได้ลิงก์ซ้อน → Command failed)');
-  assert.equal(s.brain[0].url, FB_ONE);
+  assert.equal(s.single[0].url, FB_ONE);
 
   const bare = freshState();
   const { status: bareStatus } = await postInsight({ url: 'youtu.be/dQw4w9WgXcQ' });
   assert.equal(bareStatus, 200, 'ไม่มี http(s):// = ใช้ข้อความเดิมล้างตามเดิม (ไม่กลายเป็นลิงก์ไม่รองรับ)');
-  assert.equal(bare.brain[0].url, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
-});
-
-test('ข้อ 4: /api/clip-transcript (ถอดเสียง) รับลิงก์ซ้อน → ตัวถอดเสียงได้ลิงก์เดียว', async () => {
-  const s = globalThis.__co30;
-  const once = 'https://www.tiktok.com/@a/video/1';
-  const { status, body } = await post(transcriptRoute, '/api/clip-transcript', { url: once + once });
-  assert.equal(status, 200);
-  assert.equal(body.success, true);
-  assert.deepEqual(s.transcribed, [once]);
-});
-
-test('ข้อ 4: /hunt บนคลาวด์รับลิงก์ซ้อน → ใบงานที่ส่งเข้าคิวเครื่องทีมเก็บลิงก์เดียว', async () => {
-  setPlatform('linux');
-  const { status, body } = await post(huntRoute, '/api/clip-transcript/hunt', { url: FB_TWICE, user: 'ทดสอบ' });
-  assert.equal(status, 200);
-  assert.equal(body.queued, true);
-  const jobs = globalThis.__co30Stores.get('clip-jobs');
-  assert.equal(jobs.length, 1);
-  assert.equal(jobs[0].url, FB_ONE);
-  assert.equal(jobs[0].kind, 'hunt');
+  assert.equal(bare.single[0].url, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
 });
 
 // ═══ รอบ 2 · R9: extractFirstUrl ปรับขอบ — ตัดที่อักขระนอก ASCII + เครื่องหมายท้ายที่ค้าง · ลิงก์ห่อ l.php คงพฤติกรรมเดิม ═══
@@ -1149,7 +873,7 @@ test('M2: yt-dlp ถูกฆ่ากลางทาง (ทิ้ง .part/DAS
   const ok = freshState({ downloadLeftovers: leftovers });
   const r2 = await postInsight({ url: FB_ONE });
   assert.equal(r2.status, 200);
-  assert.equal(ok.brain[0].videoBuffer.length, MB, 'สำเร็จ: อ่านไฟล์ที่โหลดครบก่อนลบโฟลเดอร์');
+  assert.equal(ok.single[0].videoBuffer.length, MB, 'สำเร็จ: อ่านไฟล์ที่โหลดครบก่อนลบโฟลเดอร์');
   assert.notEqual(dirname(ytDlpOutPath(ok)), dirname(out1), 'โหลด 1 ครั้ง = โฟลเดอร์ใหม่ 1 โฟลเดอร์');
   assert.deepEqual(downloadLeftoversOnDisk(), [], 'สำเร็จก็ต้องไม่ทิ้งโฟลเดอร์ค้าง');
 
@@ -1199,7 +923,7 @@ test('L2: tikwm ติดเพดานความถี่/ไม่ว่า
     const msg = String(insight.body.error);
     assert.equal(insight.status, 422, c.name);
     assert.equal(insight.body.retrySafe, true, `${c.name}: ยังไม่จ่ายค่าโมเดล`);
-    assert.equal(s.brain.length + s.legacy.length, 0, c.name);
+    assert.equal(s.brain.length + s.legacy.length + s.single.length, 0, c.name);
     assert.match(msg, /^tikwm/, `${c.name}: humanizeErr ต้องไม่แปลงข้อความ tikwm (ได้: ${msg})`);
     assert.doesNotMatch(msg, /Gemini/, `${c.name}: ปัญหาอยู่ที่ tikwm ห้ามโทษ Gemini (ได้: ${msg})`);
     if (c.want === 'retry') assert.equal(msg, `tikwm แน่นชั่วคราว (rate limit: ${c.api.msg})`);
@@ -1209,47 +933,7 @@ test('L2: tikwm ติดเพดานความถี่/ไม่ว่า
   }
 });
 
-// ═══ รอบ 3 · L4: ข้อความ PROCESSING ต้องไม่สัญญา "ลองใหม่อัตโนมัติ" ในเส้นที่ระบบจะไม่ลองให้ ═══════════════════
-//   YouTube บนเครื่องทีม: เครื่องยนต์ใหม่ดูลิงก์ (จ่ายแล้วล้ม) → เครื่องยนต์เดิมโหลดไฟล์เอง >19MB → Files API รอไม่ทัน
-test('L4 → รอบ 4 (F2): YouTube — เครื่องยนต์ใหม่จ่ายแล้ว/พังผิดคาด → เครื่องยนต์เดิมรอไฟล์บน Gemini ไม่ทัน → ไม่มี retrySafe · ข้อความบอก "ไม่ลองซ้ำเอง" ไม่สัญญาว่าลองใหม่ให้ · ยังไม่จ่าย (ส่ง retrySafe) = ข้อความรอบ 3 เดิม', async () => {
-  const worker = await settleWithin(loadWorker(), 'โหลด worker ตัวจริงต้องเสร็จ', 5_000);
-  const NO_AUTO_RETRY = 'Gemini ใช้เวลาประมวลผลไฟล์วิดีโอนานเกินที่รอ (timeout) — ระบบไม่ลองซ้ำเอง (กันจ่ายซ้ำ) กดส่งใหม่เองได้';
-  const QUEUE_RETRIES = 'Gemini ใช้เวลาประมวลผลไฟล์วิดีโอนานเกินที่รอ (timeout) — ถ้าส่งผ่านคิวเครื่องทีม ระบบจะลองใหม่ให้เอง · ถ้าถอดตรงให้กดส่งเข้าคิว';
-  const cases = [
-    { name: 'เครื่องยนต์ใหม่ใช้ไป 1234 token แล้วล้ม', brainResult: brainFail(1234), sendsRetrySafe: false },
-    { name: 'เครื่องยนต์ใหม่พังผิดคาด (ไม่รู้ยอด = ถือว่าจ่ายแล้ว)', brainResult: () => { throw new Error('สมองพังกลางทาง'); }, sendsRetrySafe: false },
-    { name: 'เครื่องยนต์ใหม่ล้มก่อนถึงผู้ให้บริการ (NO_KEY · 0 token)', brainResult: brainFail(0, 'NO_KEY'), sendsRetrySafe: true },
-  ];
-  for (const c of cases) {
-    const s = freshState({ brainResult: c.brainResult, downloadBytes: 20 * MB });
-    s.files.states = ['PROCESSING'];
-    s.legacyImpl = (buf) => gemini.callGeminiVideoFile({
-      prompt: 'ถอดคลิปทดสอบ', videoBuffer: buf, maxAttempts: 1, allowModelFallback: false, _fileWait: { waitMs: 60, pollMs: 5 },
-    });
-    const insight = await postInsight({ url: 'https://youtu.be/dQw4w9WgXcQ' });
-    assert.equal(insight.status, 422, c.name);
-    assert.equal(s.brain.length, 1, c.name);
-    assert.equal(s.brain[0].isYouTube, true, `${c.name}: เครื่องยนต์ใหม่ดูลิงก์ YouTube`);
-    assert.equal(s.legacy.length, 1, c.name);
-    assert.equal(s.legacy[0].buf.length, 20 * MB, `${c.name}: เครื่องยนต์เดิมบนเครื่องทีมโหลด YouTube เอง (บีบไม่ลง = เส้น Files API)`);
-    assert.equal(s.files.uploads.length, 1, c.name);
-    assert.equal(s.gen.calls.length, 0, `${c.name}: รอไม่ทัน = ยังไม่ยิงโมเดล`);
-    assert.equal(Object.hasOwn(insight.body, 'retrySafe'), c.sendsRetrySafe, c.name);
-    assert.match(insight.body.error, /\(timeout\)/, `${c.name}: คงคำ timeout`);
-    const run = await runJobAgainst(worker, insight.status, insight.body);
-    if (c.sendsRetrySafe) {
-      assert.equal(insight.body.error, QUEUE_RETRIES, `${c.name}: ส่ง retrySafe = ข้อความรอบ 3 เดิม`);
-      assert.deepEqual(run.statuses, ['retry'], `${c.name}: worker ลองใหม่ให้จริงตามที่ข้อความบอก`);
-    } else {
-      // ★ รอบ 4 (F2): ไม่ส่ง retrySafe = worker ไม่ลองซ้ำแน่นอน → ข้อความต้องบอกตรงๆ (รอบ 3 ยังสัญญา "ระบบจะลองใหม่ให้เอง")
-      assert.equal(insight.body.error, NO_AUTO_RETRY, `${c.name}: ต้องบอกว่าไม่ลองซ้ำเอง`);
-      assert.match(insight.body.error, /ไม่ลองซ้ำเอง/);
-      assert.doesNotMatch(insight.body.error, /ลองใหม่ให้เอง|ลองใหม่อัตโนมัติ/, `${c.name}: เส้นนี้ระบบจะไม่ลองใหม่เอง — ห้ามสัญญา`);
-      assert.deepEqual(run.statuses, ['error'], `${c.name}: ไม่มี retrySafe = worker ไม่ลองซ้ำเอง`);
-      assert.match(run.finalLog, /❌ ล้มหลังเริ่มยิง AI แล้ว — ไม่ลองซ้ำอัตโนมัติ \(กันจ่ายซ้ำ\) กดส่งใหม่เองได้/);
-    }
-  }
-});
+// ═══ รอบ 3 · L4 / รอบ 4 F2 (ถอด 25 ต.ค. 69): YouTube ไม่ถอยไปเครื่องยนต์เดิม/Files API แล้ว — เครื่องยนต์ช่องเดียวดูลิงก์อย่างเดียว ข้อความ PROCESSING จึงไม่เกิดจากประตูหลักอีก ═══
 
 // ═══ รอบ 3 · L6: แกะลิงก์ห่อของเฟซบุ๊ก/เมสเซนเจอร์ (3 ใน 45 ใบที่ล้มจริงเป็น l.facebook.com/l.php?u=…) ═══════════════
 const TT_SHORT = 'https://vt.tiktok.com/ZSabc123/';
@@ -1315,8 +999,8 @@ test('L6 (ปลายทาง): ลิงก์ห่อ → submitClipJob เ
   const { status } = await postInsight({ url: wrapped });
   assert.equal(status, 200);
   assert.equal(new URL(fetched[0]).searchParams.get('url'), TT_SHORT, 'tikwm ต้องได้ลิงก์จริง ไม่ใช่ลิงก์ห่อของเฟซบุ๊ก');
-  assert.equal(s.brain[0].url, TT_SHORT);
-  assert.equal(s.brain[0].videoBuffer.length, 2 * MB);
+  assert.equal(s.single[0].url, TT_SHORT);
+  assert.equal(s.single[0].videoBuffer.length, 2 * MB);
 });
 
 // ═══ รอบ 4 · F1: ลบโฟลเดอร์ชั่วคราวต้องลองซ้ำเมื่อไฟล์ยังถูกถือ (พิสูจน์บน Windows จริง: ฆ่า yt-dlp แล้ว rm โดน EBUSY 2–3 วิ) ═══════
@@ -1380,7 +1064,7 @@ test('F1: yt-dlp ถูกฆ่าแล้ว .part ยังถูกถื�
     rmControl({ lockedAttempts: Infinity });
     const { result: r3, warns: w3 } = await withWarnings(() => postInsight({ url: FB_ONE }));
     assert.equal(r3.status, 200, 'ลบโฟลเดอร์ไม่ได้ต้องไม่ทำให้งานที่ถอดสำเร็จล้ม');
-    assert.equal(s3.brain[0].videoBuffer.length, MB);
+    assert.equal(s3.single[0].videoBuffer.length, MB);
     assert.equal(cleanupWarnings(w3).length, 1);
   } finally {
     // (2)(3) ตั้งใจให้โฟลเดอร์ค้าง (จำลองลบไม่ได้) — เก็บกวาดเองไม่ให้กระทบข้อสอบอื่น
@@ -1405,7 +1089,7 @@ test('F3: tikwm ข้อความถาวรที่บังเอิญ�
     const insight = await postInsight({ url: TIKTOK_URL });
     assert.equal(insight.status, 422, c.msg);
     assert.equal(insight.body.retrySafe, true, `${c.msg}: ล้มตอนถาม tikwm = ยังไม่จ่ายค่าโมเดล`);
-    assert.equal(s.brain.length + s.legacy.length, 0, c.msg);
+    assert.equal(s.brain.length + s.legacy.length + s.single.length, 0, c.msg);
     const expected = c.want === 'retry'
       ? `tikwm แน่นชั่วคราว (rate limit: ${c.msg})`
       : `tikwm: ไม่พบวิดีโอ (ลิงก์เสีย/โพสต์รูป/ถูกลบ: ${c.msg}) — กดใหม่ไม่ช่วย`;
@@ -1562,4 +1246,70 @@ test('F6: /api/clip-agent/result?url= — คลังเก็บลิงก�
     assert.equal(miss.status, 404, q);
     assert.deepEqual(miss.body, { ok: false, errorType: 'CASE_NOT_FOUND' }, q);
   }
+});
+
+// ★ 25 ต.ค. 69 (ผู้ตรวจอิสระ): ผลที่บางช่วงดูไม่สำเร็จ = ไม่ครบ → ติดธง lowQuality และคลังกันซ้ำต้องไม่คืนใบนี้ให้ลิงก์เดิม
+test('ผลเครื่องยนต์ช่องเดียวที่บางช่วงดูไม่สำเร็จ → lowQuality + ส่งลิงก์เดิมซ้ำต้องถอดใหม่ ไม่คืนใบไม่ครบจากคลัง', async () => {
+  const partial = () => ({ ok: true, spentTokens: 4000, insight: {
+    engine: 'clip-single', headline: 'หัวข่าวไม่ครบ', body: 'ก'.repeat(400), rawData: 'ก'.repeat(400),
+    checks: [{ level: 'check', kind: 'segment', text: 'ช่วง 6:00–12:00 ดูคลิปไม่สำเร็จ เนื้อข่าวไม่มีเนื้อหาช่วงนี้' }],
+  } });
+  const s = freshState({ singleResult: partial });
+  const first = await postInsight({ url: FB_ONE });
+  assert.equal(first.status, 200);
+  assert.equal(first.body.data.lowQuality, true);
+  assert.match(first.body.data.qualityNote, /ดูคลิปไม่สำเร็จ 1 ช่วง/);
+  await new Promise((resolve) => setTimeout(resolve, 20)); // ให้การเก็บคลังแบบไม่รอผลเสร็จก่อน
+  const second = await postInsight({ url: FB_ONE });
+  assert.equal(second.status, 200);
+  assert.equal(second.body.data.cached, undefined, 'ห้ามคืนใบไม่ครบจากคลัง');
+  assert.equal(s.single.length, 2);
+});
+
+// ★ 25 ต.ค. 69 (ผู้ตรวจอิสระรอบ 2): ความยาว YouTube ไล่ หน้า watch → yt-dlp → YouTube Data API ก่อนให้เครื่องยนต์ถาม AI
+test('YouTube ความยาว: หน้า watch มาก่อน · ไม่มีทั้งหน้าและ yt-dlp (คลาวด์) → YouTube Data API', async () => {
+  const s = freshState();
+  globalThis.fetch = async (u) => {
+    const url = String(u);
+    if (url.startsWith('https://www.youtube.com/watch')) return new Response('<html>"lengthSeconds":"777"</html>');
+    throw new Error(`ไม่คาดว่าจะเรียก ${url}`);
+  };
+  assert.equal((await postInsight({ url: 'https://youtu.be/dQw4w9WgXcQ' })).status, 200);
+  assert.equal(s.single[0].durationSec, 777, 'อ่านจากหน้า watch ได้ = ไม่ต้องถาม yt-dlp');
+  assert.ok(!s.execCalls.some((c) => c.args.includes('--get-duration')));
+
+  const cloud = freshState();
+  setPlatform('linux'); // คลาวด์: ไม่มี yt-dlp
+  const oldKey = process.env.YOUTUBE_API_KEY;
+  process.env.YOUTUBE_API_KEY = 'co30-yt-key';
+  try {
+    globalThis.fetch = async (u) => {
+      const url = String(u);
+      if (url.startsWith('https://www.youtube.com/watch')) return new Response('<html>ไม่มีความยาว</html>');
+      if (url.startsWith('https://www.googleapis.com/youtube/v3/videos')) {
+        assert.ok(url.includes('id=dQw4w9WgXcQ'));
+        return new Response(JSON.stringify({ items: [{ contentDetails: { duration: 'PT1H2M3S' } }] }));
+      }
+      throw new Error(`ไม่คาดว่าจะเรียก ${url}`);
+    };
+    assert.equal((await postInsight({ url: 'https://youtu.be/dQw4w9WgXcQ' })).status, 200);
+    assert.equal(cloud.single[0].durationSec, 3723);
+  } finally {
+    if (oldKey === undefined) delete process.env.YOUTUBE_API_KEY; else process.env.YOUTUBE_API_KEY = oldKey;
+  }
+});
+
+// ═══ ★ 26 ต.ค. 69 (เฟส 4): ใบงานเก่าชนิดที่เลิกใช้ (transcript/hunt) ค้างในคิว → worker จบเป็นไม่สำเร็จ ไม่ยิงอะไร ไม่วนลองใหม่
+test('เฟส 4: worker เจอใบงาน transcript/hunt ที่ค้างคิว → error ทันทีพร้อมบอกให้ส่งใหม่ · ไม่เรียก endpoint ใด', async () => {
+  const worker = await loadWorker();
+  for (const kind of ['transcript', 'hunt']) {
+    const run = await runJobAgainst(worker, 200, { success: true, data: {} }, { kind });
+    assert.deepEqual(run.processUrls, [], `${kind}: ห้ามยิง endpoint ที่ถูกลบไปแล้ว`);
+    assert.deepEqual(run.statuses, ['error'], `${kind}: ต้องจบเป็นไม่สำเร็จ ไม่ใช่ retry`);
+    assert.match(run.errors[0], /เลิกใช้แล้ว/);
+  }
+  // ใบงานปกติยังยิง /insight ทางเดียว
+  const normal = await runJobAgainst(worker, 200, { success: true, data: { headline: 'h', body: 'b' } });
+  assert.deepEqual(normal.processUrls, ['http://clip-worker.test/api/clip-transcript/insight']);
+  assert.deepEqual(normal.statuses, ['done']);
 });

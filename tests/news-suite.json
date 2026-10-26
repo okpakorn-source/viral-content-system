@@ -28,7 +28,8 @@
     "ระบบข่าว = สาย TEXT (Discord → queue → /api/auto/process → autoFlowServiceText → summarizeServiceText → ai/* → correction/* → publishablePostText) + routine + news-filter + s5PinnedAi (สวิตช์รุ่นข่าว opus55 แตะ ANALYSIS_PIN_MODEL)",
     "detect.patterns = ท่อน path/ชื่อโมดูลข่าว (ท่อนคั่นด้วย / จับได้ทั้ง '/', '\\' และรูป join(ROOT, 'src', 'lib', ...)) — ไฟล์เทสที่อ้างท่อนใดท่อนหนึ่งแต่ไม่อยู่ใน include/exclude = ด่านแดง",
     "include = รันจริงทุกไฟล์ ต้องเขียว 100% · exclude = ไฟล์ที่จงใจไม่อยู่ในด่านข่าว (เทสปก/คลิปที่ตัวจับติดมา + เทสปกที่แดงนอกระบบข่าว) ต้องมี domain/status/reason",
-    "status ใน exclude = ผลรันวันที่ 23 ก.ย. 69 (ถอดคีย์ API) · ไม่มีผลกับตัวรัน"
+    "status ใน exclude = ผลรันวันที่ 23 ก.ย. 69 (ถอดคีย์ API) · ไม่มีผลกับตัวรัน",
+    "★ 26 ต.ค. 69 (ระบบถอดคลิปเฟส 4 · เจ้าของอนุมัติ): ลบเครื่องยนต์คลิปเดิม → ลบรายการ exclude ของเทสที่ถูกลบตาม (tests/clip-topic-v2-wiring.test.mjs · tests/clip-verify-fixes.test.mjs · tests/clip-verify-readiness.test.mjs) · tests/clip-golden-shared-clients.test.mjs เหลือข้อเฝ้าฝั่งข่าว (services/clipAI ถูกลบ)"
   ],
   "detect": {
     "dir": "tests",
@@ -202,38 +203,20 @@
     {
       "file": "tests/clip-editorial-raw.test.mjs",
       "domain": "clip",
-      "status": "red",
-      "reason": "ใช้ clipAI/geminiClient + safetyFilter สำเนาของคลิปเอง · แดง 1/19 'video URL/file ต้องคง fallback defaults…' (ค่าเริ่มต้น fallback ของ clipAI เปลี่ยน) — ห้ามแก้ในงานข่าว ส่งเจ้าของระบบคลิป"
+      "status": "green",
+      "reason": "เทสคลิป: ตัวช่วยคัดลอกเนื้อพร้อมใช้ (clipNewsReadyText ที่ /m ใช้กับใบเก่า) + สัญญาปุ่มคัดลอกเว็บ/มือถือ — ★ 26 ต.ค. 69 เฟส 4 ลบเครื่องยนต์เดิม/clipAI แล้ว เหลือ 5 ข้อ เขียวทั้งหมด · ไม่ได้ทดสอบท่อข่าว"
     },
     {
       "file": "tests/clip-outage-30sep.test.mjs",
       "domain": "clip",
       "status": "green",
-      "reason": "เคสล่มระบบถอดคลิป 30 ก.ย. 69 (pepedog89) — โหลด route คลิป (clip-transcript/insight · hunt · ถอดเสียง) + clipAI/geminiClient (สำเนาของคลิป) + clipJobs/clipUrl + worker คลิปตัวจริง · ตัวจับติดเพราะ stub '@/lib/ai/modelConfig' · '../../ai/usageLogger' · './safetyFilter' ของ clipAI เพื่อตัดของหนัก ไม่ได้ทดสอบท่อข่าว"
+      "reason": "เคสล่มระบบถอดคลิป 30 ก.ย. 69 (pepedog89) — โหลด route คลิป (clip-transcript/insight) + clipJobs/clipUrl + worker คลิปตัวจริง · ตัวจับติดเพราะ stub '@/lib/ai/modelConfig' · '../../ai/usageLogger' เพื่อตัดของหนัก ไม่ได้ทดสอบท่อข่าว (★ 26 ต.ค. 69 เฟส 4: route hunt/ถอดเสียง + clipAI ถูกลบแล้ว)"
     },
     {
       "file": "tests/clip-topic-ui.test.mjs",
       "domain": "clip",
       "status": "red",
       "reason": "UI ประเด็นคลิป · ตัวจับติดเพราะ stub '@/lib/ai/modelConfig' · แดง 2/27 (รูปแบบ output การ์ด v2 เปลี่ยน) — ห้ามแก้ในงานข่าว"
-    },
-    {
-      "file": "tests/clip-topic-v2-wiring.test.mjs",
-      "domain": "clip",
-      "status": "red",
-      "reason": "สายไฟประเด็นคลิป v2 · stub '../../ai/usageLogger.js' · แดง 3/21 (golden snapshot ก่อนบล็อก 'เสียงคนเล่า' 9 ก.ย.) — ต้องอัปเดต snapshot ฝั่งคลิป"
-    },
-    {
-      "file": "tests/clip-verify-fixes.test.mjs",
-      "domain": "clip",
-      "status": "green",
-      "reason": "ตัวตรวจคลิป (clipBrain/clipVerify) · stub '../../ai/usageLogger.js' เท่านั้น ไม่ได้ทดสอบท่อข่าว"
-    },
-    {
-      "file": "tests/clip-verify-readiness.test.mjs",
-      "domain": "clip",
-      "status": "red",
-      "reason": "ความพร้อมตัวตรวจคลิป · stub '../../ai/usageLogger.js' · แดง 1/26 (snapshot pre-P3 ก่อนบล็อก 'เสียงคนเล่า' 9 ก.ย.) — ห้ามแก้ในงานข่าว"
     },
     {
       "file": "tests/ac0084-capture-seam.test.mjs",

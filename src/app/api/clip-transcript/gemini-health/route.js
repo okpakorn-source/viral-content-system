@@ -1,4 +1,15 @@
 import { NextResponse } from 'next/server';
+import { createHash, timingSafeEqual } from 'crypto';
+
+// ★ 25 ต.ค. 69 (P6): โหมด ?probe= ยิง Gemini แบบเสียเงินด้วยคีย์วิดีโอ (max ถึง 65536 token ไม่ผ่านแคช)
+//   ยิงถี่ = คีย์ติด 429 แล้วงานถอดจริงล้ม → ต้องมีกุญแจเดียวกับ clip worker (header x-clip-worker-secret)
+function probeAuthorized(request) {
+  const expected = process.env.CLIP_WORKER_SECRET || process.env.DISCORD_API_SECRET || '';
+  const provided = request.headers.get('x-clip-worker-secret') || '';
+  if (!expected || !provided) return false;
+  const digest = (v) => createHash('sha256').update(String(v), 'utf8').digest();
+  return timingSafeEqual(digest(provided), digest(expected));
+}
 
 /**
  * GET /api/clip-transcript/gemini-health (26 มิ.ย.) — เช็ก "สถานะ Gemini แบบเรียลไทม์"
@@ -23,6 +34,9 @@ export async function GET(request) {
   //   จนไม่เห็นสาเหตุจริง (ชื่อรุ่นมีใน ListModels แต่เรียกไม่ผ่าน) · ใช้วินิจฉัยเท่านั้น ไม่แตะไฟสถานะ/แคชเดิม
   const probeQ = _sp.get('probe');
   if (probeQ) {
+    if (!probeAuthorized(request)) {
+      return NextResponse.json({ success: false, error: 'โหมดยิงทดสอบรุ่นต้องมีกุญแจ worker (header x-clip-worker-secret)', errorType: 'PROBE_UNAUTHORIZED' }, { status: 401 });
+    }
     try {
       const apiKey = process.env.GEMINI_VIDEO_API_KEY || process.env.GEMINI_API_KEY;
       if (!apiKey) {
@@ -114,9 +128,11 @@ export async function GET(request) {
       await Promise.race([probe, timeout]);
       const ms = Date.now() - t0;
       // หมายเหตุ: นี่คือ probe "ข้อความ" — endpoint วิดีโออาจโหลดต่างกัน (ถ้ามีผลวิดีโอสดจะใช้อันนั้นแทน)
+      // ★ 26 ต.ค. 69 (P13): หน้าเว็บอ่านไฟนี้จาก Vercel ซึ่งไม่เคยมีผลถอดวิดีโอสด (ถอดจริงที่เครื่องทีม)
+      //   เดิมตอบเร็วก็ยังเหลือง → ไฟเหลืองเกือบตลอด · ตอบปกติภายใน 4 วิ = เขียว
       result = ms > 4000
         ? { light: 'yellow', ok: true, ms, src: 'text', msg: 'Gemini ตอบช้า (เริ่มแน่น) — ลองถอดได้ แต่อาจช้า/ติด' }
-        : { light: 'yellow', ok: true, ms, src: 'text', msg: 'Gemini (ข้อความ) ปกติ — แต่ยังไม่มีผลถอดวิดีโอสด ลองกดดูได้' };
+        : { light: 'green', ok: true, ms, src: 'text', msg: 'Gemini ตอบปกติ (เช็คแบบข้อความ — โหลดงานวิดีโออาจต่างกัน)' };
     }
   } catch (e) {
     const msg = String(e?.message || '');
