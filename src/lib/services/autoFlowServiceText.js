@@ -34,6 +34,7 @@ import { assignAngleClosings, closingTailMatches } from '@/lib/input-engine/narr
 import { breakdownRawSourceArgs } from '@/lib/ai/factSourcePolicy'; // ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S9 · เจ้าของอนุมัติ) — PL-23: ส่ง RAW จริง (ข้อความที่ผู้ใช้วาง) เข้าขั้นแตกประเด็นเป็นแหล่งความจริงหลัก · ถอย NARRATIVE_LEGACY=1 = args เดิมทุกไบต์
 import { annotateMissingRawFacts } from '@/lib/services/rawFactPresence'; // ★ 25 ต.ค. 69 ข้อ 3: ติดป้ายฉบับที่ไม่เจอวันที่/อายุ/จำนวนเงินจากต้นฉบับ (โค้ดล้วน · ถอย RAW_FACT_PRESENCE_WARN=0)
 import { neutralizeGuessedGender } from '@/lib/services/genderNeutral'; // ★ 25 ต.ค. 69 ด่านเดาเพศชั้นสุดท้าย: ข่าวมี "เธอ" ที่ต้นฉบับไม่ใช้ → ป้ายเตือน ไม่แก้เนื้อ (ถอย GENDER_NEUTRAL_FIX=0)
+import { isAdminVoiceEditEnabled, runAdminVoiceEdit } from '@/lib/services/adminVoiceEditor'; // ★ 27 ต.ค. 69 ขั้น บก.เกลาภาษาแอดมิน (G2) — สวิตช์ ADMIN_VOICE_EDIT=1 (ค่าเริ่มต้นปิด)
 import { isCardAuthorityR6Enabled } from '@/lib/ai/cardAuthority'; // 🎛️ สวิตช์ปลดหาง "ห้ามขึ้นต้นด้วยวันที่" (19 ส.ค. 69) — ห้ามอ่าน env CARD_AUTH* เอง ต้อง import จากไฟล์กลางเท่านั้น
 import {
   getActivePipelineDeadline,
@@ -909,6 +910,18 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     finalVersions = correctionOutcome.versions;
     pipelineQualityWarnings.push(...correctionOutcome.warnings);
     addLog('Quality', `⚠️ Correction pipeline ล้มทั้งชุด — ใช้ร่างนักเขียนเดิม ${allVersions.length} ฉบับ แล้วตรวจ RAW เต็มต่อ`);
+  }
+
+  // ★ 27 ต.ค. 69 (เจ้าของสั่ง "ถ้าคะแนนนิ่ง ค่อยเอาขึ้นเว็บทำสวิตช์") — ขั้น บก.เกลาภาษาแอดมิน (G2) สาย TEXT เท่านั้น
+  //   เกลาเป็นภาษาแอดมินเพจโดยดูโพสต์จริง 3 ชิ้นแนวเดียวกับการ์ด + คุมความยาว ≤800 ตัวอักษร · ล้ม/หมดเวลา = ฉบับเดิม (ไม่ทำให้งานล้ม)
+  //   ปิดสวิตช์ (ค่าเริ่มต้น) = ไม่เข้า if นี้เลย = ทุกไบต์เดิม · ด่าน grounding/ข้อเท็จจริง/ความยาว/เพศ ด้านล่างตรวจฉบับที่เกลาแล้วตามเดิม
+  if (isAdminVoiceEditEnabled() && (detectedType === 'text' || detectedType === 'plain_text')) {
+    // กันเวลาให้ด่านหลัง (ผู้ตรวจอิสระ 27 ต.ค.): ด่าน RAW เปิด = ต้องเหลือให้ audit+editor (~200s) · ปิด (prod ตอนนี้) = 30s ให้ด่านความยาว/บันทึก
+    const _av = await runAdminVoiceEdit(finalVersions, { rawText, cards: anglePrompts, reserveMs: isRawFactCompletenessGateEnabled() ? 200_000 : 30_000 });
+    finalVersions = _av.versions;
+    if (_av.warning) pipelineQualityWarnings.push(_av.warning);
+    addLog('Quality', _av.summaryLine);
+    await logPipeline({ workflowId: _autoWorkflowId, step: 'admin-voice', status: _av.skipped ? 'skipped' : (_av.warning && !_av.applied ? 'fallback' : 'success'), detail: _av.summaryLine.slice(0, 120) }).catch(() => {});
   }
 
   // ด่านสุดท้ายก่อนบันทึก: ข่าวจากข้อความดิบห้ามเขียนเหมือนไปยืนเห็นเอง

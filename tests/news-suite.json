@@ -167,7 +167,8 @@
     "tests/viral-shortlist.test.mjs",
     "tests/workflow-final-save-contract.test.mjs",
     "tests/workflow-init-contract.test.mjs",
-    "tests/writer-fable-switch.test.mjs"
+    "tests/writer-fable-switch.test.mjs",
+    "tests/admin-voice-editor.test.mjs"
   ],
   "exclude": [
     {
