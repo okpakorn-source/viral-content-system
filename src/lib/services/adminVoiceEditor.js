@@ -33,7 +33,7 @@ export function loadAdminVoiceExemplars() {
   return _posts;
 }
 
-export const ADMIN_VOICE_MODEL = 'claude-opus-4-8'; // ตัวเดียวกับที่ผ่านห้องทดลอง (effort medium)
+export const ADMIN_VOICE_MODEL = 'claude-opus-5-5'; // ★ 27 ต.ค. 69 ค่ำ ห้องทดลองวิธี 3: Opus 5.5 ชนะ 4.8 ทั้งชุดหลัก (+1.4) และชุดกันไว้ (+2.4 ชัด) · คำสั่งเดิมทุกตัวอักษร (effort medium)
 export const ADMIN_VOICE_MAX_CHARS = 800;
 export const ADMIN_VOICE_MIN_WORDS = Number(NEW_LENGTH_CFG?.min) || 146; // = ด่านความยาว (ห้ามสั้นกว่าที่ด่านรับ)
 const STAGE_TIMEOUT_MS = 150_000; // ทุกฉบับขนานกัน · ต่อฉบับเรียกได้สูงสุด 3 ครั้ง

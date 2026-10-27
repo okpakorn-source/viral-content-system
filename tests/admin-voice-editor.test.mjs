@@ -51,7 +51,7 @@ test('B1 เกลาแล้วสั้นพอ = เรียกโมเ�
   assert.match(calls[0].system, /ภาษาแอดมินเพจ/);
   assert.match(calls[0].system, /ห้ามเดาเพศ/, 'กฎบ้านห้ามเดาเพศต้องอยู่ในคำสั่ง บก.');
   assert.match(calls[0].prompt, /^EX/);
-  assert.equal(AV.ADMIN_VOICE_MODEL, 'claude-opus-4-8');
+  assert.equal(AV.ADMIN_VOICE_MODEL, 'claude-opus-5-5');
   assert.equal(r.text, out);
 });
 
