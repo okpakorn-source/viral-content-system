@@ -24,13 +24,21 @@ import { countPublishableThaiWords } from '@/lib/utils/publishablePostText'; // 
 
 export const LAYOUT_EDIT_MODEL = 'claude-opus-5-5'; // ตัวเดียวกับที่เทสในห้องทดลอง (effort medium)
 export const LAYOUT_MIN_WORDS = Number(NEW_LENGTH_CFG?.min) || 146; // = ด่านความยาว
-const STAGE_TIMEOUT_MS = 90_000; // ทุกฉบับขนานกัน · ห้องทดลอง 22–30 วิ/ฉบับ
+const STAGE_TIMEOUT_MS = 110_000; // ทุกฉบับขนานกัน · ต่อฉบับ = รอบแรก + อ่านทวน (ห้องทดลอง 22–30 วิ/ครั้ง) · หมดเวลาระหว่างอ่านทวน = ใช้รอบแรก
 const MIN_STAGE_MS = 35_000;     // เวลาที่เหลือให้ขั้นนี้น้อยกว่านี้ = ข้าม (ไม่เรียก AI)
+const REVIEW_MIN_MS = 35_000;    // เวลาของขั้นที่เหลือหลังรอบแรกน้อยกว่านี้ = ไม่เริ่มอ่านทวน (ใช้รอบแรก)
 export const LAYOUT_DEFAULT_RESERVE_MS = 30_000; // กันไว้ให้บันทึกผล/generation log หลังขั้นนี้
 const MAX_LINES = 24;            // กันหั่นทุกประโยคเป็นบรรทัดเดียว (ห้องทดลอง 7–13 บรรทัด)
 
 export function isLayoutEditEnabled() {
   return String(process.env.LAYOUT_EDIT ?? '').trim().replace(/^["']|["']$/g, '') === '1';
+}
+
+// ★ 28 ต.ค. 69 ค่ำ (เจ้าของเคาะ "เอาวิธีที่ 3 (บก.อ่านทวน) ขึ้นระบบจริง"): รอบอ่านทวนเปิดเป็นค่าเริ่มต้นเมื่อ LAYOUT_EDIT=1
+//   ห้องทดลอง 5 ข่าว 10 ฉบับ กรรมการปิดตา GPT-5.6 Sol: อ่านทวน 9.2 vs รอบเดียว 8.9 (อันดับเฉลี่ย 1.5 vs 1.9) · ค่อมบรรทัด 7→2
+//   (วิธีอื่นที่แพ้: ปรับคำสั่ง 8.0 · หน่วยใจความ 7.6 · อ่านทวน+กฎโค้ด 8.3) · ปิดรอบอ่านทวน = LAYOUT_REVIEW=0/off/false/no
+export function isLayoutReviewEnabled() {
+  return !/^(?:0|off|false|no)$/i.test(String(process.env.LAYOUT_REVIEW ?? '').trim().replace(/^["']+|["']+$/g, '').trim());
 }
 
 export const SYS_LAYOUT = `คุณคือบรรณาธิการขั้นสุดท้ายของเพจข่าว "รวมไอจีดารา" ก่อนส่งโพสต์ให้พนักงานนำไปลง Facebook
@@ -69,6 +77,20 @@ export const SYS_LAYOUT = `คุณคือบรรณาธิการข�
 โพสต์ที่จัดใหม่ทั้งโพสต์
 </post>`;
 
+// คำสั่งรอบอ่านทวน — ตัวเดียวกับที่ชนะในห้องทดลอง (วิธี 3) ทุกตัวอักษร
+export const SYS_LAYOUT_REVIEW = `คุณคือบรรณาธิการตรวจทาน "การจัดบรรทัด" ของโพสต์ข่าว Facebook ที่คนอ่านบนมือถือ ก่อนส่งให้พนักงาน
+ได้รับโพสต์ที่บรรณาธิการคนแรกจัดบรรทัดไว้แล้ว อ่านทีละบรรทัดเหมือนคนอ่านจริง แล้วหาจุดที่
+- ค่อมบรรทัด: บรรทัดจบกลางใจความ ต้องอ่านบรรทัดถัดไปถึงจะเข้าใจ เช่น บรรทัดที่เป็นแค่หัวเรื่อง/ส่วนเกริ่นไม่มีกริยาหลัก หรือขึ้นบรรทัดก่อนคำที่ต่อใจความเดิม (เพราะ จึง ซึ่ง ที่ และ พร้อม โดย จน ทำให้)
+- แยกผู้พูด: คนพูดกับสิ่งที่พูดอยู่คนละบรรทัดจนอ่านเหมือนเพจพูดเอง
+- จังหวะสะดุด: บรรทัดยาวมากตามด้วยเศษสั้นของประโยคเดียวกัน หรือย่อหน้ายังยาวเป็นก้อน
+แก้เฉพาะจุดที่มีปัญหา โดยเปลี่ยนการขึ้นบรรทัดเท่านั้น: รวมบรรทัดที่ค่อมกลับเป็นเว้นวรรค หรือย้ายจุดขึ้นบรรทัดไปไว้ที่เว้นวรรคอื่นที่จบใจความ จุดที่ดีอยู่แล้วให้คงไว้
+ห้ามเปลี่ยน เพิ่ม ตัด หรือสลับคำ ตัวอักษร หรือเครื่องหมายใดๆ ทุกตัวต้องอยู่ครบตามลำดับเดิม ห้ามเว้นวรรคหรือขึ้นบรรทัดตรงจุดที่ไม่มีช่องว่างเดิม
+ตอบในรูปแบบนี้เท่านั้น
+<issues>จุดที่แก้และเหตุผล (สั้นๆ ถ้าไม่มีให้ตอบว่า ไม่มี)</issues>
+<post>
+โพสต์ทั้งโพสต์หลังแก้
+</post>`;
+
 let _client = null;
 const getClient = () => {
   if (!_client) {
@@ -80,7 +102,7 @@ const getClient = () => {
 };
 
 /** เรียก บก.จัดหน้า 1 ครั้ง → ข้อความดิบที่มีแท็ก */
-export async function callLayoutModel({ system, prompt, signal }) {
+export async function callLayoutModel({ system, prompt, signal, feature = 'layoutEdit' }) {
   const res = await getClient().messages.create({
     model: LAYOUT_EDIT_MODEL,
     max_tokens: 8000,
@@ -89,7 +111,7 @@ export async function callLayoutModel({ system, prompt, signal }) {
     messages: [{ role: 'user', content: prompt }],
   }, signal ? { signal } : undefined);
   if (res.stop_reason === 'refusal' || res.stop_reason === 'max_tokens') throw new Error(`บก.จัดหน้าไม่จบ (${res.stop_reason})`);
-  Promise.resolve(logApiUsage({ provider: 'anthropic', model: LAYOUT_EDIT_MODEL, inputTokens: res.usage?.input_tokens || 0, outputTokens: res.usage?.output_tokens || 0, feature: 'layoutEdit' })).catch(() => {});
+  Promise.resolve(logApiUsage({ provider: 'anthropic', model: LAYOUT_EDIT_MODEL, inputTokens: res.usage?.input_tokens || 0, outputTokens: res.usage?.output_tokens || 0, feature })).catch(() => {});
   return (res.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
 }
 
@@ -183,16 +205,42 @@ export function rebuildLayout(before, after) {
   return segs.reduce((out, seg, i) => (i ? out + SEP[types[i - 1]] + seg : seg), '');
 }
 
-/** จัดหน้า 1 ฉบับ · คืน { text, ok, reasons, understanding, issues, layout } — ไม่ผ่านด่าน = text เดิม */
-export async function editOneLayout({ text, rawText = '', signal, callModel = callLayoutModel }) {
+/** ด่านโค้ด + ประกอบข้อความจากตัวอักษรฉบับเดิม → { text|null, reasons } */
+function acceptLayout(before, post) {
+  const gate = checkLayoutEdit(before, post);
+  const rebuilt = gate.ok ? rebuildLayout(before, post) : null;
+  return { text: rebuilt, reasons: gate.ok && rebuilt === null ? ['ประกอบข้อความจากฉบับเดิมไม่ได้'] : gate.reasons };
+}
+
+/**
+ * จัดหน้า 1 ฉบับ · คืน { text, ok, reasons, understanding, issues, layout, firstText, review } — ไม่ผ่านด่าน = text เดิม
+ * รอบอ่านทวน (review): ผลรอบแรกผ่านด่านแล้ว → บก.ตรวจทานอ่านทีละบรรทัดแก้จุดค่อมบรรทัด/สะดุด · ผ่านด่านเดิม (เทียบฉบับก่อนจัด) = ใช้
+ *   ไม่ผ่าน/ล้ม = คงผลรอบแรก · onStep(ผลรอบแรก) ก่อนเริ่มอ่านทวน → หมดเวลาระหว่างอ่านทวน ผู้เรียกยังได้ผลรอบแรก
+ */
+export async function editOneLayout({ text, rawText = '', signal, callModel = callLayoutModel, review = isLayoutReviewEnabled(), onStep, stageEndAt = null, reviewMinMs = REVIEW_MIN_MS }) {
   const before = String(text || '');
-  const reply = await callModel({ system: SYS_LAYOUT, prompt: `ข่าวดิบ (ใช้เพื่อเข้าใจเรื่องเท่านั้น):\n${String(rawText || '').trim()}\n\n=====\nโพสต์ที่ต้องจัด:\n${before}`, signal });
+  const raw = String(rawText || '').trim();
+  const reply = await callModel({ system: SYS_LAYOUT, prompt: `ข่าวดิบ (ใช้เพื่อเข้าใจเรื่องเท่านั้น):\n${raw}\n\n=====\nโพสต์ที่ต้องจัด:\n${before}`, signal });
   const parsed = parseLayoutReply(reply);
   // ไม่ผ่าน sanitizeOutput ซ้ำ: ข้อความส่งจริงประกอบจากตัวอักษรของฉบับเดิม (ผ่านตัวกรองคำเสี่ยงของขั้นก่อนแล้ว) — ตัวกรองแก้คำ = ด่านตีตกเปล่าๆ
-  const gate = checkLayoutEdit(before, parsed.post);
-  const rebuilt = gate.ok ? rebuildLayout(before, parsed.post) : null;
-  const reasons = gate.ok && rebuilt === null ? ['ประกอบข้อความจากฉบับเดิมไม่ได้'] : gate.reasons;
-  return { text: rebuilt ?? before, ok: rebuilt !== null, reasons, understanding: parsed.understanding, issues: parsed.issues, layout: parsed.layout };
+  const first = acceptLayout(before, parsed.post);
+  const base = { understanding: parsed.understanding, issues: parsed.issues, layout: parsed.layout };
+  if (first.text === null) return { text: before, ok: false, reasons: first.reasons, ...base, review: null };
+  const firstResult = { text: first.text, ok: true, reasons: [], ...base, firstText: first.text, review: null };
+  if (!review) return firstResult;
+  // ผู้ตรวจอิสระรอบ 5: เวลาของขั้นเหลือไม่พอ = ไม่เริ่มอ่านทวน (เริ่มแล้วโดนตัดแน่ = เสียค่า Opus ฟรี)
+  if (Number.isFinite(stageEndAt) && stageEndAt - Date.now() < reviewMinMs) return { ...firstResult, review: { applied: false, reasons: ['เวลาไม่พอ'] } };
+  onStep?.(firstResult);
+  try {
+    const reply2 = await callModel({ system: SYS_LAYOUT_REVIEW, prompt: `ข่าวดิบ (ใช้เพื่อเข้าใจเรื่องเท่านั้น):\n${raw}\n\n=====\nโพสต์ที่จัดบรรทัดแล้ว:\n${first.text}`, signal, feature: 'layoutReview' });
+    const parsed2 = parseLayoutReply(reply2);
+    const issues2 = (String(reply2 || '').match(/<issues>\s*([\s\S]*?)\s*<\/issues>/) || [])[1] || '';
+    const second = acceptLayout(before, parsed2.post);
+    if (second.text === null) return { ...firstResult, review: { applied: false, reasons: second.reasons, issues: issues2 } };
+    return { ...firstResult, text: second.text, review: { applied: second.text !== first.text, reasons: [], issues: issues2 } };
+  } catch (e) { // ล้ม/หมดเวลา → คงผลรอบแรก (ไม่โยนต่อ: ผลรอบแรกผ่านด่านแล้ว)
+    return { ...firstResult, review: { applied: false, reasons: [signal?.aborted ? 'หมดเวลา' : `อ่านทวนล้ม: ${String(e?.message || e).slice(0, 60)}`] } };
+  }
 }
 
 const short = (s, n = 400) => String(s || '').slice(0, n);
@@ -202,7 +250,7 @@ const short = (s, n = 400) => String(s || '').slice(0, n);
  * recheck(version, newContent) → string[] เหตุ (ว่าง = ผ่าน) · ผู้เรียกใช้รันด่านโค้ดของท่อซ้ำกับฉบับจัดแล้ว · โยน error = ไม่ผ่าน
  * @returns {{ versions: object[], applied: number, skipped?: boolean, warning: string|null, summaryLine: string }}
  */
-export async function runLayoutEdit(versions, { rawText = '', recheck = null, callModel = callLayoutModel, timeoutMs = STAGE_TIMEOUT_MS, reserveMs = LAYOUT_DEFAULT_RESERVE_MS, minStageMs = MIN_STAGE_MS } = {}) {
+export async function runLayoutEdit(versions, { rawText = '', recheck = null, callModel = callLayoutModel, review = isLayoutReviewEnabled(), timeoutMs = STAGE_TIMEOUT_MS, reserveMs = LAYOUT_DEFAULT_RESERVE_MS, minStageMs = MIN_STAGE_MS, reviewMinMs = REVIEW_MIN_MS } = {}) {
   const list = Array.isArray(versions) ? versions : [];
   if (!list.length) return { versions: list, applied: 0, skipped: true, warning: null, summaryLine: '📐 บก.จัดหน้า: ไม่มีฉบับให้จัด' };
   const deadline = getActivePipelineDeadline();
@@ -217,30 +265,44 @@ export async function runLayoutEdit(versions, { rawText = '', recheck = null, ca
   try {
     await withTimeoutSignal((signal) => Promise.all(list.map(async (v, i) => {
       try {
-        const r = await editOneLayout({ text: v.content, rawText, signal, callModel });
+        // ผลรอบแรกเก็บทันที — หมดเวลาระหว่างอ่านทวน ยังใช้รอบแรกได้
+        const onStep = (first) => { if (!signal?.aborted) results[i] = { done: true, ...first, review: { applied: false, reasons: ['หมดเวลา'] } }; };
+        const r = await editOneLayout({ text: v.content, rawText, signal, callModel, review, onStep, stageEndAt: t0 + budget, reviewMinMs });
         if (!signal?.aborted) results[i] = { done: true, ...r };
-      } catch (e) { results[i] = { done: false, err: e?.message || String(e) }; }
+      } catch (e) { if (!results[i]?.done) results[i] = { done: false, err: e?.message || String(e) }; }
     })), budget, 'layout_edit');
   } catch (e) { error = e?.message || String(e); }
-  let applied = 0; const failed = []; const rejected = [];
+  let applied = 0; let reviewed = 0; const failed = []; const rejected = [];
+  const runRecheck = (v, text) => {
+    if (typeof recheck !== 'function') return [];
+    try { return [...(recheck(v, text) || [])]; } catch (e) { return [`ตรวจซ้ำล้ม: ${String(e?.message || e).slice(0, 60)}`]; }
+  };
   const out = list.map((v, i) => {
     const r = results[i];
     if (!r?.done) { failed.push(`V${i + 1}: ${String(r?.err || error || 'ไม่มีผล').slice(0, 80)}`); return v; }
     const meta = { understanding: short(r.understanding), issues: short(r.issues), layout: short(r.layout) };
+    let text = r.text;
+    let review = r.review ? { ...r.review, issues: short(r.review.issues) } : null;
     let reasons = r.reasons;
-    if (r.ok && r.text !== v.content && typeof recheck === 'function') {
-      try { reasons = [...(recheck(v, r.text) || [])]; } catch (e) { reasons = [`ตรวจซ้ำล้ม: ${String(e?.message || e).slice(0, 60)}`]; }
+    if (r.ok && text !== v.content) {
+      reasons = runRecheck(v, text);
+      // ฉบับอ่านทวนไม่ผ่านตรวจซ้ำ แต่รอบแรกผ่าน → ใช้รอบแรก
+      if (reasons.length && review?.applied && r.firstText && r.firstText !== text) {
+        const firstReasons = runRecheck(v, r.firstText);
+        if (!firstReasons.length) { text = r.firstText; review = { ...review, applied: false, reasons }; reasons = []; }
+      }
     }
-    if (reasons.length) { rejected.push(`V${i + 1}: ${reasons.join(' · ').slice(0, 120)}`); return { ...v, _layoutEdit: { applied: false, reasons, ...meta } }; }
-    if (r.text === v.content) return { ...v, _layoutEdit: { applied: false, reasons: ['เหมือนเดิม'], ...meta } };
+    if (reasons.length) { rejected.push(`V${i + 1}: ${reasons.join(' · ').slice(0, 120)}`); return { ...v, _layoutEdit: { applied: false, reasons, ...meta, review } }; }
+    if (text === v.content) return { ...v, _layoutEdit: { applied: false, reasons: ['เหมือนเดิม'], ...meta, review } };
     applied++;
-    return { ...v, content: r.text, _preLayoutContent: v.content, _layoutEdit: { applied: true, fromChars: String(v.content || '').length, toChars: r.text.length, ...meta } };
+    if (review?.applied) reviewed++;
+    return { ...v, content: text, _preLayoutContent: v.content, _layoutEdit: { applied: true, fromChars: String(v.content || '').length, toChars: text.length, ...meta, review } };
   });
   const ms = Date.now() - t0;
   return {
     versions: out,
     applied,
     warning: failed.length ? `บก.จัดหน้าล้มบางฉบับ — ใช้ฉบับเดิม (${failed.join(' · ')})` : null,
-    summaryLine: `📐 บก.จัดหน้า: ${applied}/${list.length} ฉบับ · ${Math.round(ms / 1000)} วิ${rejected.length ? ` · ไม่ผ่านด่าน ${rejected.length} (${rejected.join(' | ')})` : ''}${failed.length ? ` · ล้ม ${failed.length}` : ''}`,
+    summaryLine: `📐 บก.จัดหน้า: ${applied}/${list.length} ฉบับ${review ? ` · อ่านทวนแก้ ${reviewed}` : ''} · ${Math.round(ms / 1000)} วิ${rejected.length ? ` · ไม่ผ่านด่าน ${rejected.length} (${rejected.join(' | ')})` : ''}${failed.length ? ` · ล้ม ${failed.length}` : ''}`,
   };
 }

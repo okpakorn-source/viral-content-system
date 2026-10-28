@@ -182,7 +182,7 @@ test('D1 ทั้งชุด: ผ่าน = เนื้อใหม่ + เ
     if (prompt.includes('card_marker_fail')) throw new Error('boom');
     return calls === 2 ? reply(AFTER.replace('300 บาท', 'สามร้อยบาท')) : reply(AFTER);
   };
-  const r = await LE.runLayoutEdit(vs, { rawText: 'ข่าวดิบทดสอบ', callModel });
+  const r = await LE.runLayoutEdit(vs, { rawText: 'ข่าวดิบทดสอบ', callModel, review: false }); // ข้อนี้นับครั้งเรียกรอบแรก · รอบอ่านทวนอยู่ข้อ R
   assert.equal(calls, 3);
   const [a, b, c] = r.versions;
   const passed = [a, b].find((v) => v._layoutEdit?.applied);
@@ -338,4 +338,121 @@ test('D5 ท่อนจริง + ด่านจริง: แยกบรร
   assert.equal(out.finalVersions[0].content, health, 'grounding จริงเจอ "ข้อความสุขภาพไม่ระบุที่มา" ใหม่ → ฉบับเดิม');
   assert.ok(out.finalVersions[0]._layoutEdit.reasons.includes('ผล grounding เปลี่ยน'));
   assert.equal(out.finalVersions[1].content, AFTER, 'ข่าวปกติแยกบรรทัด → ใช้ฉบับจัด');
+});
+
+// ★ 28 ต.ค. 69 ค่ำ รอบอ่านทวน (วิธี 3 ที่เจ้าของเคาะ) — ผลรอบแรกผ่านด่าน → บก.ตรวจทานแก้จุดค่อม/สะดุด → ผ่านด่านเดิม = ใช้ · ไม่ผ่าน/ล้ม/หมดเวลา = รอบแรก
+const AFTER2 = AFTER.replace('300 บาท\n\nโรงเรียนอยู่ไกล', '300 บาท\nโรงเรียนอยู่ไกล'); // ถ้อยคำเดิม ย้ายย่อหน้าเป็นบรรทัด
+const reviewReply = (post, issues = 'ย้ายย่อหน้าที่ตัดเศษสั้น') => `<issues>${issues}</issues>\n<post>\n${post}\n</post>`;
+const twoPass = (reviewFn) => {
+  const calls = [];
+  const callModel = async (args) => {
+    calls.push(args);
+    if (args.system === LE.SYS_LAYOUT) return reply(AFTER);
+    assert.equal(args.system, LE.SYS_LAYOUT_REVIEW);
+    return reviewFn(args);
+  };
+  return { calls, callModel };
+};
+
+test('R1 สวิตช์อ่านทวน: เปิดเป็นค่าเริ่มต้น · ปิดด้วย LAYOUT_REVIEW=0/off/false/no', async () => {
+  await withEnv({ LAYOUT_REVIEW: undefined }, () => assert.equal(LE.isLayoutReviewEnabled(), true));
+  for (const v of ['0', 'off', 'FALSE', ' "no" ']) await withEnv({ LAYOUT_REVIEW: v }, () => assert.equal(LE.isLayoutReviewEnabled(), false, v));
+  await withEnv({ LAYOUT_REVIEW: '1' }, () => assert.equal(LE.isLayoutReviewEnabled(), true));
+});
+
+test('R2 อ่านทวนผ่านด่าน = ใช้ฉบับอ่านทวน · ส่งผลรอบแรก+ข่าวดิบให้ผู้ตรวจทาน · บันทึกค่าใช้จ่ายแยก layoutReview', async () => {
+  const { calls, callModel } = twoPass(async () => reviewReply(AFTER2));
+  const r = await LE.runLayoutEdit([version(BEFORE)], { rawText: 'ดิบ', callModel, review: true });
+  assert.equal(calls.length, 2);
+  assert.ok(calls[1].prompt.includes(`ข่าวดิบ (ใช้เพื่อเข้าใจเรื่องเท่านั้น):\nดิบ`));
+  assert.ok(calls[1].prompt.endsWith(`โพสต์ที่จัดบรรทัดแล้ว:\n${AFTER}`), 'ผู้ตรวจทานได้ผลรอบแรก');
+  assert.equal(calls[1].feature, 'layoutReview');
+  assert.equal(calls[0].feature, undefined, 'รอบแรกใช้ค่าเริ่มต้น layoutEdit');
+  assert.equal(r.versions[0].content, AFTER2);
+  assert.equal(r.versions[0]._preLayoutContent, BEFORE);
+  assert.deepEqual(r.versions[0]._layoutEdit.review, { applied: true, reasons: [], issues: 'ย้ายย่อหน้าที่ตัดเศษสั้น' });
+  assert.match(r.summaryLine, /1\/1 ฉบับ · อ่านทวนแก้ 1/);
+});
+
+// ★ ผู้ตรวจอิสระรอบ 5 ข้อ 1: หน้าที่หลักของรอบอ่านทวน = รวมจุดที่รอบแรกแยกค่อมกลับเป็นเว้นวรรค (เทียบฉบับก่อนจัด ไม่ใช่ผลรอบแรก)
+test('R2b อ่านทวนรวมจุดที่รอบแรกแยกกลับเป็นเว้นวรรค = ใช้ได้ · ผลเหมือนรอบแรก = review.applied false + ตัวนับ 0', async () => {
+  const merged = AFTER.replace('ไปโรงเรียน\nวันนี้', 'ไปโรงเรียน วันนี้');
+  assert.notEqual(merged, AFTER);
+  const { callModel } = twoPass(async () => reviewReply(merged, 'รวมบรรทัดค่อม'));
+  const r = await LE.runLayoutEdit([version(BEFORE)], { callModel, review: true });
+  assert.equal(r.versions[0].content, merged, 'จุดนั้นฉบับก่อนจัดเป็นเว้นวรรค → รวมกลับได้');
+  assert.equal(r.versions[0]._layoutEdit.review.applied, true);
+  const same = twoPass(async () => reviewReply(AFTER, 'ไม่มี'));
+  const r2 = await LE.runLayoutEdit([version(BEFORE)], { callModel: same.callModel, review: true });
+  assert.equal(r2.versions[0].content, AFTER);
+  assert.equal(r2.versions[0]._layoutEdit.applied, true);
+  assert.deepEqual(r2.versions[0]._layoutEdit.review, { applied: false, reasons: [], issues: 'ไม่มี' });
+  assert.match(r2.summaryLine, /อ่านทวนแก้ 0/);
+});
+
+test('R8 เวลาของขั้นเหลือไม่พอหลังรอบแรก = ไม่เริ่มอ่านทวน (ไม่เสียค่าโมเดลฟรี) · ใช้รอบแรก', async () => {
+  const { calls, callModel } = twoPass(async () => reviewReply(AFTER2));
+  const r = await LE.runLayoutEdit([version(BEFORE)], { callModel, review: true, timeoutMs: 1_000, reviewMinMs: 5_000 });
+  assert.equal(calls.length, 1);
+  assert.equal(r.versions[0].content, AFTER);
+  assert.deepEqual(r.versions[0]._layoutEdit.review.reasons, ['เวลาไม่พอ']);
+});
+
+test('R3 อ่านทวนไม่ผ่านด่าน (แก้คำ/รวมย่อหน้าเดิม) = คงผลรอบแรก ไม่เตือนพนักงาน', async () => {
+  for (const bad of [AFTER.replace('300', '301'), BEFORE.replace(/\n\n/g, ' ')]) {
+    const { callModel } = twoPass(async () => reviewReply(bad));
+    const r = await LE.runLayoutEdit([version(BEFORE)], { callModel, review: true });
+    assert.equal(r.versions[0].content, AFTER);
+    assert.equal(r.versions[0]._layoutEdit.applied, true);
+    assert.equal(r.versions[0]._layoutEdit.review.applied, false);
+    assert.ok(r.versions[0]._layoutEdit.review.reasons.length > 0);
+    assert.equal(r.warning, null);
+  }
+});
+
+test('R4 อ่านทวนล้ม = คงผลรอบแรก + บันทึกเหตุ · ไม่เตือนพนักงาน', async () => {
+  const { callModel } = twoPass(async () => { throw new Error('overloaded'); });
+  const r = await LE.runLayoutEdit([version(BEFORE)], { callModel, review: true });
+  assert.equal(r.versions[0].content, AFTER);
+  assert.match(r.versions[0]._layoutEdit.review.reasons[0], /อ่านทวนล้ม: overloaded/);
+  assert.equal(r.warning, null);
+});
+
+test('R5 หมดเวลาระหว่างอ่านทวน = ใช้ผลรอบแรก (ไม่ทิ้งกลับเป็นฉบับเดิม)', async () => {
+  const { callModel } = twoPass(({ signal }) => new Promise((resolve, reject) => {
+    const t = setTimeout(() => resolve(reviewReply(AFTER2)), 5_000);
+    signal?.addEventListener('abort', () => { clearTimeout(t); reject(new Error('aborted')); });
+  }));
+  const r = await LE.runLayoutEdit([version(BEFORE)], { callModel, review: true, timeoutMs: 300, reviewMinMs: 0 });
+  assert.equal(r.versions[0].content, AFTER);
+  assert.deepEqual(r.versions[0]._layoutEdit.review.reasons, ['หมดเวลา']);
+  assert.equal(r.applied, 1);
+  assert.equal(r.warning, null);
+});
+
+test('R6 ปิดอ่านทวน / รอบแรกไม่ผ่านด่าน = ไม่เรียกผู้ตรวจทาน', async () => {
+  const off = twoPass(async () => reviewReply(AFTER2));
+  await withEnv({ LAYOUT_REVIEW: '0' }, async () => {
+    const r = await LE.runLayoutEdit([version(BEFORE)], { callModel: off.callModel });
+    assert.equal(r.versions[0].content, AFTER);
+    assert.equal(r.versions[0]._layoutEdit.review, null);
+  });
+  assert.equal(off.calls.length, 1, 'สวิตช์ env ปิด = ครั้งเดียว');
+  const calls = [];
+  const r2 = await LE.runLayoutEdit([version(BEFORE)], { review: true, callModel: async (a) => { calls.push(a); return reply(AFTER.replace('300', '301')); } });
+  assert.equal(calls.length, 1, 'รอบแรกไม่ผ่าน = ไม่อ่านทวน');
+  assert.equal(r2.versions[0].content, BEFORE);
+});
+
+test('R7 ตรวจซ้ำของท่อตีตกฉบับอ่านทวน แต่รอบแรกผ่าน = ใช้รอบแรก · ตีตกทั้งคู่ = ฉบับเดิม', async () => {
+  const { callModel } = twoPass(async () => reviewReply(AFTER2));
+  const r = await LE.runLayoutEdit([version(BEFORE)], { callModel, review: true, recheck: (v, content) => (content === AFTER2 ? ['ผล grounding เปลี่ยน'] : []) });
+  assert.equal(r.versions[0].content, AFTER);
+  assert.equal(r.versions[0]._layoutEdit.applied, true);
+  assert.equal(r.versions[0]._layoutEdit.review.applied, false);
+  assert.deepEqual(r.versions[0]._layoutEdit.review.reasons, ['ผล grounding เปลี่ยน']);
+  const both = twoPass(async () => reviewReply(AFTER2));
+  const r2 = await LE.runLayoutEdit([version(BEFORE)], { callModel: both.callModel, review: true, recheck: () => ['ผลข้อมูลต้นฉบับหายเปลี่ยน'] });
+  assert.equal(r2.versions[0].content, BEFORE);
+  assert.equal(r2.versions[0]._layoutEdit.applied, false);
 });
