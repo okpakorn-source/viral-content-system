@@ -57,6 +57,7 @@ function segmentRunner(source = AUTO_FLOW_SOURCE) {
       isLegacyLengthOn, enforceTextNewsPublicationFloor, NEW_LENGTH_CFG, countFinalVersionSources, resolveFinalUsedPreset,
       usedPresetByPromptId, startTime, buildPublishableAnalysisResult, primaryResult, totalResearchItems,
       buildQuarantineSnapshot } = ctx;
+    const isLayoutEditEnabled = ctx.isLayoutEditEnabled || (() => false); // ★ 28 ต.ค. 69 ขั้น บก.จัดหน้า: ตรึงสวิตช์ปิด · พฤติกรรมจริงอยู่ที่ layout-editor.test.mjs
     let classicVersionCount, enhancedVersionCount;
     ${segment}
     return { finalVersions, analysisResult, pipelineQualityWarnings, factualGateSummary, textLengthGateSummary };

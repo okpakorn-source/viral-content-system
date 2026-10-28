@@ -35,6 +35,7 @@ import { breakdownRawSourceArgs } from '@/lib/ai/factSourcePolicy'; // ★ 24 �
 import { annotateMissingRawFacts } from '@/lib/services/rawFactPresence'; // ★ 25 ต.ค. 69 ข้อ 3: ติดป้ายฉบับที่ไม่เจอวันที่/อายุ/จำนวนเงินจากต้นฉบับ (โค้ดล้วน · ถอย RAW_FACT_PRESENCE_WARN=0)
 import { neutralizeGuessedGender } from '@/lib/services/genderNeutral'; // ★ 25 ต.ค. 69 ด่านเดาเพศชั้นสุดท้าย: ข่าวมี "เธอ" ที่ต้นฉบับไม่ใช้ → ป้ายเตือน ไม่แก้เนื้อ (ถอย GENDER_NEUTRAL_FIX=0)
 import { isAdminVoiceEditEnabled, runAdminVoiceEdit } from '@/lib/services/adminVoiceEditor'; // ★ 27 ต.ค. 69 ขั้น บก.เกลาภาษาแอดมิน (G2) — สวิตช์ ADMIN_VOICE_EDIT=1 (ค่าเริ่มต้นปิด)
+import { isLayoutEditEnabled, runLayoutEdit } from '@/lib/services/layoutEditor'; // ★ 28 ต.ค. 69 ขั้น บก.จัดหน้า (ขั้นสุดท้าย) — สวิตช์ LAYOUT_EDIT=1 (ค่าเริ่มต้นปิด)
 import { isCardAuthorityR6Enabled } from '@/lib/ai/cardAuthority'; // 🎛️ สวิตช์ปลดหาง "ห้ามขึ้นต้นด้วยวันที่" (19 ส.ค. 69) — ห้ามอ่าน env CARD_AUTH* เอง ต้อง import จากไฟล์กลางเท่านั้น
 import {
   getActivePipelineDeadline,
@@ -1206,6 +1207,30 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
     }
   } catch (rawFactErr) {
     addLog('Quality', `⏭️ ข้ามด่านข้อมูลต้นฉบับหาย: ${rawFactErr?.message || rawFactErr}`);
+  }
+
+  // ★ 28 ต.ค. 69 (เจ้าของสั่ง "เปิดใช้จริงในระบบ") — ขั้น บก.จัดหน้า = ขั้นสุดท้ายก่อนบันทึก/ส่งพนักงาน · สาย TEXT เท่านั้น
+  //   อ่านข่าวให้เข้าใจก่อน แล้วจัดย่อหน้า/บรรทัดตามเนื้อข่าว (ไม่บังคับสามย่อหน้า) · ด่านในตัว: ตัวอักษรเดิมทุกตัว + ช่องว่างตำแหน่งเดิม
+  //   + ตรวจซ้ำด้วยด่านโค้ดด้านบน (grounding/ข้อมูลหาย/เดาเพศ) กับฉบับจัดแล้ว — แย่ลงหรือป้ายเปลี่ยน = ฉบับเดิม → ป้ายที่ติดไว้ยังตรงกับเนื้อ
+  //   ปิดสวิตช์ (ค่าเริ่มต้น) = ไม่เข้า if นี้เลย = ทุกไบต์เดิม
+  if (isLayoutEditEnabled() && (detectedType === 'text' || detectedType === 'plain_text')) {
+    const _layoutRecheck = (version, content) => {
+      const pre = { ...version }, post = { ...version, content };
+      const reasons = [];
+      // เทียบ "ชุดผล" ไม่ใช่จำนวน (ผู้ตรวจอิสระรอบ 3: รวมย่อหน้าแล้วคำอ้างสุขภาพไปเกาะคนอื่น → grounding ลดลง แต่คำเตือนเดิมค้าง) · ต่างทางไหน = ฉบับเดิม
+      const groundingSet = (v) => JSON.stringify([...assessRawTextSafety([v], groundingSourceText).issues].sort());
+      if (groundingSet(post) !== groundingSet(pre)) reasons.push('ผล grounding เปลี่ยน');
+      const missingSet = (v) => JSON.stringify(annotateMissingRawFacts([v], groundingSourceText).flagged.flatMap((f) => (f.missing || []).map((m) => String(m?.text ?? m))).sort());
+      if (missingSet(post) !== missingSet(pre)) reasons.push('ผลข้อมูลต้นฉบับหายเปลี่ยน');
+      const genderCount = (v) => neutralizeGuessedGender([v], groundingSourceText).warned.length;
+      if (genderCount(post) !== genderCount(pre)) reasons.push('ป้ายเดาเพศเปลี่ยน');
+      return reasons;
+    };
+    const _le = await runLayoutEdit(finalVersions, { rawText, recheck: _layoutRecheck });
+    finalVersions = _le.versions;
+    if (_le.warning) pipelineQualityWarnings.push(_le.warning);
+    addLog('Quality', _le.summaryLine);
+    await logPipeline({ workflowId: _autoWorkflowId, step: 'layout-edit', status: _le.skipped ? 'skipped' : (_le.applied ? 'success' : 'fallback'), detail: _le.summaryLine.slice(0, 120) }).catch(() => {});
   }
 
   ({ classic: classicVersionCount, enhanced: enhancedVersionCount } = countFinalVersionSources(finalVersions));

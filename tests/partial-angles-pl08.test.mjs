@@ -58,6 +58,8 @@ const STUBS = {
   '@/lib/utils/textCleaner': fnStub(['cleanScrapedText']),
   // ★ 27 ต.ค. 69 ขั้น บก.เกลาภาษาแอดมิน: ข้อสอบนี้ทดสอบสัญญามุม → ตรึงสวิตช์ปิด (ค่าเริ่มต้นจริง) · พฤติกรรมจริงอยู่ที่ admin-voice-editor.test.mjs
   '@/lib/services/adminVoiceEditor': "export const isAdminVoiceEditEnabled = () => false;\nexport const runAdminVoiceEdit = async (versions) => ({ versions, applied: 0, warning: null, summaryLine: '' });",
+  // ★ 28 ต.ค. 69 ขั้น บก.จัดหน้า: ตรึงสวิตช์ปิดแบบเดียวกัน · พฤติกรรมจริงอยู่ที่ layout-editor.test.mjs
+  '@/lib/services/layoutEditor': "export const isLayoutEditEnabled = () => false;\nexport const runLayoutEdit = async (versions) => ({ versions, applied: 0, warning: null, summaryLine: '' });",
   'next/headers': fnStub(['cookies']),
 };
 const unknownSpecifiers = new Set();
