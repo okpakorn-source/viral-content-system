@@ -6,6 +6,8 @@
  *   ③ ดูทุกช่วงพร้อมกัน (Gemini ดูวิดีโอ) → บทถอดคำต่อคำ + จอ + ภาพ + ประเด็น
  *   ④ คนเขียนอ่านบทถอดทั้งคลิป → พาดหัว + เนื้อข่าวช่องเดียว
  *   ⑤ ตรวจด้วยโค้ด → แก้คำพูดที่ใกล้เคียงมาก + รายการ "จุดที่ควรเช็ค"
+ * ★ 28 ต.ค. 69 ร้อยแก้วกระชับ (ค่าเริ่มต้น): คลิปที่ดูได้ในช่วงเดียว (≤8 นาที) ข้าม ③④ — Gemini 3.8 คิดสูง ดูวิดีโอแล้วเขียนเลย
+ *   · คลิปยาวทำ ③ ตามเดิมแล้ว ④ เขียนร้อยแก้วกระชับจากบทถอด · CLIP_RAW_STYLE=full = กลับแบบ 25 ต.ค. ทุกคลิป
  * สัญญา: ไม่โยน error · ไม่เขียนคลัง · คืน spentTokens ให้ผู้เรียกตัดสินใจเรื่องลองใหม่ (กันจ่ายซ้ำ)
  */
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
@@ -13,12 +15,25 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { callClipGeminiVideo } from '../clipBrain/clipGeminiVideo.js';
 import { cutSegments, hasFfmpeg, probeDurationSec } from '../clipBrain/clipSegmenter.js';
-import { SINGLE_REV, buildWatchPrompt, buildWriterPrompt, formatTranscriptForWriter } from './prompts.js';
-import { planSegments, normalizeWatch, parseClock, SINGLE_PASS_MAX_SEC } from './segments.js';
-import { writeSingleBody, resolveWriter } from './writer.js';
+import {
+  SINGLE_REV, CONCISE_REV, buildWatchPrompt, buildWriterPrompt, buildConcisePassPrompt, buildConciseWriterPrompt,
+  CONCISE_WRITER_SYSTEM, formatTranscriptForWriter,
+} from './prompts.js';
+import { planSegments, normalizeWatch, parseClock, formatClock, SINGLE_PASS_MAX_SEC } from './segments.js';
+import { writeSingleBody, resolveWriter, validateDraft } from './writer.js';
 import { checkSingleBody } from './check.js';
 
 export const INLINE_CAP = 19 * 1024 * 1024;
+export const DEFAULT_CONCISE_MODEL = 'gemini-3.8-flash';
+const envStr = (k) => String(process.env[k] || '').trim();
+
+/**
+ * ★ 28 ต.ค. 69 รูปแบบเนื้อดิบ — 'concise' = ร้อยแก้วกระชับ (ค่าเริ่มต้น · เจ้าของสั่งขึ้นระบบหลังห้องทดลอง)
+ *   'full' = เนื้อข่าวช่องเดียวแบบ 25 ต.ค. (สวิตช์ถอย CLIP_RAW_STYLE=full แล้วรีสตาร์ตตัวทำงาน)
+ */
+export function resolveRawStyle(override = '') {
+  return String(override || envStr('CLIP_RAW_STYLE')).toLowerCase() === 'full' ? 'full' : 'concise';
+}
 const TRANSCRIPT_STORE_CAP = 200_000;
 const MAX_PROBE_SEC = 6 * 3600; // ความยาวที่ AI ตอบเกินนี้ถือว่าเพี้ยน (กันแบ่ง 24 ช่วง ช่วงละชั่วโมง)
 const envInt = (k, d) => { const n = parseInt(process.env[k] || '', 10); return Number.isFinite(n) && n > 0 ? n : d; };
@@ -65,8 +80,9 @@ export async function runClipSinglePipeline(o = {}) {
   const ffmpegReady = deps.hasFfmpeg || hasFfmpeg;
   const probe = deps.probeBufferDurationSec || probeBufferDurationSec;
   const write = deps.writeSingleBody || writeSingleBody;
+  const style = resolveRawStyle(o.style);
   const single = {
-    rev: SINGLE_REV, steps: [], degradations: [], segments: [],
+    rev: style === 'concise' ? CONCISE_REV : SINGLE_REV, style, steps: [], degradations: [], segments: [],
     usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 }, writer: null,
   };
   const step = (name, extra = {}) => { single.steps.push({ name, ms: Date.now() - t0, ...extra }); log(name); };
@@ -139,6 +155,53 @@ export async function runClipSinglePipeline(o = {}) {
       }
     }
 
+    // ★ 28 ต.ค. 69 ร้อยแก้วกระชับ: คลิปที่ดูจบได้ในรอบเดียว (≤8 นาที) = Gemini ดูวิดีโอแล้วเขียนเลย ตรงกับห้องทดลอง
+    //   (เจ้าของเคาะ "สั้นดูรอบเดียว ยาวใช้บทถอด") · ไม่มีบทถอด → ตัวตรวจข้ามด่านที่ต้องเทียบบทถอด
+    if (style === 'concise' && parts.length === 1 && !(dur > SINGLE_PASS_MAX_SEC)) {
+      const p = parts[0];
+      if (p.cutFailed) return fail('SEG_CUT_FAILED', 'ย่อไฟล์คลิปไม่สำเร็จ');
+      // ★ ผู้ตรวจอิสระ 28 ต.ค.: ใบ "เทียบสองโมเดล" (o.model) ต้องใช้รุ่นที่ขอจริง — คลังบันทึก modelUsed ตามคำขอ
+      const model = String(o.model || o.conciseModel || envStr('CLIP_CONCISE_MODEL') || DEFAULT_CONCISE_MODEL);
+      const r = await callVideo({
+        prompt: buildConcisePassPrompt({ platform: o.type, durationSec: dur, caption, wantDuration: !dur }),
+        videoBuffer: p.buffer, youtubeUrl: p.youtubeUrl || '', videoRange: null,
+        model, feature: 'clipSingle', onUsage, maxTokens: 24000, temperature: 0.3,
+        thinkingLevel: envStr('CLIP_CONCISE_EFFORT') || 'high',
+      });
+      single.watchModel = r?.receipt?.model || model;
+      single.segments = [{ no: 1, startSec: 0, endSec: dur, ok: !!r?.ok, errorType: r?.errorType, ms: r?.receipt?.elapsedMs, keyPoints: [] }];
+      step('ดูคลิปแล้วเขียนรอบเดียว', { ok: !!r?.ok });
+      if (!r?.ok) return fail(r?.errorType || 'WATCH_FAILED', r?.error || 'Gemini ดูคลิปไม่สำเร็จ');
+      if (!dur) {
+        const sec = Math.round(Number(parseClock(r.data?.durationSec)) || 0);
+        dur = sec > 0 && sec <= MAX_PROBE_SEC ? sec : 0;
+        single.segments[0].endSec = dur;
+      }
+      const v = validateDraft(r.data);
+      if (!v.ok) return fail('WRITER_BAD_OUTPUT', `เขียนเนื้อข่าวไม่สำเร็จ: ${v.error}`);
+      single.writer = { model: single.watchModel, kind: 'gemini-video', ms: r.receipt?.elapsedMs, costUSD: null, usage: r.receipt?.usage ?? null };
+      const checked = checkSingleBody(v.draft, { segments: [], caption, noTranscript: true });
+      // ★ ผู้ตรวจอิสระ 28 ต.ค.: อ่านความยาวก่อนดูไม่ได้ แล้วพบทีหลังว่าคลิปยาวเกิน 8 นาที = ดูรอบเดียวแบบที่อาจตกรายละเอียด
+      if (dur > SINGLE_PASS_MAX_SEC) {
+        single.degradations.push({ type: 'long-clip-single-pass', note: `อ่านความยาวก่อนดูไม่ได้ — คลิป ${dur} วิ ถูกดูแล้วเขียนรอบเดียว` });
+        checked.checks.push({ level: 'check', kind: 'coverage', text: `คลิปยาว ${formatClock(dur)} นาที (เกิน 8 นาที) แต่ถูกดูแล้วเขียนรอบเดียว (อ่านความยาวก่อนดูไม่ได้) — อาจตกรายละเอียด ควรเช็คกับคลิปหรือกดถอดใหม่` });
+      }
+      single.stats = checked.stats;
+      step('ตรวจด้วยโค้ด', { checks: checked.checks.length });
+      single.transcriptChars = 0;
+      single.elapsedMs = Date.now() - t0;
+      return {
+        ok: true,
+        spentTokens: single.usage.totalTokens,
+        transcriptText: '',
+        insight: {
+          engine: 'clip-single', schema: 'single-v1', promptRev: single.rev,
+          headline: checked.headline, body: checked.body, rawData: checked.body,
+          checks: checked.checks, clipDurationSec: dur, caption, single,
+        },
+      };
+    }
+
     // ③ ดูทุกช่วงพร้อมกัน
     const total = parts.length;
     const watched = await mapLimit(parts, envInt('CLIP_SINGLE_WATCH_CONCURRENCY', 4), async (p) => {
@@ -174,7 +237,10 @@ export async function runClipSinglePipeline(o = {}) {
     // ④ เขียน
     const transcriptBlock = formatTranscriptForWriter(segments);
     const writer = resolveWriter(o.writerModel);
-    const w = await write({ prompt: buildWriterPrompt({ platform: o.type, durationSec: dur, caption, transcriptBlock }), writer });
+    // ★ 28 ต.ค. 69: คลิปยาว (หรือคลิปที่ต้องดูหลายช่วง) เขียนร้อยแก้วกระชับจากบทถอด · 'full' = คำสั่งเดิม 25 ต.ค.
+    const w = style === 'concise'
+      ? await write({ prompt: buildConciseWriterPrompt({ platform: o.type, durationSec: dur, caption, transcriptBlock }), writer, systemPrompt: CONCISE_WRITER_SYSTEM })
+      : await write({ prompt: buildWriterPrompt({ platform: o.type, durationSec: dur, caption, transcriptBlock }), writer });
     single.writer = { model: w.model, kind: w.kind || writer.kind, ms: w.elapsedMs, costUSD: w.costUSD ?? null, usage: w.usage ?? null };
     if (w.tokensUsed) single.usage.totalTokens += w.tokensUsed;
     step('เขียนเนื้อข่าว', { ok: w.ok });
@@ -194,7 +260,7 @@ export async function runClipSinglePipeline(o = {}) {
       spentTokens: single.usage.totalTokens,
       transcriptText: transcriptBlock.slice(0, TRANSCRIPT_STORE_CAP),
       insight: {
-        engine: 'clip-single', schema: 'single-v1', promptRev: SINGLE_REV,
+        engine: 'clip-single', schema: 'single-v1', promptRev: single.rev,
         headline: checked.headline, body: checked.body, rawData: checked.body,
         checks: checked.checks, clipDurationSec: dur, caption, single,
       },

@@ -32,10 +32,11 @@ export function validateDraft(json) {
 }
 
 /**
- * @param {{prompt:string, writer?:object, timeoutMs?:number, deps?:object}} o
+ * @param {{prompt:string, writer?:object, systemPrompt?:string, timeoutMs?:number, deps?:object}} o
+ *   systemPrompt = ใช้กับค่าย Claude เท่านั้น (ร้อยแก้วกระชับส่งของตัวเอง 28 ต.ค. 69)
  *   deps = ตัวเรียกแทน (ข้อสอบ) { runBrain, callClaude }
  */
-export async function writeSingleBody({ prompt, writer = resolveWriter(), timeoutMs = envMs('CLIP_WRITER_TIMEOUT_MS', 300000), deps = {} } = {}) {
+export async function writeSingleBody({ prompt, writer = resolveWriter(), systemPrompt = SINGLE_WRITER_SYSTEM, timeoutMs = envMs('CLIP_WRITER_TIMEOUT_MS', 300000), deps = {} } = {}) {
   const t0 = Date.now();
   try {
     if (writer.kind === 'claude') {
@@ -44,7 +45,7 @@ export async function writeSingleBody({ prompt, writer = resolveWriter(), timeou
       const timer = setTimeout(() => ac.abort(new Error(`คนเขียนเกินเวลา ${timeoutMs}ms`)), timeoutMs);
       try {
         const json = await callClaude({
-          prompt, systemPrompt: SINGLE_WRITER_SYSTEM, model: writer.model, effort: writer.effort,
+          prompt, systemPrompt, model: writer.model, effort: writer.effort,
           temperature: 0.3, maxTokens: 16000, signal: ac.signal, sanitizeScope: 'facts',
         });
         const v = validateDraft(json);

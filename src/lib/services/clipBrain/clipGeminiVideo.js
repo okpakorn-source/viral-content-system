@@ -112,6 +112,7 @@ export async function callClipGeminiVideo(rawOpts = {}) {
     feature = 'clipBrain',      // ASCII usage label; never included in the Gemini request
     onUsage,                   // Optional, best-effort callback for every usage-bearing attempt
     temperature = 0.2,
+    thinkingLevel = '',         // ★ 28 ต.ค. 69 ร้อยแก้วกระชับ: 'high' = ให้คิดก่อนตอบ (ว่าง = ค่าเริ่มต้นของรุ่น — ทางเดิมไม่เปลี่ยน)
     maxTokens = 32000,
     videoRange = null,          // [startSec, endSec] — ให้ดูเฉพาะช่วง (ประหยัดและตรงจุด)
     maxAttempts = envInt('CLIP_GEMINI_MAX_ATTEMPTS', 3),
@@ -148,6 +149,14 @@ export async function callClipGeminiVideo(rawOpts = {}) {
     return done({ ok: false, errorType: 'BAD_INPUT', error: 'ไม่มีชื่อโมเดลที่ใช้ได้ (ชื่อโมเดลต้องเป็นข้อความ)' });
   }
 
+  // ★ 28 ต.ค. 69: ระดับการคิด low|medium|high (ไม่สนตัวพิมพ์) · ค่าอื่น = ไม่ส่ง + จดไว้ (ผู้ตรวจอิสระ: พิมพ์ HIGH แล้วหายเงียบ)
+  const thinkingRaw = typeof thinkingLevel === 'string' ? thinkingLevel.trim().toLowerCase() : '';
+  const thinking = /^(low|medium|high)$/.test(thinkingRaw) ? thinkingRaw : '';
+  if (thinkingRaw && !thinking) {
+    receipt.degradations.push({ type: 'thinking-level-ignored', note: `ระดับการคิด "${thinkingRaw.slice(0, 20)}" ไม่รู้จัก — ใช้ค่าเริ่มต้นของรุ่น` });
+    try { console.warn(`[ClipGemini] ⚠️ thinkingLevel "${thinkingRaw.slice(0, 20)}" ไม่รู้จัก — ไม่ส่ง`); } catch {}
+  }
+
   const rangePart = Array.isArray(videoRange) && videoRange.length === 2
     ? { videoMetadata: { startOffset: `${Math.max(0, Math.round(videoRange[0]))}s`, endOffset: `${Math.round(videoRange[1])}s` } }
     : {};
@@ -156,7 +165,10 @@ export async function callClipGeminiVideo(rawOpts = {}) {
     : { inlineData: { mimeType, data: videoBuffer.toString('base64') }, ...rangePart };
   const body = JSON.stringify({
     contents: [{ role: 'user', parts: [videoPart, { text: String(prompt || '') }] }],
-    generationConfig: { temperature, maxOutputTokens: maxTokens, responseMimeType: 'application/json' },
+    generationConfig: {
+      temperature, maxOutputTokens: maxTokens, responseMimeType: 'application/json',
+      ...(thinking ? { thinkingConfig: { thinkingLevel: thinking } } : {}),
+    },
   });
 
   let lastFail = null;

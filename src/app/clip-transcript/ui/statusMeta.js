@@ -36,6 +36,7 @@ export function jobActions(job) {
  */
 export const CHECK_KIND_LABEL = {
   segment: 'ช่วงคลิปหาย', quote: 'คำพูด', name: 'ชื่อ', number: 'ตัวเลข', coverage: 'ประเด็นอาจตกหล่น', gender: 'คำเรียกเพศ', legacy: 'ผลตรวจระบบเดิม',
+  unverified: 'ยังไม่ได้เทียบ', // ★ 28 ต.ค. 69 ร้อยแก้วกระชับ: ฉบับดูรอบเดียวไม่มีบทถอดให้โค้ดเทียบ
 };
 const txt = (v) => (typeof v === 'string' ? v.trim() : '');
 const arr = (v) => (Array.isArray(v) ? v : []);

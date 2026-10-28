@@ -13,6 +13,10 @@ import { runClipSinglePipeline, INLINE_CAP } from '../src/lib/services/clipSingl
 import { resolveWriter, validateDraft, writeSingleBody } from '../src/lib/services/clipSingle/writer.js';
 import { buildWatchPrompt, buildWriterPrompt, SINGLE_WRITER_SYSTEM } from '../src/lib/services/clipSingle/prompts.js';
 
+// ★ 28 ต.ค. 69: ค่าเริ่มต้นเปลี่ยนเป็นร้อยแก้วกระชับ — ไฟล์นี้คุมทางเดิม (สวิตช์ถอย CLIP_RAW_STYLE=full)
+//   ทางใหม่อยู่ใน tests/clip-concise.test.mjs (node --test แยกโปรเซสต่อไฟล์ ค่า env นี้ไม่รั่วข้ามไฟล์)
+process.env.CLIP_RAW_STYLE = 'full';
+
 const seg = (over = {}) => ({ no: 1, startSec: 0, endSec: 120, ok: true, transcript: [], screen: [], visuals: [], keyPoints: [], ...over });
 
 test('planSegments: สั้นดูรอบเดียว · ยาวแบ่งช่วงต่อกันไม่มีช่องว่าง · มีเพดานจำนวนช่วง', () => {

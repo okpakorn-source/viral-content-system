@@ -348,14 +348,36 @@ export const COVERAGE_MIN = 0.34;
 const MAX_FLAGS_PER_KIND = 8;
 
 /**
+ * ★ 28 ต.ค. 69 ร้อยแก้วกระชับ (คลิป ≤8 นาที ดูแล้วเขียนรอบเดียว): ไม่มีบทถอดให้เทียบ
+ *   ด่านคำพูด/ชื่อ/ตัวเลข/ความครบ เทียบกับความว่างจะติดธงผิดทุกข้อ → ข้าม แล้วบอกพนักงานตรง ๆ ว่าคำพูดยังไม่ได้เทียบ
+ *   (ห้องทดลองพบฉบับดูรอบเดียวอ่านชื่อบนจอผิดและยกคำพูดไม่ตรงบางส่วนได้)
+ */
+function checkWithoutTranscript(draft, caption) {
+  const body = String(draft?.body ?? '');
+  const headline = String(draft?.headline ?? '');
+  const checks = [];
+  const stats = { quotes: 0, quotesFixed: 0, quotesFlagged: 0, names: 0, namesFlagged: 0, numbers: 0, numbersFlagged: 0, keyPoints: 0, keyPointsUncovered: 0, keyPointsSkipped: 0, noTranscript: true };
+  stats.quotes = extractQuotes(body).length;
+  // ★ ผู้ตรวจอิสระ 28 ต.ค.: ขึ้นทุกใบ — ไม่มีจุดเช็คเลย หน้าจอจะขึ้น "✓ ตัวตรวจไม่พบจุดที่ต้องเช็ค" ทั้งที่ยังไม่ได้เทียบอะไร
+  const what = stats.quotes ? `ชื่อ ตัวเลข และคำพูดในเครื่องหมายคำพูด (${stats.quotes} จุด)` : 'ชื่อและตัวเลข';
+  checks.push({ level: 'check', kind: 'unverified', text: `ฉบับนี้ดูคลิปแล้วเขียนรอบเดียว ไม่มีบทถอดให้ระบบเทียบ — ${what} ควรเช็คกับคลิปก่อนใช้` });
+  if (/เธอ/.test(`${headline}\n${body}`) && !FEMALE_HINT.test(caption)) {
+    checks.push({ level: 'check', kind: 'gender', text: 'ใช้คำว่า "เธอ" — ฉบับดูรอบเดียวไม่มีบทถอดให้ระบบยืนยันเพศ ตรวจกับคลิปก่อนใช้' });
+  }
+  return { headline, body, checks, stats };
+}
+
+/**
  * @param {{headline:string, body:string, names?:string[]}} draft
- * @param {{segments:Array, caption?:string}} ev  segments = ผลดูคลิปที่ normalizeWatch แล้ว + {no,startSec,endSec,ok}
+ * @param {{segments:Array, caption?:string, noTranscript?:boolean}} ev  segments = ผลดูคลิปที่ normalizeWatch แล้ว + {no,startSec,endSec,ok}
+ *   noTranscript = ฉบับดูรอบเดียวไม่มีบทถอด (28 ต.ค. 69)
  * @returns {{headline:string, body:string, checks:Array<{level:'fixed'|'check', kind:string, text:string}>, stats:object}}
  */
 export function checkSingleBody(draft, ev = {}) {
   const segments = Array.isArray(ev.segments) ? ev.segments : [];
   const okSegs = segments.filter((s) => s.ok);
   const caption = String(ev.caption ?? '');
+  if (ev.noTranscript) return checkWithoutTranscript(draft, caption);
   // หนึ่งรายการคำพูด = หนึ่งบรรทัดเสมอ (ยุบขึ้นบรรทัดใหม่ภายในข้อความ กันบรรทัดเลื่อนจากป้ายผู้พูด)
   const transcriptRaw = okSegs.flatMap((s) => s.transcript.map((t) => String(t.text ?? '').replace(/\s*[\r\n]+\s*/g, ' '))).join('\n');
   const tMap = normalizeWithMap(transcriptRaw);
