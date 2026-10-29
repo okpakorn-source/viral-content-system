@@ -60,6 +60,8 @@ const STUBS = {
   '@/lib/services/adminVoiceEditor': "export const isAdminVoiceEditEnabled = () => false;\nexport const runAdminVoiceEdit = async (versions) => ({ versions, applied: 0, warning: null, summaryLine: '' });",
   // ★ 28 ต.ค. 69 ขั้น บก.จัดหน้า: ตรึงสวิตช์ปิดแบบเดียวกัน · พฤติกรรมจริงอยู่ที่ layout-editor.test.mjs
   '@/lib/services/layoutEditor': "export const isLayoutEditEnabled = () => false;\nexport const runLayoutEdit = async (versions) => ({ versions, applied: 0, warning: null, summaryLine: '' });",
+  // ★ 29 ต.ค. 69 นักเขียน F2X: ตรึงสวิตช์ปิดแบบเดียวกัน · พฤติกรรมจริงอยู่ที่ tests/f2x-writer.test.mjs
+  '@/lib/services/f2xWriter': "export const isF2xWriterEnabled = () => false;\nexport const classifyF2xGenre = async () => ({ genre: '', ok: false });\nexport const writeF2xVersion = async () => { throw new Error('stub'); };\nexport const f2xPreset = () => ({});\nexport const F2X_PRESET_ID = 'f2x';",
   'next/headers': fnStub(['cookies']),
 };
 const unknownSpecifiers = new Set();

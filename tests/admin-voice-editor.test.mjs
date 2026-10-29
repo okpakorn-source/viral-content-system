@@ -40,7 +40,9 @@ test('A2 ต่อท่อ: หลัง correction ก่อน grounding · �
   assert.ok(at > src.indexOf('runCorrectionPipeline('), 'ต้องอยู่หลังตรวจแก้');
   assert.ok(at < src.indexOf('let grounding = assessRawTextSafety('), 'ต้องอยู่ก่อน grounding');
   assert.match(src.slice(at, at + 200), /detectedType === 'text' \|\| detectedType === 'plain_text'/);
-  assert.match(src.slice(at, at + 700), /runAdminVoiceEdit\(finalVersions, \{ rawText, cards: anglePrompts, reserveMs: isRawFactCompletenessGateEnabled\(\) \? 200_000 : 30_000 \}\)/);
+  // ★ 29 ต.ค. 69 (F2X): ส่ง _avInput — ปิดสวิตช์ F2X = finalVersions ตัวเดิม (เส้นเดิมทุกไบต์) · ฉบับ F2X ไม่ผ่าน บก.เกลา (tests/f2x-writer.test.mjs C4–C6)
+  assert.match(src.slice(at, at + 1200), /const _avInput = _f2xOn \? finalVersions\.filter\(\(version\) => !version\._f2x\) : finalVersions;/);
+  assert.match(src.slice(at, at + 1200), /runAdminVoiceEdit\(_avInput, \{ rawText, cards: anglePrompts, reserveMs: isRawFactCompletenessGateEnabled\(\) \? 200_000 : 30_000 \}\)/);
 });
 
 test('B1 เกลาแล้วสั้นพอ = เรียกโมเดลครั้งเดียว (ขั้นเสียงแอดมิน)', async () => {

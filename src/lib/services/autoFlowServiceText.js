@@ -36,6 +36,7 @@ import { annotateMissingRawFacts } from '@/lib/services/rawFactPresence'; // ★
 import { neutralizeGuessedGender } from '@/lib/services/genderNeutral'; // ★ 25 ต.ค. 69 ด่านเดาเพศชั้นสุดท้าย: ข่าวมี "เธอ" ที่ต้นฉบับไม่ใช้ → ป้ายเตือน ไม่แก้เนื้อ (ถอย GENDER_NEUTRAL_FIX=0)
 import { isAdminVoiceEditEnabled, runAdminVoiceEdit } from '@/lib/services/adminVoiceEditor'; // ★ 27 ต.ค. 69 ขั้น บก.เกลาภาษาแอดมิน (G2) — สวิตช์ ADMIN_VOICE_EDIT=1 (ค่าเริ่มต้นปิด)
 import { isLayoutEditEnabled, runLayoutEdit } from '@/lib/services/layoutEditor'; // ★ 28 ต.ค. 69 ขั้น บก.จัดหน้า (ขั้นสุดท้าย) — สวิตช์ LAYOUT_EDIT=1 (ค่าเริ่มต้นปิด)
+import { isF2xWriterEnabled, classifyF2xGenre, writeF2xVersion, f2xPreset, F2X_PRESET_ID } from '@/lib/services/f2xWriter'; // ★ 29 ต.ค. 69 นักเขียน F2X (สาย TEXT) — สวิตช์ F2X_WRITER=1 (ค่าเริ่มต้นปิด)
 import { isCardAuthorityR6Enabled } from '@/lib/ai/cardAuthority'; // 🎛️ สวิตช์ปลดหาง "ห้ามขึ้นต้นด้วยวันที่" (19 ส.ค. 69) — ห้ามอ่าน env CARD_AUTH* เอง ต้อง import จากไฟล์กลางเท่านั้น
 import {
   getActivePipelineDeadline,
@@ -286,6 +287,14 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   const writerRawSourceText = (detectedType === 'text' || detectedType === 'plain_text')
     ? rawText
     : undefined;
+
+  // ★ 29 ต.ค. 69 (เจ้าของสั่ง "F2X สวยฉันอ่านแล้ว เขียนลงระบบจริงเลย"): นักเขียน F2X สาย TEXT — สวิตช์ F2X_WRITER=1 เท่านั้น
+  //   ปิด (ค่าเริ่มต้น) = _f2xOn false = ไม่เรียก ไม่รอ = ท่อเดิมทุกไบต์ · เปิด = ทุกมุมเขียนด้วย F2X (ดู src/lib/services/f2xWriter.js)
+  //   จัดหมวดข่าวครั้งเดียวต่องาน เริ่มขนานกับแตกประเด็น — ไม่โยน error (ล้ม = หมวดว่าง = ตัวอย่างยอดสูงสุดแทน)
+  const _f2xOn = isF2xWriterEnabled() && (detectedType === 'text' || detectedType === 'plain_text');
+  const _f2xGenrePromise = _f2xOn ? classifyF2xGenre({ rawText: writerRawSourceText, signal: getActivePipelineDeadline()?.signal }) : null;
+  _f2xGenrePromise?.catch(() => {}); // งานล้มก่อนถึงขั้นเขียน (ยกเลิกเส้นตาย) = ไม่ทิ้ง unhandled rejection (ผู้ตรวจรอบ 2) · ผู้รอจริงยังได้ error เดิม
+  const _f2xFallbacks = []; // มุมที่ F2X ล้มแล้วถอยไปนักเขียนเดิม (แจ้งพนักงานใน qualityWarnings)
 
   // === STEP 3: แตกประเด็น (Breakdown) ===
   const step3Start = Date.now();
@@ -574,7 +583,8 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   //   มุมที่ 2 เป็นต้นไป ถ้าจับคู่หลวม (_matchScore < 45 หรือหลุดไป Built-in Fallback ซึ่งไม่มี score)
   //   → ตัดมุมทิ้ง ออกน้อยเวอร์ชันแต่ไม่บิดเบือน (พร้อมท์อันดับท้ายเคยพาตัวเขียนละข้อเท็จจริง "แม่เสียชีวิต")
   //   มุมแรกเก็บเสมอ = การันตีมีผลลัพธ์อย่างน้อย 1 เวอร์ชัน
-  for (let i = anglesToUse.length - 1; i >= 1; i--) {
+  // ★ 29 ต.ค. 69 (F2X): นักเขียน F2X ไม่ใช้การ์ด → ไม่ตัดมุมเพราะการ์ดจับคู่หลวม (คง 2 ฉบับให้พนักงานเลือก) · ปิดสวิตช์ = ลูปเดิมทุกไบต์
+  for (let i = anglesToUse.length - 1; i >= 1 && !_f2xOn; i--) {
     // ★ 1 ส.ค. 69 (Opus P2-A): ใบที่ luna ตั้งใจเลือก (AI_PICKED) อ่านการ์ดเต็ม+เนื้อข่าวแล้ว — ห้ามใช้คะแนนสูตร
     //   (ที่มันตัดสินว่าด้อยกว่าอยู่แล้ว) มาโยนทิ้ง ไม่งั้นฟีเจอร์ถูกล้างเงียบๆ ในเคสที่ควรช่วยที่สุด
     if (anglePrompts[i]?._matchType === 'AI_PICKED') continue;
@@ -634,7 +644,49 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         .filter(Boolean);
       const _openingStyle = buildAngleOpeningContract(index, _promptHook, _reservedOpeningAngles, _caR6Tail);
       const writeAngle = `${focusAngle}\nสไตล์เปิดเรื่องบังคับของเวอร์ชันนี้: ${_openingStyle}`;
-      
+
+      // ★ 29 ต.ค. 69 (F2X): เขียนตรงจากข่าวดิบด้วย F2X (ไม่รีเสิร์ชต่อมุม ไม่ใช้การ์ด) — คืนรูปผลเดียวกับ performSummarize เพื่อผ่านสัญญาเดิม
+      //   ล้ม/หมดเวลา/ตรวจข้อเท็จจริงไม่สำเร็จ = ถอยไปรีเสิร์ช+นักเขียนเดิมของมุมนี้ (โค้ดด้านล่างเดิมทุกบรรทัด) · เส้นตายรวม = โยนต่อตามเดิม
+      if (_f2xOn) {
+        const _f2xT0 = Date.now();
+        try {
+          const genreInfo = await _f2xGenrePromise;
+          // variant = ตัวอย่างชุดที่ 1 สำหรับมุมแรก · ชุดถัดไป (ไม่ซ้ำ) สำหรับมุมที่ 2+ — 2 ฉบับไม่เขียนจากตัวอย่างชุดเดียวกัน
+          const f2xVersions = await Promise.all(Array.from({ length: count }, () => writeF2xVersion({ rawText: writerRawSourceText, genreInfo, variant: Math.min(index, 1), signal: stageSignal })));
+          const _f2xFixed = f2xVersions.reduce((sum, item) => sum + item.fixed, 0);
+          addLog('F2X', `✍️ มุม ${index + 1}: F2X เขียนเสร็จ ${f2xVersions.length} ฉบับ · หมวด ${genreInfo?.genre || '-'}${genreInfo?.ok === false ? ' (จัดหมวดล้ม ใช้ตัวอย่างยอดสูงสุด)' : ''} · แก้จุดเกินดิบ ${_f2xFixed} จุด · ${((Date.now() - _f2xT0) / 1000).toFixed(1)}s`);
+          return {
+            success: true,
+            data: {
+              versions: f2xVersions.map((item) => ({
+                title: String(newsData.newsTitle || '').trim() || item.text.split('\n')[0].slice(0, 80), // หัวข่าวว่าง = บรรทัดแรก (กันมุมตกสัญญา title)
+                content: item.text,
+                style: 'F2X',
+                _f2x: true,
+                _f2xMeta: { genre: item.genre, variant: item.variant, exemplarIds: item.exemplarIds, fixed: item.fixed, heavyIssues: item.heavyIssues, lightIssues: item.lightIssues, sanitized: item.sanitized, guardRelaxed: item.guardRelaxed },
+              })),
+              usedModel: f2xVersions[0].model,
+              usedPreset: f2xPreset(genreInfo),
+              debug: {},
+            },
+            _sourceLabel: angleObj.angle_name,
+            _pIndex: index + 1,
+            _researchItems: [],
+            _topPrompt: { id: F2X_PRESET_ID, promptName: f2xPreset(genreInfo).promptName },
+          };
+        } catch (f2xErr) {
+          rethrowPipelineDeadline(f2xErr, `f2x_A${index + 1}`);
+          const reason = String(f2xErr?.message || f2xErr).slice(0, 160);
+          // มุมที่ 2+ ที่การ์ดจับคู่หลวม (ลูปตัดมุมถูกข้ามเพราะ F2X) ห้ามถอยไปเขียนด้วยการ์ดผิดเรื่อง → ให้มุมนี้ล้ม (ระบบส่งเฉพาะมุมที่สำเร็จ)
+          const _loose = index >= 1 && anglePrompts[index]?._matchType !== 'AI_PICKED' && Number(anglePrompts[index]?._matchScore ?? 0) < MIN_ANGLE_MATCH;
+          _f2xFallbacks.push({ angle: angleObj.angle_name, reason, dropped: _loose });
+          addLog('F2X', `⚠️ มุม ${index + 1}: F2X ล้ม (${reason}) — ${_loose ? 'การ์ดมุมนี้จับคู่หลวม ไม่ถอยไปนักเขียนเดิม (ตัดมุมนี้)' : 'ถอยไปนักเขียนเดิมของมุมนี้'}`);
+          if (_loose) {
+            return { success: false, error: `F2X ล้ม (${reason}) และการ์ดมุมนี้จับคู่หลวม — ไม่เขียนด้วยการ์ดผิดเรื่อง`, _sourceLabel: angleObj.angle_name, _pIndex: index + 1, _researchItems: [], _topPrompt: null };
+          }
+        }
+      }
+
       // 1. Research for this angle
       const resResult = await performResearch({
         newsTitle: newsData.newsTitle,
@@ -889,37 +941,65 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
   const groundingSourceText = (detectedType === 'text' || detectedType === 'plain_text')
     ? rawText
     : newsData.newsBody;
-  try {
-    // ★ 14 ส.ค. 69: ส่งข้อเท็จจริงรีเสิร์ชให้ด่าน L1.8 — ของจริงจากรีเสิร์ชไม่ใช่ "ของเกิน"
-    finalVersions = await runCorrectionPipeline(
-      allVersions,
-      newsData,
-      breakdownData,
-      correctionResearchFacts,
-      groundingSourceText,
-    );
-    const correctionOutcome = applyCorrectionFallback(finalVersions, allVersions);
-    finalVersions = correctionOutcome.versions;
-    pipelineQualityWarnings.push(...correctionOutcome.warnings);
-    addLog('Correction', `🔧 Correction Pipeline: ${finalVersions.filter(v => v._correctionApplied).length}/${finalVersions.length} corrected${correctionOutcome.warnings.length ? ` · fallback ${correctionOutcome.warnings.length}` : ''}`);
-  } catch (corrErr) {
-    rethrowPipelineDeadline(corrErr, 'correction');
-    const correctionOutcome = applyCorrectionFallback(
-      allVersions.map(version => ({ ...version, _correctionError: corrErr?.message || String(corrErr) })),
-      allVersions,
-    );
-    finalVersions = correctionOutcome.versions;
-    pipelineQualityWarnings.push(...correctionOutcome.warnings);
-    addLog('Quality', `⚠️ Correction pipeline ล้มทั้งชุด — ใช้ร่างนักเขียนเดิม ${allVersions.length} ฉบับ แล้วตรวจ RAW เต็มต่อ`);
+  // ★ 29 ต.ค. 69 (F2X): ฉบับ F2X ตรวจแก้ข้อมูลเกินดิบในตัวแล้ว และห้องทดลองวัดฉบับที่ไม่ผ่าน correction → ไม่ส่งเข้า correction
+  //   ปิดสวิตช์ = _corrInput คือ allVersions ตัวเดิม = บล็อก correction เดิมทุกไบต์ · ฉบับที่ถอยไปนักเขียนเดิมยังผ่าน correction ตามเดิม
+  const _corrInput = _f2xOn ? allVersions.filter((version) => !version._f2x) : allVersions;
+  if (_corrInput.length === 0) {
+    finalVersions = [];
+    addLog('Correction', `⏭️ ข้าม Correction — ทั้ง ${allVersions.length} ฉบับเขียนด้วย F2X (ตรวจแก้ข้อมูลเกินดิบในตัวแล้ว)`);
+  } else {
+    try {
+      // ★ 14 ส.ค. 69: ส่งข้อเท็จจริงรีเสิร์ชให้ด่าน L1.8 — ของจริงจากรีเสิร์ชไม่ใช่ "ของเกิน"
+      finalVersions = await runCorrectionPipeline(
+        _corrInput,
+        newsData,
+        breakdownData,
+        correctionResearchFacts,
+        groundingSourceText,
+      );
+      const correctionOutcome = applyCorrectionFallback(finalVersions, _corrInput);
+      finalVersions = correctionOutcome.versions;
+      pipelineQualityWarnings.push(...correctionOutcome.warnings);
+      addLog('Correction', `🔧 Correction Pipeline: ${finalVersions.filter(v => v._correctionApplied).length}/${finalVersions.length} corrected${correctionOutcome.warnings.length ? ` · fallback ${correctionOutcome.warnings.length}` : ''}`);
+    } catch (corrErr) {
+      rethrowPipelineDeadline(corrErr, 'correction');
+      const correctionOutcome = applyCorrectionFallback(
+        _corrInput.map(version => ({ ...version, _correctionError: corrErr?.message || String(corrErr) })),
+        _corrInput,
+      );
+      finalVersions = correctionOutcome.versions;
+      pipelineQualityWarnings.push(...correctionOutcome.warnings);
+      addLog('Quality', `⚠️ Correction pipeline ล้มทั้งชุด — ใช้ร่างนักเขียนเดิม ${_corrInput.length} ฉบับ แล้วตรวจ RAW เต็มต่อ`);
+    }
+  }
+  if (_corrInput !== allVersions) {
+    // ใส่ฉบับ F2X กลับตำแหน่งเดิม (ลำดับมุมไม่เปลี่ยน)
+    let _corrIndex = 0;
+    const _corrected = finalVersions;
+    finalVersions = allVersions.map((version) => (version._f2x ? { ...version, _correctionApplied: false, _correctionSkipped: 'f2x' } : _corrected[_corrIndex++]));
+  }
+  if (_f2xOn && _f2xFallbacks.length > 0) {
+    pipelineQualityWarnings.push(`F2X ล้ม ${_f2xFallbacks.length} มุม — ${_f2xFallbacks.map((item) => `${item.angle}: ${item.dropped ? 'ตัดมุม' : 'ถอยไปนักเขียนเดิม'} (${item.reason.slice(0, 80)})`).join(' | ')}`);
+  }
+  if (_f2xOn) {
+    const _f2xCount = allVersions.filter((version) => version._f2x).length;
+    await logPipeline({ workflowId: _autoWorkflowId, step: 'f2x-writer', status: _f2xFallbacks.length ? 'fallback' : 'success', detail: `F2X ${_f2xCount}/${allVersions.length} ฉบับ${_f2xFallbacks.length ? ` · ล้ม ${_f2xFallbacks.length} มุม` : ''}`.slice(0, 120) }).catch(() => {});
   }
 
   // ★ 27 ต.ค. 69 (เจ้าของสั่ง "ถ้าคะแนนนิ่ง ค่อยเอาขึ้นเว็บทำสวิตช์") — ขั้น บก.เกลาภาษาแอดมิน (G2) สาย TEXT เท่านั้น
   //   เกลาเป็นภาษาแอดมินเพจโดยดูโพสต์จริง 3 ชิ้นแนวเดียวกับการ์ด + คุมความยาว ≤800 ตัวอักษร · ล้ม/หมดเวลา = ฉบับเดิม (ไม่ทำให้งานล้ม)
   //   ปิดสวิตช์ (ค่าเริ่มต้น) = ไม่เข้า if นี้เลย = ทุกไบต์เดิม · ด่าน grounding/ข้อเท็จจริง/ความยาว/เพศ ด้านล่างตรวจฉบับที่เกลาแล้วตามเดิม
-  if (isAdminVoiceEditEnabled() && (detectedType === 'text' || detectedType === 'plain_text')) {
+  // ★ 29 ต.ค. 69 (F2X): ฉบับ F2X ไม่ผ่าน บก.เกลา (เกลาจะทับเสียงที่สอบผ่านมา) · ทุกฉบับเป็น F2X = ไม่เข้าบล็อกนี้ · ปิดสวิตช์ = เงื่อนไขเดิม
+  if (isAdminVoiceEditEnabled() && (detectedType === 'text' || detectedType === 'plain_text') && !(_f2xOn && finalVersions.every((version) => version._f2x))) {
     // กันเวลาให้ด่านหลัง (ผู้ตรวจอิสระ 27 ต.ค.): ด่าน RAW เปิด = ต้องเหลือให้ audit+editor (~200s) · ปิด (prod ตอนนี้) = 30s ให้ด่านความยาว/บันทึก
-    const _av = await runAdminVoiceEdit(finalVersions, { rawText, cards: anglePrompts, reserveMs: isRawFactCompletenessGateEnabled() ? 200_000 : 30_000 });
-    finalVersions = _av.versions;
+    const _avInput = _f2xOn ? finalVersions.filter((version) => !version._f2x) : finalVersions;
+    const _av = await runAdminVoiceEdit(_avInput, { rawText, cards: anglePrompts, reserveMs: isRawFactCompletenessGateEnabled() ? 200_000 : 30_000 });
+    if (_avInput !== finalVersions) {
+      let _avIndex = 0;
+      finalVersions = finalVersions.map((version) => (version._f2x ? version : _av.versions[_avIndex++]));
+    } else {
+      finalVersions = _av.versions;
+    }
     if (_av.warning) pipelineQualityWarnings.push(_av.warning);
     addLog('Quality', _av.summaryLine);
     await logPipeline({ workflowId: _autoWorkflowId, step: 'admin-voice', status: _av.skipped ? 'skipped' : (_av.warning && !_av.applied ? 'fallback' : 'success'), detail: _av.summaryLine.slice(0, 120) }).catch(() => {});
@@ -1300,6 +1380,8 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         promptId: usedPreset?.promptId || anglePrompts[0]?.id || '',
         newsType: newsType || '',
         writerModels: usedModels,
+        // ★ 29 ต.ค. 69 (F2X): ตรวจย้อนได้ว่าฉบับไหนเขียนด้วย F2X · ตัวอย่างชุดไหน · แก้จุดเกินดิบกี่จุด · มุมไหนถอย (ปิดสวิตช์ = undefined = ไม่มีคีย์นี้ใน JSON)
+        f2x: _f2xOn ? { versions: finalVersions.map((version) => version._f2xMeta || null), fallbacks: _f2xFallbacks } : undefined,
         diversityWarning: diversityWarning || null,
         desk: deskMeta || null, // ★ ป้ายโต๊ะข่าว {newsId, lane, category, editor, editorIcon}
         // ★ 16 ก.ค. 69 (B4): พอร์ตจากสาย URL — เดิม stepTimings มีเฉพาะใน return data ไม่เข้า Generation Log

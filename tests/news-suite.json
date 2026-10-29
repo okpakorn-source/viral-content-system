@@ -169,7 +169,8 @@
     "tests/workflow-init-contract.test.mjs",
     "tests/writer-fable-switch.test.mjs",
     "tests/admin-voice-editor.test.mjs",
-    "tests/layout-editor.test.mjs"
+    "tests/layout-editor.test.mjs",
+    "tests/f2x-writer.test.mjs"
   ],
   "exclude": [
     {

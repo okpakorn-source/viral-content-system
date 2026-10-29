@@ -23,12 +23,13 @@ const nextConfig = {
     // ★ 14 ส.ค. 69 (กับดักเดิมรอบ 5 — กันไว้ก่อนพัง): viral-likes-real.json (สูตรแสนไลก์) ก็อ่านด้วย fs
     //   ไม่ trace = เปิด VIRAL_HITS_FORMULA บน Vercel แล้วไลก์จริงเงียบหาย (โค้ดข้ามไม่พังท่อ แต่ผลเทสไม่ตรงจริง)
     // ★ 27 ต.ค. 69 คลังโพสต์ตัวอย่างของขั้น บก.เกลาภาษาแอดมิน (adminVoiceEditor อ่านด้วย fs) — ไม่ trace = บน Vercel เกลาโดยไม่มีตัวอย่างแบบเงียบๆ
-    '/api/auto': ['./data/card-essences.json', './data/viral-essences.json', './data/viral-likes-real.json', './data/admin-voice-exemplars.json'],
-    '/api/auto/process': ['./data/card-essences.json', './data/viral-essences.json', './data/viral-likes-real.json', './data/admin-voice-exemplars.json'],
-    '/api/queue/worker': ['./data/card-essences.json', './data/viral-essences.json', './data/viral-likes-real.json', './data/admin-voice-exemplars.json'],
+    // ★ 29 ต.ค. 69 คลังตัวอย่างนักเขียน F2X (f2xWriter อ่านด้วย fs) — ไม่ trace = บน Vercel F2X ล้มทุกงาน (ถอยไปนักเขียนเดิม)
+    '/api/auto': ['./data/card-essences.json', './data/viral-essences.json', './data/viral-likes-real.json', './data/admin-voice-exemplars.json', './data/f2x-exemplars.json'],
+    '/api/auto/process': ['./data/card-essences.json', './data/viral-essences.json', './data/viral-likes-real.json', './data/admin-voice-exemplars.json', './data/f2x-exemplars.json'],
+    '/api/queue/worker': ['./data/card-essences.json', './data/viral-essences.json', './data/viral-likes-real.json', './data/admin-voice-exemplars.json', './data/f2x-exemplars.json'],
     // ★ ผู้ตรวจอิสระ S2 (14 ส.ค.): หน้าเว็บยิง /api/summarize ตรง (content/new) — ต้องได้ไฟล์ชุดเดียวกัน
     //   ไม่งั้นข่าวผ่านคิวได้ไลก์จริง แต่ผ่านหน้าเว็บไม่ได้ แบบเงียบๆ (ช่องนี้ viral-essences ก็เคยขาด)
-    '/api/summarize': ['./data/card-essences.json', './data/viral-essences.json', './data/viral-likes-real.json', './data/admin-voice-exemplars.json'],
+    '/api/summarize': ['./data/card-essences.json', './data/viral-essences.json', './data/viral-likes-real.json', './data/admin-voice-exemplars.json', './data/f2x-exemplars.json'],
   },
 };
 

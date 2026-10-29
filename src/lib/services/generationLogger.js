@@ -378,6 +378,7 @@ export async function logGeneration({
         writerModels: Array.isArray(pipelineInfo.writerModels) ? pipelineInfo.writerModels : [],
         stepTimings: pipelineInfo.stepTimings || {},
         desk: pipelineInfo.desk || null, // ★ ป้ายโต๊ะข่าว {newsId, lane, category, editor, editorIcon}
+        ...(pipelineInfo.f2x ? { f2x: pipelineInfo.f2x } : {}), // ★ 29 ต.ค. 69 นักเขียน F2X: ไม่ส่งมา (สวิตช์ปิด) = ไม่มีคีย์ = pipeline_info เดิมทุกไบต์
         ...compactResearchAgentPipelineInfo(pipelineInfo), // ★ 1 ต.ค. 69 (Research Agent v2): ไม่ส่งมา = ไม่มีคีย์ = ไบต์เดิม
       },
       userId: userId || 'anonymous',
