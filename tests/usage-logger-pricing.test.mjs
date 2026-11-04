@@ -12,6 +12,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { register } from 'node:module';
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { importPatchedModule } from './helpers/temp-module.mjs';
 
 const _mod = (body) => 'data:text/javascript,' + encodeURIComponent(body);
 
@@ -19,7 +22,12 @@ const _mod = (body) => 'data:text/javascript,' + encodeURIComponent(body);
 const STUB_DB = _mod(`
   export const prisma = {
     apiUsageLog: {
-      async create(args) { globalThis.__USAGE_LOG_CAPTURED = args; return args; }
+      async create(args) {
+        globalThis.__CACHE_AUDIT_WRITES?.push(args);
+        if (globalThis.__CACHE_AUDIT_DB_FAIL) throw new Error('test database unavailable');
+        globalThis.__USAGE_LOG_CAPTURED = args;
+        return args;
+      }
     }
   };
 `);
@@ -75,4 +83,157 @@ test('claude-opus-5: ตัวคูณ token เศษส่วนคิดถ�
   const expected = (2900 / 1_000_000) * 5.0 + (900 / 1_000_000) * 25.0;
   assert.ok(Math.abs(captured.data.costUsd - expected) < 1e-9);
   assert.ok(captured.data.costUsd > 0, 'ต้องไม่ใช่ 0 — นี่คือบั๊กเดิมที่ COST-AUDIT.md ชี้ (ข้อ 2-A)');
+});
+
+// Cache audit: real client + real pricing, mocked SDK/DB; never use paid APIs.
+const CLIENT_URL = new URL('../src/lib/ai/claudeClient.js', import.meta.url);
+const JSON_SUFFIX = '\n\nตอบเป็น JSON เท่านั้น ห้ามมี text อื่นนอก JSON';
+const CACHE_USAGE = { input_tokens: 1000, output_tokens: 500, cache_creation_input_tokens: 2000, cache_read_input_tokens: 10000 };
+
+async function runClaude({ args = {}, response = {}, sdkError, dbFail = false } = {}) {
+  const requests = [], writes = [], logs = [];
+  const previousFetch = globalThis.fetch;
+  const previousEnv = { ...process.env };
+  const previousConsole = { log: console.log, warn: console.warn, error: console.error };
+  globalThis.__CACHE_AUDIT_WRITES = writes;
+  globalThis.__CACHE_AUDIT_DB_FAIL = dbFail;
+  globalThis.__CACHE_AUDIT_CLIENT = { messages: { create: async (body, options) => {
+    requests.push({ body: structuredClone(body), options });
+    if (sdkError) throw sdkError;
+    return {
+      id: 'msg_cache_test', _request_id: 'req_cache_test', model: body.model,
+      stop_reason: 'end_turn', usage: CACHE_USAGE,
+      content: [{ type: 'text', text: '{"news":"ต้นฉบับเดิม"}' }], ...response,
+    };
+  } } };
+  globalThis.fetch = () => { throw new Error('Network is forbidden in cache regression tests'); };
+  for (const level of Object.keys(previousConsole)) console[level] = (...parts) => logs.push(parts.join(' '));
+  for (const key of ['CLAUDE_WRITE_MODEL', 'CLAUDE_WRITE_EFFORT', 'LEGACY_LENGTH_RULES', 'RISK_WORDS_LEGACY', 'LOG_FULL_PROMPT']) delete process.env[key];
+  process.env.ANTHROPIC_API_KEY = 'test-only-no-network';
+  try {
+    const source = readFileSync(CLIENT_URL, 'utf8')
+      .replace("import Anthropic from '@anthropic-ai/sdk';", 'const Anthropic = class { constructor() { return globalThis.__CACHE_AUDIT_CLIENT; } };')
+      .replace("from './usageLogger';", "from './usageLogger.js';")
+      .replace("import { sanitizeOutput } from './safetyFilter';", 'const sanitizeOutput = (value) => value;');
+    const client = await importPatchedModule(source, CLIENT_URL, 'cache-usage-client');
+    let result, error;
+    try {
+      result = await client.callClaude({ prompt: 'ต้นฉบับข่าวทดสอบ', model: 'claude-opus-4-8', effort: 'medium', maxTokens: 16000, ...args });
+    } catch (e) { error = e; }
+    await Promise.resolve(); // let the mocked asynchronous DB write finish
+    const events = logs.filter(s => s.startsWith('[Anthropic Usage] ')).map(s => JSON.parse(s.slice('[Anthropic Usage] '.length)));
+    return { requests, writes, logs, events, result, error };
+  } finally {
+    globalThis.fetch = previousFetch;
+    for (const [level, fn] of Object.entries(previousConsole)) console[level] = fn;
+    for (const key of Object.keys(process.env)) if (!(key in previousEnv)) delete process.env[key];
+    Object.assign(process.env, previousEnv);
+    delete globalThis.__CACHE_AUDIT_WRITES;
+    delete globalThis.__CACHE_AUDIT_DB_FAIL;
+    delete globalThis.__CACHE_AUDIT_CLIENT;
+  }
+}
+
+test('refusal usage is recorded exactly once before throwing to the existing fallback', async () => {
+  const r = await runClaude({ response: { stop_reason: 'refusal', content: [{ type: 'text', text: '{"partial":true}' }] } });
+  assert.match(r.error?.message || '', /refusal/);
+  assert.equal(r.result, undefined, 'partial refusal must never become successful content');
+  assert.equal(r.requests.length, 1);
+  assert.equal(r.writes.length, 1, 'billed refusal usage must not be discarded');
+  assert.equal(r.writes[0].data.inputTokens, 4500);
+  assert.equal(r.writes[0].data.costUsd, 0.035);
+  assert.equal(r.events.length, 1);
+  assert.equal(r.events[0].stopReason, 'refusal');
+});
+
+test('raw cache counters stay separate from weighted DB tokens and preserve existing prices', async () => {
+  for (const [model, weighted, cost] of [['claude-opus-4-8', 4500, 0.035], ['claude-opus-5-5', 4000, 0.026]]) {
+    const r = await runClaude({ args: { model, promptBlocks: [{ text: 'กติกาคงที่', cache: true }, { text: 'ข้อมูลข่าว' }] } });
+    assert.equal(r.error, undefined);
+    assert.equal(r.writes.length, 1);
+    assert.equal(r.writes[0].data.inputTokens, weighted);
+    assert.ok(Math.abs(r.writes[0].data.costUsd - cost) < 1e-12);
+    assert.equal(r.events.length, 1);
+    const e = r.events[0];
+    assert.equal(e.inputTokens, 1000);
+    assert.equal(e.cacheCreationInputTokens, 2000);
+    assert.equal(e.cacheReadInputTokens, 10000);
+    assert.equal(e.totalInputTokens, 13000);
+    assert.equal(e.weightedInputTokens, weighted);
+    assert.equal(e.requestId, 'req_cache_test');
+    assert.equal(e.messageId, 'msg_cache_test');
+    assert.equal(e.cacheBreakpoints, 1);
+    assert.equal(e.promptMode, 'blocks');
+    assert.equal(e.usageReported, true);
+    assert.equal(e.model, model);
+    assert.ok(Math.abs(e.costUsd - cost) < 1e-12);
+    assert.deepEqual(Object.keys(r.writes[0].data).sort(), ['provider', 'model', 'inputTokens', 'outputTokens', 'costUsd', 'feature', 'userId'].sort(), 'no DB schema changes');
+  }
+});
+
+test('zero-cache and absent usage are distinguishable; no prompt text or keys in telemetry', async () => {
+  for (const usage of [{ input_tokens: 42, output_tokens: 5 }, undefined]) {
+    const r = await runClaude({ response: { usage } });
+    assert.equal(r.events.length, 1);
+    const e = r.events[0];
+    assert.equal(e.cacheCreationInputTokens, 0);
+    assert.equal(e.cacheReadInputTokens, 0);
+    assert.equal(e.cacheBreakpoints, 0);
+    assert.equal(e.promptMode, 'text');
+    assert.equal(e.usageReported, usage !== undefined);
+    const eventText = JSON.stringify(e);
+    assert.equal(eventText.includes('ต้นฉบับข่าวทดสอบ'), false);
+    assert.equal(eventText.includes('test-only-no-network'), false);
+  }
+});
+
+test('HTTP errors do not manufacture usage; invalid JSON and empty responses still log once', async () => {
+  const failed = await runClaude({ sdkError: new Error('HTTP 503') });
+  assert.match(failed.error.message, /HTTP 503/);
+  assert.equal(failed.writes.length, 0);
+  assert.equal(failed.events.length, 0);
+  for (const content of [[], [{ type: 'text', text: 'not json' }]]) {
+    const r = await runClaude({ response: { content } });
+    assert.ok(r.error);
+    assert.equal(r.writes.length, 1);
+    assert.equal(r.events.length, 1);
+  }
+});
+
+test('DB failure leaves cache telemetry available and preserves success/refusal behavior', async () => {
+  for (const stop_reason of ['end_turn', 'refusal']) {
+    const r = await runClaude({ dbFail: true, response: { stop_reason } });
+    assert.equal(r.events.length, 1);
+    assert.equal(r.writes.length, 1);
+    assert.ok(r.logs.some(s => s.includes('Failed to save usage log')));
+    if (stop_reason === 'refusal') assert.match(r.error.message, /refusal/);
+    else { assert.equal(r.error, undefined); assert.equal(r.result.news, 'ต้นฉบับเดิม'); }
+  }
+});
+
+test('writer request is byte-identical to audited main 862e72d0; normal JSON and model metadata survive', async () => {
+  const r = await runClaude();
+  assert.equal(r.error, undefined);
+  const hash = createHash('sha256').update(JSON.stringify(r.requests[0].body)).digest('hex');
+  assert.equal(hash, '396ed92a99eba22bb5b0b8e0470379637e35e25dd28557dbed518c68065591a6');
+  assert.equal(r.result.news, 'ต้นฉบับเดิม');
+  assert.equal(r.result._modelUsed, 'claude-opus-4-8');
+  assert.equal(Object.keys(r.result).includes('_modelUsed'), false);
+});
+
+test('cache breakpoints, static prefix, JSON suffix and empty-block fallback are unchanged', async () => {
+  for (const variable of ['ข่าว ก', 'ข่าว ข']) {
+    const r = await runClaude({ args: {
+      systemPrompt: 'ระบบเดิม', prompt: 'สำรอง',
+      promptBlocks: [{ text: '  ', cache: true }, { text: 'กติกาคงที่', cache: true }, { text: variable }],
+    } });
+    assert.equal(r.requests[0].body.system, 'ระบบเดิม');
+    assert.deepEqual(r.requests[0].body.messages[0].content, [
+      { type: 'text', text: 'กติกาคงที่', cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: variable + JSON_SUFFIX },
+    ]);
+  }
+  const r = await runClaude({ args: { prompt: 'สำรอง', promptBlocks: [{ text: '', cache: true }] } });
+  assert.equal(r.requests[0].body.messages[0].content, 'สำรอง' + JSON_SUFFIX);
+  assert.equal(r.events[0].cacheBreakpoints, 0);
 });
