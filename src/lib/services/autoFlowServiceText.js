@@ -37,6 +37,7 @@ import { neutralizeGuessedGender } from '@/lib/services/genderNeutral'; // ★ 2
 import { isAdminVoiceEditEnabled, runAdminVoiceEdit } from '@/lib/services/adminVoiceEditor'; // ★ 27 ต.ค. 69 ขั้น บก.เกลาภาษาแอดมิน (G2) — สวิตช์ ADMIN_VOICE_EDIT=1 (ค่าเริ่มต้นปิด)
 import { isLayoutEditEnabled, runLayoutEdit } from '@/lib/services/layoutEditor'; // ★ 28 ต.ค. 69 ขั้น บก.จัดหน้า (ขั้นสุดท้าย) — สวิตช์ LAYOUT_EDIT=1 (ค่าเริ่มต้นปิด)
 import { isF2xWriterEnabled, classifyF2xGenre, writeF2xVersion, f2xPreset, F2X_PRESET_ID } from '@/lib/services/f2xWriter'; // ★ 29 ต.ค. 69 นักเขียน F2X (สาย TEXT) — สวิตช์ F2X_WRITER=1 (ค่าเริ่มต้นปิด)
+import { isThreeParaEditEnabled, runThreeParaEdit } from '@/lib/services/threeParaEditor'; // ★ 4 พ.ย. 69 ขั้น บก.สามย่อหน้า (แทน บก.จัดหน้า) — สวิตช์ THREE_PARA_EDIT=1 (ค่าเริ่มต้นปิด)
 import { isCardAuthorityR6Enabled } from '@/lib/ai/cardAuthority'; // 🎛️ สวิตช์ปลดหาง "ห้ามขึ้นต้นด้วยวันที่" (19 ส.ค. 69) — ห้ามอ่าน env CARD_AUTH* เอง ต้อง import จากไฟล์กลางเท่านั้น
 import {
   getActivePipelineDeadline,
@@ -1306,7 +1307,10 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
       if (genderCount(post) !== genderCount(pre)) reasons.push('ป้ายเดาเพศเปลี่ยน');
       return reasons;
     };
-    const _le = await runLayoutEdit(finalVersions, { rawText, recheck: _layoutRecheck });
+    // ★ 4 พ.ย. 69 (เจ้าของสั่ง "ให้เป็นสามย่อหน้าแบบเดิม แต่จัดโครงสร้างประโยคให้อ่านแล้วเข้าใจ ใช้วรรคตอน เครื่องหมายถูกต้อง"): THREE_PARA_EDIT=1 = บก.สามย่อหน้าแทน · ปิด = บก.จัดหน้าเดิมทุกไบต์
+    const _le = isThreeParaEditEnabled()
+      ? await runThreeParaEdit(finalVersions, { rawText, recheck: _layoutRecheck })
+      : await runLayoutEdit(finalVersions, { rawText, recheck: _layoutRecheck });
     finalVersions = _le.versions;
     if (_le.warning) pipelineQualityWarnings.push(_le.warning);
     addLog('Quality', _le.summaryLine);
@@ -1382,6 +1386,10 @@ export async function processAutoFlowText({ url, text, sourceType: forceType, pr
         writerModels: usedModels,
         // ★ 29 ต.ค. 69 (F2X): ตรวจย้อนได้ว่าฉบับไหนเขียนด้วย F2X · ตัวอย่างชุดไหน · แก้จุดเกินดิบกี่จุด · มุมไหนถอย (ปิดสวิตช์ = undefined = ไม่มีคีย์นี้ใน JSON)
         f2x: _f2xOn ? { versions: finalVersions.map((version) => version._f2xMeta || null), fallbacks: _f2xFallbacks } : undefined,
+        // ★ 4 พ.ย. 69 (บก.สามย่อหน้า): ขั้นนี้แก้ถ้อยคำได้ → เก็บฉบับก่อนแก้ + เหตุที่ถอย ให้ตรวจย้อนได้ (ปิดสวิตช์ = undefined = ไม่มีคีย์นี้ใน JSON)
+        threePara: finalVersions.some((version) => version._layoutEdit?.mode === 'three_para')
+          ? { versions: finalVersions.map((version) => (version._layoutEdit?.mode === 'three_para' ? { rewritten: version._layoutEdit.rewritten, reasons: version._layoutEdit.reasons || [], editorNotes: version._layoutEdit.issues, lightIssues: version._layoutEdit.lightDetails || [], pre: version._preLayoutContent || null } : null)) }
+          : undefined,
         diversityWarning: diversityWarning || null,
         desk: deskMeta || null, // ★ ป้ายโต๊ะข่าว {newsId, lane, category, editor, editorIcon}
         // ★ 16 ก.ค. 69 (B4): พอร์ตจากสาย URL — เดิม stepTimings มีเฉพาะใน return data ไม่เข้า Generation Log

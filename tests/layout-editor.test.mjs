@@ -238,7 +238,7 @@ test('D4 ท่อนจริงใน autoFlowServiceText: เปิดสว�
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   const run = new AsyncFunction('ctx', `
     let { finalVersions } = ctx;
-    const { detectedType, rawText, groundingSourceText, pipelineQualityWarnings, addLog, _autoWorkflowId, logPipeline, isLayoutEditEnabled, runLayoutEdit,
+    const { detectedType, rawText, groundingSourceText, pipelineQualityWarnings, addLog, _autoWorkflowId, logPipeline, isLayoutEditEnabled, runLayoutEdit, isThreeParaEditEnabled = () => false, runThreeParaEdit,
       assessRawTextSafety, annotateMissingRawFacts, neutralizeGuessedGender } = ctx;
     ${src.slice(start, end)}
     return { finalVersions, pipelineQualityWarnings };
@@ -320,7 +320,7 @@ test('D5 ท่อนจริง + ด่านจริง: แยกบรร
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   const run = new AsyncFunction('ctx', `
     let { finalVersions } = ctx;
-    const { detectedType, rawText, groundingSourceText, pipelineQualityWarnings, addLog, _autoWorkflowId, logPipeline, isLayoutEditEnabled, runLayoutEdit,
+    const { detectedType, rawText, groundingSourceText, pipelineQualityWarnings, addLog, _autoWorkflowId, logPipeline, isLayoutEditEnabled, runLayoutEdit, isThreeParaEditEnabled = () => false, runThreeParaEdit,
       assessRawTextSafety, annotateMissingRawFacts, neutralizeGuessedGender } = ctx;
     ${src.slice(start, end)}
     return { finalVersions };
