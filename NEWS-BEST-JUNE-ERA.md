@@ -6,7 +6,7 @@
 ## จุดย้อนกลับ (ใช้อันไหนก็ได้)
 | ชั้น | จุดปักหมุด |
 |---|---|
-| โค้ด (GitHub) | ป้าย `news-best-june-8nov69` บน `okpakorn-source/viral-content-system` |
+| โค้ด (GitHub) | กิ่ง `news-best-june-8nov69` บน `okpakorn-source/viral-content-system` (ห้าม push ทับกิ่งนี้) · โค้ดเท่ากับ commit `b24e291e` ที่ deploy จริง |
 | Vercel (ย้อนเร็วสุด) | deployment `dpl_BsFpYbNXivA6cddL4ui6CnUhaBwo` (commit b24e291e) → Vercel › Deployments › Instant Rollback / Promote |
 | คลังพรอมต์ (Supabase) | snapshot `store_items` store `prompt-library__best-june-20261108` (73 ใบ) |
 | คลังไวรัล (Supabase) | snapshot `store_items` store `viral_examples__best-june-20261108` (73 แถว) |
@@ -53,9 +53,9 @@ Supabase project: `ajyhujuxvmdhypmnpfny` (okpakorn-source's Project) · Vercel p
 แก้อะไรในสมองเขียนข่าวต้องรันชุดทดสอบเนื้อดิบ มิ.ย. ก่อน-หลัง แล้วเทียบ % ลอกดิบ + ให้พนักงานอ่านแบบไม่บอกเวอร์ชัน
 
 ## วิธีย้อนกลับมาระบบนี้
-1. **โค้ด** — เร็วสุด: Vercel Instant Rollback ไป deployment ด้านบน · ถาวร: เอาโค้ดจากป้ายขึ้น main
-   `git checkout -B restore-best news-best-june-8nov69 && git push origin restore-best:main --force-with-lease`
-   (หรือ `git revert` ทุก commit หลังป้าย) · Railway บอทไม่ต้องแตะ
+1. **โค้ด** — เร็วสุด: Vercel Instant Rollback ไป deployment ด้านบน · ถาวร: เอาโค้ดจากกิ่งปักหมุดขึ้น main
+   `git fetch origin news-best-june-8nov69 && git checkout -B restore-best origin/news-best-june-8nov69 && git push origin restore-best:main --force-with-lease`
+   (หรือ `git revert` ทุก commit หลังกิ่งปักหมุด) · Railway บอทไม่ต้องแตะ
 2. **สวิตช์** — ตั้งตามตารางด้านบน แล้ว Redeploy 1 ครั้ง
 3. **คลัง** — รันใน Supabase SQL (สำรองของที่อยู่ตอนนั้นก่อน):
    ```sql
