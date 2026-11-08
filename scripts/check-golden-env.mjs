@@ -26,8 +26,11 @@ const GOLDEN = [
   // ★ 8 พ.ย. 69 ชั้นคิวรุ่นปัจจุบันอ่านเพิ่ม (หลังรอบ 23 ส.ค.) — ยุค มิ.ย. ไม่มีรีเสิร์ชเอเจนต์: โหมด write = งานข่าวถูกพักรอรีเสิร์ชที่โค้ด มิ.ย. ไม่ใช้
   { name: 'RESEARCH_AGENT',       expect: 'unset', allow: [],                  meaning: 'รีเสิร์ชเอเจนต์ (ไม่มีในยุค มิ.ย.) — Vercel และ Railway ต้องไม่ตั้ง', critical: false },
   { name: 'RESEARCH_AGENT_MODE',  expect: 'unset', allow: [],                  meaning: 'write = พักงานข่าวรอรีเสิร์ช (เสียเวลาเปล่ากับโค้ด มิ.ย.)', critical: false },
-  { name: 'QUEUE_NEWS_CONCURRENCY', expect: 'unset', allow: ['*'],             meaning: 'จำนวนข่าวที่เขียนพร้อมกัน (โครงสร้าง — ไม่แตะสำนวน)', critical: false },
-  { name: 'QUEUE_TIMEOUT_RESCUE', expect: 'cover-only', allow: ['unset'],      meaning: 'แนะนำ cover-only: ข่าวเกิน 770 วิ = failed ทันทีแบบยุคปัง (ไม่ตั้ง = รอ route รายงาน ซึ่ง route ยุคปังไม่ทำ → ค้าง 15 นาที)', critical: false },
+  { name: 'QUEUE_NEWS_CONCURRENCY', expect: 'unset', allow: ['*'],             meaning: 'จำนวนข่าวที่เขียนพร้อมกัน (โครงสร้าง — ไม่แตะสำนวน · ตัวบันทึกยุค มิ.ย. จองเลขเคสใหม่เมื่อชนกันแล้ว)', critical: false },
+  // ★ 8 พ.ย. 69 ผู้ตรวจอิสระ: route ยุค มิ.ย. ไม่รายงานสถานะคิวเอง → ไม่ตั้ง = ข่าวเกิน 770 วิค้าง 15 นาทีแล้วถูกรันซ้ำ (จ่ายซ้ำ) — บังคับ
+  { name: 'QUEUE_TIMEOUT_RESCUE', expect: 'cover-only', allow: [],             meaning: 'ต้อง cover-only: ข่าวเกิน 770 วิ = failed ทันทีแบบยุค มิ.ย. (ไม่ตั้ง = ค้าง 15 นาทีแล้วถูกรันซ้ำ)', critical: true },
+  // ★ 8 พ.ย. 69 ผู้ตรวจอิสระ: Routine API เรียก ensureWorkflow ที่ workflowEngine ยุค มิ.ย. ไม่มี → 503 ทุกงาน (ไม่ได้ใช้มาตั้งแต่ 11 ก.ย.)
+  { name: 'ROUTINE_API',          expect: 'unset', allow: ['0'],               meaning: 'ต้องไม่เปิด — ใช้กับโค้ด มิ.ย. ไม่ได้', critical: true },
   { name: 'QUEUE_NEWS_DEADLINE_MS', expect: 'unset', allow: [],                meaning: 'เพดานเวลางานข่าวใน worker (default 770000)', critical: false },
   { name: 'QUEUE_FETCH_LONG_AGENT', expect: 'unset', allow: ['0', '1'],        meaning: 'dispatcher fetch ยาว (โครงสร้าง)', critical: false },
   { name: 'QUEUE_SELF_BASE_URL',  expect: 'unset', allow: ['*'],               meaning: 'origin ที่ worker เรียกตัวเอง (กัน 401 SSO)', critical: false },

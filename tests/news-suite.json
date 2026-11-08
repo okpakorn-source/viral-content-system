@@ -118,7 +118,8 @@
     "tests/usage-pricing-new-models.test.mjs",
     "tests/bot-pipeline-labels.test.mjs",
     "tests/test-news-runner.test.mjs",
-    "tests/usage-logger-pricing.test.mjs"
+    "tests/usage-logger-pricing.test.mjs",
+    "tests/era-generation-log-collision.test.mjs"
   ],
   "exclude": [
     {

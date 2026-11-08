@@ -34,20 +34,43 @@ select net.http_get(
 select status_code, jsonb_array_length(content::jsonb) as cards
 from net._http_response where id = <REQUEST_ID>;
 
--- ── ขั้น 4: แทนคลังพรอมต์ด้วย 73 ใบยุค มิ.ย. + ตัดตัวอย่างไวรัลที่เพิ่มหลังยุค (ทำในธุรกรรมเดียว) ──
-begin;
-delete from public.store_items where store_name = 'prompt-library';
-insert into public.store_items (id, store_name, data, created_at, updated_at)
-select e->>'id', 'prompt-library', e,
-       (e->>'createdAt')::timestamptz,
-       coalesce((e->>'updatedAt')::timestamptz, (e->>'createdAt')::timestamptz)
-from net._http_response r, jsonb_array_elements(r.content::jsonb) e
-where r.id = <REQUEST_ID> and r.status_code = 200;
-delete from public.viral_examples where created_at >= '2026-07-25T00:00:00+07';
--- ตรวจก่อน commit: prompt-library ต้อง = 73 · viral_examples ต้อง = 73 · ไม่ตรง = rollback;
-select (select count(*) from public.store_items where store_name = 'prompt-library') as prompt_cards,
-       (select count(*) from public.viral_examples) as viral_rows;
-commit;
+-- ── ขั้น 4: แทนคลังพรอมต์ด้วย 73 ใบยุค มิ.ย. + ตัดตัวอย่างไวรัลที่เพิ่มหลังยุค ──
+-- ทั้งบล็อกเป็นธุรกรรมเดียว · ด่านกันพลาดอัตโนมัติ: ไฟล์ไม่ใช่ 200/ไม่ครบ 73 ใบ/สำรองไม่ครบ/ผลไม่ใช่ 73+73
+--   = RAISE EXCEPTION → ยกเลิกทั้งหมด ข้อมูลเดิมไม่ถูกแตะ (กันคลังว่างเพราะดึงไฟล์พลาด)
+do $$
+declare
+  _req bigint := <REQUEST_ID>;
+  _cards int; _bk_prompt int; _bk_viral int; _prompt_now int; _viral_now int;
+begin
+  select jsonb_array_length(content::jsonb) into _cards
+  from net._http_response where id = _req and status_code = 200;
+  if coalesce(_cards, 0) <> 73 then
+    raise exception 'ไฟล์คลังพรอมต์ไม่ครบ (ได้ % ใบ ต้อง 73) — ยกเลิก', coalesce(_cards, 0);
+  end if;
+
+  select count(*) into _bk_prompt from public.store_items where store_name = 'prompt-library__backup-20261108';
+  select count(*) into _bk_viral  from public.store_items where store_name = 'viral_examples__backup-20261108';
+  if _bk_prompt <> (select count(*) from public.store_items where store_name = 'prompt-library')
+     or _bk_viral <> (select count(*) from public.viral_examples where created_at >= '2026-07-25T00:00:00+07') then
+    raise exception 'สำรองไม่ครบ (prompt % · viral %) — รันขั้น 1 ก่อน', _bk_prompt, _bk_viral;
+  end if;
+
+  delete from public.store_items where store_name = 'prompt-library';
+  insert into public.store_items (id, store_name, data, created_at, updated_at)
+  select e->>'id', 'prompt-library', e,
+         (e->>'createdAt')::timestamptz,
+         coalesce((e->>'updatedAt')::timestamptz, (e->>'createdAt')::timestamptz)
+  from net._http_response r, jsonb_array_elements(r.content::jsonb) e
+  where r.id = _req and r.status_code = 200;
+  delete from public.viral_examples where created_at >= '2026-07-25T00:00:00+07';
+
+  select count(*) into _prompt_now from public.store_items where store_name = 'prompt-library';
+  select count(*) into _viral_now  from public.viral_examples;
+  if _prompt_now <> 73 or _viral_now <> 73 then
+    raise exception 'ผลไม่ตรงยุค มิ.ย. (prompt % · viral %) — ยกเลิกทั้งหมด', _prompt_now, _viral_now;
+  end if;
+  raise notice 'สำเร็จ: คลังพรอมต์ % ใบ · คลังไวรัล % แถว', _prompt_now, _viral_now;
+end $$;
 
 -- ── ขั้น 5: ปิดส่วนเสริมที่เปิดในขั้น 0 (ถ้าเดิมไม่ได้เปิดไว้) ──
 drop extension if exists pg_net;

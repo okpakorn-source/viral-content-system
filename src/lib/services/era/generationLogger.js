@@ -94,7 +94,7 @@ export async function logGeneration({
   userId = null,
 }) {
   try {
-    const caseId = await getNextCaseNumber();
+    let caseId = await getNextCaseNumber(); // ★ 8 พ.ย. 69 ข้อต่อคิวขนาน: let — จองเลขใหม่ได้เมื่อชนกัน
     const now = new Date().toISOString();
 
     // Compact versions for storage (keep essential data)
@@ -148,36 +148,49 @@ export async function logGeneration({
     };
 
     // Save to Supabase
+    // ★ 8 พ.ย. 69 ข้อต่อคิวขนาน (ไม่แตะการเขียนข่าว): คิวปัจจุบันเขียนข่าวพร้อมกันหลายงาน (ยุค มิ.ย. ทีละงาน)
+    //   → เลขเคสชนกันได้ (23505) · ชน = จองเลขใหม่ภายใน 30 วิ · บันทึกไม่สำเร็จ = ไม่คืนเลขเคส (กันบอทลิงก์ไปเคสที่ไม่มีจริง)
+    let _savedOk = true;
     if (isSupabaseReady()) {
       const sb = getSupabase();
-      const { error } = await sb.from(TABLE).insert({
-        case_id: caseId,
-        news_title: logEntry.newsTitle,
-        source_type: sourceType,
-        source_url: sourceUrl,
-        source_text: logEntry.sourceText,
-        source_text_length: logEntry.sourceTextLength,
-        version_count: logEntry.versionCount,
-        versions: logEntry.versions,
-        breakdown: logEntry.breakdown,
-        pipeline_info: logEntry.pipelineInfo,
-        user_id: logEntry.userId,
-        status: 'unreviewed',
-        review_note: null,
-        reviewed_at: null,
-        created_at: now,
-      });
-      if (error) {
+      const _collisionDeadline = Date.now() + 30000;
+      while (true) {
+        logEntry.caseId = caseId;
+        const { error } = await sb.from(TABLE).insert({
+          case_id: caseId,
+          news_title: logEntry.newsTitle,
+          source_type: sourceType,
+          source_url: sourceUrl,
+          source_text: logEntry.sourceText,
+          source_text_length: logEntry.sourceTextLength,
+          version_count: logEntry.versionCount,
+          versions: logEntry.versions,
+          breakdown: logEntry.breakdown,
+          pipeline_info: logEntry.pipelineInfo,
+          user_id: logEntry.userId,
+          status: 'unreviewed',
+          review_note: null,
+          reviewed_at: null,
+          created_at: now,
+        });
+        if (!error) {
+          console.log(`[GenLogger] ✅ Case #${caseId} saved to Supabase`);
+          break;
+        }
+        const _isCollision = /23505|duplicate key|unique/i.test(`${error.code || ''} ${error.message || ''}`);
+        if (_isCollision && Date.now() < _collisionDeadline) {
+          caseId = await getNextCaseNumber();
+          continue;
+        }
         console.warn(`[GenLogger] Supabase insert failed, using local: ${error.message}`);
-        await saveToLocal(logEntry);
-      } else {
-        console.log(`[GenLogger] ✅ Case #${caseId} saved to Supabase`);
+        _savedOk = await saveToLocal(logEntry).then(() => !process.env.VERCEL, () => false);
+        break;
       }
     } else {
       await saveToLocal(logEntry);
     }
 
-    return { caseId, success: true };
+    return _savedOk ? { caseId, success: true } : { caseId: null, success: false, error: 'GENERATION_LOG_NOT_SAVED' };
   } catch (err) {
     console.error('[GenLogger] Failed to log generation:', err.message);
     return { caseId: null, success: false, error: err.message };
