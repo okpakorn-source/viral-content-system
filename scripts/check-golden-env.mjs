@@ -21,7 +21,12 @@ const GOLDEN = [
   { name: 'SUPABASE_RESILIENCE_MODE', expect: 'unset', allow: [],              meaning: 'โหมดทนทาน Supabase (โครงสร้าง)', critical: false },
   { name: 'SUPABASE_REST_TIMEOUT_MS', expect: 'unset', allow: [],              meaning: 'timeout Supabase (โครงสร้าง)', critical: false },
   // --- ชั้นคิว/ตัวส่งงาน (คงรุ่นปัจจุบันไว้ — ค่าที่แนะนำให้ใกล้ยุคปัง) ---
-  { name: 'TEXT_ONLY_MODE',       expect: 'unset', allow: ['0', '1'],          meaning: 'ไม่ตั้ง/1 = รับเฉพาะข้อความ (เจ้าของเคาะ 16 ก.ค.) · 0 = รับลิงก์ด้วยเหมือนยุคปัง — เจ้าของเคาะ', critical: false },
+  // ★ 8 พ.ย. 69 (เจ้าของสั่ง "สวิตช์เหมือนยุค มิ.ย. ทุกจุด"): TEXT_ONLY_MODE คาด 0 = รับลิงก์ด้วยแบบ มิ.ย.
+  { name: 'TEXT_ONLY_MODE',       expect: '0',     allow: ['unset', '1'],      meaning: 'มิ.ย. = รับลิงก์ด้วย (0) · ไม่ตั้ง/1 = รับเฉพาะข้อความ (เจ้าของเคาะ 16 ก.ค.)', critical: false },
+  // ★ 8 พ.ย. 69 ชั้นคิวรุ่นปัจจุบันอ่านเพิ่ม (หลังรอบ 23 ส.ค.) — ยุค มิ.ย. ไม่มีรีเสิร์ชเอเจนต์: โหมด write = งานข่าวถูกพักรอรีเสิร์ชที่โค้ด มิ.ย. ไม่ใช้
+  { name: 'RESEARCH_AGENT',       expect: 'unset', allow: [],                  meaning: 'รีเสิร์ชเอเจนต์ (ไม่มีในยุค มิ.ย.) — Vercel และ Railway ต้องไม่ตั้ง', critical: false },
+  { name: 'RESEARCH_AGENT_MODE',  expect: 'unset', allow: [],                  meaning: 'write = พักงานข่าวรอรีเสิร์ช (เสียเวลาเปล่ากับโค้ด มิ.ย.)', critical: false },
+  { name: 'QUEUE_NEWS_CONCURRENCY', expect: 'unset', allow: ['*'],             meaning: 'จำนวนข่าวที่เขียนพร้อมกัน (โครงสร้าง — ไม่แตะสำนวน)', critical: false },
   { name: 'QUEUE_TIMEOUT_RESCUE', expect: 'cover-only', allow: ['unset'],      meaning: 'แนะนำ cover-only: ข่าวเกิน 770 วิ = failed ทันทีแบบยุคปัง (ไม่ตั้ง = รอ route รายงาน ซึ่ง route ยุคปังไม่ทำ → ค้าง 15 นาที)', critical: false },
   { name: 'QUEUE_NEWS_DEADLINE_MS', expect: 'unset', allow: [],                meaning: 'เพดานเวลางานข่าวใน worker (default 770000)', critical: false },
   { name: 'QUEUE_FETCH_LONG_AGENT', expect: 'unset', allow: ['0', '1'],        meaning: 'dispatcher fetch ยาว (โครงสร้าง)', critical: false },
@@ -32,6 +37,9 @@ const GOLDEN = [
   // --- สวิตช์ยุคใหม่ที่โค้ดยุคปัง "ไม่อ่านแล้ว" — ตั้งไว้ก็ไม่มีผล แต่ควรลบกันสับสน ---
   ...['VIRAL_SHORTLIST', 'VIRAL_SHORTLIST_K', 'VIRAL_MATCH_MODE', 'VIRAL_STYLE_PACK', 'VIRAL_ROTATE', 'VIRAL_HITS_FORMULA', 'VIRAL_TEACHER_GUIDE', 'VIRAL_EXAMPLE_CHARS', 'LEGACY_LENGTH_RULES', 'LENGTH_BY_CONTENT', 'ALLOW_LEGACY_AUTO', 'PROMPT_VARIETY_BAND', 'GEMINI_TEXT_MODEL', 'CARD_PICKER_AI', 'CARD_CATALOG_ALL', 'CARD_PICKER_MODEL', 'MODEL_BREAKDOWN', 'MODEL_BLUEPRINT', 'ENDING_MODE', 'STYLE_PACK_V2', 'FORCE_LESSON_ANGLE', 'ALLOW_SIMULATION', 'FEELING_ECHO', 'WITNESS_FACTLOCK', 'RAW_FACT_COMPLETENESS_GATE', 'NEWS_RESEARCH', 'ANGLE_MIN_MATCH_SCORE', 'DESK_PIPELINE']
     .map(n => ({ name: n, expect: 'unset', allow: [], meaning: 'สวิตช์ยุค ก.ค.16–ส.ค. — โค้ดยุคปังไม่อ่าน (ไม่มีผล) ควรลบ', critical: false, ignored: true })),
+  // ★ 8 พ.ย. 69 สวิตช์ท่อข่าวที่เกิดหลัง 23 ส.ค. — โค้ด มิ.ย. ไม่อ่าน (ไม่มีผล) · ลบได้ หรือเก็บไว้เผื่อสลับกลับระบบปัจจุบัน
+  ...['F2X_WRITER', 'THREE_PARA_EDIT', 'THREE_PARA_AI', 'LAYOUT_EDIT', 'ADMIN_VOICE_EDIT', 'EXTRACT_PRIMARY', 'EXTRACT_CLAUDE_MODEL', 'EXTRACT_CLAUDE_EFFORT', 'WRITER_SOURCE_CHARS', 'VIRAL_TEACHERS', 'WRITER_KEEP_FACTS_RULE']
+    .map(n => ({ name: n, expect: 'unset', allow: [], meaning: 'สวิตช์หลัง 23 ส.ค. — โค้ด มิ.ย. ไม่อ่าน (ไม่มีผล)', critical: false, ignored: true })),
 ];
 
 function loadEnvFile(p) {
