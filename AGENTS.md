@@ -72,7 +72,9 @@ node scripts/validate-workflow.mjs   # ต้องผ่าน 100%
 npx next build                        # ต้องไม่มี error
 ```
 
-### 9. ห้ามแก้ไฟล์เหล่านี้โดยไม่ได้รับอนุญาต
+### 9. ไฟล์หัวใจ (เดิม: ห้ามแก้โดยไม่ได้รับอนุญาต)
+> 🔓 **8 พ.ย. 69 เจ้าของปลดล็อกแล้ว** — แก้ได้โดยไม่ต้องถามทีละไฟล์ (รวมไฟล์ระบบเขียนข่าวทั้งหมดใน `SYSTEM_LOCKED_FILES.md`)
+> แต่ยังต้องแก้แบบ incremental ตามข้อ 6 และผ่านข้อ 8 ก่อน merge เข้า main
 - `prisma/schema.prisma` (DB schema)
 - `src/lib/ai/openai.js` (core AI client)
 - `src/lib/ai/aiRouter.js` (model routing logic)
