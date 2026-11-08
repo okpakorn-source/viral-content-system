@@ -76,51 +76,22 @@
     ]
   },
   "include": [
-    "tests/archive-best-effort-pl13.test.mjs",
-    "tests/archive-save-truth.test.mjs",
     "tests/batch5-v2-pinned-ai.test.mjs",
     "tests/bot-research-card.test.mjs",
     "tests/bot-resume.test.mjs",
     "tests/bot-review-reactions.test.mjs",
     "tests/bot-tracking-route.test.mjs",
-    "tests/breakdown-angle-selection.test.mjs",
-    "tests/breakdown-single-fallback-mc05.test.mjs",
-    "tests/card-picker-sonnet5.test.mjs",
-    "tests/card-teacher-match.test.mjs",
     "tests/clip-golden-shared-clients.test.mjs",
-    "tests/contextual-grounding-warning-only.test.mjs",
-    "tests/correction-ai-timeout-pl11.test.mjs",
-    "tests/correction-fact-stability.test.mjs",
     "tests/deadline-reserve-t1.test.mjs",
     "tests/discord-queue-terminal-error.test.mjs",
-    "tests/diversity-warning-only.test.mjs",
-    "tests/editor-post-sanitize-pl06.test.mjs",
     "tests/env-alias-apify.test.mjs",
-    "tests/extract-claude-attempt-cap.test.mjs",
-    "tests/extract-claude-switch.test.mjs",
     "tests/fab-gate-off.test.mjs",
     "tests/fabrication-gate-fail-open.test.mjs",
-    "tests/fact-source-policy-s9.test.mjs",
-    "tests/generation-log-nonblocking.test.mjs",
-    "tests/health-attribution-grounding.test.mjs",
     "tests/keywords-dream-schema.test.mjs",
-    "tests/l3a-ai-fix-mc07.test.mjs",
-    "tests/l3b-contract.test.mjs",
-    "tests/medical-term-whitelist.test.mjs",
     "tests/news-filter-budget-mc13.test.mjs",
-    "tests/news-length-contract.test.mjs",
     "tests/news-prepush-gate.test.mjs",
     "tests/opus55-effort-cost.test.mjs",
-    "tests/opus55-switch.test.mjs",
-    "tests/opus55-timeouts.test.mjs",
-    "tests/partial-angles-pl08.test.mjs",
-    "tests/pipeline-deadline-contract.test.mjs",
-    "tests/place-scrub-raw-authority.test.mjs",
-    "tests/post-text-no-separate-title.test.mjs",
-    "tests/publish-quarantine-pl14.test.mjs",
     "tests/queue-parallel.test.mjs",
-    "tests/raw-fact-completeness-gate.test.mjs",
-    "tests/raw-first-prompt-authority.test.mjs",
     "tests/research-agent-codex-runner.test.mjs",
     "tests/research-agent-gate.test.mjs",
     "tests/research-agent-ops.test.mjs",
@@ -132,46 +103,22 @@
     "tests/research-editor-brief.test.mjs",
     "tests/research-encoding-check.test.mjs",
     "tests/research-queue-hold.test.mjs",
-    "tests/research-switch.test.mjs",
     "tests/research-watchdog-digest.test.mjs",
     "tests/research-web-digest.test.mjs",
-    "tests/research-web-pipeline.test.mjs",
     "tests/research-web-routes.test.mjs",
     "tests/research-web-store.test.mjs",
     "tests/research-write-bot-web.test.mjs",
-    "tests/research-write-pipeline.test.mjs",
     "tests/research-xlane-gate.test.mjs",
-    "tests/risk-words-single-source.test.mjs",
-    "tests/rollback-scrub-pl05.test.mjs",
     "tests/routine-core.test.mjs",
     "tests/routine-mutation.test.mjs",
-    "tests/routine-pipeline.test.mjs",
     "tests/routine-routes.test.mjs",
     "tests/routine-storage.test.mjs",
     "tests/routine-validation.test.mjs",
-    "tests/safety-filter-word-boundary.test.mjs",
-    "tests/semantic-seam-guard.test.mjs",
-    "tests/system-prompt-slim-ov04.test.mjs",
-    "tests/raw-fact-presence.test.mjs",
     "tests/openai-gpt6-params.test.mjs",
-    "tests/teacher-concept-match.test.mjs",
-    "tests/gender-neutral.test.mjs",
-    "tests/viral-fewshot-url-path.test.mjs",
     "tests/usage-pricing-new-models.test.mjs",
     "tests/bot-pipeline-labels.test.mjs",
     "tests/test-news-runner.test.mjs",
-    "tests/text-queue-handoff-contract.test.mjs",
-    "tests/usage-logger-pricing.test.mjs",
-    "tests/validate-workflow-text.test.mjs",
-    "tests/viral-fewshot-rotation.test.mjs",
-    "tests/viral-shortlist.test.mjs",
-    "tests/workflow-final-save-contract.test.mjs",
-    "tests/workflow-init-contract.test.mjs",
-    "tests/writer-fable-switch.test.mjs",
-    "tests/admin-voice-editor.test.mjs",
-    "tests/layout-editor.test.mjs",
-    "tests/f2x-writer.test.mjs",
-    "tests/three-para-editor.test.mjs"
+    "tests/usage-logger-pricing.test.mjs"
   ],
   "exclude": [
     {
@@ -275,6 +222,324 @@
       "domain": "cover",
       "status": "red",
       "reason": "regex ซอร์สเก่า: คาด '.sort(storyRank(_legacyKeyOf(slot)))' แต่ megaAdapters.js เป็น 'storyRank(_fbLegacyKey)' (แดง 1/43) · ถ้าฟื้นให้คลาย regex เป็น storyRank\\([^)]+\\)"
+    },
+    {
+      "file": "tests/admin-voice-editor.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/archive-best-effort-pl13.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/archive-save-truth.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/breakdown-angle-selection.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/breakdown-single-fallback-mc05.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/card-picker-sonnet5.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/card-teacher-match.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/contextual-grounding-warning-only.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/correction-ai-timeout-pl11.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/correction-fact-stability.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/diversity-warning-only.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/editor-post-sanitize-pl06.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/extract-claude-attempt-cap.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/extract-claude-switch.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/f2x-writer.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/fact-source-policy-s9.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/gender-neutral.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/generation-log-nonblocking.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/health-attribution-grounding.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/l3a-ai-fix-mc07.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/l3b-contract.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/layout-editor.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/medical-term-whitelist.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/news-length-contract.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/opus55-switch.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/opus55-timeouts.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/partial-angles-pl08.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/pipeline-deadline-contract.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/place-scrub-raw-authority.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/post-text-no-separate-title.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/publish-quarantine-pl14.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/raw-fact-completeness-gate.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/raw-fact-presence.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/raw-first-prompt-authority.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/research-switch.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/research-web-pipeline.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/research-write-pipeline.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/risk-words-single-source.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/rollback-scrub-pl05.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/routine-pipeline.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/safety-filter-word-boundary.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/semantic-seam-guard.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/system-prompt-slim-ov04.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/teacher-concept-match.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/text-queue-handoff-contract.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/three-para-editor.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/validate-workflow-text.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/viral-fewshot-rotation.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/viral-fewshot-url-path.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/viral-shortlist.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/workflow-final-save-contract.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/workflow-init-contract.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
+    },
+    {
+      "file": "tests/writer-fable-switch.test.mjs",
+      "domain": "news-post-june",
+      "status": "red",
+      "reason": "ทดสอบฟีเจอร์ท่อข่าวที่เพิ่มหลังยุค มิ.ย. 69 — ปิดชั่วคราวเพราะสมองเขียนข่าวย้อนเป็นโค้ด 5b566c2 (เจ้าของสั่ง 8 พ.ย. 69) · บน main เดิมเทสนี้เขียว · ถ้ากลับไปใช้ระบบปัจจุบัน ให้ย้ายกลับเข้า include"
     }
   ]
 }
