@@ -9,28 +9,18 @@
  * - engagement bait
  * 
  * ห้ามแก้ output ใน layer นี้ — แค่ตรวจแล้ว report
- *
- * ★ 24 ก.ย. 69 (แคมเปญแก้บั๊ก กลุ่ม 1 S2 · เจ้าของอนุมัติ) — OV-01/PL-15/PL-04: คำเสี่ยงอ่านจากตารางกลาง
- *   ค่าเริ่มต้น: findRiskWords (เครื่องสแกนเดียวกับตัวกรอง safetyFilter · กฎชุด 'audit' ของ src/lib/ai/riskWords.js)
- *     → ไม่จับกลางคำ (ประเทศพม่า/ทศพล — เดิม /ศพ/g จับแล้ว L3A แทนเป็น "ประเทร่างผู้เสียหายม่า") · ไม่จับคำแทนที่ตัวกรองสร้างเอง
- *       ("ใช้อาวุธปืน" — เดิม /อาวุธ/g จับแล้วแทนซ้ำเป็น "สิ่งของอันตรายปืน") · กฎยาวชนะกฎสั้นไม่ซ้อนกัน ("ยิงตาย" = 1 issue ไม่ใช่ ยิง+ตาย)
- *     issue แนบ ruleId/aiRewrite/start/end ให้ L3 แทนคำตรงตำแหน่งที่กฎนี้จับจริง (ไม่ใช่ String.replace ตำแหน่งแรก) และ location นับจากตำแหน่งจริง
- *   RISK_WORDS_LEGACY=1: ลูป FORBIDDEN_WORDS เดิมทุกไบต์ (ตารางด้านล่างคงไว้เพื่อโหมดถอย ห้ามแก้)
  */
 
-import { callAI } from '@/lib/ai/openai';
-import { findRiskWords } from '../ai/safetyFilter.js';
-import { isRiskWordsLegacy } from '../ai/riskWords.js';
+import { callAI } from '@/lib/ai/era/openai';
 
 // === คำเสี่ยง Facebook (regex-based fast check) ===
-// ★ 24 ก.ย. 69 (S2): ใช้เฉพาะโหมดถอย RISK_WORDS_LEGACY=1 — ตารางจริงอยู่ที่ src/lib/ai/riskWords.js (RISK_RULES)
 const FORBIDDEN_WORDS = [
   // === ความรุนแรง / ชีวิต (HIGH) ===
   { pattern: /ฆ่า(?!เชื้อ|แมลง)/g, type: 'forbidden_word', severity: 'high', suggestion: 'ก่อเหตุ' },
   { pattern: /ฆาตกรรม/g, type: 'forbidden_word', severity: 'high', suggestion: 'คดีร้ายแรง' },
   { pattern: /ฆ่าตัวตาย/g, type: 'forbidden_word', severity: 'high', suggestion: 'จากไปอย่างเงียบๆ' },
   { pattern: /ศพ/g, type: 'forbidden_word', severity: 'high', suggestion: 'ร่างผู้เสียหาย' },
-  { pattern: /(?<!เสีย|ปิด)ตาย(?!ตัว|ด้าน|แล้ว)/g, type: 'forbidden_word', severity: 'high', suggestion: 'จากไป' },
+  { pattern: /(?<!เสีย)ตาย(?!ตัว|ด้าน|แล้ว)/g, type: 'forbidden_word', severity: 'high', suggestion: 'จากไป' },
   { pattern: /ชำแหละ/g, type: 'forbidden_word', severity: 'high', suggestion: 'เหตุรุนแรงอย่างยิ่ง' },
   { pattern: /หมกศพ/g, type: 'forbidden_word', severity: 'high', suggestion: 'ซุกซ่อนร่าง' },
   { pattern: /ข่มขืน/g, type: 'forbidden_word', severity: 'high', suggestion: 'ล่วงละเมิดทางเพศ' },
@@ -40,9 +30,8 @@ const FORBIDDEN_WORDS = [
   { pattern: /ยิง(?!ประตู|จรวด|ดาว)/g, type: 'forbidden_word', severity: 'high', suggestion: 'ใช้อาวุธปืน' },
 
   // === คำเสี่ยงที่ขาดไป (เพิ่มใหม่) ===
-  // ★ 16 ก.ค. 69 (B2 completion — review จับได้): ถอดกฎแบน "เสียชีวิต" ออกจาก L2 —
-  //   system/user prompt อนุญาตคำนี้แล้ว (บทเรียนเคส #01641) แต่ L2 ยังจับ → L3B เกลาทิ้งทุกงาน
-  //   = ย้อนกลับการแก้เงียบๆ ทุกข่าวการสูญเสีย ("ตาย/ดับ/สิ้นใจ" คำห้วนยังคงกฎเดิมตามนโยบาย)
+  // ★ เสียชีวิต/ตาย: ห้ามแทนคำตรงๆ (จะได้ "จากไป" ซ้ำจำเจทุกข่าว) — เข้าโหมด AI เกลาตามบริบทใน safeCorrect
+  { pattern: /เสียชีวิต/g, type: 'forbidden_word', severity: 'high', suggestion: 'สำนวนเลี่ยงตามบริบท เช่น จากไปอย่างสงบ/ไม่อยู่แล้ว/ลาลับ/ปิดตำนาน' },
   { pattern: /บาดเจ็บสาหัส/g, type: 'forbidden_word', severity: 'high', suggestion: 'ได้รับบาดเจ็บหนัก' },
   { pattern: /สะเก็ดระเบิด/g, type: 'forbidden_word', severity: 'high', suggestion: 'เหตุการณ์ไม่คาดฝัน' },
   { pattern: /ระเบิด(?!ความ|พลัง|แรง)/g, type: 'forbidden_word', severity: 'high', suggestion: 'เหตุการณ์รุนแรง' },
@@ -54,25 +43,14 @@ const FORBIDDEN_WORDS = [
   { pattern: /กระสุน/g, type: 'forbidden_word', severity: 'medium', suggestion: 'วัตถุอันตราย' },
 
   // === ความรุนแรง (MEDIUM) ===
-  // ★ 1 ส.ค. 69 (กรรมการเทสจับได้ — เคสจริง "ตามลำดับ"→"ตามลำจากไป" แล้วท่อนพังถูกลบทั้งท่อนจนแก่นข่าวหาย):
-  //   เพิ่ม lookbehind กันจับกลางคำ ลำดับ/อันดับ/ระดับ + lookahead ดับเบิล/ดับบลิว — สไตล์เดียวกับเคส "เส้นเลือด" ข้างล่าง
-  { pattern: /(?<!ลำ|อัน|ระ|ไฟ|เครื่อง)ดับ(?!เพลิง|ไฟ|กลิ่น|แสง|เบิล|บลิว)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'จากไป' },
+  { pattern: /ดับ(?!เพลิง|ไฟ|กลิ่น|แสง)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'จากไป' },
   { pattern: /สิ้นใจ/g, type: 'forbidden_word', severity: 'medium', suggestion: 'จากไป' },
   { pattern: /สยอง/g, type: 'forbidden_word', severity: 'medium', suggestion: 'น่าตกใจ' },
   { pattern: /โหด(?!ร้อน)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'รุนแรง' },
-  // ★ 10 ก.ค. 69: เพิ่ม lookbehind (?<!เส้น) — "เส้นเลือด/เส้นเลือดในสมอง" คือศัพท์การแพทย์ ห้ามจับ (เคยถูกแทนเป็น "เส้นร่องรอยเหตุการณ์ในสมองแตก")
-  // ★ 14 ส.ค. 69 (เจ้าของอนุมัติ + Sol รับรอง 9.1/10): ขยายศัพท์แพทย์ หลอด|ลิ่ม|เม็ด|ฟอก|ดัน|บริจาค —
-  //   บั๊กพิสูจน์ 2 รอบ (ข่าวพระ): "โรคหลอดเลือดสมอง" ถูกแทนเป็น "หลอดร่องรอยเหตุการณ์" → semantic scrub ตัดวลี → กริยาหาย
-  // ★ รอบ 2 คืนเดียวกัน (Sol รับรอง 9.2/10 — เคสจริง #03995 "สายเลือด" พังบนโปรดักชัน): + สาย|เกล็ด|กระแส|ถ่าย|ปั๊ม|เติม|ห้าม
-  //   ข้อจำกัดที่รู้ (Sol บันทึก): regex ไม่อ่านบริบททั้งประโยค — "เร่งห้ามเลือดที่ไหลนอง" จะรอดด่านนี้ (ยอมรับ เพราะ compound เองคือปฐมพยาบาล/การแพทย์)
-  { pattern: /(?<!เส้น|หลอด|ลิ่ม|เม็ด|ฟอก|ดัน|บริจาค|สาย|เกล็ด|กระแส|ถ่าย|ปั๊ม|เติม|ห้าม)เลือด(?!ดี|ข้น|ฝาด|จาง|ผสม|กำเดา)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'ร่องรอยเหตุการณ์' },
+  { pattern: /เลือด(?!ดี|ข้น|ฝาด|จาง|ผสม)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'ร่องรอยเหตุการณ์' },
   { pattern: /ทุบตี/g, type: 'forbidden_word', severity: 'medium', suggestion: 'ใช้ความรุนแรง' },
   { pattern: /ทำร้าย(?!ตัวเอง)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'ใช้ความรุนแรง' },
   { pattern: /เลือดสาด/g, type: 'forbidden_word', severity: 'high', suggestion: 'เหตุรุนแรง' },
-  // ★ 14 ส.ค. 69 ดึก (Sol backlog ข้อ 3 ขั้น 3 — ปิดความเสี่ยงคงเหลือที่จดไว้ตอนทำ whitelist):
-  //   คำแพทย์+ภาคต่อรุนแรง = ฉากกราฟิกจริง ("กระแสเลือดทะลักออกจากแผล") — whitelist ทำให้หลุดด่านคำเดี่ยว
-  //   severity high → เข้าเส้น AI เกลาทั้งประโยค (L3B ที่เพิ่งซ่อมสัญญา) ไม่แทนคำดิบ
-  { pattern: /(?:เส้น|หลอด|สาย|เกล็ด|กระแส|ถ่าย|ปั๊ม|เติม|ห้าม|บริจาค)เลือด(?:ที่)?(?:ออกมา)?(?:ไหลนอง|ทะลัก|สาด|พุ่งออก|เป็นกอง)/gu, type: 'forbidden_word', severity: 'high', suggestion: 'เหตุการณ์รุนแรง' },
   { pattern: /บาดแผล(?!ทางใจ)/g, type: 'forbidden_word', severity: 'medium', suggestion: 'อาการบาดเจ็บ' },
 
   // === ★ การพนัน / ยาเสพติด / แอลกอฮอล์ (Meta restricted — เพิ่ม 12 มิ.ย. 69) ===
@@ -128,38 +106,19 @@ export async function auditOutput(version) {
     // === FAST CHECKS (regex/string — ไม่เรียก AI) ===
 
     // 1. Forbidden words
-    if (isRiskWordsLegacy()) {
-      // โหมดถอย RISK_WORDS_LEGACY=1 — ลูปเดิมทุกไบต์ (ตาราง FORBIDDEN_WORDS ของไฟล์นี้)
-      for (const rule of FORBIDDEN_WORDS) {
-        const matches = content.match(rule.pattern);
-        if (matches) {
-          matches.forEach(m => {
-            const idx = content.indexOf(m);
-            const paraIndex = content.substring(0, idx).split('\n\n').length - 1;
-            issues.push({
-              type: rule.type,
-              text: m,
-              location: paraIndex,
-              severity: rule.severity,
-              suggestion: rule.suggestion,
-            });
+    for (const rule of FORBIDDEN_WORDS) {
+      const matches = content.match(rule.pattern);
+      if (matches) {
+        matches.forEach(m => {
+          const idx = content.indexOf(m);
+          const paraIndex = content.substring(0, idx).split('\n\n').length - 1;
+          issues.push({
+            type: rule.type,
+            text: m,
+            location: paraIndex,
+            severity: rule.severity,
+            suggestion: rule.suggestion,
           });
-        }
-      }
-    } else {
-      // ★ 24 ก.ย. 69 (S2): ตารางกลาง + เครื่องสแกนเดียวกับตัวกรอง — hit ไม่ซ้อนกัน มีตำแหน่งจริง
-      for (const hit of findRiskWords(content)) {
-        const paraIndex = content.substring(0, hit.start).split('\n\n').length - 1;
-        issues.push({
-          type: 'forbidden_word',
-          text: hit.text,
-          location: paraIndex,
-          severity: hit.rule.severity,
-          suggestion: hit.replacement,
-          ruleId: hit.rule.id,              // ให้ L3/scrub ค้นตำแหน่งด้วยกฎเดียวกัน (PL-04)
-          aiRewrite: hit.rule.aiRewrite === true, // เส้นทาง L3B (AI เกลา) ตัดสินจากตาราง ไม่ใช่รายการแยกใน L3
-          start: hit.start,
-          end: hit.end,
         });
       }
     }

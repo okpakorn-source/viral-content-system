@@ -16,10 +16,6 @@
  *  multi_url_pipeline → sequential/parallel: article_pipeline × N
  */
 
-// ★ 16 ส.ค. 69: ตัวอ่านกุญแจกลาง (รองรับชื่อพ้อง + ถอดอัญประกาศ) — ตารางชื่อพ้องอยู่ที่เดียวใน baseProvider
-//   ไฟล์นี้ถูก import จากฝั่งเซิร์ฟเวอร์เท่านั้น (auto/detect, auto/process) จึงนำเข้าได้ปลอดภัย
-import { readEnvKey } from '@/lib/providers/baseProvider';
-
 // ─── Provider Registry ─────────────────────────────────────────────
 // ลำดับ: primary ก่อน ถ้า key ไม่มี → ขยับ fallback ถัดไป
 
@@ -155,11 +151,9 @@ const PIPELINES = {
  */
 function isProviderAvailable(provider) {
   if (provider.envKey === null) return true;
-  // เช็ค process.env (server-side) ผ่านตัวอ่านกลาง — รองรับชื่อพ้อง (APIFY_API_TOKEN ↔ APIFY_API_KEY)
-  //   ★ 16 ส.ค. 69: ถ้าเช็คที่นี่ไม่รู้จักชื่อพ้อง จะตัด provider ทิ้งตั้งแต่ต้นทาง
-  //   ทั้งที่ตัวมันเองยิงได้จริง = "มีกุญแจแต่ระบบบอกว่าไม่มี"
+  // เช็ค process.env (server-side)
   try {
-    return Boolean(readEnvKey(provider.envKey));
+    return Boolean(process.env[provider.envKey]);
   } catch {
     return false;
   }
