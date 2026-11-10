@@ -4,6 +4,7 @@ import { createStore } from '@/lib/persistStore';
 import { getClipVideoQueue } from '@/lib/services/clipQueue';
 import { pickCasesToPurge, CLIP_CASE_KEEP, archiveRowId, CLIP_ARCHIVE_STORE } from '@/lib/services/clipArchive';
 import { extractFirstUrl } from '@/lib/services/clipAgent/clipUrl'; // ★ 30 ก.ย. 69 (เคสล่ม pepedog89): ดึงลิงก์แรก (ข้อ 4)
+import { downloadTiktokSlides, isTiktokPhotoUrl, looksAudioOnlyWatch } from '@/lib/services/clipSingle/slides'; // ★ 10 พ.ย. 69: โพสต์ภาพสไลด์ TikTok
 import { randomUUID } from 'crypto';
 
 // โหลดไฟล์วิดีโอ TikTok (tikwm) — ใช้บนคลาวด์ได้
@@ -27,6 +28,17 @@ async function downloadTiktokBuffer(url, meta = null) {
   //   และ "limit" เปล่าจับ "limited in your region" → ข้อความถาวร ("Failed to generate play address" · "under moderated review"
   //   · "limited in your region") กลายเป็น "แน่นชั่วคราว" → วนลองซ้ำ 80 รอบ · ตอนนี้จับเฉพาะวลีจำกัดความถี่จริง
   //   (rate limit/rate_limit/ratelimit · "Api Limit" · คำ limit เดี่ยวที่ไม่ตามด้วย " in" · too many · busy · try again)
+  // ★ 10 พ.ย. 69 (เคสตำรวจน๊อต · เจ้าของสั่ง "แก้เลย"): โพสต์ภาพสไลด์ (TikTok /photo/) — tikwm ให้ images[] + play = ไฟล์เพลง
+  //   เดิมหยิบ play (เพลง MP3) ไปให้ Gemini "ดูคลิป" → ไม่เห็นภาพเลย แต่งเรื่องขึ้นเอง · ตอนนี้โหลดภาพทุกใบ + เสียงประกอบ
+  //   คืน null (ไม่มีไฟล์วิดีโอ) แล้วฝากภาพไว้ที่ meta.slides ให้ท่อหลักดูภาพนิ่งแทน
+  const images = Array.isArray(data?.data?.images)
+    ? data.data.images.filter((u) => typeof u === 'string' && /^https:\/\//.test(u))
+    : [];
+  if (images.length) {
+    if (!meta) throw new Error('โพสต์ภาพสไลด์ต้องส่ง meta มารับภาพ — กดใหม่ไม่ช่วย');
+    meta.slides = await downloadTiktokSlides(images, playUrl);
+    return null;
+  }
   if (!playUrl) {
     const msg = String(data?.msg ?? '');
     if (/rate[\s_-]?limit|\bapi limit\b|\blimit\b(?! in)|too many|busy|try again/i.test(msg)) throw new Error(`tikwm แน่นชั่วคราว (rate limit: ${msg.slice(0, 80)})`);
@@ -34,6 +46,9 @@ async function downloadTiktokBuffer(url, meta = null) {
   }
   const vres = await fetch(playUrl, { signal: AbortSignal.timeout(300_000) });
   if (vres?.ok === false) throw new Error(`tikwm โหลดไฟล์วิดีโอไม่สำเร็จ (HTTP ${vres.status}) แน่นชั่วคราว ลองใหม่ได้`);
+  // ★ 10 พ.ย. 69: ได้ไฟล์เสียงล้วน (ไม่มีภาพ) = ห้ามส่งให้ "ดูคลิป" — Gemini จะแต่งภาพขึ้นเอง (เคสตำรวจน๊อต)
+  const vtype = String(vres?.headers?.get?.('content-type') || '').toLowerCase();
+  if (vtype.startsWith('audio/')) throw new Error('tikwm ได้แค่ไฟล์เสียง ไม่มีภาพหรือวิดีโอให้ดู (โพสต์รูป/ลิงก์เสีย) — กดใหม่ไม่ช่วย');
   const buf = Buffer.from(await vres.arrayBuffer());
   if (buf.length < 10000) throw new Error('วิดีโอเล็กเกินไป');
   if (buf.length > 150 * 1e6) throw new Error('วิดีโอใหญ่เกิน 150MB — กดใหม่ไม่ช่วย');
@@ -268,7 +283,8 @@ async function _loadClipForSingle(url, type) {
   try {
     const meta = { caption: '', durationSec: 0 };
     const buffer = type === 'tiktok' ? await downloadTiktokBuffer(url, meta) : await downloadMetaBuffer(url, undefined, meta);
-    return { buffer, caption: meta.caption, durationSec: meta.durationSec };
+    // ★ 10 พ.ย. 69: โพสต์ภาพสไลด์ = ไม่มีไฟล์วิดีโอ มีภาพนิ่งใน meta.slides แทน
+    return { buffer, caption: meta.caption, durationSec: meta.durationSec, slides: meta.slides || null };
   } catch (e) {
     throw _markRetrySafe(e);
   }
@@ -317,6 +333,7 @@ async function buildInsightSingle({ url, type, model = '', acc = null }) {
   const { runClipSinglePipeline } = await import('@/lib/services/clipSingle/pipeline');
   const r = await runClipSinglePipeline({
     url, type, videoBuffer: src.buffer, caption: src.caption, durationSec: src.durationSec, model, onUsage: _logClipUsage,
+    slides: src.slides || null, // ★ 10 พ.ย. 69: โพสต์ภาพสไลด์ TikTok
   });
   if (r.ok && r.insight) return r.insight;
   const spent = Number(r.spentTokens) || 0;
@@ -373,7 +390,11 @@ export async function POST(request) {
         // ★ 25 ต.ค. 69 (P9): ไม่คืนผลจากเครื่องยนต์สำรองที่ไม่ผ่านด่านตรวจ (brainFallback) · ใบที่ปักหมุดขึ้นก่อน
         const hit = all
           .filter(c => c.url === url && !c.lowQuality && !c.insight?.brainFallback
-            && String(c.insight?.rawData || '').length >= minRawChars(c.insight))
+            && String(c.insight?.rawData || '').length >= minRawChars(c.insight)
+            // ★ 10 พ.ย. 69: ใบโพสต์ภาพสไลด์ที่ถอดก่อนแก้ (ดูแค่เพลง แต่งภาพขึ้นเอง) ห้ามคืนจากคลัง — ถอดใหม่ด้วยภาพจริง
+            && !(isTiktokPhotoUrl(url) && c.insight?.source !== 'slideshow')
+            // ★ ผู้ตรวจอิสระ 10 พ.ย. (ข้อ 2): ลิงก์สั้น vt.tiktok ของโพสต์รูป — ใบเก่าที่ Gemini ได้แค่เสียง ดูจากใบเสร็จโทเคน
+            && !looksAudioOnlyWatch(c.insight))
           .sort((a, b) => Number(!!b.chosen) - Number(!!a.chosen) || new Date(b.createdAt) - new Date(a.createdAt))[0];
         if (hit) {
           console.log(`[ClipInsight] ⚡ ผลจากคลัง (เคยถอดแล้ว ${hit.createdAt}): ${url.slice(0, 60)}`);

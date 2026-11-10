@@ -119,6 +119,9 @@ export async function callClipGeminiVideo(rawOpts = {}) {
     fallbackModels = null,      // null = อ่านจาก env · [] = ห้ามสลับโมเดล
     timeoutMs = envInt('CLIP_GEMINI_TIMEOUT_MS', 300000),
     totalTimeoutMs = envInt('CLIP_GEMINI_TOTAL_TIMEOUT_MS', 600000), // เพดานรวมทั้ง call (ไม่ใช่ต่อครั้ง)
+    // ★ 10 พ.ย. 69 (เคสตำรวจน๊อต · TikTok ภาพสไลด์): แนบสื่อหลายชิ้นแทนวิดีโอ [{ mimeType, buffer }] — ภาพนิ่งเรียงลำดับ + เสียงประกอบ
+    //   ส่งมา = ไม่ใช้ videoBuffer/youtubeUrl · ไม่ส่ง/ว่าง = ทางเดิมทุกตัวอักษร
+    mediaParts = null,
   } = (rawOpts && typeof rawOpts === 'object') ? rawOpts : {};
   receipt.requestedModel = typeof model === 'string' ? model : String(model ?? '');
 
@@ -131,8 +134,25 @@ export async function callClipGeminiVideo(rawOpts = {}) {
 
   const apiKey = videoApiKey();
   if (!apiKey) return done({ ok: false, errorType: 'NO_KEY', error: 'ยังไม่ได้ตั้งคีย์ Gemini สำหรับวิดีโอ' });
-  const useLink = !!youtubeUrl;
-  if (!useLink) {
+  // ★ 10 พ.ย. 69: สื่อหลายชิ้น (ภาพสไลด์) — ตรวจทุกชิ้นเป็นไฟล์จริง + รวมไม่เกินเพดานแนบตรง (base64 โตขึ้น 1/3)
+  const media = Array.isArray(mediaParts)
+    ? mediaParts.filter((p) => p && Buffer.isBuffer(p.buffer) && p.buffer.length > 0 && typeof p.mimeType === 'string' && /^(image|audio)\//.test(p.mimeType))
+    : [];
+  const useMedia = Array.isArray(mediaParts) && mediaParts.length > 0;
+  if (useMedia) {
+    if (!media.length || media.length !== mediaParts.length) {
+      return done({ ok: false, errorType: 'BAD_INPUT', error: 'สื่อที่แนบไม่ถูกต้อง (ต้องเป็นไฟล์ภาพ/เสียงจริงทุกชิ้น)' });
+    }
+    if (!media.some((p) => p.mimeType.startsWith('image/'))) {
+      return done({ ok: false, errorType: 'BAD_INPUT', error: 'ไม่มีภาพให้ดู — ห้ามส่งเสียงอย่างเดียวให้ "ดูคลิป" (เคยแต่งภาพขึ้นเอง)' });
+    }
+    const total = media.reduce((s, p) => s + p.buffer.length, 0);
+    if (total > INLINE_CAP * 0.75) {
+      return done({ ok: false, errorType: 'TOO_LARGE', error: `สื่อรวม ${(total / 1e6).toFixed(1)}MB เกินเพดานแนบตรง — ต้องย่อภาพก่อน` });
+    }
+  }
+  const useLink = !useMedia && !!youtubeUrl;
+  if (!useLink && !useMedia) {
     if (!Buffer.isBuffer(videoBuffer) || videoBuffer.length < 10000) {
       return done({ ok: false, errorType: 'BAD_INPUT', error: 'ไฟล์วิดีโอเล็ก/ว่างเกินไป' });
     }
@@ -140,7 +160,7 @@ export async function callClipGeminiVideo(rawOpts = {}) {
       return done({ ok: false, errorType: 'TOO_LARGE', error: `ไฟล์ ${(videoBuffer.length / 1e6).toFixed(1)}MB เกินเพดานแนบตรง 19MB — ต้องย่อหรือผ่าท่อนก่อน` });
     }
   }
-  receipt.source = useLink ? 'link' : 'file';
+  receipt.source = useMedia ? 'media-parts' : (useLink ? 'link' : 'file');
 
   const envFb = normalizeModelList(process.env.CLIP_GEMINI_FALLBACK_MODELS || '', 3);
   const fbList = normalizeModelList(fallbackModels === null ? envFb : fallbackModels, 3);
@@ -160,11 +180,13 @@ export async function callClipGeminiVideo(rawOpts = {}) {
   const rangePart = Array.isArray(videoRange) && videoRange.length === 2
     ? { videoMetadata: { startOffset: `${Math.max(0, Math.round(videoRange[0]))}s`, endOffset: `${Math.round(videoRange[1])}s` } }
     : {};
-  const videoPart = useLink
-    ? { fileData: { fileUri: youtubeUrl }, ...rangePart }
-    : { inlineData: { mimeType, data: videoBuffer.toString('base64') }, ...rangePart };
+  const videoParts = useMedia
+    ? media.map((p) => ({ inlineData: { mimeType: p.mimeType, data: p.buffer.toString('base64') } }))
+    : [useLink
+      ? { fileData: { fileUri: youtubeUrl }, ...rangePart }
+      : { inlineData: { mimeType, data: videoBuffer.toString('base64') }, ...rangePart }];
   const body = JSON.stringify({
-    contents: [{ role: 'user', parts: [videoPart, { text: String(prompt || '') }] }],
+    contents: [{ role: 'user', parts: [...videoParts, { text: String(prompt || '') }] }],
     generationConfig: {
       temperature, maxOutputTokens: maxTokens, responseMimeType: 'application/json',
       ...(thinking ? { thinkingConfig: { thinkingLevel: thinking } } : {}),

@@ -17,7 +17,7 @@ import { callClipGeminiVideo } from '../clipBrain/clipGeminiVideo.js';
 import { cutSegments, hasFfmpeg, probeDurationSec } from '../clipBrain/clipSegmenter.js';
 import {
   SINGLE_REV, CONCISE_REV, buildWatchPrompt, buildWriterPrompt, buildConcisePassPrompt, buildConciseWriterPrompt,
-  CONCISE_WRITER_SYSTEM, formatTranscriptForWriter,
+  CONCISE_WRITER_SYSTEM, formatTranscriptForWriter, SLIDESHOW_REV, buildSlideshowPassPrompt,
 } from './prompts.js';
 import { planSegments, normalizeWatch, parseClock, formatClock, SINGLE_PASS_MAX_SEC } from './segments.js';
 import { writeSingleBody, resolveWriter, validateDraft } from './writer.js';
@@ -104,6 +104,50 @@ export async function runClipSinglePipeline(o = {}) {
     const caption = String(o.caption || '').trim().slice(0, 1500);
     let dur = Math.round(Number(o.durationSec) || 0);
     let parts;
+
+    // ★ 10 พ.ย. 69 (เคสตำรวจน๊อต · เจ้าของสั่ง "แก้เลย"): โพสต์ภาพสไลด์ = ดูภาพนิ่งทุกใบ (+ เสียงประกอบ) แล้วเขียนรอบเดียว
+    //   เดิมส่งแค่ไฟล์เพลงให้ "ดูคลิป" → ไม่เห็นภาพ แต่งเรื่องขึ้นเอง · ใช้ได้ทั้ง concise/full (ทาง full ถอดบทจากภาพนิ่งไม่ได้)
+    const slides = o.slides && Array.isArray(o.slides.images) ? o.slides : null;
+    if (slides) {
+      if (!slides.images.length) return fail('BAD_INPUT', 'โพสต์ภาพสไลด์แต่โหลดภาพไม่ได้สักภาพ');
+      single.rev = SLIDESHOW_REV;
+      const total = Math.max(slides.images.length, Math.round(Number(slides.total) || 0));
+      const mediaParts = [...slides.images, ...(slides.audio ? [slides.audio] : [])];
+      const model = String(o.model || o.conciseModel || envStr('CLIP_CONCISE_MODEL') || DEFAULT_CONCISE_MODEL);
+      const r = await callVideo({
+        prompt: buildSlideshowPassPrompt({ platform: o.type, caption, count: slides.images.length, total, hasAudio: !!slides.audio, missingNos: slides.missingNos }),
+        mediaParts, model, feature: 'clipSingle', onUsage, maxTokens: 24000, temperature: 0.3,
+        thinkingLevel: envStr('CLIP_CONCISE_EFFORT') || 'high',
+      });
+      single.watchModel = r?.receipt?.model || model;
+      single.slides = { count: slides.images.length, total, audio: !!slides.audio, skipped: Number(slides.skipped) || 0 };
+      single.segments = [{ no: 1, startSec: 0, endSec: dur, ok: !!r?.ok, errorType: r?.errorType, ms: r?.receipt?.elapsedMs, keyPoints: [] }];
+      step(`ดูภาพสไลด์ ${slides.images.length} ภาพแล้วเขียนรอบเดียว`, { ok: !!r?.ok });
+      if (!r?.ok) return fail(r?.errorType || 'WATCH_FAILED', r?.error || 'Gemini ดูภาพสไลด์ไม่สำเร็จ');
+      const v = validateDraft(r.data);
+      if (!v.ok) return fail('WRITER_BAD_OUTPUT', `เขียนเนื้อข่าวไม่สำเร็จ: ${v.error}`);
+      single.writer = { model: single.watchModel, kind: 'gemini-slides', ms: r.receipt?.elapsedMs, costUSD: null, usage: r.receipt?.usage ?? null };
+      const checked = checkSingleBody(v.draft, { segments: [], caption, noTranscript: true });
+      checked.checks.push({ level: 'check', kind: 'slideshow', text: `โพสต์ภาพสไลด์ ${total} ภาพ — ระบบดูภาพนิ่งทีละภาพ (ไม่ใช่วิดีโอ) · ตัวเลข/ข้อความบนภาพควรเช็คกับโพสต์ก่อนใช้` });
+      if (total > slides.images.length) {
+        single.degradations.push({ type: 'slides-missing', note: `แนบภาพได้ ${slides.images.length}/${total}` });
+        checked.checks.push({ level: 'check', kind: 'coverage', text: `โหลดภาพได้ ${slides.images.length} จาก ${total} ภาพ — ภาพที่ขาดไม่ได้อยู่ในเนื้อ ควรเปิดโพสต์ดูเอง` });
+      }
+      single.stats = checked.stats;
+      step('ตรวจด้วยโค้ด', { checks: checked.checks.length });
+      single.transcriptChars = 0;
+      single.elapsedMs = Date.now() - t0;
+      return {
+        ok: true,
+        spentTokens: single.usage.totalTokens,
+        transcriptText: '',
+        insight: {
+          engine: 'clip-single', schema: 'single-v1', promptRev: single.rev, source: 'slideshow',
+          headline: checked.headline, body: checked.body, rawData: checked.body,
+          checks: checked.checks, clipDurationSec: dur, caption, single,
+        },
+      };
+    }
 
     // ① + ② เตรียมช่วง
     if (isYT) {

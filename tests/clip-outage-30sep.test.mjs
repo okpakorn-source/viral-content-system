@@ -563,8 +563,12 @@ const TIKTOK_URL = 'https://www.tiktok.com/@a/video/123';
 test('R3: ตัวโหลดล้ม → POST /insight จริง → worker ตัวจริง — ถาวรไม่วนซ้ำ · ชั่วคราวลองใหม่ · ข้อความไม่มีบรรทัดคำสั่ง/พาธชั่วคราว', async () => {
   const worker = await settleWithin(loadWorker(), 'โหลด worker ตัวจริงต้องเสร็จ', 5_000);
   const cases = [
-    { name: 'tikwm ตอบแต่ไม่มีลิงก์วิดีโอ (โพสต์รูป)', want: 'error', url: TIKTOK_URL,
+    // ★ 10 พ.ย. 69 (เคสตำรวจน๊อต): โพสต์รูปรองรับแล้ว (ดูภาพนิ่งทุกใบ) — โหลดภาพไม่ได้สักภาพ = ชั่วคราว (ยังไม่จ่ายค่าโมเดล) ไม่ใช่ถาวรแบบเดิม
+    { name: 'tikwm โพสต์รูป แต่โหลดภาพไม่ได้สักภาพ', want: 'retry', url: TIKTOK_URL,
       fetch: tikwmFetch({ api: { code: 0, msg: 'success', data: { images: ['https://cdn.tiktok.test/1.jpg'] } } }) },
+    // ★ 10 พ.ย. 69 (ผู้ตรวจอิสระ ข้อ 6): play เป็นไฟล์เสียงล้วน ไม่มีภาพ = ถาวร (ห้ามส่งเสียงให้ "ดูคลิป" — เคยแต่งภาพขึ้นเอง)
+    { name: 'tikwm play เป็นไฟล์เสียงล้วน (ไม่มี images)', want: 'error', url: TIKTOK_URL,
+      fetch: tikwmFetch({ api: { code: 0, data: { play: 'https://cdn.tiktok.test/a.mp3' } }, video: async () => new Response(Buffer.alloc(20000, 1), { headers: { 'content-type': 'audio/mpeg' } }) }) },
     { name: 'tikwm ตอบลิงก์เสีย (Url parsing is failed)', want: 'error', url: TIKTOK_URL,
       fetch: tikwmFetch({ api: { code: -1, msg: 'Url parsing is failed! Please check url.' } }) },
     { name: 'tikwm วิดีโอใหญ่เกิน 150MB', want: 'error', url: TIKTOK_URL,
@@ -906,6 +910,31 @@ test('M2: เพดานเวลา yt-dlp จาก env CLIP_YTDLP_TIMEOUT_MS
   }
 });
 
+// ═══ 10 พ.ย. 69 (เคสตำรวจน๊อต · ผู้ตรวจอิสระ ข้อ 6): โพสต์ภาพสไลด์เดินเต็มเส้น POST → ตัวโหลด → ท่อหลักได้ภาพตามลำดับ ═══
+test('โพสต์ภาพสไลด์: POST /insight จริง → tikwm images[] → โหลดภาพตามลำดับ + เสียง → ท่อหลักได้ slides (ไม่มีไฟล์วิดีโอ)', async () => {
+  const s = freshState();
+  const jpeg = (n) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(3000, n)]);
+  globalThis.fetch = async (u) => {
+    const url = String(u);
+    if (url.includes('tikwm.com')) return new Response(JSON.stringify({ code: 0, data: { title: 'ไปรับลูกชายกันครับ', images: ['https://cdn.tiktok.test/1.jpg', 'https://cdn.tiktok.test/2.jpg', 'https://cdn.tiktok.test/3.jpg'], play: 'https://cdn.tiktok.test/a.mp3' } }));
+    if (url.endsWith('/a.mp3')) return new Response(Buffer.alloc(5000, 0), { headers: { 'content-type': 'audio/mpeg' } });
+    const n = Number(url.match(/\/(\d)\.jpg$/)?.[1]);
+    if (n === 2) return new Response('<html>403</html>', { status: 403, headers: { 'content-type': 'text/html' } });
+    return new Response(jpeg(n), { headers: { 'content-type': 'application/octet-stream' } });
+  };
+  const insight = await postInsight({ url: 'https://www.tiktok.com/@a/photo/7703982250454502708' });
+  assert.equal(insight.status, 200, JSON.stringify(insight.body));
+  assert.equal(s.single.length, 1);
+  const args = s.single[0];
+  assert.equal(args.videoBuffer, null, 'โพสต์ภาพต้องไม่มีไฟล์วิดีโอ');
+  assert.equal(args.caption, 'ไปรับลูกชายกันครับ');
+  assert.equal(args.slides.total, 3);
+  assert.deepEqual(args.slides.missingNos, [2], 'ภาพที่ 2 โหลดไม่ได้ต้องถูกนับเป็นภาพขาดพร้อมตำแหน่ง');
+  assert.equal(args.slides.images.length, 2);
+  assert.ok(args.slides.images.every((p) => p.mimeType === 'image/jpeg' && p.buffer[0] === 0xff), 'ภาพที่ส่งต้องเป็น JPEG จริง (ดูจากหัวไฟล์ ไม่ใช่ป้าย octet-stream)');
+  assert.equal(args.slides.audio.mimeType, 'audio/mp3');
+});
+
 // ═══ รอบ 3 · L2: tikwm จำกัดความถี่ = ชั่วคราว (รอบ 2 รวบเป็น "ไม่พบวิดีโอ — กดใหม่ไม่ช่วย") ═══════════════════
 test('L2: tikwm ติดเพดานความถี่/ไม่ว่าง → 422 retrySafe · ข้อความ tikwm ไม่ถูกแปลงเป็น "Gemini …" · worker ตัวจริงลองใหม่ · โพสต์รูป/ลิงก์เสียยังถาวร', async () => {
   const worker = await settleWithin(loadWorker(), 'โหลด worker ตัวจริงต้องเสร็จ', 5_000);
@@ -913,7 +942,8 @@ test('L2: tikwm ติดเพดานความถี่/ไม่ว่า
     { name: 'Free Api Limit (คำตอบจริงของ tikwm)', want: 'retry', api: { code: -1, msg: 'Free Api Limit: 1 request/second.', processed_time: 0.0021 } },
     { name: 'Too many requests / try again', want: 'retry', api: { code: -1, msg: 'Too many requests. Please try again later.' } },
     { name: 'Server busy', want: 'retry', api: { code: -1, msg: 'Server is busy' } },
-    { name: 'โพสต์รูป (ไม่มีลิงก์วิดีโอ)', want: 'error', api: { code: 0, msg: 'success', data: { images: ['https://cdn.tiktok.test/1.jpg'] } } },
+    // ★ 10 พ.ย. 69 (เคสตำรวจน๊อต): โพสต์รูปรองรับแล้ว — โหลดภาพไม่ได้สักภาพ = ชั่วคราว
+    { name: 'โพสต์รูป โหลดภาพไม่ได้สักภาพ', want: 'retry', expectMsg: 'tikwm โหลดภาพสไลด์ไม่ได้สักภาพ แน่นชั่วคราว ลองใหม่ได้', api: { code: 0, msg: 'success', data: { images: ['https://cdn.tiktok.test/1.jpg'] } } },
     { name: 'Url parsing is failed', want: 'error', api: { code: -1, msg: 'Url parsing is failed! Please check url.' } },
   ];
   for (const c of cases) {
@@ -926,7 +956,8 @@ test('L2: tikwm ติดเพดานความถี่/ไม่ว่า
     assert.equal(s.brain.length + s.legacy.length + s.single.length, 0, c.name);
     assert.match(msg, /^tikwm/, `${c.name}: humanizeErr ต้องไม่แปลงข้อความ tikwm (ได้: ${msg})`);
     assert.doesNotMatch(msg, /Gemini/, `${c.name}: ปัญหาอยู่ที่ tikwm ห้ามโทษ Gemini (ได้: ${msg})`);
-    if (c.want === 'retry') assert.equal(msg, `tikwm แน่นชั่วคราว (rate limit: ${c.api.msg})`);
+    if (c.expectMsg) assert.equal(msg, c.expectMsg);
+    else if (c.want === 'retry') assert.equal(msg, `tikwm แน่นชั่วคราว (rate limit: ${c.api.msg})`);
     else assert.match(msg, / — กดใหม่ไม่ช่วย$/, `${c.name}: (ได้: ${msg})`);
     const run = await runJobAgainst(worker, insight.status, insight.body);
     assert.deepEqual(run.statuses, [c.want], `${c.name}: worker ต้องรายงาน ${c.want} (ได้ ${run.statuses}) · ข้อความ: ${msg}`);
