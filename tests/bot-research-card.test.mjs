@@ -2891,13 +2891,17 @@ test('route /api/bot/posted (W2): editorMsgId ผ่านด่าน id เด
 // ★ 25 ต.ค. 69 (ข้อ 9 ผลทดสอบท่อทีละขั้น — เจ้าของสั่งแก้ป้ายขั้นตอนบอท): ข้อความความคืบหน้าเปลี่ยนป้ายขั้น → transcript เปลี่ยน → ลายนิ้วมือใหม่ทั้ง 6
 //   พิสูจน์ก่อนอัปเดต: logs/delays/clientOpts/handlerCounts/pending เท่าเดิมทุกไบต์ทั้ง 6 ฉาก · transcript ต่างเฉพาะป้ายขั้น (ป้ายเก่า 5 ชื่อหายหมด)
 //   ค่าเดิม: shadow normal=0670734ffd6e · shadow resume=4c1482bfe015 · shadow late=3bd4d291c13d · assist normal=6f17c6407adf · assist resume=e96fe6657734 · assist late=cf66afd41b00
+// ★ 10 พ.ย. 69 (เจ้าของสั่ง "แก้ข้อความบอท" — ข่าวจากบอทเขียนด้วยระบบเขียนตัวใหม่แล้ว): ป้ายขั้นเปลี่ยนเป็น กำหนดทิศทาง → เลือกแนวการเขียน → เขียน 3 เวอร์ชัน → ตรวจและแก้ → ลายนิ้วมือใหม่ทั้ง 6
+//   พิสูจน์ก่อนอัปเดต (รันฉากเดียวกันด้วย index.js ก่อนแก้ เทียบกับหลังแก้): logs/delays/clientOpts/handlerCounts/pending เท่าเดิมทุกไบต์ทั้ง 6 ฉาก ·
+//   transcript ต่าง 8 รายการต่อฉาก และทั้ง 8 เป็นข้อความความคืบหน้า ("Auto Pipeline V2 …") เท่านั้น · index.js ก่อนแก้ให้ลายนิ้วมือชุด 25 ต.ค. ตรงทุกค่า
+//   ค่าเดิม (ชุด 25 ต.ค. 69): shadow normal=02d133e4cca4 · shadow resume=53c8265adbac · shadow late=595020aa1fee · assist normal=5b12e332d9c3 · assist resume=181c6aacdd98 · assist late=7cb88757d92d
 const PHASE1_FINGERPRINTS = Object.freeze({
-  'shadow normal': '02d133e4cca45b3667d36f3182ffc53af98a84ad59739540ec917926007ba2d1',
-  'shadow resume': '53c8265adbac99816c9896c6e59be07953135f1494748f9dec3a679102dc4aec',
-  'shadow late': '595020aa1fee5eca5e7e8e9fc8e98be979687fd2b1765dd04f3c3a0e5a887fff',
-  'assist normal': '5b12e332d9c3058f57d0f1c98d950e2db75efa8b276ce8626dcb4672a11ef6ff',
-  'assist resume': '181c6aacdd98bea5257c0dad0316fafb9468480678c6b1f71081b27fa9810bf8',
-  'assist late': '7cb88757d92d20796137afb0ee958f848a8b97bff42419ee541008d203f504c9',
+  'shadow normal': '6d202ca54d5ac8f3d02d9054c885dc0126bb909d4f9ab81ac976c26405c8e191',
+  'shadow resume': '267289c621ff2e5f40a65ba5d7bc28eb730639c9cccc2e0a4207b7c056288f20',
+  'shadow late': '5fbefd280830657b5bb33405c88d8659813547770ef56149717c2bb75abafd48',
+  'assist normal': '8f0b28e9fa701ca25c450a3ad463335f8abf530f8edbb8ac5038ed57f58c5fd5',
+  'assist resume': '79fe9374be2cea50aa6e5c76e2c429ea8aa30223c1051c67206c1c197e54ac57',
+  'assist late': '182dd5ef102c452ef54ef3e023c09c17d63a4cee306dfb1f8f1d0b498b25a68f',
 });
 
 function botFingerprint(r) {

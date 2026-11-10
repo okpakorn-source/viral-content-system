@@ -3,18 +3,31 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
+import { NEWS_STUDIO } from '../src/lib/services/newsStudio/pipeline.js';
 
 const src = readFileSync(new URL('../discord-bot/index.js', import.meta.url), 'utf8');
 const block = src.match(/const PIPELINE_STEPS = \[([\s\S]*?)\n\s*\];/u)?.[1] || '';
 
-test('A1 ป้ายครบตามท่อ TEXT ตามลำดับ · ไม่มีขั้นดึงเว็บ · ไม่มีชื่อรุ่นตกยุค', () => {
+// ★ 10 พ.ย. 69 (เจ้าของสั่ง "แก้ข้อความบอท"): ข่าวจากบอทเขียนด้วยระบบเขียนตัวใหม่ (newsStudio) — ป้ายต้องตรงขั้นและจำนวนเวอร์ชันของระบบนั้น
+//   ของเดิม (ชุด 25 ต.ค. 69): สกัดเนื้อข่าว → แตกประเด็น 4 มุม → วางโครงอารมณ์ → เลือกการ์ด → เขียน 2 เวอร์ชัน → ตรวจแก้
+test('A1 ป้ายครบตามระบบเขียนตัวใหม่ ตามลำดับ · ไม่มีขั้นของท่อเดิม · ไม่มีขั้นดึงเว็บ · ไม่มีชื่อรุ่นตกยุค', () => {
   assert.ok(block.length > 0, 'ต้องพบ PIPELINE_STEPS');
   const labels = [...block.matchAll(/label: '([^']+)'/gu)].map((m) => m[1]);
-  assert.deepEqual(labels, ['รับข้อความข่าว', 'สกัดเนื้อข่าว (AI)', 'แตกประเด็น 4 มุม (AI)', 'วางโครงอารมณ์ (AI)',
-    'เลือกการ์ดสไตล์เขียน (AI)', 'เขียนข่าว 2 เวอร์ชันพร้อมกัน (AI)', 'ตรวจแก้', 'สรุปผลและบันทึก']);
-  for (const stale of ['ดึงเนื้อหาจากเว็บ', 'Firecrawl', 'Gemini 2.0 Flash', 'GPT-5.5', 'Claude Sonnet 4', 'Classic + Enhanced']) {
+  assert.deepEqual(labels, ['รับข้อความข่าว', 'กำหนดทิศทางข่าว (AI)', 'เลือกแนวการเขียน (AI)',
+    `เขียนข่าว ${NEWS_STUDIO.versions} เวอร์ชันพร้อมกัน (AI)`, 'ตรวจและแก้', 'สรุปผลและบันทึก'], 'จำนวนเวอร์ชันในป้ายต้องตรงกับที่ระบบเขียนจริง');
+  for (const stale of ['ดึงเนื้อหาจากเว็บ', 'Firecrawl', 'Gemini 2.0 Flash', 'GPT-5.5', 'Claude Sonnet 4', 'Classic + Enhanced',
+    'สกัดเนื้อข่าว', 'แตกประเด็น', '4 มุม', 'วางโครงอารมณ์', 'เลือกการ์ด', '2 เวอร์ชัน']) {
     assert.ok(!block.includes(stale), `ห้ามมี "${stale}"`);
   }
+});
+
+test('A4 เวลาของป้ายใกล้ของจริง: งานปกติ (~80 วินาที) ต้องเดินถึงขั้นท้ายๆ ไม่ค้างที่ขั้นต้น · ขั้นสุดท้ายบอกเหตุเมื่อนานผิดปกติ', () => {
+  const steps = [...block.matchAll(/\{ at: (\d+),\s+done: (\d+),/gu)].map((m) => [Number(m[1]), Number(m[2])]);
+  const details = [...block.matchAll(/detail: '([^']+)'/gu)].map((m) => m[1]);
+  assert.equal(steps.length, 6);
+  assert.ok(steps.at(-1)[0] >= 60 && steps.at(-1)[0] <= 100, `ขั้นสุดท้ายเริ่มที่ ${steps.at(-1)[0]} วิ`);
+  assert.ok(steps[3][0] <= 40, 'ขั้นเขียนต้องเริ่มภายใน 40 วิ (ทิศทาง ~25 + เลือกแนว ~5)');
+  assert.match(details.at(-1), /กำลังแก้อีกรอบ หรือระบบสำรองกำลังเขียนแทน/u);
 });
 
 test('A2 เวลาเรียงต่อกัน: done ของขั้นก่อน = at ของขั้นถัดไป · ขั้นสุดท้าย done 999', () => {
