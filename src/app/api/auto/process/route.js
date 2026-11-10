@@ -29,6 +29,10 @@ import { createLogger }    from '@/lib/logger';
 // Direct Service Imports
 import { processAutoFlow } from '@/lib/services/autoFlowService';
 import { processAutoFlowText } from '@/lib/services/autoFlowServiceText';
+import { processNewsStudioText, shouldUseStudioForJob, fallbackWarning } from '@/lib/services/newsStudio/discordFlow';
+
+// ระบบเขียนตัวใหม่ล้มภายในเวลานี้ = ยังเหลือเวลาให้นักเขียนชุดเดิมทำงานจบในเส้นตายของคิว (งานข่าว ~770 วินาที · ท่อเดิมใช้ได้ถึง ~480 วินาที)
+const STUDIO_FALLBACK_WITHIN_MS = 240000;
 import { performOcr }      from '@/lib/services/ocrService';
 import { performSummarize } from '@/lib/services/summarizeService';
 import { createStore }     from '@/lib/persistStore';
@@ -176,7 +180,33 @@ export async function POST(request) {
       // ★ ส่งตัวตนคนสั่ง (ai-บก.X / desk-ทีม) + ป้ายโต๊ะข่าวเข้า pipeline — Generation Log ถึงรู้ว่าใครทำ
       //   (เดิมไม่ส่ง → ทุกเคสจากคิวเป็น anonymous หมด)
       const _delegateUser = body.userId ? { userId: body.userId, userName: body.userId } : undefined;
-      if (detection.inputType === 'plain_text' || (!detection.primaryUrl && detection.hasText)) {
+      const _isTextJob = detection.inputType === 'plain_text' || (!detection.primaryUrl && detection.hasText);
+      // ★ 10 พ.ย. 69 (เจ้าของเคาะ — ต่อระบบเขียนตัวใหม่เข้าท่อ Discord): งานข้อความล้วนที่มาจากบอท Discord
+      //   เขียนด้วยระบบเขียนตัวใหม่ (ต้นแบบปกกำหนดทิศทาง + ครูเสริมสำนวน · src/lib/services/newsStudio/discordFlow.js)
+      //   คืนผลรูปเดียวกับ processAutoFlowText — ส่วนประกอบผล/เก็บคลัง/ตอบกลับด้านล่างใช้ร่วมกันไม่เปลี่ยน
+      //   งานจากหน้าเว็บ/แอปมือถือ และงานที่มีลิงก์/รูป ยังใช้ท่อเดิมทุกไบต์
+      //   ทางถอย: ตั้ง env NEWS_STUDIO_DISCORD=0 แล้ว redeploy = งานจากบอทกลับไปใช้ processAutoFlowText (ของเดิมด้านล่าง)
+      //   ระบบใหม่ล้มกลางงาน (โมเดลล่ม/คีย์หาย/โหลดคลังไม่ได้): ส่งงานนั้นต่อให้นักเขียนชุดเดิม พร้อมคำเตือนถึงพนักงานว่าข่าวนี้มาจากระบบเดิม
+      //   (ห้ามถอยเงียบ · ท่อเดิมมีโซ่โมเดลสำรองของตัวเอง) — ล้มช้าเกิน STUDIO_FALLBACK_WITHIN_MS = เวลาไม่พอให้ท่อเดิมจบในเส้นตายของคิว จึงล้มทั้งงานพร้อมเหตุ
+      let _studioFailure = null;
+      if (_isTextJob && shouldUseStudioForJob(body)) {
+        addLog('Route', `⚡ News Studio (ระบบเขียนตัวใหม่) — งานจากบอท Discord`);
+        try {
+          delegateRes = await processNewsStudioText({
+            text:       input || detection.textContent, // เนื้อดิบตามที่พนักงานพิมพ์ (คงการขึ้นบรรทัด)
+            user:       _delegateUser,
+            workflowId: _wfId,
+            deskMeta:   body.deskMeta || null,
+          });
+        } catch (studioErr) {
+          if (Date.now() - startTime > STUDIO_FALLBACK_WITHIN_MS) throw studioErr;
+          _studioFailure = studioErr;
+          addLog('Route', `⚠️ News Studio ล้ม (${studioErr?.errorType || 'ไม่ทราบชนิด'}: ${String(studioErr?.message || studioErr).slice(0, 120)}) — ส่งต่อให้นักเขียนชุดเดิม`);
+        }
+      }
+      if (delegateRes) {
+        // ได้ผลจากระบบเขียนตัวใหม่แล้ว
+      } else if (_isTextJob) {
         addLog('Route', `⚡ Delegating to /api/auto (TEXT pipeline)`);
         delegateRes = await processAutoFlowText({
           url:           null,
@@ -188,6 +218,10 @@ export async function POST(request) {
           user:          _delegateUser,
           deskMeta:      body.deskMeta || null,
         });
+        if (_studioFailure && delegateRes?.success && delegateRes.data?.analysisResult) {
+          const _ar = delegateRes.data.analysisResult;
+          _ar.qualityWarnings = [fallbackWarning(_studioFailure), ...(Array.isArray(_ar.qualityWarnings) ? _ar.qualityWarnings : [])];
+        }
       } else {
         addLog('Route', `⚡ Delegating to /api/auto (URL pipeline) → ${detection.primaryUrl ? detection.primaryUrl.slice(0, 60) : 'Plain Text'}`);
         delegateRes = await processAutoFlow({
@@ -241,7 +275,7 @@ export async function POST(request) {
             label:        detection.label,
             confidence:   detection.confidence,
             pipelineUsed: 'article_pipeline_enhanced',
-            pipelineLabel:'เว็บข่าว / บทความ (Enhanced)',
+            pipelineLabel: legacyData.pipelineLabel || 'เว็บข่าว / บทความ (Enhanced)', // ★ 10 พ.ย. 69: ระบบเขียนตัวใหม่ส่งป้ายของตัวเองมา (ท้าย embed ของบอทบอกได้ว่าข่าวนี้เขียนด้วยระบบไหน) · ท่อเดิมไม่ส่ง = ป้ายเดิม
             pipelineIcon: '⚡',
             provider:     legacyData.providerUsed || 'firecrawl',
             fallbacksUsed:[],
@@ -631,6 +665,8 @@ export async function POST(request) {
       success: false,
       error:   err.message,
       failedStep: err.failedStep || 'u_extract',
+      // ★ 10 พ.ย. 69: ส่งชนิดเหตุต่อเฉพาะเมื่อตัวที่ล้มตั้งมาให้ (ระบบเขียนตัวใหม่ตั้งทุกครั้ง) — ท่อเดิมไม่ตั้ง จึงไม่มีช่องนี้เหมือนเดิม และคิวยังบันทึก PROCESS_API_FAILED ตามเดิม
+      ...(err.errorType ? { errorType: err.errorType } : {}),
       log,
       debug: { durationSeconds: parseFloat(totalTime) },
     }, { status: 500 });
