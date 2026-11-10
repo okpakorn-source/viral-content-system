@@ -99,3 +99,7 @@ public/case-frames/
 
 # Local multi-model audit logs and task artifacts (never release)
 /.model-orchestrator/
+
+# ★ 10 พ.ย. 69: ไฟล์ที่เกิดจากการรันในเครื่องแบบไม่ต่อฐานข้อมูล (SUPABASE_DISABLED=1) — ประวัติงานของสตูดิโอเขียนข่าว + คลังผลงานสำรอง · ติดไปกับ commit = โผล่เป็นข้อมูลปลอมบนระบบจริง
+data/news-studio-runs.json
+data/generation-logs.json

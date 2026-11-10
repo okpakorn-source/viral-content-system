@@ -1,0 +1,173 @@
+/* สตูดิโอเขียนข่าว — สไตล์เฉพาะหน้า (ทุกคลาสขึ้นต้น ns- · ใช้ตัวแปรสีของระบบ จึงตามธีมสว่าง/มืดเอง)
+   เขียนเป็นคลาส ไม่ใช้ style ในแท็ก เพราะ globals.css มีกฎมือถือที่จับ style ในแท็กแล้วเปลี่ยนการจัดวาง */
+
+.ns-page { display: flex; flex-direction: column; gap: 16px; max-width: 1180px; margin: 0 auto; width: 100%; }
+/* ลูกของกล่อง flex แนวตั้งหดไม่ได้ต่ำกว่าเนื้อหาที่กว้างสุด (เช่น แถวป้ายกรองที่เลื่อนแนวนอน) → ดันทั้งหน้ากว้างเกินจอ — ต้องปลด min-width */
+.ns-page > *, .ns-stack > * { min-width: 0; }
+
+/* ── แถบแท็บ ── */
+.ns-tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--border); scrollbar-width: none; }
+/* globals.css (จอ ≤ 640px) สั่ง .page-content > div > div { overflow-x: hidden } ซึ่งโดนแถบแท็บพอดี → แท็บท้ายๆ ถูกตัดและเลื่อนไปกดไม่ได้ — ต้องชนะด้วยตัวเลือกที่เจาะจงกว่า */
+.page-content > .ns-page > .ns-tabs { overflow-x: auto; }
+.ns-tabs::-webkit-scrollbar { display: none; }
+.ns-tab { flex: none; min-height: 44px; padding: 10px 14px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--text-secondary); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.ns-tab:hover { color: var(--text-primary); }
+.ns-tab[aria-selected='true'] { color: var(--accent); border-bottom-color: var(--accent); }
+.ns-tab:focus-visible, .ns-btn:focus-visible, .ns-seg button:focus-visible, .ns-row:focus-visible, .ns-disclose > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ns-tab-count { margin-left: 6px; font-size: 12px; font-weight: 500; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+/* ── กล่องพื้นฐาน ── */
+.ns-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.ns-card-pad { padding: 16px; }
+.ns-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.ns-h2 { font-size: 15px; font-weight: 700; color: var(--text-primary); }
+.ns-sub { font-size: 13px; color: var(--text-secondary); }
+.ns-muted { color: var(--text-muted); font-size: 12.5px; }
+.ns-num { font-variant-numeric: tabular-nums; }
+.ns-stack { display: flex; flex-direction: column; gap: 12px; }
+.ns-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ns-grow { flex: 1; min-width: 0; }
+
+/* ── ปุ่ม ── */
+.ns-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 8px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-light); background: var(--bg-card); color: var(--text-primary); font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; transition: background var(--transition), border-color var(--transition); }
+.ns-btn:hover:not(:disabled) { border-color: var(--accent); }
+.ns-btn:disabled { opacity: .5; cursor: not-allowed; }
+.ns-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ns-btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+.ns-btn-quiet { border-color: transparent; background: none; color: var(--accent); padding-inline: 8px; }
+.ns-btn-good[aria-pressed='true'] { background: var(--success-bg); border-color: var(--success); color: var(--success); }
+.ns-btn-bad[aria-pressed='true'] { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); }
+.ns-btn-lg { min-height: 46px; padding-inline: 20px; font-size: 15px; }
+
+/* ── ป้ายสถานะ ── */
+.ns-pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.7; white-space: nowrap; background: var(--bg-elevated); color: var(--text-secondary); }
+.ns-pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.ns-pill.ok { background: var(--success-bg); color: var(--success); }
+.ns-pill.warn { background: var(--warning-bg); color: var(--warning); }
+.ns-pill.bad { background: var(--danger-bg); color: var(--danger); }
+.ns-pill.info { background: var(--info-bg); color: var(--info); }
+.ns-pill.plain::before { display: none; }
+
+/* ── กล่องข้อความแจ้ง ── */
+.ns-note { padding: 10px 14px; border-radius: var(--radius-sm); font-size: 13.5px; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-primary); }
+.ns-note.bad { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); }
+.ns-note.warn { background: var(--warning-bg); border-color: var(--warning); color: var(--warning); }
+.ns-note.info { background: var(--info-bg); border-color: transparent; color: var(--text-primary); }
+.ns-note b { font-weight: 700; }
+
+/* ── ช่องวางเนื้อข่าว ── */
+.ns-textarea { width: 100%; min-height: 220px; resize: vertical; padding: 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-light); background: var(--bg-secondary); color: var(--text-primary); font: inherit; font-size: 16px; line-height: 1.75; }
+.ns-textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+.ns-textarea::placeholder { color: var(--text-muted); }
+.ns-check { display: flex; align-items: flex-start; gap: 10px; min-height: 40px; font-size: 13.5px; color: var(--text-primary); cursor: pointer; }
+.ns-check input { width: 20px; height: 20px; margin-top: 2px; accent-color: var(--accent); flex: none; }
+.ns-input, .ns-select { min-height: 42px; padding: 8px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-light); background: var(--bg-secondary); color: var(--text-primary); font: inherit; font-size: 16px; min-width: 0; }
+.ns-input:focus, .ns-select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ns-filters { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+
+/* ── ขั้นตอนระหว่างเขียน ── */
+.ns-steps { list-style: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.ns-step { padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-secondary); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ns-step-name { font-size: 13.5px; font-weight: 700; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; }
+.ns-step-detail { font-size: 12.5px; color: var(--text-muted); overflow-wrap: anywhere; }
+.ns-step.run { border-color: var(--accent); }
+.ns-step.run .ns-step-name { color: var(--accent); }
+.ns-step.done .ns-step-name { color: var(--success); }
+.ns-step.fail .ns-step-name { color: var(--warning); }
+.ns-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid currentColor; flex: none; }
+.ns-step.done .ns-dot, .ns-step.fail .ns-dot { background: currentColor; }
+.ns-step.run .ns-dot { border-top-color: transparent; animation: spin .9s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .ns-step.run .ns-dot { animation: none; background: currentColor; opacity: .6; } }
+
+/* ── ผลงาน 1 งาน ── */
+.ns-run-title { font-size: 18px; font-weight: 700; line-height: 1.4; color: var(--text-primary); text-wrap: balance; }
+.ns-seg { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.ns-seg button { flex: 1 0 auto; min-height: 44px; padding: 8px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-light); background: var(--bg-card); color: var(--text-secondary); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; }
+.ns-seg button[aria-selected='true'] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ns-seg .ns-mark { width: 8px; height: 8px; border-radius: 50%; background: var(--success); flex: none; }
+.ns-seg .ns-mark.no { background: var(--warning); }
+.ns-seg .ns-mark.err { background: var(--danger); }
+.ns-seg button[aria-selected='true'] .ns-mark { box-shadow: 0 0 0 2px #fff; }
+.ns-seg { scrollbar-width: none; }
+.ns-seg::-webkit-scrollbar { display: none; }
+.ns-seg-top { display: inline-flex; align-items: center; gap: 8px; }
+.ns-seg-note { font-size: 12px; font-weight: 500; opacity: .8; }
+.ns-raw { border-top: 1px solid var(--border); }
+
+.ns-angle { margin: 14px 16px 0; padding: 12px 14px; border-left: 3px solid var(--warning); background: var(--warning-bg); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; display: flex; flex-direction: column; gap: 4px; }
+.ns-angle-k { font-size: 12px; font-weight: 700; color: var(--warning); }
+.ns-angle-cover { font-size: 16px; font-weight: 700; line-height: 1.55; color: var(--text-primary); white-space: pre-line; }
+.ns-angle-focus { font-size: 13px; color: var(--text-secondary); }
+
+.ns-post { padding: 16px; font-size: 17px; line-height: 1.85; color: var(--text-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ns-post.small { font-size: 15px; line-height: 1.75; color: var(--text-secondary); padding-top: 0; }
+.ns-meta { padding: 0 16px 12px; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--text-muted); }
+.ns-actions { padding: 0 16px 14px; display: flex; flex-wrap: wrap; gap: 8px; }
+.ns-checks { padding: 0 16px 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+.ns-issues { list-style: none; padding: 0 16px 14px; display: flex; flex-direction: column; gap: 6px; }
+.ns-issues li { padding: 8px 12px; border-radius: var(--radius-sm); background: var(--bg-elevated); font-size: 13.5px; line-height: 1.6; color: var(--text-primary); overflow-wrap: anywhere; }
+.ns-issues li.bad { background: var(--danger-bg); color: var(--danger); }
+.ns-issues li.warn { background: var(--warning-bg); }
+.ns-issues .ns-tag { font-weight: 700; margin-right: 6px; }
+
+.ns-disclose { border-top: 1px solid var(--border); }
+.ns-disclose > summary { min-height: 44px; padding: 12px 16px; font-size: 13.5px; font-weight: 600; color: var(--accent); cursor: pointer; list-style-position: inside; }
+.ns-disclose-body { padding: 0 16px 14px; display: flex; flex-direction: column; gap: 8px; font-size: 13.5px; color: var(--text-secondary); }
+.ns-disclose-body a { color: var(--accent); overflow-wrap: anywhere; }
+
+.ns-review { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+
+/* ── คลังต้นแบบประเด็น ── */
+.ns-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
+.ns-ex { display: flex; flex-direction: column; overflow: hidden; }
+/* ปกต้นแบบเป็นภาพจัตุรัสทุกใบ — จองพื้นที่ 1:1 ไว้ก่อนภาพมา และ contain เพื่อไม่ตัดข้อความบนปก */
+.ns-ex-img { width: 100%; aspect-ratio: 1 / 1; object-fit: contain; background: var(--bg-elevated); display: block; }
+.ns-ex-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.ns-ex-lines { font-size: 15px; font-weight: 700; line-height: 1.55; color: var(--text-primary); white-space: pre-line; }
+.ns-chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.ns-chips::-webkit-scrollbar { display: none; }
+.ns-chip { flex: none; min-height: 36px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border-light); background: var(--bg-card); color: var(--text-secondary); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.ns-chip[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ns-roles { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.ns-roles li { font-size: 13px; line-height: 1.6; color: var(--text-secondary); }
+.ns-roles b { color: var(--text-primary); }
+
+/* ── รายการ (คลังครู / ประวัติงาน) ── */
+.ns-list { display: flex; flex-direction: column; gap: 10px; }
+.ns-row { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 14px 16px; text-align: left; font: inherit; color: inherit; cursor: pointer; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.ns-row:hover { border-color: var(--accent); }
+.ns-row-title { font-size: 15px; font-weight: 700; line-height: 1.5; color: var(--text-primary); overflow-wrap: anywhere; }
+.ns-row-text { font-size: 13.5px; line-height: 1.65; color: var(--text-secondary); overflow-wrap: anywhere; }
+
+/* ── ตัวเลขรวม / ตาราง ── */
+.ns-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.ns-tile { padding: 12px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-card); min-width: 0; }
+.ns-tile b { display: block; font-size: 22px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; line-height: 1.3; }
+.ns-tile span { font-size: 12.5px; color: var(--text-secondary); }
+.ns-kv { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 0; font-size: 13.5px; }
+.ns-kv > div { padding: 9px 16px; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+.ns-kv > div:nth-child(-n + 2) { border-top: 0; }
+.ns-kv > div:nth-child(odd) { color: var(--text-secondary); }
+.ns-kv > div:nth-child(even) { color: var(--text-primary); font-weight: 600; }
+.ns-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
+
+.ns-empty { padding: 36px 16px; text-align: center; color: var(--text-secondary); font-size: 14px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+
+@media (max-width: 900px) {
+  .ns-two { grid-template-columns: minmax(0, 1fr); }
+  .ns-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .ns-page { gap: 12px; }
+  .ns-steps { grid-template-columns: minmax(0, 1fr); }
+  .ns-filters { grid-template-columns: minmax(0, 1fr); }
+  .ns-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .ns-ex-lines { font-size: 13.5px; }
+  .ns-post { font-size: 16.5px; }
+  .ns-card-pad { padding: 12px; }
+  .ns-kv { grid-template-columns: minmax(0, 1fr); }
+  .ns-kv > div:nth-child(even) { border-top: 0; padding-top: 0; }
+  .ns-kv > div:nth-child(2) { border-top: 0; }
+  .ns-btn-lg { width: 100%; }
+  .ns-seg button { flex: 1 1 0; min-width: 0; flex-direction: column; gap: 0; padding: 6px 4px; }
+}

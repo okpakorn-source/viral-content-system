@@ -115,7 +115,9 @@ test('1a news-suite ครอบทุกไฟล์เทสที่อ้า
   const excluded = new Set(suite.exclude.map((e) => e.file));
   assert.deepEqual(suite.include.filter((f) => /\/clip-[^/]*$/.test(f) && !CLIP_FILES_GUARDING_NEWS.has(f)), [], 'ห้ามมีเทสคลิปใน include ของด่านข่าว');
   assert.deepEqual(suite.include.filter((f) => excluded.has(f)), []);
-  for (const e of suite.exclude) assert.ok(['cover', 'clip'].includes(e.domain), `exclude ${e.file} ต้องระบุ domain cover/clip`);
+  // ★ 10 พ.ย. 69: 'news-post-june' = เทสฟีเจอร์ท่อข่าวหลังยุค มิ.ย. ที่เจ้าของสั่งพักไว้เมื่อ 8 พ.ย. 69 (commit b3522e37 ย้ายเข้า exclude 53 ไฟล์ แต่ข้อนี้ไม่ได้แก้ตาม → ด่านเทสข่าวแดงค้างตั้งแต่วันนั้น)
+  //   เทสข่าวอื่นยังห้ามอยู่ใน exclude เหมือนเดิม · เลิกพักเมื่อไรให้ย้ายกลับเข้า include แล้วถอดโดเมนนี้ออกจากบรรทัดนี้
+  for (const e of suite.exclude) assert.ok(['cover', 'clip', 'news-post-june'].includes(e.domain), `exclude ${e.file} ต้องระบุ domain cover/clip/news-post-june`);
 });
 
 test('1b ไฟล์เทสใหม่ที่ import โมดูลข่าว (path ตรง / join / alias @/) แต่ไม่ลงทะเบียน → ตัวจับเจอ', () => withTempRoot((root) => {

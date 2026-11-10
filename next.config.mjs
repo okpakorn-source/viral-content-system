@@ -25,11 +25,19 @@ const nextConfig = {
     // ★ 27 ต.ค. 69 คลังโพสต์ตัวอย่างของขั้น บก.เกลาภาษาแอดมิน (adminVoiceEditor อ่านด้วย fs) — ไม่ trace = บน Vercel เกลาโดยไม่มีตัวอย่างแบบเงียบๆ
     // ★ 29 ต.ค. 69 คลังตัวอย่างนักเขียน F2X (f2xWriter อ่านด้วย fs) — ไม่ trace = บน Vercel F2X ล้มทุกงาน (ถอยไปนักเขียนเดิม)
     '/api/auto': ['./data/card-essences.json', './data/viral-essences.json', './data/viral-likes-real.json', './data/admin-voice-exemplars.json', './data/f2x-exemplars.json'],
-    '/api/auto/process': ['./data/card-essences.json', './data/viral-essences.json', './data/viral-likes-real.json', './data/admin-voice-exemplars.json', './data/f2x-exemplars.json'],
-    '/api/queue/worker': ['./data/card-essences.json', './data/viral-essences.json', './data/viral-likes-real.json', './data/admin-voice-exemplars.json', './data/f2x-exemplars.json'],
+    '/api/auto/process': ['./data/card-essences.json', './data/viral-essences.json', './data/viral-likes-real.json', './data/admin-voice-exemplars.json', './data/f2x-exemplars.json', './data/teacher-library.json', './data/angle-exemplars/angle-library.json'],
+    '/api/queue/worker': ['./data/card-essences.json', './data/viral-essences.json', './data/viral-likes-real.json', './data/admin-voice-exemplars.json', './data/f2x-exemplars.json', './data/teacher-library.json', './data/angle-exemplars/angle-library.json'],
     // ★ ผู้ตรวจอิสระ S2 (14 ส.ค.): หน้าเว็บยิง /api/summarize ตรง (content/new) — ต้องได้ไฟล์ชุดเดียวกัน
     //   ไม่งั้นข่าวผ่านคิวได้ไลก์จริง แต่ผ่านหน้าเว็บไม่ได้ แบบเงียบๆ (ช่องนี้ viral-essences ก็เคยขาด)
     '/api/summarize': ['./data/card-essences.json', './data/viral-essences.json', './data/viral-likes-real.json', './data/admin-voice-exemplars.json', './data/f2x-exemplars.json'],
+    // ★ 10 พ.ย. 69 ระบบเขียนข่าวตัวใหม่ (/news-studio): คลังครู + คลังต้นแบบประเด็น + ภาพปกต้นแบบ อ่านด้วย fs (path คำนวณ runtime)
+    //   ไม่ trace = บน Vercel โหลดคลังไม่ได้ → สั่งเขียนล้มทันที (TEACHER_LIBRARY_UNREADABLE / ANGLE_LIBRARY_UNREADABLE) และภาพปกต้นแบบขึ้น 404
+    //   ★ ท่อ Discord เรียกระบบนี้ผ่าน /api/auto/process (คิว: /api/queue/worker) — สอง route นั้นต้องได้คลังสองไฟล์นี้ด้วย (แนบไว้ในบรรทัดของมันด้านบน)
+    //     ไม่แนบ = ข่าวจากบอททุกงานล้มบน Vercel ทั้งที่รันในเครื่องผ่าน (ผู้ตรวจอิสระจับได้ก่อนขึ้นระบบ 10 พ.ย. 69)
+    '/api/news-studio/run': ['./data/teacher-library.json', './data/angle-exemplars/angle-library.json'],
+    '/api/news-studio/library': ['./data/teacher-library.json', './data/angle-exemplars/angle-library.json'],
+    '/api/news-studio/status': ['./data/teacher-library.json', './data/angle-exemplars/angle-library.json'],
+    '/api/news-studio/exemplar-image': ['./data/angle-exemplars/**'],
   },
 };
 

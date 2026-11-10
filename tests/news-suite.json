@@ -36,6 +36,7 @@
     "patterns": [
       "achievementResearch",
       "aiRouter",
+      "angleDirector",
       "app/api/auto/",
       "app/api/bot/",
       "app/api/news-filter/",
@@ -54,6 +55,7 @@
       "lib/workflow/workflowEngine",
       "modelConfig",
       "newsArchiveService",
+      "newsStudio",
       "newsFilterService",
       "pipelineDeadline",
       "pipelineLogger",
@@ -71,6 +73,8 @@
       "usageLogger",
       "utils/newsCap",
       "utils/textCleaner",
+      "teacherLibrary",
+      "teacherWriter",
       "utils/withTimeout",
       "viralFewshot"
     ]
@@ -119,7 +123,12 @@
     "tests/bot-pipeline-labels.test.mjs",
     "tests/test-news-runner.test.mjs",
     "tests/usage-logger-pricing.test.mjs",
-    "tests/era-generation-log-collision.test.mjs"
+    "tests/era-generation-log-collision.test.mjs",
+    "tests/teacher-writer.test.mjs",
+    "tests/angle-director.test.mjs",
+    "tests/news-studio-pipeline.test.mjs",
+    "tests/news-studio-server.test.mjs",
+    "tests/news-studio-discord.test.mjs"
   ],
   "exclude": [
     {

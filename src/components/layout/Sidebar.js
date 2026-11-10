@@ -43,6 +43,9 @@ export default function Sidebar() {
     { type: 'divider', label: '⭐ ใช้งานหลัก' },
     // ⛔ 6 ส.ค. 69: ถอดเมนูโต๊ะข่าวถาวร — ระบบถูกลบทั้งชุดตามคำสั่งเจ้าของ (หน้า /news-desk ไม่มีอยู่แล้ว)
     { label: 'สร้างคอนเทนต์ใหม่', icon: '✨', href: '/content/new', highlight: true },
+    // ★ 10 พ.ย. 69: หน้าใช้งานของระบบเขียนข่าวตัวใหม่ (ต้นแบบปกกำหนดทิศทาง + ครูเสริมสำนวน) — แยกจากท่อเขียนเดิมทั้งหมด
+    //   ถอดเมนู: ลบบรรทัดนี้ (หน้า /news-studio และ API /api/news-studio/* ไม่กระทบท่ออื่น)
+    { label: 'สตูดิโอเขียนข่าว (ระบบใหม่)', icon: '📝', href: '/news-studio', highlight: true },
     { label: 'ผลงานที่เขียนแล้ว', icon: '🧪', href: '/generation-logs' },
     { label: 'คอนเทนต์ทั้งหมด', icon: '📰', href: '/content' },
     { label: 'หน้าแรก (แดชบอร์ด)', icon: '📊', href: '/' },
