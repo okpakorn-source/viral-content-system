@@ -59,7 +59,16 @@ test('ทางปกติ: ได้ครบ 3 เวอร์ชัน ท�
   assert.equal(r.ok, true);
   assert.equal(r.versions.length, NEWS_STUDIO.versions);
   assert.deepEqual(r.versions.flatMap((v) => v.fails.map((f) => f.code)), [], 'ทุกเวอร์ชันต้องผ่านแบบแผน');
-  assert.deepEqual(r.summary, { requested: 3, written: 3, passed: 3, formPassed: 3, factChecked: 3, readClear: 3 });
+  // ผู้กำหนดทิศทางตัวปลอมส่งมา 2 ทิศทาง → เวอร์ชันที่ 3 ใช้ทิศทางหลักซ้ำ = ต่างกันจริง 2 แบบ (ตัวเลขนี้คือสิ่งที่ใช้เฝ้าดูว่าพนักงานได้ตัวเลือกคนละแบบครบไหม)
+  assert.deepEqual(r.summary, { requested: 3, written: 3, passed: 3, formPassed: 3, factChecked: 3, readClear: 3, distinctAngles: 2 });
+  assert.deepEqual(r.versions.map((v) => v.angle.focus), [ANGLES.angles[0].focus, ANGLES.angles[1].focus, ANGLES.angles[0].focus]);
+  // ผู้กำหนดทิศทางส่งครบ 3 ทิศทางที่ต่างกัน → ทุกเวอร์ชันได้ทิศทางของตัวเอง
+  const three = makeDeps();
+  const third = { ...ANGLES.angles[1], focus: 'ชูรายละเอียดอีกจุดหนึ่งที่ไม่ซ้ำกับสองทิศทางแรกเลย', coverLines: ['บรรทัดปกของทิศทางที่สามซึ่งไม่เหมือนใคร'], order: ['เปิดด้วยอีกจุด', 'ขยายอีกชุด', 'ปิดอีกแบบ'] };
+  three.deps.callDirector = async () => ({ angles: [...ANGLES.angles, third] });
+  const r3 = await runNewsStudio({ rawText: RAW, deps: three.deps });
+  assert.equal(r3.summary.distinctAngles, 3);
+  assert.equal(new Set(r3.versions.map((v) => v.angle.focus)).size, 3);
   assert.equal(calls.reader, 3, 'ทุกเวอร์ชันต้องผ่านผู้อ่านจับใจความ');
   assert.ok(r.versions.every((v) => v.readChecked && v.readClear && v.readOpening === 'บอกเรื่อง'));
   assert.equal(new Set(r.versions.map((v) => v.teacher.id)).size, 3, 'ครูต้องไม่ซ้ำ');
@@ -110,6 +119,23 @@ test('นักเขียนล้ม 1 เวอร์ชัน: อีก 2 
   assert.equal(r.summary.written, 2);
   const failed = r.versions.find((v) => v.error);
   assert.ok(failed && failed.error.includes('โมเดลล่มกลางทาง') && failed.content === '' && failed.teacher.id);
+  // จำนวนทิศทางที่ต่างกันจริง นับเฉพาะเวอร์ชันที่เขียนสำเร็จ: เวอร์ชันของทิศทางที่สองล้ม → พนักงานเหลือ 2 โพสต์จากทิศทางเดียวกัน = 1 แบบ
+  const second = makeDeps({ callWriter: async (prompt) => { if (String(prompt?.user || '').includes('ประเด็นที่ชู: คำพูดถึงแม่')) throw new Error('ล่ม'); return POST; } });
+  const r2 = await runNewsStudio({ rawText: RAW, deps: second.deps });
+  assert.deepEqual([r2.summary.written, r2.summary.distinctAngles], [2, 1]);
+});
+
+test('จำนวนทิศทางที่ต่างกันจริงวัดจากข้อความ ไม่ใช่จำนวนที่ผู้กำหนดทิศทางส่งมา · ผู้กำหนดทิศทางล้ม = 0', async () => {
+  // ส่งมา 3 ทิศทาง แต่ทิศทางที่สามเป็นทิศทางแรกเปลี่ยนคำนิดเดียว → ต่างกันจริง 2
+  const dup = makeDeps();
+  const reworded = { ...ANGLES.angles[0], focus: 'กิจวัตรตีสี่ของเด็กขายข้าวแกง ทุกวัน', why: 'ซ้ำ' };
+  dup.deps.callDirector = async () => ({ angles: [...ANGLES.angles, reworded] });
+  const r = await runNewsStudio({ rawText: RAW, deps: dup.deps });
+  assert.equal(r.direction.angles.length, 3);
+  assert.deepEqual([r.summary.written, r.summary.distinctAngles], [3, 2]);
+  const down = makeDeps({ callDirector: async () => { throw new Error('ผู้กำหนดทิศทางล่ม'); } });
+  const none = await runNewsStudio({ rawText: RAW, deps: down.deps });
+  assert.deepEqual([none.summary.written, none.summary.distinctAngles, none.direction.ok], [3, 0, false]);
 });
 
 test('นักเขียนล้มทุกเวอร์ชัน = error ALL_VERSIONS_FAILED (ไม่คืนผลว่างที่ดูเหมือนสำเร็จ)', async () => {

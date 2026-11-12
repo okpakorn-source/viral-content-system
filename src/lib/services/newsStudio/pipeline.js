@@ -13,7 +13,7 @@
  *   → หน้าเว็บ บอท Discord และข้อสอบ เรียกตัวเดียวกัน · ไม่มี import แบบ alias (รันด้วย node ตรงๆ ได้)
  * ตัวต่อสายของจริงอยู่ที่ src/lib/services/newsStudio/server.js
  */
-import { directAngle, angleForVersion } from '../angleDirector.js';
+import { directAngle, angleForVersion, countDistinctAngles } from '../angleDirector.js';
 import { shortlistTeachers, chooseRankedTeachers, pickTeachers } from '../teacherLibrary.js';
 import { writeWithTeacher } from '../teacherWriter.js';
 
@@ -256,6 +256,9 @@ export async function runNewsStudio({ rawText, useResearch = false, onProgress, 
       formPassed: versions.filter((v) => v.formOk).length,
       factChecked: versions.filter((v) => v.factChecked).length,
       readClear: versions.filter((v) => v.readClear).length,
+      // จำนวนทิศทางที่ต่างกันจริงในเวอร์ชันที่เขียนออกมา (3 = พนักงานได้ตัวเลือกคนละแบบครบ) — ใช้เฝ้าดูผลของกติกาผู้กำหนดทิศทาง
+      //   นับเฉพาะเวอร์ชันที่เขียนสำเร็จ (เวอร์ชันที่ล้มไม่ใช่ตัวเลือกของพนักงาน) · 0 = ไม่มีทิศทาง (ผู้กำหนดทิศทางล้ม ดู direction.ok)
+      distinctAngles: countDistinctAngles(written.map((v) => v.angle).filter(Boolean)),
     },
     warnings,
     timings: { ...timings, total: now() - t0 },
