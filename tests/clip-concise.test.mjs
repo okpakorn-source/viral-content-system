@@ -17,7 +17,9 @@ import { SINGLE_WRITER_SYSTEM } from '../src/lib/services/clipSingle/prompts.js'
 import { cardView, CHECK_KIND_LABEL } from '../src/app/clip-transcript/ui/statusMeta.js';
 import { createHash } from 'node:crypto';
 
-delete process.env.CLIP_RAW_STYLE;
+// ★ 12 พ.ย. 69: ค่าเริ่มต้นเปลี่ยนเป็นเนื้อข่าวเล่าต่อเนื่อง (tests/clip-narrative.test.mjs) — ไฟล์นี้คุมทางร้อยแก้วกระชับ (สวิตช์ถอย CLIP_RAW_STYLE=concise)
+//   node --test แยกโปรเซสต่อไฟล์ ค่า env นี้ไม่รั่วข้ามไฟล์
+process.env.CLIP_RAW_STYLE = 'concise';
 delete process.env.CLIP_CONCISE_MODEL;
 delete process.env.CLIP_CONCISE_EFFORT;
 
@@ -44,13 +46,16 @@ function fakeWriter(draft = { ...DRAFT, names: ['ลุงสมชาย'] }) {
   return fn;
 }
 
-test('สวิตช์: ค่าเริ่มต้น = ร้อยแก้วกระชับ · full = ทางเดิม · ค่าแปลก = กระชับ', () => {
-  assert.equal(resolveRawStyle(), 'concise');
+test('สวิตช์: CLIP_RAW_STYLE=concise = ร้อยแก้วกระชับ · full = ทางเดิม · ว่าง/ค่าแปลก = เนื้อข่าวเล่าต่อเนื่อง (ค่าเริ่มต้น 12 พ.ย. 69)', () => {
+  assert.equal(resolveRawStyle(), 'concise', 'ไฟล์นี้ตั้ง env = concise');
   assert.equal(resolveRawStyle('full'), 'full');
   assert.equal(resolveRawStyle('FULL'), 'full');
-  assert.equal(resolveRawStyle('อะไรก็ได้'), 'concise');
+  assert.equal(resolveRawStyle(' Concise '), 'concise');
+  assert.equal(resolveRawStyle('อะไรก็ได้'), 'narrative');
+  delete process.env.CLIP_RAW_STYLE;
+  try { assert.equal(resolveRawStyle(), 'narrative'); } finally { process.env.CLIP_RAW_STYLE = 'concise'; }
   process.env.CLIP_RAW_STYLE = 'full';
-  try { assert.equal(resolveRawStyle(), 'full'); } finally { delete process.env.CLIP_RAW_STYLE; }
+  try { assert.equal(resolveRawStyle(), 'full'); } finally { process.env.CLIP_RAW_STYLE = 'concise'; }
 });
 
 test('คำสั่ง: ดูรอบเดียวมีกฎห้องทดลองครบ · ขอความยาวเฉพาะตอนไม่รู้ · คลิปยาวเลิกเพดาน 2–6 ย่อหน้าและขอรายชื่อ', () => {

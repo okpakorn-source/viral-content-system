@@ -9,7 +9,7 @@ import test, { after } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { downloadTiktokSlides, isTiktokPhotoUrl, SLIDES_MAX, sniffImageType, looksAudioOnlyWatch } from '../src/lib/services/clipSingle/slides.js';
 import { runClipSinglePipeline } from '../src/lib/services/clipSingle/pipeline.js';
-import { buildSlideshowPassPrompt, SLIDESHOW_REV } from '../src/lib/services/clipSingle/prompts.js';
+import { buildSlideshowPassPrompt, SLIDESHOW_REV, NARRATIVE_SLIDESHOW_REV } from '../src/lib/services/clipSingle/prompts.js';
 import { callClipGeminiVideo } from '../src/lib/services/clipBrain/clipGeminiVideo.js';
 import { cardView, CHECK_KIND_LABEL } from '../src/app/clip-transcript/ui/statusMeta.js';
 
@@ -115,7 +115,8 @@ test('ท่อหลัก: โพสต์ภาพสไลด์ = แนบ
   assert.match(c.prompt, /ไปรับลูกชายกันครับ/, 'แคปชั่นต้องถึงคำสั่ง');
   assert.equal(c.thinkingLevel, 'high');
   assert.equal(r.insight.source, 'slideshow');
-  assert.equal(r.insight.promptRev, SLIDESHOW_REV);
+  assert.equal(r.insight.promptRev, NARRATIVE_SLIDESHOW_REV, 'ค่าเริ่มต้น 12 พ.ย. 69 = เนื้อข่าวเล่าต่อเนื่อง');
+  assert.match(c.prompt, /เนื้อข่าวออนไลน์/);
   assert.equal(r.insight.single.writer.kind, 'gemini-slides');
   assert.deepEqual(r.insight.single.slides, { count: 25, total: 25, audio: true, skipped: 0 });
   assert.ok(r.insight.checks.some((x) => x.kind === 'slideshow'));
@@ -292,4 +293,15 @@ test('ผู้ตรวจรอบ 2: HTML ที่ตอบ content-type ima
     assert.deepEqual(r.missingNos, [1]);
     assert.equal(r.images[0].buffer[0], 0xff);
   }
+});
+
+test('สวิตช์ถอย CLIP_RAW_STYLE=concise: โพสต์ภาพสไลด์กลับใช้คำสั่งภาพสไลด์ 10 พ.ย. (SLIDESHOW_REV)', async () => {
+  process.env.CLIP_RAW_STYLE = 'concise';
+  try {
+    const video = fakeVideo(DRAFT);
+    const r = await runClipSinglePipeline({ url: 'u', type: 'tiktok', slides: slidesOf(2), deps: { callVideo: video } });
+    assert.equal(r.insight.promptRev, SLIDESHOW_REV);
+    assert.doesNotMatch(video.calls[0].prompt, /เนื้อข่าวออนไลน์/);
+    assert.match(video.calls[0].prompt, /ร้อยแก้วกระชับ/);
+  } finally { delete process.env.CLIP_RAW_STYLE; }
 });

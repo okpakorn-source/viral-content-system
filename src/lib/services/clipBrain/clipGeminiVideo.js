@@ -35,7 +35,7 @@ function videoApiKey() {
 export function classifyFailure({ httpStatus, errorMessage, finishReason }) {
   const m = String(errorMessage || '').toLowerCase();
   if (finishReason === 'MAX_TOKENS') return { kind: 'TRUNCATED', retry: false, note: 'คำตอบถูกตัดเพราะชนเพดาน — ยิงซ้ำเหมือนเดิมก็ตันเหมือนเดิม' };
-  if (finishReason === 'SAFETY' || finishReason === 'PROHIBITED_CONTENT') return { kind: 'BLOCKED', retry: false, note: 'ถูกบล็อกด้วยนโยบายเนื้อหา' };
+  if (finishReason === 'SAFETY' || finishReason === 'PROHIBITED_CONTENT' || finishReason === 'BLOCKLIST' || finishReason === 'IMAGE_SAFETY' || finishReason === 'OTHER') return { kind: 'BLOCKED', retry: false, note: 'ถูกบล็อกด้วยนโยบายเนื้อหา' };
   if (httpStatus === 429) return { kind: 'RATE_LIMIT', retry: true, note: 'โควตาเต็มชั่วคราว' };
   if (httpStatus === 503 || /overload|high demand|unavailable/i.test(m)) return { kind: 'BUSY', retry: true, note: 'ผู้ให้บริการแน่นชั่วคราว' };
   if (httpStatus === 500 || httpStatus === 502 || httpStatus === 504) return { kind: 'SERVER', retry: true, note: 'ฝั่งผู้ให้บริการพลาดชั่วคราว' };
@@ -236,6 +236,10 @@ export async function callClipGeminiVideo(rawOpts = {}) {
         if (json?.error) errMsg = `${json.error.code || res.status} ${json.error.message || ''}`;
         const cand = (json?.candidates || [])[0] || {};
         finishReason = cand.finishReason || null;
+        // ★ 12 พ.ย. 69: คำขอถูกตัวกรองฝั่ง Google บล็อกทั้งก้อน (promptFeedback.blockReason · ไม่มี candidates)
+        //   เดิมตกเป็น "ตอบว่าง" (EMPTY) แล้วยิงซ้ำ 3 รอบ เสียค่าอินพุตเต็มทุกรอบ ทั้งที่คำขอเดิมโดนบล็อกเหมือนเดิม → ตีเป็น BLOCKED ไม่ยิงซ้ำ
+        //   (เคสโพสต์ภาพตำรวจน๊อต: แคปชั่น "ไปรับลูกชาย…ซื้อมือสอง" + ภาพ + เสียง = PROHIBITED_CONTENT)
+        if (!finishReason && json?.promptFeedback?.blockReason) finishReason = String(json.promptFeedback.blockReason);
         const text = ((cand.content || {}).parts || []).map((p) => p.text || '').join('');
         textLength = text.length;
         if (res.ok && text) {
