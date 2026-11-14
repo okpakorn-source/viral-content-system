@@ -1,6 +1,9 @@
 'use client';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import Header from '@/components/layout/Header';
+// ★ 14 พ.ย. 69: ปรับแสง/สี/ความคม แบบคำนวณพิกเซลตรงๆ (ไม่มี AI เจนภาพ — หน้าคนเหมือนต้นฉบับ) แยกโมดูล
+import { adjustCanvas, adjustKey, getAutoLevelsForImage, isNeutralAdjust, ADJUST_PRESETS } from '@/lib/cover-editor/imageAdjust';
+import AdjustPanel from './AdjustPanel';
 
 // ═══════════════════════════════════════════════════════════
 const W = 1080, H = 1350;
@@ -237,7 +240,20 @@ function coverFit(img, tw, th, focusY = 0.3, crop) {
   return { sx, sy, sw, sh };
 }
 
+// 🩹 Safari/iOS บางรุ่นไม่รองรับ ctx.filter — ตรวจครั้งเดียว (ฝั่ง server ไม่มี document → false อัตโนมัติ)
+const CANVAS_FILTER_OK = (() => {
+  try {
+    const c = document.createElement('canvas').getContext('2d');
+    return typeof c.filter === 'string';
+  } catch { return false; }
+})();
+
+// ★ 14 พ.ย. 69 (เพิ่มความเร็ว): แคชหน้ากากเฟด — เดิมสร้าง canvas ใหม่ทุกช่องทุกเฟรมตอนลาก
+const _maskCache = new Map();
 function createFadeMask(w, h, f) {
+  const key = `${w}x${h}|${f.right || 0},${f.left || 0},${f.bottom || 0},${f.top || 0}`;
+  const hit = _maskCache.get(key);
+  if (hit) return hit;
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   const m = c.getContext('2d');
   m.fillStyle = '#000'; m.fillRect(0, 0, w, h);
@@ -247,16 +263,42 @@ function createFadeMask(w, h, f) {
   if (f.left > 0)   { const g = grad(0,0,f.left,0);    g.addColorStop(0,'rgba(0,0,0,1)'); g.addColorStop(1,'rgba(0,0,0,0)'); m.fillStyle=g; m.fillRect(0,0,f.left,h); }
   if (f.bottom > 0) { const g = grad(0,h-f.bottom,0,h); g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(0,0,0,1)'); m.fillStyle=g; m.fillRect(0,h-f.bottom,w,f.bottom); }
   if (f.top > 0)    { const g = grad(0,0,0,f.top);      g.addColorStop(0,'rgba(0,0,0,1)'); g.addColorStop(1,'rgba(0,0,0,0)'); m.fillStyle=g; m.fillRect(0,0,w,f.top); }
+  if (_maskCache.size >= 40) _maskCache.clear();
+  _maskCache.set(key, c);
   return c;
 }
 
-function drawRectSlot(ctx, img, slot, offset, crop) {
-  const ox = offset?.dx||0, oy = offset?.dy||0;
-  const { x:bx, y:by, w, h, fadeRight:fR=0, fadeLeft:fL=0, fadeTop:fT=0, fadeBottom:fB=0, border, borderWidth:bw=0, _gray=0 } = slot;
-  const x = bx+ox, y = by+oy;
+// ★ 14 พ.ย. 69 (เพิ่มความเร็ว): แคช "แผ่นภาพของช่อง" (ครอป+ปรับแสง+เฟดเสร็จแล้ว) ต่อช่อง
+//   ลากช่องหนึ่ง = วาดใหม่เฉพาะช่องนั้น ช่องอื่นแค่แปะแผ่นเดิม · ย้ายตำแหน่งช่อง = ไม่ต้องประกอบใหม่เลย
+const _imgIds = new WeakMap();
+let _imgSeq = 0;
+function imgUid(img) {
+  let id = _imgIds.get(img);
+  if (!id) { id = ++_imgSeq; _imgIds.set(img, id); }
+  return id;
+}
+const _tileCache = new Map(); // slot.id → { key, canvas, mL, mT }
+function tileStore(slotId, tile) {
+  _tileCache.delete(slotId);
+  _tileCache.set(slotId, tile);
+  if (_tileCache.size > 14) _tileCache.delete(_tileCache.keys().next().value); // กันกินแรมเมื่อสลับแทมเพลตหลายแบบ
+  return tile;
+}
+// ลูกเล่นระดับพิกเซลของช่อง: ขาวดำ (_gray) + ปรับแสง/สี/ความคม (_adj) — คีย์ไว้เทียบแคช
+const slotFxKey = (slot) => `${slot._gray || 0}|${slot._adjKey || '0'}|${slot._lite && slot._adj?.sharpen ? 'L' : 'F'}`;
+const slotHasFx = (slot) => (slot._gray > 0) || !!slot._adj;
+function applySlotFx(canvas, img, slot) {
+  if (!slotHasFx(slot)) return;
+  adjustCanvas(canvas, slot._adj || null, {
+    autoLevels: slot._adj?.auto ? getAutoLevelsForImage(img) : null,
+    gray: slot._gray || 0,
+    skipSharpen: !!slot._lite, // ระหว่างลากเลื่อนภาพ: ข้ามขั้นความคมให้ลื่น ปล่อยมือแล้วคมกลับ
+  });
+}
+
+function getRectTile(img, slot, crop) {
+  const { w, h, fadeRight:fR=0, fadeLeft:fL=0, fadeTop:fT=0, fadeBottom:fB=0, border, borderWidth:bw=0 } = slot;
   const dw = border ? w-bw*2 : w, dh = border ? h-bw*2 : h;
-  const dx = border ? x+bw : x, dy = border ? y+bw : y;
-  if (border) { ctx.save(); ctx.fillStyle=border; ctx.shadowColor='rgba(0,0,0,0.5)'; ctx.shadowBlur=12; ctx.shadowOffsetY=4; ctx.fillRect(x,y,w,h); ctx.restore(); }
 
   // ★ 6 ก.ค. รอบ 4 (ผู้ใช้ชี้เป้าจากปกตัวอย่าง): โหมด "ละลายทับ" — เนื้อภาพคมทั้งใบ
   //   แต่ขยายภาพ "ลามออกนอกกรอบ" ด้านที่เลือก แล้วไล่ความใสเฉพาะส่วนที่ลาม
@@ -267,15 +309,23 @@ function drawRectSlot(ctx, img, slot, offset, crop) {
   const ext = Math.round(mpx / 2); // ระยะลามออกนอกกรอบ
   const mL = me && me.left ? ext : 0, mR = me && me.right ? ext : 0, mT = me && me.top ? ext : 0, mB = me && me.bottom ? ext : 0;
   const ow = dw + mL + mR, oh = dh + mT + mB; // ขนาดผืนวาดจริง (รวมส่วนลาม)
+  const be0 = slot._blurEdges;
+  const be = (CANVAS_FILTER_OK && !border && !me && be0 && (be0.left || be0.right || be0.top || be0.bottom)) ? be0 : null;
+  const {sx,sy,sw,sh} = coverFit(img,ow,oh,0.3,crop);
+
+  const edgeKey = (e) => (e ? `${+!!e.left}${+!!e.right}${+!!e.top}${+!!e.bottom}:${e.px || 0}:${e.blur || 0}` : '-');
+  const key = [imgUid(img), ow, oh, sx, sy, sw, sh, border ? 1 : 0, fR, fL, fT, fB, edgeKey(me), edgeKey(be), slotFxKey(slot)].join('|');
+  const hit = _tileCache.get(slot.id);
+  if (hit && hit.key === key) return hit;
 
   const o = document.createElement('canvas'); o.width=ow; o.height=oh;
-  const c = o.getContext('2d');
+  const c = o.getContext('2d', slotHasFx(slot) ? { willReadFrequently: true } : undefined);
   // ★ 6 ก.ค. (คุณภาพสูงสุด): ย่อ/ขยายภาพแบบเกรดสูง — ขอบคม ไม่หยาบ
   c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
-  const {sx,sy,sw,sh} = coverFit(img,ow,oh,0.3,crop);
-  if (_gray > 0) c.filter = `grayscale(${_gray})`; // ★ 4 ก.ค.: โทนไว้อาลัยรายช่อง
   c.drawImage(img,sx,sy,sw,sh,0,0,ow,oh);
-  c.filter = 'none';
+  // ★ 14 พ.ย. 69: ปรับแสง/สี/ความคม + ขาวดำรายช่อง (★ 4 ก.ค.) ที่ระดับพิกเซล — ทำ "ก่อน" ใส่หน้ากากเฟด
+  //   (เดิมขาวดำใช้ ctx.filter ซึ่ง Safari/iOS ไม่มี → บนไอโฟนกดแล้วไม่ขึ้น · สูตรใหม่เท่ากับ grayscale() ของ CSS)
+  applySlotFx(o, img, slot);
   if (me) {
     // ไล่ความใสคร่อมเส้นขอบเดิม: เริ่มจางจาก "ครึ่งในกรอบ" → ใสสุดที่ปลายส่วนลาม
     // = ขอบตัวเองหายจาง (เห็นผลทันทีทุกกรณี) + เนื้อที่ลามซ้อนบนช่องข้างเคียงจางเข้าหากัน
@@ -290,8 +340,7 @@ function drawRectSlot(ctx, img, slot, offset, crop) {
   if (!border && !me && (fR||fL||fT||fB)) { const mask = createFadeMask(ow,oh,{right:fR,left:fL,top:fT,bottom:fB}); c.globalCompositeOperation='destination-in'; c.drawImage(mask,0,0); c.globalCompositeOperation='source-over'; }
   // ★ 6 ก.ค. รอบ 3 (ผู้ใช้สั่ง): โหมด "เบลอละลาย" — ขอบภาพเบลอฟุ้งค่อยๆ ชัดเข้าใน (ภาพละลายเข้าหากัน)
   //   ต่างจากเฟด: ภาพไม่จางหายเป็นใส แต่ขอบถูกเบลอแรงสุดที่ริมแล้วไล่กลับมาคม
-  const be = slot._blurEdges;
-  if (!border && !me && be && (be.left || be.right || be.top || be.bottom)) {
+  if (be) {
     const bpx = Math.max(40, be.px || 200);
     // ★ ความแรงเบลอปรับแยกได้ (be.blur) — ไม่ตั้ง = คำนวณจากระยะ (บทเรียน: ผู้ใช้ขอคุมเองได้)
     const k = Math.min(80, Math.max(2, be.blur || Math.round(bpx / 6)));
@@ -320,21 +369,47 @@ function drawRectSlot(ctx, img, slot, offset, crop) {
     bc.drawImage(mk, 0, 0);
     c.drawImage(bo, 0, 0);
   }
-  ctx.drawImage(o, dx - mL, dy - mT);
+  return tileStore(slot.id, { key, canvas: o, mL, mT });
+}
+
+function drawRectSlot(ctx, img, slot, offset, crop) {
+  const ox = offset?.dx||0, oy = offset?.dy||0;
+  const { x:bx, y:by, w, h, border, borderWidth:bw=0 } = slot;
+  const x = bx+ox, y = by+oy;
+  const dx = border ? x+bw : x, dy = border ? y+bw : y;
+  if (border) { ctx.save(); ctx.fillStyle=border; ctx.shadowColor='rgba(0,0,0,0.5)'; ctx.shadowBlur=12; ctx.shadowOffsetY=4; ctx.fillRect(x,y,w,h); ctx.restore(); }
+  const tile = getRectTile(img, slot, crop);
+  ctx.drawImage(tile.canvas, dx - tile.mL, dy - tile.mT);
 }
 
 function drawCircleSlot(ctx, img, slot, offset, crop) {
   ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; // ★ คุณภาพสูงสุด
   const ox = offset?.dx||0, oy = offset?.dy||0;
-  const { x:bx, y:by, diameter:d, border='#fff', borderWidth:bw=4, _gray=0 } = slot;
+  const { x:bx, y:by, diameter:d, border='#fff', borderWidth:bw=4 } = slot;
   const x = bx+ox, y = by+oy, r = d/2, cx = x+r, cy = y+r;
   ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,r+bw,0,Math.PI*2);
   ctx.shadowColor='rgba(0,0,0,0.5)'; ctx.shadowBlur=16; ctx.shadowOffsetY=4;
   ctx.fillStyle=border; ctx.fill(); ctx.restore();
   ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.clip();
-  if (_gray > 0) ctx.filter = `grayscale(${_gray})`; // ★ 4 ก.ค.: โทนไว้อาลัยรายช่อง
   const {sx,sy,sw,sh} = coverFit(img,d,d,0.3,crop);
-  ctx.drawImage(img,sx,sy,sw,sh,x,y,d,d); ctx.restore();
+  if (slotHasFx(slot)) {
+    // ★ 14 พ.ย. 69: มีปรับแสง/ขาวดำ → ประกอบลงแผ่นย่อยก่อน (แคชไว้) แล้วค่อยแปะในวง
+    const cw = Math.max(1, Math.round(d));
+    const key = [imgUid(img), cw, sx, sy, sw, sh, slotFxKey(slot)].join('|');
+    let tile = _tileCache.get(slot.id);
+    if (!tile || tile.key !== key) {
+      const o = document.createElement('canvas'); o.width = cw; o.height = cw;
+      const c = o.getContext('2d', { willReadFrequently: true });
+      c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+      c.drawImage(img,sx,sy,sw,sh,0,0,cw,cw);
+      applySlotFx(o, img, slot);
+      tile = tileStore(slot.id, { key, canvas: o, mL: 0, mT: 0 });
+    }
+    ctx.drawImage(tile.canvas, 0, 0, cw, cw, x, y, d, d);
+  } else {
+    ctx.drawImage(img,sx,sy,sw,sh,x,y,d,d);
+  }
+  ctx.restore();
 }
 
 function drawTextSlot(ctx, ts, val, overrideBg, overrides) {
@@ -372,17 +447,40 @@ function drawTextSlot(ctx, ts, val, overrideBg, overrides) {
 }
 
 /** Draw blurred + darkened background to fill gaps (no black areas) */
+// ★ 14 พ.ย. 69 (เพิ่มความเร็ว): เบลอ 30px ทั้งผืนแพงมาก เดิมทำซ้ำทุกเฟรม → ทำครั้งเดียวต่อรูปแล้วแคช
+let _bgCache = null; // { id, canvas }
 function drawBlurredBg(ctx, slotImages, template) {
   // Find best image for background: prefer 'main', fallback to first available
-  const mainSlot = template.slots.find(sl => sl.id === 'main');
   const bgImg = slotImages['main'] || slotImages[template.slots[0]?.id];
   if (!bgImg) return;
-  ctx.save();
-  ctx.filter = 'blur(30px) brightness(0.3)';
-  const { sx, sy, sw, sh } = coverFit(bgImg, W + 40, H + 40);
-  ctx.drawImage(bgImg, sx, sy, sw, sh, -20, -20, W + 40, H + 40);
-  ctx.filter = 'none';
-  ctx.restore();
+  const id = imgUid(bgImg);
+  if (!_bgCache || _bgCache.id !== id) {
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const b = c.getContext('2d');
+    if (CANVAS_FILTER_OK) {
+      const { sx, sy, sw, sh } = coverFit(bgImg, W + 40, H + 40);
+      b.filter = 'blur(30px) brightness(0.3)';
+      b.drawImage(bgImg, sx, sy, sw, sh, -20, -20, W + 40, H + 40);
+      b.filter = 'none';
+    } else {
+      // 🩹 Safari fallback: ไม่มี ctx.filter → เบลอด้วยย่อ-ขยายภาพ 2 จังหวะ + ทามืดด้วย fillRect แทน brightness()
+      const stage1 = document.createElement('canvas'); stage1.width = 135; stage1.height = 169;
+      const s1 = stage1.getContext('2d');
+      s1.imageSmoothingEnabled = true; s1.imageSmoothingQuality = 'high';
+      const { sx: fsx, sy: fsy, sw: fsw, sh: fsh } = coverFit(bgImg, 135, 169);
+      s1.drawImage(bgImg, fsx, fsy, fsw, fsh, 0, 0, 135, 169);
+      const stage2 = document.createElement('canvas'); stage2.width = 27; stage2.height = 34;
+      const s2 = stage2.getContext('2d');
+      s2.imageSmoothingEnabled = true; s2.imageSmoothingQuality = 'high';
+      s2.drawImage(stage1, 0, 0, 27, 34);
+      b.imageSmoothingEnabled = true; b.imageSmoothingQuality = 'high';
+      b.drawImage(stage2, -20, -20, W + 40, H + 40);
+      b.fillStyle = 'rgba(0,0,0,0.7)';
+      b.fillRect(0, 0, W, H);
+    }
+    _bgCache = { id, canvas: c };
+  }
+  ctx.drawImage(_bgCache.canvas, 0, 0);
 }
 
 /** Draw text area background — solid rounded rect or gradient overlay */
@@ -465,6 +563,10 @@ export default function CoverPage() {
   const [slotCrops, setSlotCrops] = useState({}); // { slotId: { zoom: 1.2, panX: 0, panY: -1 } }
   const [textValues, setTextValues] = useState({});
   const [dragState, setDragState] = useState(null);
+  // ★ 14 พ.ย. 69: เก็บสถานะลากใน ref คู่กับ state — ตัวจับเมาส์/นิ้วอ่านค่าล่าสุดได้ทันที ไม่ต้องรอ React วาดรอบใหม่
+  //   (เดิม: เฟรมแรกๆ ของการลากหลุด เพราะ handleMove ยังเห็น dragState=null ของรอบ render ก่อน — เครื่องช้า/มือถืออาการชัด)
+  const dragRef = useRef(null);
+  const setDrag = (v) => { dragRef.current = v; setDragState(v); };
   const [downloaded, setDownloaded] = useState(false);
   const [hoverCursor, setHoverCursor] = useState('default');
   const [textBgColors, setTextBgColors] = useState({}); // override bg color per text slot
@@ -592,6 +694,22 @@ export default function CoverPage() {
     );
   };
   const [slotBorderColors, setSlotBorderColors] = useState({}); // slotId → สีขอบ override
+  // ★ 14 พ.ย. 69: ปรับแสง/สี/ความคมรายช่อง (สูตรพิกเซลล้วน ไม่มี AI เจนภาพ) — slotAdjust[slotId] = { auto, brightness, ... }
+  const [slotAdjust, setSlotAdjust] = useState({});
+  const [compareOriginal, setCompareOriginal] = useState(false); // กดค้าง = ดูภาพก่อนปรับ
+  const [adjLite, setAdjLite] = useState(false);                 // กำลังเลื่อนสไลเดอร์ปรับภาพ (พักขั้นความคมชั่วคราว)
+  const adjLiteTimerRef = useRef(null);
+  const [notice, setNotice] = useState(null);                    // แถบแจ้งเตือนสั้นๆ { msg, kind }
+  const noticeTimerRef = useRef(null);
+  const showNotice = (msg, kind = 'info') => {
+    setNotice({ msg, kind });
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = setTimeout(() => setNotice(null), 4200);
+  };
+  const [isWide, setIsWide] = useState(false);                   // จอกว้าง ≥1280: เครื่องมืออยู่ข้างปก ไม่ต้องเลื่อนลงไปหา
+  const [dropActive, setDropActive] = useState(false);           // กำลังลากไฟล์มาเหนือปก
+  const toolsRef = useRef(null);                                 // แผงเครื่องมือของช่องที่เลือก (ไว้เลื่อนจอไปหา)
+  const liveRef = useRef({});                                    // ตัวชี้ฟังก์ชันรุ่นล่าสุด ให้ listener ระดับ window เรียก
   const [slotGray, setSlotGray] = useState({});             // slotId → 0..1 ขาวดำรายช่อง
   const [grayAll, setGrayAll] = useState(0);                // 0..1 ขาวดำทั้งใบ (โทนไว้อาลัย)
   const [markers, setMarkers] = useState([]);               // วง/กรอบแดงเน้นจุด [{id,type,x,y,w,h,color,width}]
@@ -600,7 +718,7 @@ export default function CoverPage() {
   const pinchRef = useRef(null);    // สถานะจีบ 2 นิ้ว (ซูมภาพในช่อง)
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 768px)');
-    const apply = () => setIsMobile(mq.matches || window.innerWidth <= 768);
+    const apply = () => { setIsMobile(mq.matches || window.innerWidth <= 768); setIsWide(window.innerWidth >= 1280); };
     apply();
     mq.addEventListener('change', apply);
     window.addEventListener('resize', apply); // กันเคส matchMedia change ไม่ยิง (emulation/หมุนจอ/พับจอ)
@@ -610,7 +728,11 @@ export default function CoverPage() {
   // ★ E3: ตั้งธง mounted — งาน async ของ E3a เช็คก่อน setState ทุกครั้ง (กัน setState หลัง unmount)
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+      if (adjLiteTimerRef.current) clearTimeout(adjLiteTimerRef.current);
+    };
   }, []);
 
   // ★ E3b: ล็อกสกอลล์ตัวหน้าเมื่อเปิด modal เลือกรูป + ปิดด้วย Esc + คืนค่าตอนปิด/unmount
@@ -709,7 +831,9 @@ export default function CoverPage() {
   const handleDeleteTemplate = async (id) => {
     if (!confirm('ลบแทมเพลตนี้?')) return;
     try {
-      await fetch(`/api/templates/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/templates/${id}`, { method: 'DELETE' });
+      // ★ 14 พ.ย. 69: เดิมลบออกจากจอทั้งที่ server ปฏิเสธ → รีเฟรชแล้วแทมเพลตกลับมา (ดูเหมือนลบไม่ติด)
+      if (!res.ok) { showNotice(`ลบแทมเพลตไม่สำเร็จ (${res.status}) — ลองใหม่`, 'error'); return; }
       setTemplates(prev => prev.filter(t => t.id !== id));
       if (templateId === id) {
         const remaining = templates.filter(t => t.id !== id);
@@ -717,6 +841,7 @@ export default function CoverPage() {
       }
     } catch (e) {
       console.warn('Delete failed:', e.message);
+      showNotice('ลบแทมเพลตไม่สำเร็จ: ' + e.message, 'error');
     }
   };
 
@@ -744,81 +869,77 @@ export default function CoverPage() {
   const hasDraggables = draggableSlots.some(sl => slotImages[sl.id]);
   const hasOffsets = Object.values(slotOffsets).some(o => o.dx || o.dy);
   const hasScaleChanges = Object.values(slotScales).some(s => s !== 1 && s !== undefined);
-  const [enhancing, setEnhancing] = useState({});
-  const [enhanceResults, setEnhanceResults] = useState({}); // per-slot enhancement metadata
+  // ★ 14 พ.ย. 69: ถอดปุ่ม "AI Enhance 2x/4x/Auto" (Real-ESRGAN + face-restore ผ่าน /api/assets/enhance-image) ออกจากหน้านี้
+  //   เหตุผล: เป็นโมเดลเจนที่ "วาดรายละเอียดใหม่" = ต้นเหตุหน้าคนเพี้ยน (บทเรียน 10 ก.ค. 69) + ช้า 10-30 วิ + มีค่า API
+  //   แทนด้วยแผง 🎨 ปรับแสง/สี/ความคม (AdjustPanel) ที่คำนวณพิกเซลเดิมตรงๆ เห็นผลทันที — ตัว API เดิมไม่ได้ถูกแตะ
 
-  // ── AI Enhance Image ──
-  const enhanceSlotImage = async (slotId, forceScale) => {
-    const img = slotImages[slotId];
-    if (!img) return;
-    setEnhancing(prev => ({ ...prev, [slotId]: true }));
-    try {
-      // Convert Image to base64
-      const c = document.createElement('canvas');
-      c.width = img.naturalWidth || img.width;
-      c.height = img.naturalHeight || img.height;
-      c.getContext('2d').drawImage(img, 0, 0);
-      const dataUrl = c.toDataURL('image/jpeg', 0.95);
-      const base64 = dataUrl.split(',')[1];
-
-      const maxDim = Math.max(img.naturalWidth, img.naturalHeight);
-      const scale = forceScale || (maxDim < 400 ? 4 : 2);
-
-      const res = await fetch('/api/assets/enhance-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          base64,
-          mode: 'auto',
-          upscale: scale,
-          faceRestore: true,
-          quality: 95,
-        }),
-      });
-      const data = await res.json();
-      if (data.success && data.data?.base64) {
-        const enhanced = new Image();
-        enhanced.onload = () => setSlotImages(prev => ({ ...prev, [slotId]: enhanced }));
-        enhanced.src = `data:image/jpeg;base64,${data.data.base64}`;
-        // Store enhancement metadata
-        setEnhanceResults(prev => ({ ...prev, [slotId]: {
-          enhancerUsed: data.data.enhancerUsed,
-          originalResolution: data.data.originalResolution,
-          enhancedResolution: data.data.enhancedResolution,
-          sharpnessBefore: data.data.sharpnessBefore,
-          sharpnessAfter: data.data.sharpnessAfter,
-          similarityScore: data.data.similarityScore,
-          qualityGain: data.data.qualityGain,
-          processingTime: data.data.processingTime,
-          rejected: data.data.rejected || false,
-        }}));
-        console.log(`[Cover] ✨ Enhanced ${slotId}: ${data.data.originalResolution} → ${data.data.enhancedResolution} (${data.data.enhancerUsed}) | similarity: ${data.data.similarityScore}%`);
-      }
-    } catch (e) {
-      console.error(`[Cover] ❌ Enhance error:`, e);
-    } finally {
-      setEnhancing(prev => ({ ...prev, [slotId]: false }));
+  // ── วางรูปลงช่อง (ทางเดียวที่ทุกแหล่งรูปใช้ร่วมกัน: อัปโหลด/ลากวาง/วางจากคลิปบอร์ด/ถาด/คลังเคส) ──
+  // คืนหน่วยความจำของไฟล์ที่อัปโหลด: รูปไหน "หลุดออกจากทุกช่อง" (ถูกแทน/ลบ/ล้าง) → ปล่อย object URL ของรูปนั้น
+  const prevImagesRef = useRef({});
+  useEffect(() => {
+    const live = new Set(Object.values(slotImages));
+    for (const img of Object.values(prevImagesRef.current)) {
+      if (live.has(img)) continue;
+      try { if (img && typeof img.src === 'string' && img.src.startsWith('blob:')) URL.revokeObjectURL(img.src); } catch { /* เงียบ */ }
     }
+    prevImagesRef.current = slotImages;
+  }, [slotImages]);
+  const placeImage = (slotId, img) => {
+    setSlotImages(prev => ({ ...prev, [slotId]: img }));
+    // รูปใหม่ = เริ่มครอป/การปรับภาพใหม่ (เดิม: อัปโหลดทับแล้วค่าเลื่อนภาพของรูปเก่าค้าง → รูปใหม่โผล่เบี้ยว)
+    setSlotCrops(p => ({ ...p, [slotId]: { zoom: 1, panX: 0, panY: 0 } }));
+    setSlotAdjust(p => { if (!p[slotId]) return p; const n = { ...p }; delete n[slotId]; return n; });
+    setSelectedSlotId(slotId);
   };
+  // ไฟล์ → Image ผ่าน object URL (เดิมแปลงเป็น base64 ทั้งไฟล์: รูปมือถือ 10MB กินแรมหลายเท่าและหน่วง)
+  const loadFileImage = (file) => new Promise((resolve, reject) => {
+    if (!file || (file.type && !file.type.startsWith('image/'))) { reject(new Error('NOT_IMAGE')); return; }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('DECODE_FAILED')); };
+    img.src = url;
+  });
+  const fileErrorText = (e) => (e?.message === 'NOT_IMAGE'
+    ? 'ไฟล์นี้ไม่ใช่รูปภาพ — เลือกไฟล์ JPG / PNG / WEBP'
+    : 'เปิดรูปนี้ไม่ได้ (ไฟล์เสียหรือชนิดไม่รองรับ) — ลองบันทึกเป็น JPG/PNG แล้วอัปโหลดใหม่');
 
-  // ── File upload (auto-enhance if small) ──
-  const handleFile = (slotId, file) => {
+  // ── File upload ──
+  //   ★ 6 ก.ค. (ผู้ใช้สั่ง): ห้าม AI แตะภาพเองทุกกรณี — ภาพที่อัปโหลดต้องเป็นต้นฉบับตรงๆ (ยังคงเดิม)
+  const handleFile = async (slotId, file) => {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        setSlotImages(prev => ({ ...prev, [slotId]: img }));
-        // ★ 6 ก.ค. (ผู้ใช้สั่ง): ❌ ปิด auto-enhance — ห้าม AI แตะภาพเองทุกกรณี ภาพต้องเป็นต้นฉบับตรงๆ
-        //   ปุ่ม "ปรับชัด 2x/4x/Auto" ยังกดเองได้ (ภายใต้กฎเดิม: ห้ามแตะหน้า/คงต้นฉบับ 100%)
-        //   (เดิม: รูป <600px ถูกส่งเข้า Real-ESRGAN อัตโนมัติโดยไม่ถาม)
-      };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
+    try { placeImage(slotId, await loadFileImage(file)); }
+    catch (e) { showNotice(fileErrorText(e), 'error'); }
+  };
+  // ★ 14 พ.ย. 69: หลายรูปทีเดียว — ลงช่องที่ชี้ (ถ้ามี) แล้วเติมช่องว่างตามลำดับ
+  const handleFiles = async (fileList, preferSlotId) => {
+    const files = Array.from(fileList || []).filter(f => f && (!f.type || f.type.startsWith('image/')));
+    if (!files.length) { showNotice('ไม่พบไฟล์รูปภาพ', 'error'); return; }
+    if (!template) return;
+    const cur = slotImages;
+    const order = [...template.slots].sort((a, b) => {
+      const o = { main: 0, sub_left: 1, highlight: 2, circle: 3 }; return (o[a.id] ?? 5) - (o[b.id] ?? 5);
+    }).map(sl => sl.id);
+    const empties = order.filter(id => !cur[id] && id !== preferSlotId);
+    let targets;
+    // รูปเดียว: ช่องที่ชี้ → ช่องที่เลือกอยู่ถ้ายังว่าง → ช่องว่างช่องแรก → (เต็มหมดแล้ว) เปลี่ยนรูปช่องที่เลือก
+    if (files.length === 1) targets = [preferSlotId || (selectedSlotId && !cur[selectedSlotId] ? selectedSlotId : null) || empties[0] || selectedSlotId || order[0]];
+    else targets = [...(preferSlotId ? [preferSlotId] : []), ...empties];
+    let ok = 0, bad = 0;
+    for (let i = 0; i < files.length && i < targets.length; i++) {
+      try { placeImage(targets[i], await loadFileImage(files[i])); ok++; } catch { bad++; }
+    }
+    const unused = Math.max(0, files.length - targets.length);
+    if (bad || unused || files.length > 1) {
+      const parts = [`วางรูปแล้ว ${ok} ช่อง`];
+      if (unused) parts.push(`เหลือ ${unused} รูปไม่ได้ใช้ (ช่องเต็ม — แตะช่องที่จะเปลี่ยนแล้วอัปโหลดทีละรูป)`);
+      if (bad) parts.push(`เปิดไม่ได้ ${bad} ไฟล์`);
+      showNotice(parts.join(' · '), bad || (unused && !ok) ? 'error' : 'info');
+    }
   };
   const removeImage = (slotId) => {
     setSlotImages(prev => { const n = {...prev}; delete n[slotId]; return n; });
+    setSlotAdjust(p => { if (!p[slotId]) return p; const n = { ...p }; delete n[slotId]; return n; });
     if (fileRefs.current[slotId]) fileRefs.current[slotId].value = '';
   };
 
@@ -848,9 +969,7 @@ export default function CoverPage() {
     try {
       let img;
       try { img = await loadUrlImage(t.url); } catch { img = await loadUrlImage(t.thumb || t.url); }
-      setSlotImages(prev => ({ ...prev, [slotId]: img }));
-      setSlotCrops(p => ({ ...p, [slotId]: { zoom: 1, panX: 0, panY: 0 } }));
-      setSelectedSlotId(slotId);
+      placeImage(slotId, img);
       setArmedTray(null);
       return true;
     } catch {
@@ -938,9 +1057,7 @@ export default function CoverPage() {
     if (!target || !url) return;
     try {
       const img = await loadUrlImage(url);
-      setSlotImages(prev => ({ ...prev, [target]: img }));
-      setSlotCrops(p => ({ ...p, [target]: { zoom: 1, panX: 0, panY: 0 } }));
-      setSelectedSlotId(target);
+      placeImage(target, img);
     } catch {
       alert('โหลดรูปนี้ไม่สำเร็จ (ต้นทางอาจบล็อก CORS) — ลองภาพที่ rehost แล้ว (มีเครื่องหมายเขียว)');
     }
@@ -1085,8 +1202,11 @@ export default function CoverPage() {
       // Approximate text bounding box
       const textW = Math.min(ts.maxWidth || 600, val.length * fs * 0.55);
       const textH = fs * 1.4;
-      const left = (ts.align === 'center') ? tx - textW/2 : tx;
-      const top = ty - fs * 0.3;
+      // ★ 14 พ.ย. 69: ข้อความวาดแบบ textBaseline='middle' → กล่องจับต้องอยู่กึ่งกลางบรรทัด
+      //   (เดิม top = ty - 0.3fs = กล่องเลื่อนลงต่ำ ครึ่งบนของตัวหนังสือจับลากไม่ติด) + รองรับชิดขวา
+      const align = ts.align || 'center';
+      const left = align === 'center' ? tx - textW/2 : align === 'right' ? tx - textW : tx;
+      const top = ty - textH / 2;
       if (mx >= left && mx <= left + textW && my >= top && my <= top + textH) {
         return ts;
       }
@@ -1112,6 +1232,22 @@ export default function CoverPage() {
     return null;
   };
 
+  // ★ 14 พ.ย. 69: ช่องใต้นิ้ว/เมาส์ "รวมช่องว่าง" — ใช้ตอนลากไฟล์มาวางบนปก
+  const slotAtPoint = (mx, my) => {
+    if (!template) return null;
+    const sorted = [...template.slots].sort((a,b) => (b.zIndex||0)-(a.zIndex||0));
+    for (const slot of sorted) {
+      const off = slotOffsets[slot.id] || {dx:0,dy:0};
+      const eff = getEffSlot(slot, slotScales[slot.id]);
+      const sx = eff.x + off.dx, sy = eff.y + off.dy;
+      if (slot.shape === 'circle') {
+        const r = eff.diameter/2;
+        if (Math.hypot(mx-(sx+r), my-(sy+r)) <= r + (slot.borderWidth||0)) return slot;
+      } else if (mx >= sx && mx <= sx+(eff.w||0) && my >= sy && my <= sy+(eff.h||0)) return slot;
+    }
+    return null;
+  };
+
   // ── Pointer handlers ──
   const handleDown = (cx, cy) => {
     const {mx,my} = getCoords(cx,cy);
@@ -1119,7 +1255,7 @@ export default function CoverPage() {
     const mHit = hitTestMarker(mx, my);
     if (mHit) {
       setSelectedMarkerId(mHit.marker.id);
-      setDragState({ markerId: mHit.marker.id, mode: mHit.mode === 'move' ? 'marker-move' : 'marker-resize', startX: mx, startY: my, orig: { ...mHit.marker } });
+      setDrag({ markerId: mHit.marker.id, mode: mHit.mode === 'move' ? 'marker-move' : 'marker-resize', startX: mx, startY: my, orig: { ...mHit.marker } });
       return;
     }
     // ★ 19 ก.ค.: จับปุ่มย้าย (✥) ของช่องที่เลือกอยู่ → ย้ายทั้งช่อง/วง (เช็คก่อนเลือกช่องใหม่ กันสลับช่อง)
@@ -1127,7 +1263,7 @@ export default function CoverPage() {
     if (gripSlot) {
       const off = slotOffsets[gripSlot.id] || { dx: 0, dy: 0 };
       const sc = slotScales[gripSlot.id] || 1;
-      setDragState({ slotId: gripSlot.id, mode: 'move', startX: mx, startY: my, origDx: off.dx, origDy: off.dy, origScale: sc, startDist: 0 });
+      setDrag({ slotId: gripSlot.id, mode: 'move', startX: mx, startY: my, origDx: off.dx, origDy: off.dy, origScale: sc, startDist: 0 });
       return;
     }
     if (selectedMarkerId) setSelectedMarkerId(null); // แตะที่อื่น = วางมือจากวงแดง
@@ -1138,7 +1274,7 @@ export default function CoverPage() {
     const textHit = hitTestText(mx, my);
     if (textHit) {
       const ov = textOverrides[textHit.id] || {};
-      setDragState({ slotId: textHit.id, mode: 'textmove', startX: mx, startY: my, origDx: ov.dx || 0, origDy: ov.dy || 0 });
+      setDrag({ slotId: textHit.id, mode: 'textmove', startX: mx, startY: my, origDx: ov.dx || 0, origDy: ov.dy || 0 });
       return;
     }
     // Then try draggable slots (move/resize/crop)
@@ -1147,7 +1283,7 @@ export default function CoverPage() {
       if (hit.mode === 'crop') {
         // Center of draggable slot → crop pan
         const crop = slotCrops[hit.slot.id] || { zoom: 1, panX: 0, panY: 0 };
-        setDragState({ slotId: hit.slot.id, mode:'crop', startX:mx, startY:my, origPanX: crop.panX || 0, origPanY: crop.panY || 0 });
+        setDrag({ slotId: hit.slot.id, mode:'crop', startX:mx, startY:my, origPanX: crop.panX || 0, origPanY: crop.panY || 0 });
       } else {
         const off = slotOffsets[hit.slot.id] || {dx:0,dy:0};
         const sc = slotScales[hit.slot.id] || 1;
@@ -1156,9 +1292,9 @@ export default function CoverPage() {
           const ecx = eff.x + off.dx + (eff.shape==='circle' ? eff.diameter/2 : eff.w/2);
           const ecy = eff.y + off.dy + (eff.shape==='circle' ? eff.diameter/2 : eff.h/2);
           const startDist = Math.hypot(mx-ecx, my-ecy);
-          setDragState({ slotId: hit.slot.id, mode:'resize', startX:mx, startY:my, origDx:off.dx, origDy:off.dy, origScale:sc, startDist });
+          setDrag({ slotId: hit.slot.id, mode:'resize', startX:mx, startY:my, origDx:off.dx, origDy:off.dy, origScale:sc, startDist });
         } else {
-          setDragState({ slotId: hit.slot.id, mode:'move', startX:mx, startY:my, origDx:off.dx, origDy:off.dy, origScale:sc, startDist:0 });
+          setDrag({ slotId: hit.slot.id, mode:'move', startX:mx, startY:my, origDx:off.dx, origDy:off.dy, origScale:sc, startDist:0 });
         }
       }
       return;
@@ -1167,12 +1303,13 @@ export default function CoverPage() {
     const anySlot = hitTestAll(mx,my);
     if (anySlot) {
       const crop = slotCrops[anySlot.id] || { zoom: 1, panX: 0, panY: 0 };
-      setDragState({ slotId: anySlot.id, mode:'crop', startX:mx, startY:my, origPanX: crop.panX || 0, origPanY: crop.panY || 0 });
+      setDrag({ slotId: anySlot.id, mode:'crop', startX:mx, startY:my, origPanX: crop.panX || 0, origPanY: crop.panY || 0 });
     }
   };
 
   const handleMove = (cx, cy) => {
     const {mx,my} = getCoords(cx,cy);
+    const dragState = dragRef.current; // ค่าล่าสุดจริง (ไม่รอ render)
 
     if (!dragState) {
       // ★ 19 ก.ค.: ชี้โดนปุ่มย้าย (✥) = เคอร์เซอร์มือจับ
@@ -1258,14 +1395,59 @@ export default function CoverPage() {
     }
   };
 
-  const handleUp = () => setDragState(null);
+  const handleUp = () => setDrag(null);
+
+  // ★ 14 พ.ย. 69: ลากต่อเนื่องได้แม้เมาส์หลุดขอบปก — เดิมผูก mouseleave = จบการลาก ลากช่องไปชิดขอบแล้วหลุดมือ
+  //   ระหว่างลาก: ฟัง mousemove/mouseup ที่ระดับ window (เรียกฟังก์ชันรุ่นล่าสุดผ่าน liveRef กัน state ค้าง)
+  useEffect(() => {
+    const mv = (e) => { if (dragRef.current && e.target !== canvasRef.current) liveRef.current.handleMove?.(e.clientX, e.clientY); };
+    const up = () => { if (dragRef.current) liveRef.current.handleUp?.(); };
+    window.addEventListener('mousemove', mv);
+    window.addEventListener('mouseup', up);
+    return () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
+  }, []);
+
+  // ★ 14 พ.ย. 69: วางรูปจากคลิปบอร์ด (Ctrl+V) + คีย์ลัด — ลูกศร=ขยับรูป/วงแดงที่เลือก · Delete=ลบวงแดง · Esc=เลิกเลือก
+  useEffect(() => {
+    const isTyping = (el) => !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+    const onPaste = (e) => {
+      const files = Array.from(e.clipboardData?.files || []).filter(f => f.type && f.type.startsWith('image/'));
+      if (!files.length) return; // วางข้อความธรรมดา = ไม่ยุ่ง
+      e.preventDefault();
+      liveRef.current.handleFiles?.(files);
+    };
+    const onKey = (e) => { if (!isTyping(e.target) && !e.ctrlKey && !e.metaKey && !e.altKey) liveRef.current.onKey?.(e); };
+    window.addEventListener('paste', onPaste);
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('paste', onPaste); window.removeEventListener('keydown', onKey); };
+  }, []);
+  const onKeyShortcut = (e) => {
+    if (pickerSlotId != null) return; // modal เลือกรูปเปิดอยู่ — ให้ modal จัดการเอง
+    const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+    const dir = arrows[e.key];
+    const step = e.shiftKey ? 50 : 10;
+    if (selectedMarkerId) {
+      if (dir) { e.preventDefault(); setMarkers(prev => prev.map(m => m.id === selectedMarkerId ? { ...m, x: m.x + dir[0] * step, y: m.y + dir[1] * step } : m)); }
+      else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); setMarkers(prev => prev.filter(m => m.id !== selectedMarkerId)); setSelectedMarkerId(null); }
+      else if (e.key === 'Escape') setSelectedMarkerId(null);
+      return;
+    }
+    if (selectedSlotId && slotImages[selectedSlotId]) {
+      if (dir) {
+        e.preventDefault();
+        const sid = selectedSlotId;
+        setSlotCrops(prev => { const old = prev[sid] || { zoom: 1, panX: 0, panY: 0 }; return { ...prev, [sid]: { ...old, panX: (old.panX || 0) + dir[0] * step, panY: (old.panY || 0) + dir[1] * step } }; });
+      } else if (e.key === 'Escape') setSelectedSlotId(null);
+    }
+  };
 
   // ── Mouse wheel: smooth zoom in slot ──
   const handleWheel = useCallback((e) => {
-    e.preventDefault();
     const {mx,my} = getCoords(e.clientX, e.clientY);
     const slot = hitTestAll(mx,my);
+    // ★ 14 พ.ย. 69: ไม่ได้ชี้บนรูป = ปล่อยให้หน้าเว็บเลื่อนตามปกติ (เดิมกลืนล้อเมาส์ทั้งผืนปก เลื่อนหน้าไม่ได้)
     if (!slot) return;
+    e.preventDefault();
     // Smooth zoom — faster steps
     const delta = e.deltaY < 0 ? 0.15 : -0.15;
     setSlotCrops(prev => {
@@ -1287,8 +1469,11 @@ export default function CoverPage() {
   const resetAll = () => { setSlotOffsets({}); setSlotScales({}); setSlotCrops({}); };
 
   // ★ 4 ก.ค. รอบ 2 — รวม override ต่อช่อง (เฟด/สีขอบ/ขาวดำ) ใช้ทั้งพรีวิว render และดาวน์โหลด
-  const effWithOverrides = (slot) => {
+  const effWithOverrides = (slot, liteSlotId) => {
     let eff = getEffSlot(slot, slotScales[slot.id]);
+    // ★ 14 พ.ย. 69: ปรับแสง/สี/ความคมรายช่อง (กดค้าง "ดูต้นฉบับ" = ข้ามชั่วคราว)
+    const adj = compareOriginal ? null : slotAdjust[slot.id];
+    if (adj && !isNeutralAdjust(adj)) eff = { ...eff, _adj: adj, _adjKey: adjustKey(adj), _lite: liteSlotId === slot.id };
     const ov = slotFadeEdges[slot.id];
     if (fadeAllOff) {
       // ปิดเฟดทั้งใบ = ขอบคมหมดทุกช่อง (ชนะทุกอย่าง — คาดเดาง่าย)
@@ -1330,7 +1515,9 @@ export default function CoverPage() {
   // ★ โทนไว้อาลัยทั้งใบ: ก๊อปภาพที่วาดเสร็จ → วาดทับตัวเองด้วย filter grayscale (ข้อความ/ขอบโดนด้วย = โทนเดียวทั้งใบ)
   const applyGlobalGray = (ctx) => {
     if (!grayAll || grayAll <= 0) return;
-    const canvas = canvasRef.current; if (!canvas) return;
+    const canvas = ctx.canvas; if (!canvas) return; // ★ 14 พ.ย. 69: ผืนที่กำลังวาดจริง (พรีวิว หรือ ผืนส่งออก)
+    // 🩹 Safari/iOS ไม่มี ctx.filter → ทำขาวดำที่ระดับพิกเซลแทน (สูตรเดียวกับ grayscale() ของ CSS)
+    if (!CANVAS_FILTER_OK) { adjustCanvas(canvas, null, { gray: grayAll }); return; }
     const snap = document.createElement('canvas'); snap.width = W; snap.height = H;
     snap.getContext('2d').drawImage(canvas, 0, 0);
     ctx.save(); ctx.filter = `grayscale(${grayAll})`; ctx.drawImage(snap, 0, 0); ctx.restore();
@@ -1384,16 +1571,19 @@ export default function CoverPage() {
   };
 
   // ── Render ──
-  const render = useCallback(() => {
-    const canvas = canvasRef.current; if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+  // ★ 14 พ.ย. 69: รวมตัววาด "พรีวิว" กับ "ไฟล์ส่งออก" เป็นฟังก์ชันเดียว (เดิมก๊อปโค้ดกัน 2 ชุด เสี่ยงแก้ไม่ครบแล้วไฟล์ไม่ตรงพรีวิว)
+  //   withHandles=true → พรีวิวบนจอ (มีจุดจับ/กรอบเลือก) · false → ไฟล์จริงสะอาด วาดลงผืนแยก ไม่แตะผืนบนจอ
+  const paintCover = (ctx, withHandles) => {
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; // ★ คุณภาพสูงสุด
     ctx.fillStyle = '#111119'; ctx.fillRect(0,0,W,H);
     if (!template) {
+      if (!withHandles) return;
       ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.font = 'bold 36px sans-serif'; ctx.textAlign = 'center';
       ctx.fillText('เลือกแทมเพลตเพื่อเริ่มต้น', W/2, H/2);
       return;
     }
+    // ระหว่างลากเลื่อนภาพในช่อง: ช่องนั้นข้ามขั้นความคมชั่วคราวให้ลื่น (ปล่อยมือ = คมกลับ · ไฟล์ส่งออกคมเต็มเสมอ)
+    const liteId = !withHandles ? null : dragState?.mode === 'crop' ? dragState.slotId : adjLite ? selectedSlotId : null;
 
     // Blurred background — fills gaps so no black areas when elements are moved/resized
     drawBlurredBg(ctx, slotImages, template);
@@ -1405,7 +1595,7 @@ export default function CoverPage() {
       if ((slot.zIndex||0) >= 3) continue;
       const img = slotImages[slot.id]; if (!img) continue;
       const offset = slotOffsets[slot.id];
-      const eff = effWithOverrides(slot); // ★ 4 ก.ค. รอบ 2: เฟด/สีขอบ/ขาวดำ ตามที่ผู้ใช้ตั้ง
+      const eff = effWithOverrides(slot, liteId); // ★ 4 ก.ค. รอบ 2: เฟด/สีขอบ/ขาวดำ ตามที่ผู้ใช้ตั้ง
       if (eff.shape === 'circle') drawCircleSlot(ctx, img, eff, offset, slotCrops[slot.id]);
       else drawRectSlot(ctx, img, eff, offset, slotCrops[slot.id]);
     }
@@ -1421,14 +1611,15 @@ export default function CoverPage() {
       if ((slot.zIndex||0) < 3) continue;
       const img = slotImages[slot.id]; if (!img) continue;
       const offset = slotOffsets[slot.id];
-      const eff = effWithOverrides(slot); // ★ 4 ก.ค. รอบ 2
+      const eff = effWithOverrides(slot, liteId); // ★ 4 ก.ค. รอบ 2
       if (eff.shape === 'circle') drawCircleSlot(ctx, img, eff, offset, slotCrops[slot.id]);
       else drawRectSlot(ctx, img, eff, offset, slotCrops[slot.id]);
     }
 
     // ★ 4 ก.ค. รอบ 2: โทนไว้อาลัยทั้งใบ → แล้วค่อยวาดวง/กรอบแดง (วงยังแดงสดบนภาพขาวดำ)
     applyGlobalGray(ctx);
-    drawMarkers(ctx, true);
+    drawMarkers(ctx, withHandles);
+    if (!withHandles) return; // ไฟล์ส่งออก: จบแค่นี้ (ไม่มีจุดจับ/เส้นประ/ข้อความแนะนำ)
 
     // Empty state
     if (!Object.keys(slotImages).length) {
@@ -1513,58 +1704,48 @@ export default function CoverPage() {
         ctx.restore();
       }
     }
-  }, [slotImages, slotOffsets, slotScales, slotCrops, template, textValues, textBgColors, dragState, draggableSlots, selectedSlotId,
-      slotFadeEdges, fadeAllOff, fadeAllLevel, slotBorderColors, slotGray, grayAll, markers, selectedMarkerId]); // ★ 4 ก.ค. รอบ 2 + เฟดรายขอบ 6 ก.ค.
+  };
 
-  useEffect(() => { render(); }, [render]);
+  const render = useCallback(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    paintCover(canvas.getContext('2d'), true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slotImages, slotOffsets, slotScales, slotCrops, template, textValues, textBgColors, textOverrides, dragState, selectedSlotId,
+      slotFadeEdges, fadeAllOff, fadeAllLevel, slotBorderColors, slotGray, grayAll, markers, selectedMarkerId, // ★ 4 ก.ค. รอบ 2 + เฟดรายขอบ 6 ก.ค.
+      slotAdjust, compareOriginal, adjLite]); // ★ 14 พ.ย. 69: ปรับแสง/สี/ความคม
 
-  // ── Render clean (no handles) ลง canvas — ใช้ร่วม download + บันทึกเข้าคลัง ──
+  // ★ 14 พ.ย. 69 (เพิ่มความเร็ว): วาดไม่เกิน 1 ครั้งต่อเฟรมจอ — ลากเร็วๆ มี state เปลี่ยนหลายรอบใน 1 เฟรม เดิมวาดซ้ำทุกรอบ
+  useEffect(() => {
+    const id = requestAnimationFrame(render);
+    return () => cancelAnimationFrame(id);
+  }, [render]);
+
+  // ── Render clean (no handles) — ใช้ร่วม download + บันทึกเข้าคลัง ──
+  // ★ 14 พ.ย. 69: วาดลง "ผืนแยก" (offscreen) — เดิมวาดทับผืนบนจอแล้วตั้งเวลา 100ms วาดจุดจับกลับ
+  //   = จอกระพริบ + ถ้าผู้ใช้ขยับอะไรใน 100ms นั้น ไฟล์/จออาจไม่ตรงกัน
   const renderCleanCanvas = () => {
-    const canvas = canvasRef.current; if (!canvas || !template) return null;
-    const ctx = canvas.getContext('2d');
-    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; // ★ คุณภาพสูงสุด
-    ctx.fillStyle = '#111119'; ctx.fillRect(0,0,W,H);
-    drawBlurredBg(ctx, slotImages, template);
-    const sorted = [...template.slots].sort((a,b) => (a.zIndex||0)-(b.zIndex||0));
-    // Pass 1: zIndex < 3
-    for (const slot of sorted) {
-      if ((slot.zIndex||0) >= 3) continue;
-      const img = slotImages[slot.id]; if (!img) continue;
-      const eff = effWithOverrides(slot); // ★ 4 ก.ค. รอบ 2: ไฟล์ดาวน์โหลดได้เอฟเฟกต์ครบเหมือนพรีวิว
-      if (eff.shape === 'circle') drawCircleSlot(ctx, img, eff, slotOffsets[slot.id], slotCrops[slot.id]);
-      else drawRectSlot(ctx, img, eff, slotOffsets[slot.id], slotCrops[slot.id]);
-    }
-    // TextBg
-    if (template.textBg) drawTextBg(ctx, template.textBg);
-    // Text
-    for (const ts of (template.textSlots||[])) drawTextSlot(ctx, ts, textValues[ts.id], textBgColors[ts.id], textOverrides[ts.id]);
-    // Pass 2: zIndex >= 3
-    for (const slot of sorted) {
-      if ((slot.zIndex||0) < 3) continue;
-      const img = slotImages[slot.id]; if (!img) continue;
-      const eff = effWithOverrides(slot); // ★ 4 ก.ค. รอบ 2
-      if (eff.shape === 'circle') drawCircleSlot(ctx, img, eff, slotOffsets[slot.id], slotCrops[slot.id]);
-      else drawRectSlot(ctx, img, eff, slotOffsets[slot.id], slotCrops[slot.id]);
-    }
-    // ★ 4 ก.ค. รอบ 2: โทนไว้อาลัยทั้งใบ + วง/กรอบแดง (ไม่มีเส้นประเลือก — ไฟล์จริงสะอาด)
-    applyGlobalGray(ctx);
-    drawMarkers(ctx, false);
-    return canvas;
+    if (!template) return null;
+    const off = document.createElement('canvas'); off.width = W; off.height = H;
+    paintCover(off.getContext('2d'), false);
+    return off;
   };
 
   // ── Download ──
   const handleDownload = () => {
     const canvas = renderCleanCanvas(); if (!canvas) return;
-
-    canvas.toBlob((blob) => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url;
-      a.download = `cover_${template.name}_${Date.now()}.jpg`; a.click();
-      URL.revokeObjectURL(url);
-      setDownloaded(true); setTimeout(() => setDownloaded(false), 2500);
-    }, 'image/jpeg', 0.95);
-    // Re-render with handles after short delay
-    setTimeout(render, 100);
+    const safeName = String(template.name || 'cover').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 60);
+    const fail = () => showNotice('สร้างไฟล์ไม่สำเร็จ — มีรูปจากเว็บนอกที่เบราว์เซอร์ไม่ยอมให้ส่งออก ลองเปลี่ยนรูปช่องนั้นเป็นไฟล์จากเครื่อง', 'error');
+    try {
+      canvas.toBlob((blob) => {
+        if (!blob) { fail(); return; } // ★ เดิม: blob=null แล้ว createObjectURL โยน error เงียบ ปุ่มกดแล้วไม่มีอะไรเกิดขึ้น
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url;
+        a.download = `cover_${safeName}_${Date.now()}.jpg`;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 5000); // ★ เดิม revoke ทันที — Safari บางรุ่นยังไม่ทันเริ่มโหลดไฟล์
+        setDownloaded(true); setTimeout(() => setDownloaded(false), 2500);
+      }, 'image/jpeg', 0.95);
+    } catch { fail(); }
   };
 
   // ★ แบตช์ E (E2a): บันทึกปกที่แก้เองเข้าคลัง MEGA (โชว์เฉพาะโหมด recipe)
@@ -1578,7 +1759,6 @@ export default function CoverPage() {
       // canvas taint: มีภาพจากเว็บนอก (ไม่ rehost) → export ไม่ได้
       setSavingCover(false);
       setSaveToast({ ok: false, msg: 'บันทึกไม่ได้: มีภาพบางช่องมาจากเว็บนอก (CORS) — สลับเป็นภาพที่ rehost แล้วในคลังภาพก่อน' });
-      setTimeout(render, 100);
       return;
     }
     try {
@@ -1597,11 +1777,39 @@ export default function CoverPage() {
       setSaveToast({ ok: false, msg: 'เรียก API บันทึกล้ม: ' + (e?.message || 'ไม่ทราบสาเหตุ') });
     } finally {
       setSavingCover(false);
-      setTimeout(render, 100);
     }
   };
 
   const switchTemplate = (id) => { setTemplateId(id); setSlotOffsets({}); setSlotScales({}); };
+
+  // ★ 14 พ.ย. 69: ตัวช่วยของแผงปรับแสง/สี/ความคม
+  const setAdjustFor = (slotId, next) => {
+    // เลื่อนสไลเดอร์แสง/สีต่อเนื่อง: พักขั้น "ความคม" (ขั้นที่หนักสุด) ไว้ 180ms ให้ภาพตามนิ้วทัน หยุดเลื่อนแล้วคมกลับเอง
+    //   (ถ้ากำลังปรับตัวความคมเอง/กดชุดสำเร็จ = แสดงผลเต็มทันที)
+    const prev = slotAdjust[slotId];
+    if ((next?.sharpen || 0) > 0 && (prev?.sharpen || 0) === (next?.sharpen || 0)) {
+      setAdjLite(true);
+      if (adjLiteTimerRef.current) clearTimeout(adjLiteTimerRef.current);
+      adjLiteTimerRef.current = setTimeout(() => setAdjLite(false), 180);
+    }
+    setSlotAdjust(p => { const n = { ...p }; if (next) n[slotId] = next; else delete n[slotId]; return n; });
+  };
+  const applyAdjustToAll = (adj, label) => {
+    if (!template) return;
+    const ids = template.slots.filter(sl => slotImages[sl.id]).map(sl => sl.id);
+    if (!ids.length) { showNotice('ยังไม่มีรูปในช่องไหนเลย — ใส่รูปก่อน', 'error'); return; }
+    setSlotAdjust(p => { const n = { ...p }; for (const id of ids) n[id] = { ...adj }; return n; });
+    showNotice(`${label} ${ids.length} ช่องแล้ว — ไม่ถูกใจช่องไหน แตะช่องนั้นแล้วปรับ/ล้างได้`);
+  };
+  const adjustedCount = template ? template.slots.filter(sl => slotImages[sl.id] && slotAdjust[sl.id] && !isNeutralAdjust(slotAdjust[sl.id])).length : 0;
+  const filledCount = template ? template.slots.filter(sl => slotImages[sl.id]).length : 0;
+  // เลือกช่อง แล้วเลื่อนจอไปที่แผงเครื่องมือของช่องนั้น
+  const focusTools = (slotId) => {
+    setSelectedSlotId(slotId);
+    setTimeout(() => toolsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 80);
+  };
+  // listener ระดับ window (ลาก/วาง/คีย์ลัด) เรียกฟังก์ชันรุ่นล่าสุดผ่าน ref — อัปเดตหลังทุก render
+  useEffect(() => { liveRef.current = { handleMove, handleUp, handleFiles, onKey: onKeyShortcut }; });
 
   // Sort slots for UI
   const uiSlots = template ? [...template.slots].sort((a,b) => {
@@ -1613,7 +1821,7 @@ export default function CoverPage() {
       <Header title="🖼️ ปกข่าว" subtitle={`สร้างปกข่าว ${W}×${H} — เลือกแทมเพลต อัปโหลดรูป ลากจัดตำแหน่ง ปรับขนาด`} />
 
       {/* ===== HELP BUTTON + GUIDE ===== */}
-      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '0 16px' }}>
+      <div style={{ maxWidth: isWide ? 1560 : 1100, margin: '0 auto', padding: '0 16px' }}>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8, gap: 8 }}>
           {/* ★ 5 ก.ค.: ปุ่มไปหน้าค้นภาพหลายแหล่ง (หน้านี้เป็น public ไม่มี sidebar — ผู้ใช้หาทางเข้าไม่เจอ) */}
           <a href="/image-search" style={{
@@ -1644,19 +1852,19 @@ export default function CoverPage() {
             animation: 'fadeUp 0.3s ease-out both',
           }}>
             <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 18 }}>
-              📖 คู่มือการใช้งาน — แทมเพลตปก 14 แบบ
+              📖 คู่มือการใช้งาน — แทมเพลตปก {templates.length} แบบ
             </div>
 
             {/* Steps */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 16, marginBottom: 20 }}>
               <div style={{ padding: 16, borderRadius: 12, background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.12)' }}>
                 <div style={{ fontSize: 14, fontWeight: 800, color: '#94a3b8', marginBottom: 12 }}>🎯 ขั้นตอนการใช้</div>
                 {[
                   { s: '1', t: 'เลือกแทมเพลต — ดูป้าย 🖼️รูป ⭕วงกลม 📝ข้อความ ใต้แต่ละแบบ', i: '🖼️' },
-                  { s: '2', t: 'อัปโหลดรูปตามช่อง (★ ภาพหลัก, 🖼 ฉากหลัง, ⭐ ไฮไลท์, ⭕ วงกลม)', i: '📤' },
-                  { s: '3', t: 'ลากจัดตำแหน่งภาพ ⭐ และ ⭕ ได้อิสระ', i: '✋' },
-                  { s: '4', t: 'ปรับขนาดภาพด้วย slider (50%–200%)', i: '🔍' },
-                  { s: '5', t: 'พิมพ์ข้อความ (ถ้าแทมเพลตรองรับ)', i: '✏️' },
+                  { s: '2', t: 'ใส่รูป — กด “อัปโหลดหลายรูปทีเดียว” / ลากไฟล์มาวางบนปก / ก๊อปรูปแล้วกด Ctrl+V', i: '📤' },
+                  { s: '3', t: 'แตะช่องบนปก → ลากกลางภาพ = เลื่อนรูป · สกอลล์/จีบ 2 นิ้ว = ซูม · ลากปุ่ม ✥ = ย้ายช่อง', i: '✋' },
+                  { s: '4', t: 'กด ✨ ออโต้ทุกช่อง ให้แสง-สี-ความคมพอดี แล้วปรับรายช่องในแผง 🎨 ถ้ายังไม่ถูกใจ', i: '🎨' },
+                  { s: '5', t: 'พิมพ์ข้อความ (ถ้าแทมเพลตรองรับ) · เพิ่มวง/กรอบแดงเน้นจุดข่าว', i: '✏️' },
                   { s: '6', t: `กด 📥 Download — ได้ภาพ ${W}×${H}px`, i: '💾' },
                 ].map(x => (
                   <div key={x.s} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid rgba(148,163,184,0.08)' }}>
@@ -1667,21 +1875,24 @@ export default function CoverPage() {
               </div>
 
               <div style={{ padding: 16, borderRadius: 12, background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.12)' }}>
-                <div style={{ fontSize: 14, fontWeight: 800, color: '#94a3b8', marginBottom: 12 }}>📐 ประเภทแทมเพลต</div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: '#94a3b8', marginBottom: 12 }}>🎨 ปรับแสง · สี · ความคม</div>
                 {[
-                  { cat: 'ฮีโร่ + กรอบ', ids: '1, 2, 4, 8, 10, 12, 14', color: '#FFD700' },
-                  { cat: 'ฮีโร่ + วงกลม', ids: '3, 5', color: '#4FC3F7' },
-                  { cat: 'ซ้อนภาพ + ข้อความ', ids: '6, 7, 9, 13', color: '#FFFFFF' },
-                  { cat: 'ฮีโร่ + กรอบดำ', ids: '11', color: '#666' },
+                  { k: '✨ ออโต้', d: 'ระบบวัดแสงของรูปแล้วปรับให้พอดี + คมขึ้นเล็กน้อย — เริ่มจากปุ่มนี้เสมอ' },
+                  { k: '🔎 คมชัด', d: 'ภาพแคปจากคลิป/ภาพมัว' },
+                  { k: '🌤️ แก้ย้อนแสง', d: 'หน้ามืดเพราะฉากหลังสว่าง' },
+                  { k: '👁 กดค้าง', d: 'ดูภาพต้นฉบับเทียบกับที่ปรับ ปล่อยมือ = กลับมา' },
+                  { k: '📋 ใช้กับทุกช่อง', d: 'คัดลอกค่าของช่องนี้ไปทุกช่อง ให้ทั้งปกโทนเดียวกัน' },
                 ].map(c => (
-                  <div key={c.cat} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px solid rgba(148,163,184,0.08)' }}>
-                    <div style={{ width: 14, height: 14, borderRadius: 4, background: c.color, border: '1px solid rgba(255,255,255,0.2)', flexShrink: 0 }} />
-                    <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600 }}>{c.cat}</span>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 'auto' }}>แบบ {c.ids}</span>
+                  <div key={c.k} style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '7px 0', borderBottom: '1px solid rgba(148,163,184,0.08)' }}>
+                    <span style={{ fontSize: 12, color: '#22c55e', fontWeight: 700, whiteSpace: 'nowrap' }}>{c.k}</span>
+                    <span style={{ fontSize: 12, color: 'var(--text-primary)', lineHeight: 1.5 }}>{c.d}</span>
                   </div>
                 ))}
-                <div style={{ marginTop: 12, padding: '8px 12px', borderRadius: 8, background: 'rgba(148,163,184,0.08)', fontSize: 12, color: '#94a3b8' }}>
-                  💡 แทมเพลตที่มี 📝 ข้อความ: แบบ 6, 7, 8, 9, 13
+                <div style={{ marginTop: 12, padding: '8px 12px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', fontSize: 12, color: '#22c55e', lineHeight: 1.6 }}>
+                  🛡️ ระบบปรับภาพนี้ไม่ใช้ AI เจน/วาดภาพใหม่ — แค่ปรับค่าสีของพิกเซลเดิม รูปหน้าคนเหมือนต้นฉบับ 100%
+                </div>
+                <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                  ⌨️ คีย์ลัด (คอม): ลูกศร = ขยับรูปในช่องที่เลือก (กด Shift = ขยับไกล) · Delete = ลบวงแดงที่เลือก · Esc = เลิกเลือก
                 </div>
               </div>
             </div>
@@ -1694,7 +1905,7 @@ export default function CoverPage() {
                 { icon: '⭐', label: 'ไฮไลท์', desc: 'กรอบสี ลากได้', color: '#FFD700' },
                 { icon: '⭕', label: 'วงกลม', desc: 'รูปวงกลม ลากได้', color: '#4FC3F7' },
                 { icon: '📝', label: 'ข้อความ', desc: 'พิมพ์ข้อความบนภาพ', color: '#f97316' },
-                { icon: '🤖', label: 'AI Enhance', desc: 'ปรับภาพด้วย AI', color: '#94a3b8' },
+                { icon: '🎨', label: 'ปรับภาพ', desc: 'แสง สี ความคม (ไม่ใช้ AI เจนภาพ)', color: '#22c55e' },
               ].map(s => (
                 <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 8, background: `${s.color}10`, border: `1px solid ${s.color}25`, fontSize: 12 }}>
                   <span>{s.icon}</span>
@@ -1707,7 +1918,7 @@ export default function CoverPage() {
         )}
       </div>
 
-      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '0 16px 60px' }}>
+      <div style={{ maxWidth: isWide ? 1560 : 1100, margin: '0 auto', padding: '0 16px 60px' }}>
         {/* ★ แบตช์ E (E1c): แถบโหมด recipe — เปิดงานคิวปก MEGA มาจัดต่อ */}
         {recipeMode && (
           <div style={{ marginBottom: 16, padding: 16, borderRadius: 14, background: 'linear-gradient(135deg, rgba(96,165,250,0.08), rgba(124,58,237,0.06))', border: '1px solid rgba(96,165,250,0.25)' }}>
@@ -1915,6 +2126,15 @@ export default function CoverPage() {
                     </div>
                   )}
                 </div>
+                {/* ★ 14 พ.ย. 69: อัปโหลดหลายรูปครั้งเดียว — เติมช่องว่างตามลำดับ (ภาพหลักก่อน) */}
+                <label style={{ display:'block', marginBottom: 6, padding:'11px 14px', borderRadius:10, border:'1px solid rgba(96,165,250,0.4)', background:'rgba(96,165,250,0.1)', color:'#60a5fa', fontSize:13, fontWeight:800, cursor:'pointer', textAlign:'center' }}>
+                  📤 อัปโหลดหลายรูปทีเดียว
+                  <input type="file" accept="image/*" multiple style={{ display:'none' }}
+                    onChange={e => { handleFiles(e.target.files); e.target.value = ''; }} />
+                </label>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 14, lineHeight: 1.6, textAlign: 'center' }}>
+                  ระบบเติมช่องว่างให้ตามลำดับ{isMobile ? '' : ' · ลากไฟล์มาวางบนปกได้ · ก๊อปรูปแล้วกด Ctrl+V ได้'}
+                </div>
                 {uiSlots.map(slot => (
                   <div key={slot.id} style={{ marginBottom: 16 }}>
                     <label style={s.label}>
@@ -1935,109 +2155,42 @@ export default function CoverPage() {
                         {slotImages[slot.id] ? `✅ ${slotImages[slot.id].naturalWidth}×${slotImages[slot.id].naturalHeight}` : (poolItems.length ? '🗂️ เลือกรูป' : '📷 เลือกรูป')}
                         <input type="file" accept="image/*" style={{display:'none'}}
                           ref={el => fileRefs.current[slot.id]=el}
-                          onChange={e => handleFile(slot.id, e.target.files?.[0])} />
+                          onChange={e => { handleFile(slot.id, e.target.files?.[0]); e.target.value = ''; }} />
                       </label>
                       {slotImages[slot.id] && (
                         <>
-                          <button
-                            onClick={() => enhanceSlotImage(slot.id, 2)}
-                            disabled={enhancing[slot.id]}
-                            title="Enhance 2x — Real-ESRGAN"
-                            style={{
-                              padding:'8px 10px', borderRadius:10,
-                              border:'1px solid rgba(148,163,184,0.3)',
-                              background: enhancing[slot.id] ? 'rgba(148,163,184,0.15)' : 'rgba(148,163,184,0.06)',
-                              color:'#94a3b8', fontSize:11, fontWeight:700,
-                              cursor: enhancing[slot.id] ? 'wait' : 'pointer',
-                              fontFamily:'inherit', opacity: enhancing[slot.id] ? 0.7 : 1,
-                              animation: enhancing[slot.id] ? 'pulse 1.5s infinite' : 'none',
-                            }}
-                          >
-                            {enhancing[slot.id] ? '⏳' : '2x'}
-                          </button>
-                          <button
-                            onClick={() => enhanceSlotImage(slot.id, 4)}
-                            disabled={enhancing[slot.id]}
-                            title="Enhance 4x — Real-ESRGAN"
-                            style={{
-                              padding:'8px 10px', borderRadius:10,
-                              border:'1px solid rgba(148,163,184,0.3)',
-                              background:'rgba(148,163,184,0.06)',
-                              color:'#94a3b8', fontSize:11, fontWeight:700,
-                              cursor: enhancing[slot.id] ? 'wait' : 'pointer',
-                              fontFamily:'inherit',
-                            }}
-                          >
-                            4x
-                          </button>
-                          <button
-                            onClick={() => enhanceSlotImage(slot.id)}
-                            disabled={enhancing[slot.id]}
-                            title="Auto Best — เลือก model อัตโนมัติ"
-                            style={{
-                              padding:'8px 10px', borderRadius:10,
-                              border:'1px solid rgba(34,197,94,0.3)',
-                              background:'rgba(34,197,94,0.06)',
-                              color:'#22c55e', fontSize:11, fontWeight:700,
-                              cursor: enhancing[slot.id] ? 'wait' : 'pointer',
-                              fontFamily:'inherit',
-                            }}
-                          >
-                            Auto
-                          </button>
+                          {/* ★ 14 พ.ย. 69: แทนปุ่ม AI Enhance 2x/4x/Auto — เปิดแผงปรับแสง/สี/ความคมของช่องนี้ (ไม่มี AI เจนภาพ) */}
+                          {(() => {
+                            const on = !!slotAdjust[slot.id] && !isNeutralAdjust(slotAdjust[slot.id]);
+                            return (
+                              <button onClick={() => focusTools(slot.id)} title="ปรับแสง สี ความคม ของรูปนี้"
+                                style={{ padding:'8px 10px', borderRadius:10, whiteSpace:'nowrap',
+                                  border: `1px solid ${on ? 'rgba(34,197,94,0.5)' : 'rgba(34,197,94,0.3)'}`,
+                                  background: on ? 'rgba(34,197,94,0.14)' : 'rgba(34,197,94,0.06)',
+                                  color:'#22c55e', fontSize:11, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>
+                                🎨 ปรับภาพ{on ? ' ✓' : ''}
+                              </button>
+                            );
+                          })()}
                           <button onClick={() => removeImage(slot.id)} style={{ padding:'8px 10px', borderRadius:10, border:'1px solid rgba(239,68,68,0.3)', background:'rgba(239,68,68,0.06)', color:'#f87171', fontSize:11, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>✕</button>
                         </>
                       )}
                     </div>
                     {/* ★ 6 ก.ค. รอบ 2: เฟดรายขอบ ตรงนี้เลย (จุดที่คนทำงานจริง) — รูปไหนเฟด รูปไหนคม เลือกอิสระ */}
                     {slotImages[slot.id] && renderFadeEdges(slot)}
-                    {/* Small image warning + enhancing status */}
+                    {/* Small image warning */}
                     {slotImages[slot.id] && (() => {
                       const iw = slotImages[slot.id].naturalWidth || 0;
                       const ih = slotImages[slot.id].naturalHeight || 0;
                       const maxDim = Math.max(iw, ih);
-                      const isSmall = maxDim > 0 && maxDim < 600;
-                      const isVerySmall = maxDim > 0 && maxDim < 300;
-                      if (enhancing[slot.id]) {
-                        return (
-                          <div style={{ marginTop:4, padding:'6px 10px', borderRadius:8, background:'rgba(148,163,184,0.1)', border:'1px solid rgba(148,163,184,0.2)', fontSize:11, color:'#94a3b8', fontWeight:600 }}>
-                            ⏳ กำลังเพิ่มความชัดด้วย Real-ESRGAN... (อาจใช้เวลา 10-30 วินาที)
-                          </div>
-                        );
-                      }
-                      // Show enhancement results
-                      const eResult = enhanceResults[slot.id];
-                      if (eResult && !isSmall && !isVerySmall) {
-                        return (
-                          <div style={{ marginTop:4, padding:'8px 10px', borderRadius:8, background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.15)', fontSize:11, lineHeight:1.7 }}>
-                            <div style={{ fontWeight:700, color:'#22c55e', marginBottom:2 }}>✅ Enhanced — {eResult.enhancerUsed}</div>
-                            <div style={{ color:'var(--text-muted)' }}>
-                              📐 {eResult.originalResolution} → <span style={{color:'#22c55e',fontWeight:700}}>{eResult.enhancedResolution}</span>
-                              {' | '}
-                              🔍 Sharpness: {eResult.sharpnessBefore} → {eResult.sharpnessAfter}
-                              {' | '}
-                              🎯 Similarity: <span style={{color: eResult.similarityScore >= 95 ? '#22c55e' : '#ef4444', fontWeight:700}}>{eResult.similarityScore}%</span>
-                              {' | '}
-                              ⏱ {eResult.processingTime}
-                            </div>
-                          </div>
-                        );
-                      }
-                      if (isVerySmall) {
-                        return (
-                          <div style={{ marginTop:4, padding:'4px 10px', borderRadius:6, background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.2)', fontSize:11, color:'#f87171', fontWeight:600 }}>
-                            ⚠️ ภาพเล็กมาก ({iw}×{ih}) — กด ✨ เพิ่มความชัดก่อนทำปก!
-                          </div>
-                        );
-                      }
-                      if (isSmall) {
-                        return (
-                          <div style={{ marginTop:4, padding:'4px 10px', borderRadius:6, background:'rgba(148,163,184,0.08)', border:'1px solid rgba(148,163,184,0.2)', fontSize:11, color:'#94a3b8', fontWeight:600 }}>
-                            ⚠️ ภาพเล็ก ({iw}×{ih}) — แนะนำกด ✨ เพิ่มความชัด
-                          </div>
-                        );
-                      }
-                      return null;
+                      if (!(maxDim > 0 && maxDim < 600)) return null;
+                      const very = maxDim < 300;
+                      // ★ 14 พ.ย. 69: เดิมแนะนำให้กด AI เพิ่มความชัด — เปลี่ยนเป็นคำแนะนำที่ไม่ทำให้หน้าคนเพี้ยน
+                      return (
+                        <div style={{ marginTop:4, padding:'4px 10px', borderRadius:6, background: very ? 'rgba(239,68,68,0.1)' : 'rgba(148,163,184,0.08)', border: `1px solid ${very ? 'rgba(239,68,68,0.2)' : 'rgba(148,163,184,0.2)'}`, fontSize:11, color: very ? '#f87171' : '#94a3b8', fontWeight:600, lineHeight:1.6 }}>
+                          ⚠️ ภาพ{very ? 'เล็กมาก' : 'เล็ก'} ({iw}×{ih}) — {very ? 'ขยายเต็มช่องจะแตก ควรหาภาพใหญ่กว่านี้ หรือใช้ในช่องเล็ก/วงกลม' : 'ใช้ช่องเล็กจะคมกว่า · กด 🎨 ปรับภาพ → 🔎 คมชัด ช่วยได้ระดับหนึ่ง'}
+                        </div>
+                      );
                     })()}
                     {/* Scale controls for draggable */}
                     {slot.draggable && slotImages[slot.id] && (
@@ -2088,7 +2241,7 @@ export default function CoverPage() {
                     {/* ── Position Offset Controls ── */}
                     {slotImages[slot.id] && (() => {
                       const off = slotOffsets[slot.id] || { dx: 0, dy: 0 };
-                      const hasOff = off.dx || off.dy;
+                      const hasOff = !!(off.dx || off.dy); // ★ 14 พ.ย. 69: เดิมได้ค่า 0 แล้ว React พิมพ์เลข "0" ลอยอยู่ท้ายแถวปุ่ม
                       const moveSlot = (axis, delta) => {
                         setSlotOffsets(prev => {
                           const old = prev[slot.id] || { dx: 0, dy: 0 };
@@ -2155,7 +2308,7 @@ export default function CoverPage() {
                         <button onClick={() => setTextOverrides(p => ({...p,[ts.id]:{...p[ts.id], dy: (ov.dy||0) + 30}}))} style={s.scaleBtn}>▼</button>
                         <button onClick={() => setTextOverrides(p => ({...p,[ts.id]:{...p[ts.id], dx: (ov.dx||0) - 30}}))} style={s.scaleBtn}>◀</button>
                         <button onClick={() => setTextOverrides(p => ({...p,[ts.id]:{...p[ts.id], dx: (ov.dx||0) + 30}}))} style={s.scaleBtn}>▶</button>
-                        {(ov.dx || ov.dy) && <span style={{ fontSize:10, color:'var(--text-muted)' }}>x{ov.dx>0?'+':''}{ov.dx||0} y{ov.dy>0?'+':''}{ov.dy||0}</span>}
+                        {!!(ov.dx || ov.dy) && <span style={{ fontSize:10, color:'var(--text-muted)' }}>x{ov.dx>0?'+':''}{ov.dx||0} y{ov.dy>0?'+':''}{ov.dy||0}</span>}
                         {(ov.fontSize || ov.color || ov.dx || ov.dy) && (
                           <button onClick={() => setTextOverrides(p => { const n={...p}; delete n[ts.id]; return n; })}
                             style={{ fontSize:11, padding:'2px 8px', borderRadius:4, border:'1px solid var(--border)', background:'none', color:'var(--text-muted)', cursor:'pointer', fontFamily:'inherit', marginLeft:'auto' }}>↺ รีเซ็ต</button>
@@ -2209,7 +2362,7 @@ export default function CoverPage() {
               1. เลือกแทมเพลต (แบบ 1-{templates.length})<br/>
               2. อัปโหลดรูปแต่ละช่อง<br/>
               3. เลือกช่อง → ลากปุ่ม ✥ = ย้ายทั้งวง · ลากกลาง = เลื่อนรูปในช่อง · ลากมุม = ปรับขนาด<br/>
-              4. ใช้ปุ่ม +/− ปรับขนาดละเอียด<br/>
+              4. กด ✨ ออโต้ทุกช่อง / 🎨 ปรับภาพ ให้แสง-สี-ความคมพอดี<br/>
               5. กดดาวน์โหลด JPEG คุณภาพสูง
             </div>
           </div>
@@ -2220,18 +2373,33 @@ export default function CoverPage() {
               ตัวอย่างปก
               <span style={{ fontSize:11, fontWeight:400, color:'var(--text-muted)', marginLeft:'auto' }}>{W}×{H}px • {template?.name || '—'}</span>
             </div>
-            <div style={{ ...s.body, display:'flex', flexDirection:'column', gap:12 }}>
+            {/* ★ 14 พ.ย. 69: จอกว้าง (≥1280) = ปกพอดีความสูงจอ + เครื่องมืออยู่ข้างปก เห็นพร้อมกันไม่ต้องเลื่อนลงไปหา
+                จอแคบ/มือถือ = เรียงลงมาเหมือนเดิม (ปก → ชิปช่อง → เครื่องมือ) */}
+            <div style={{ ...s.body, ...(isWide
+              ? { display:'grid', gridTemplateColumns:'minmax(0,1fr) 400px', gap:14, alignItems:'start' }
+              : { display:'flex', flexDirection:'column', gap:12 }) }}>
               <div style={{
+                ...(isWide ? { width:'min(100%, calc((100vh - 205px) * 0.8))', justifySelf:'center' } : {}),
                 borderRadius:12, overflow:'hidden',
-                border: allSlotsFilled ? '2px solid #60a5fa':'2px dashed rgba(255,255,255,0.08)',
+                border: dropActive ? '2px dashed #facc15' : allSlotsFilled ? '2px solid #60a5fa':'2px dashed rgba(255,255,255,0.08)',
                 background:'#111119',
                 cursor: dragState ? (dragState.mode==='resize' ? 'nwse-resize':'grabbing') : hoverCursor,
               }}>
                 <canvas ref={canvasRef} width={W} height={H}
                   style={{ width:'100%', height:'auto', display:'block', touchAction:'none' }}
-                  onMouseDown={e => handleDown(e.clientX, e.clientY)}
+                  onMouseDown={e => { if (e.button === 0) handleDown(e.clientX, e.clientY); }}
                   onMouseMove={e => handleMove(e.clientX, e.clientY)}
-                  onMouseUp={handleUp} onMouseLeave={handleUp}
+                  onDragOver={e => { if (Array.from(e.dataTransfer?.types || []).includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; if (!dropActive) setDropActive(true); } }}
+                  onDragLeave={() => setDropActive(false)}
+                  onDrop={e => {
+                    // ★ 14 พ.ย. 69: ลากไฟล์รูปจากเครื่องมาปล่อยบนช่อง = ใส่รูปช่องนั้นทันที (หลายไฟล์ = เติมช่องว่างต่อ)
+                    const files = e.dataTransfer?.files;
+                    setDropActive(false);
+                    if (!files || !files.length) return;
+                    e.preventDefault();
+                    const { mx, my } = getCoords(e.clientX, e.clientY);
+                    handleFiles(files, slotAtPoint(mx, my)?.id);
+                  }}
                   onTouchStart={e => {
                     // ★ 4 ก.ค.: จีบ 2 นิ้ว = ซูมภาพในช่อง (มือถือไม่มีสกอลล์เมาส์)
                     if (e.touches.length === 2) {
@@ -2240,7 +2408,7 @@ export default function CoverPage() {
                       const slot = hitTestAll(mx, my) || (selectedSlotId ? template?.slots.find(sl => sl.id === selectedSlotId && slotImages[sl.id]) : null);
                       if (slot) {
                         pinchRef.current = { slotId: slot.id, startDist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), startZoom: slotCrops[slot.id]?.zoom || 1 };
-                        setDragState(null); // ยกเลิกลากนิ้วเดียวที่เริ่มไว้ก่อนนิ้วที่สองแตะ
+                        setDrag(null); // ยกเลิกลากนิ้วเดียวที่เริ่มไว้ก่อนนิ้วที่สองแตะ
                         setSelectedSlotId(slot.id);
                       }
                       return;
@@ -2263,6 +2431,7 @@ export default function CoverPage() {
                 />
               </div>
 
+              <div style={{ display:'flex', flexDirection:'column', gap:12, minWidth:0, ...(isWide ? { maxHeight:'calc(100vh - 150px)', overflowY:'auto', paddingRight:4 } : {}) }}>
               {/* ★ 4 ก.ค. — ชิปเลือกช่อง + แถบสถานะ + แผงเครื่องมือรวม (มือถือครบจบใต้ปก · PC ก็ใช้ได้) */}
               {template && (
                 <div>
@@ -2327,7 +2496,7 @@ export default function CoverPage() {
                     const zoomBy = (d) => setSlotCrops(prev => { const old = prev[sl.id] || { zoom: 1, panX: 0, panY: 0 }; return { ...prev, [sl.id]: { ...old, zoom: Math.max(1, Math.min(5, +(old.zoom + d).toFixed(1))) } }; });
                     const bigBtn = { ...s.scaleBtn, width: 40, height: 40, fontSize: 18, borderRadius: 9 };
                     return (
-                      <div style={{ marginTop: 9, padding: 11, borderRadius: 11, background: 'rgba(96,165,250,0.06)', border: '1px solid rgba(96,165,250,0.22)' }}>
+                      <div ref={toolsRef} style={{ marginTop: 9, padding: 11, borderRadius: 11, background: 'rgba(96,165,250,0.06)', border: '1px solid rgba(96,165,250,0.22)', scrollMarginTop: 80 }}>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                           {/* ★ E3b: มีพูล = เปิด modal เลือกรูป · ไม่มีพูล = file input เดิม */}
                           <label
@@ -2337,9 +2506,16 @@ export default function CoverPage() {
                             <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { handleFile(sl.id, e.target.files?.[0]); e.target.value = ''; }} />
                           </label>
                           {img && <>
-                            <button onClick={() => enhanceSlotImage(sl.id)} disabled={enhancing[sl.id]} style={{ ...bigBtn, width: 'auto', padding: '0 13px', fontSize: 12, color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}>
-                              {enhancing[sl.id] ? '⏳ กำลังเพิ่มคม...' : '✨ คมชัด'}
-                            </button>
+                            {/* ★ 14 พ.ย. 69: แทนปุ่ม "✨ คมชัด" (AI) — ออโต้แบบสูตรพิกเซล เห็นผลทันที ไม่ส่งภาพออกนอกเครื่อง */}
+                            {(() => {
+                              const on = adjustKey(slotAdjust[sl.id]) === adjustKey(ADJUST_PRESETS[0].adj);
+                              return (
+                                <button onClick={() => setAdjustFor(sl.id, on ? null : { ...ADJUST_PRESETS[0].adj })} title={ADJUST_PRESETS[0].hint}
+                                  style={{ ...bigBtn, width: 'auto', padding: '0 13px', fontSize: 12, color: '#22c55e', border: `1px solid ${on ? '#22c55e' : 'rgba(34,197,94,0.3)'}`, background: on ? 'rgba(34,197,94,0.14)' : bigBtn.background }}>
+                                  ✨ ปรับอัตโนมัติ{on ? ' ✓' : ''}
+                                </button>
+                              );
+                            })()}
                             <button onClick={() => removeImage(sl.id)} style={{ ...bigBtn, width: 'auto', padding: '0 13px', fontSize: 12, color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>🗑 ลบ</button>
                             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{img.naturalWidth}×{img.naturalHeight}</span>
                           </>}
@@ -2380,6 +2556,18 @@ export default function CoverPage() {
                               style={{ ...bigBtn, width: 'auto', padding: '0 13px', fontSize: 12 }}>↺ รีเซ็ตช่องนี้</button>
                           </div>
                         )}
+                        {/* ★ 14 พ.ย. 69: แผงปรับแสง · สี · ความคม ของช่องนี้ */}
+                        {img && (
+                          <AdjustPanel
+                            adj={slotAdjust[sl.id]}
+                            onChange={(next) => setAdjustFor(sl.id, next)}
+                            canApplyAll={filledCount > 1}
+                            onApplyAll={() => applyAdjustToAll(slotAdjust[sl.id], 'ใช้ค่าปรับภาพกับ')}
+                            onCompare={setCompareOriginal}
+                            comparing={compareOriginal}
+                            autoAvailable={getAutoLevelsForImage(img) != null}
+                          />
+                        )}
                         {/* ★ 4 ก.ค. รอบ 2 — ลูกเล่นรายช่อง: เฟด / สีขอบ / ขาวดำไว้อาลัย */}
                         {img && (
                           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
@@ -2403,11 +2591,6 @@ export default function CoverPage() {
                                 style={{ width: 110 }} />
                               <span style={{ fontSize: 12, fontWeight: 800, minWidth: 34, color: (slotGray[sl.id] || 0) > 0 ? '#cbd5e1' : 'var(--text-muted)' }}>{Math.round((slotGray[sl.id] || 0) * 100)}%</span>
                             </div>
-                          </div>
-                        )}
-                        {img && enhanceResults[sl.id] && !enhancing[sl.id] && (
-                          <div style={{ marginTop: 8, fontSize: 11, color: '#22c55e', fontWeight: 600 }}>
-                            ✅ เพิ่มคมแล้ว {enhanceResults[sl.id].originalResolution} → {enhanceResults[sl.id].enhancedResolution} · เหมือนต้นฉบับ {enhanceResults[sl.id].similarityScore}%
                           </div>
                         )}
                       </div>
@@ -2445,6 +2628,23 @@ export default function CoverPage() {
                         <span style={{ fontSize: 12, fontWeight: 800, minWidth: 34, color: grayAll > 0 ? '#cbd5e1' : 'var(--text-muted)' }}>{Math.round(grayAll * 100)}%</span>
                       </div>
                     </div>
+                    {/* ★ 14 พ.ย. 69: ปรับภาพทั้งใบในคลิกเดียว (ออโต้วัดแสงแยกรายภาพ) */}
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 }}>
+                      <span style={{ fontSize: 12, color: '#22c55e', fontWeight: 700 }}>🎨 ปรับภาพทั้งใบ</span>
+                      <button onClick={() => applyAdjustToAll(ADJUST_PRESETS[0].adj, 'ปรับอัตโนมัติ')} disabled={!filledCount}
+                        style={{ padding: '9px 13px', borderRadius: 9, fontSize: 12, fontWeight: 700, fontFamily: 'inherit', cursor: filledCount ? 'pointer' : 'not-allowed', opacity: filledCount ? 1 : 0.45, border: '1px solid rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.08)', color: '#22c55e' }}>
+                        ✨ ออโต้ทุกช่อง
+                      </button>
+                      {adjustedCount > 0 && (
+                        <>
+                          <button onClick={() => setSlotAdjust({})}
+                            style={{ padding: '9px 13px', borderRadius: 9, fontSize: 12, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
+                            ↺ ล้างการปรับภาพทุกช่อง
+                          </button>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>ปรับอยู่ {adjustedCount}/{filledCount} ช่อง</span>
+                        </>
+                      )}
+                    </div>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 }}>
                       <span style={{ fontSize: 12, color: '#f87171', fontWeight: 700 }}>🔴 เน้นจุดข่าว</span>
                       <button onClick={() => addMarker('circle')} style={{ padding: '9px 13px', borderRadius: 9, fontSize: 12, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.07)', color: '#f87171' }}>⭕ เพิ่มวงแดง</button>
@@ -2472,8 +2672,8 @@ export default function CoverPage() {
                 </div>
               )}
 
-              {/* Quick download + status */}
-              <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+              {/* Quick download + status (จอกว้าง: ย้ายขึ้นบนสุดของคอลัมน์เครื่องมือ เห็นตลอด) */}
+              <div style={{ display:'flex', gap:8, alignItems:'center', order: isWide ? -1 : 0 }}>
                 <button onClick={handleDownload} disabled={!Object.keys(slotImages).length}
                   style={{
                     flex:1, padding:'10px 0', borderRadius:10, border:'none',
@@ -2489,11 +2689,24 @@ export default function CoverPage() {
                   {template ? `${Object.keys(slotImages).filter(k => template.slots.some(sl => sl.id===k)).length}/${template.slots.length} รูป` : ''}
                 </span>
               </div>
+              </div>
             </div>
           </div>
 
         </div>
       </div>
+
+      {/* ★ 14 พ.ย. 69: แถบแจ้งเตือนสั้นๆ (แทน alert ที่บล็อกจอ) */}
+      {notice && (
+        <div role="status" aria-live="polite" onClick={() => setNotice(null)}
+          style={{ position: 'fixed', left: '50%', bottom: 22, transform: 'translateX(-50%)', zIndex: 9500, maxWidth: 'min(92vw, 560px)',
+            padding: '11px 16px', borderRadius: 12, fontSize: 13, fontWeight: 700, lineHeight: 1.5, cursor: 'pointer',
+            color: '#fff', background: notice.kind === 'error' ? 'rgba(185,28,28,0.96)' : 'rgba(30,41,59,0.97)',
+            border: `1px solid ${notice.kind === 'error' ? 'rgba(248,113,113,0.6)' : 'rgba(96,165,250,0.5)'}`,
+            boxShadow: '0 10px 36px rgba(0,0,0,0.45)' }}>
+          {notice.kind === 'error' ? '⚠️ ' : '✅ '}{notice.msg}
+        </div>
+      )}
 
       {/* ★ E3b: MODAL เลือกรูปจากคลัง (พูลเดียวกับแถบล่างโหมด recipe) — overlay เต็มจอ, คลิกรูป=วางลงช่องทันที */}
       {pickerSlotId != null && (() => {
