@@ -13,7 +13,18 @@ import {
   isPlanBEnabled,
   shouldUseStudioForJob,
 } from '../src/lib/services/newsStudio/switches.js';
-import { planBModels } from '../src/lib/services/newsStudio/planBPipeline.js';
+import { planBModels, formatReadableThreeParagraphs } from '../src/lib/services/newsStudio/planBPipeline.js';
+
+test('formatReadableThreeParagraphs บังคับเรียง 3 ย่อหน้าเสมอ และเว้นวรรครอบเครื่องหมายคำพูด/ตัวเลขให้อ่านง่าย', () => {
+  // กรณีโมเดลส่งมาติดกันหรือเครื่องหมายคำพูดติดตัวอักษร
+  const raw = 'จากเด็กไร้พ่อแม่“เก่ง”ทำงานร้านขนมได้20บาทต่อวัน\n\nครูแนะแนว"สมญา เพ็ชรรุ่ง"ซื้อขนมมาฝากเสมอ\n\nส่วนครูที่ปรึกษา"อรัญญา"บอกให้มาหาที่ห้องพักครู\n\nวันนี้เก่งเรียนจบและกำลังสอบบรรจุเป็นครู';
+  const out = formatReadableThreeParagraphs(raw);
+  const paras = out.split('\n\n');
+  assert.equal(paras.length, 3);
+  assert.ok(out.includes(' "เก่ง" '));
+  assert.ok(out.includes('20 บาท'));
+  assert.ok(out.includes(' "สมญา เพ็ชรรุ่ง" '));
+});
 
 const ROOT = 'C:/news-studio-dev';
 

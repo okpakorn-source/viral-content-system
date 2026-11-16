@@ -4,10 +4,10 @@
  * "Gemini 4 Elemental Studio (Hydrogen + Carbon + Argon) & Cross-Family Critic"
  * =====================================================
  * ขั้นตอนและโมเดลที่ใช้:
- *   ขั้นที่ 1 (Fast Fact Guard & Typo Sanitizer) : Google gemini-4-hydrogen (คลีนคำผิดพนักงาน + แยกคำพูดตรง/อ้อม + ผูกตัวเลข)
+ *   ขั้นที่ 1 (Fast Fact Guard & Typo Sanitizer) : Google gemini-4-hydrogen (คลีนคำผิดพนักงาน + สกัดชื่อคน/คำพูดที่ต้องเน้น + ผูกตัวเลข)
  *   ขั้นที่ 2 (All-254 Single-Pass Strategist)   : Google gemini-4-carbon (สมองใหญ่สุด อ่านครูครบ 254 ใบ + ปก 33 ใบในรวดเดียว + แยกฉาก 3 ประตู)
- *   ขั้นที่ 3 (Admin-Voice Storytelling Writer)   : Google gemini-4-carbon & gemini-4-argon (เขียนด้วยครูต้นแบบ + สำนวนแอดมินจริง admin-voice & f2x)
- *   ขั้นที่ 4 (Cross-Family Adversarial Critic)   : OpenAI gpt-5.6-sol ตรวจความจริงข้ามค่าย + gemini-4-argon เกลาจบ
+ *   ขั้นที่ 3 (Admin-Voice Storytelling Writer)   : Google gemini-4-carbon & gemini-4-argon (เขียน 3 ย่อหน้าอ่านง่าย เว้นวรรคถูกจังหวะ เน้นชื่อคนและคำพูดถูกบริบท)
+ *   ขั้นที่ 4 (Cross-Family Adversarial Critic)   : OpenAI gpt-5.6-sol ตรวจความจริง/การเว้นวรรค/การเน้นคำ + gemini-4-argon เกลาจบ
  */
 import { loadEnrichedKnowledgeBase, formatFullAngleExemplars } from './enrichedLibrary.js';
 import { createMultiModelHub, loadStudioEnv } from './multiModelCallers.js';
@@ -33,6 +33,70 @@ function fail(errorType, message) {
   return err;
 }
 
+/**
+ * จัดระเบียบเนื้อข่าวให้เป็น 3 ย่อหน้าที่อ่านเข้าใจง่าย เว้นวรรคถูกบริบท และเน้นชื่อคน/คำพูดในเครื่องหมายคำพูดอย่างสะอาดตาเสมอ
+ */
+export function formatReadableThreeParagraphs(rawContent) {
+  let text = String(rawContent || '')
+    .replace(/^```[a-z]*\s*/i, '')
+    .replace(/```\s*$/i, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/[—–]/g, ' ')
+    .trim();
+
+  if (!text) return '';
+
+  // 1. จัดการเครื่องหมายคำพูดให้เป็นมาตรฐานเดียวกัน และเว้นวรรคหน้า-หลัง "..." ไม่ให้ติดกลืนกับคำรอบข้าง
+  const normalizeQuotesAndSpaces = (para) => {
+    let s = String(para || '').replace(/\s*\n\s*/g, ' ').trim();
+    // แปลงเครื่องหมายคำพูดโค้งเปิด-ปิด หรือคู่ของ "..." ให้มีช่องว่างด้านนอกแต่ไม่มีช่องว่างเกินด้านใน
+    s = s.replace(/[“"]([^”"\n]+)[”"]/g, (_, inner) => ` "${inner.trim()}" `);
+    // จัดการช่องว่างรอบตัวเลขและหน่วยให้สะอาด (เช่น 18ล้าน -> 18 ล้าน, 20บาท -> 20 บาท)
+    s = s.replace(/([0-9])(ล้าน|แสน|หมื่น|พัน|ร้อย|บาท|ไร่|ปี|เดือน|วัน|คน|นาย|ใบ|ครั้ง)/g, '$1 $2');
+    // ลบช่องว่างซ้ำซ้อน
+    s = s.replace(/[ \t]{2,}/g, ' ').trim();
+    return s;
+  };
+
+  let paragraphs = text
+    .split(/\n\s*\n/)
+    .map(normalizeQuotesAndSpaces)
+    .filter(Boolean);
+
+  // 2. หากโมเดลเผลอส่งมาไม่ใช่ 3 ย่อหน้า (เช่น 1, 2 หรือ 4+ ย่อหน้า) ให้จัดเรียงเป็น 3 ย่อหน้าเสมอ
+  if (paragraphs.length === 1) {
+    const tokens = paragraphs[0].split(/(?<=\S)\s+(?=\S)/).filter(Boolean);
+    if (tokens.length >= 6) {
+      const cut1 = Math.max(2, Math.round(tokens.length * 0.28));
+      const cut2 = Math.max(cut1 + 2, Math.round(tokens.length * 0.72));
+      paragraphs = [
+        tokens.slice(0, cut1).join(' '),
+        tokens.slice(cut1, cut2).join(' '),
+        tokens.slice(cut2).join(' '),
+      ];
+    }
+  } else if (paragraphs.length === 2) {
+    // แยกย่อหน้าที่ยาวกว่าออกเป็น 2 ส่วนตามจังหวะเว้นวรรค
+    const idxToSplit = paragraphs[0].length >= paragraphs[1].length ? 0 : 1;
+    const target = paragraphs[idxToSplit];
+    const tokens = target.split(/\s+/).filter(Boolean);
+    if (tokens.length >= 4) {
+      const mid = Math.round(tokens.length * 0.55);
+      const firstHalf = tokens.slice(0, mid).join(' ');
+      const secondHalf = tokens.slice(mid).join(' ');
+      paragraphs = idxToSplit === 0 ? [firstHalf, secondHalf, paragraphs[1]] : [paragraphs[0], firstHalf, secondHalf];
+    }
+  } else if (paragraphs.length > 3) {
+    // รวมย่อหน้ากลางเข้าด้วยกัน คงย่อหน้าเปิดและย่อหน้าปิดไว้
+    const first = paragraphs[0];
+    const last = paragraphs[paragraphs.length - 1];
+    const middle = paragraphs.slice(1, -1).join(' ');
+    paragraphs = [first, middle, last];
+  }
+
+  return paragraphs.map(normalizeQuotesAndSpaces).join('\n\n');
+}
+
 export async function runPlanBPipeline({ rawText, hub, rootDir, avoidIds = [], researchFacts = [], retryDeadlineMs = 0, onProgress }) {
   const t0 = Date.now();
   const timings = {};
@@ -48,7 +112,7 @@ export async function runPlanBPipeline({ rawText, hub, rootDir, avoidIds = [], r
   const activeHub = hub || createMultiModelHub(loadStudioEnv(rootDir));
 
   // ── ขั้นที่ 1: Fast Fact Guard & Typo Sanitizer ด้วย gemini-4-hydrogen ──
-  emit('step1_hydrogen_fact_guard', 'สกัด Fact Guard แก้คำสะกดผิดพนักงาน และผูกตัวเลขด้วย gemini-4-hydrogen');
+  emit('step1_hydrogen_fact_guard', 'สกัด Fact Guard แก้คำสะกดผิดพนักงาน และแยกชื่อคน/คำพูดที่ต้องเน้นด้วย gemini-4-hydrogen');
   const factGuard = await timed('step1_hydrogenFactGuard', () =>
     activeHub.callGemini({
       model: 'gemini-4-hydrogen',
@@ -61,13 +125,14 @@ export async function runPlanBPipeline({ rawText, hub, rootDir, avoidIds = [], r
         'อ่านเนื้อข่าวดิบจากพนักงานแล้วสกัดข้อมูลต่อไปนี้เป็น JSON:',
         '1. cleanedRawText: แก้เฉพาะคำสะกดผิดหรือพิมพ์ตกในเนื้อข่าวดิบ (เช่น "ค่าเช้า"->"ค่าเช่า", "บาทเดี่ยว"->"บาทเดียว", "18ล้าน"->"18 ล้านบาท", "3ไร่"->"3 ไร่", "ต้องนั้น"->"ตรงนั้น", "สมัค"->"สมัคร", "ไมได้"->"ไม่ได้", "ป้าเจี้ยบ"->"ป้าเจี๊ยบ") โดยคงข้อเท็จจริงเดิม 100%',
         '2. whoIsWho: อธิบายตัวตนและบทบาทของคนในข่าวสั้นๆ เพื่อปูในย่อหน้าแรกให้คนอ่านที่ไม่รู้จักชื่อเข้าใจทันที',
-        '3. exactQuotesAllowed: รายการประโยคคำพูดตรงที่มีอยู่จริงในเนื้อข่าว (ที่อนุญาตให้ใส่เครื่องหมายคำพูด "..." ได้)',
-        '4. indirectDoNotQuote: รายการข้อมูลที่เป็นแค่คำบอกเล่าอ้อม (ที่ห้ามใส่เครื่องหมายคำพูด "..." เด็ดขาด)',
-        '5. numberFacts: รายการผูกตัวเลขแต่ละตัวเข้ากับความหมายที่ถูกต้อง (ห้ามสลับที่ เช่น 9 ปีคือเวลารับราชการทหาร ไม่ใช่เวลาสอบ)',
-        '6. typoFixes: รายการคำผิดที่แก้ไป',
+        '3. keyPeopleNames: รายชื่อบุคคลสำคัญในข่าวที่นักเขียนต้องใส่เครื่องหมายคำพูดเน้นชื่อเมื่อเอ่ยถึงครั้งแรก (เช่น ["เก่ง", "สมญา เพ็ชรรุ่ง", "อรัญญา มโนธนธรรม"])',
+        '4. exactQuotesAllowed: รายการประโยคคำพูดตรงที่มีอยู่จริงในเนื้อข่าว (ที่ต้องใส่เครื่องหมายคำพูด "..." เพื่อเน้นคำพูดจริง)',
+        '5. indirectDoNotQuote: รายการข้อมูลที่เป็นแค่คำบอกเล่าอ้อมยาวๆ (ที่ห้ามแต่งเป็นประโยคคำพูดยาวใส่ "..." เด็ดขาด)',
+        '6. numberFacts: รายการผูกตัวเลขแต่ละตัวเข้ากับความหมายที่ถูกต้อง (ห้ามสลับที่ เช่น 9 ปีคือเวลารับราชการทหาร ไม่ใช่เวลาสอบ)',
+        '7. typoFixes: รายการคำผิดที่แก้ไป',
         '',
         'ตอบเป็น JSON เท่านั้น:',
-        '{"cleanedRawText": "...", "whoIsWho": "...", "exactQuotesAllowed": ["..."], "indirectDoNotQuote": ["..."], "numberFacts": ["..."], "typoFixes": ["..."]}',
+        '{"cleanedRawText": "...", "whoIsWho": "...", "keyPeopleNames": ["..."], "exactQuotesAllowed": ["..."], "indirectDoNotQuote": ["..."], "numberFacts": ["..."], "typoFixes": ["..."]}',
       ].join('\n'),
       user: `=== เนื้อข่าวดิบจากพนักงาน ===\n${rawText}\n=== จบเนื้อข่าวดิบ ===`,
     })
@@ -136,7 +201,7 @@ export async function runPlanBPipeline({ rawText, hub, rootDir, avoidIds = [], r
       user: [
         `=== คลังปกต้นแบบ 33 ใบ (Full Anatomy) ===\n${full33Exemplars}\n=== จบคลังปก 33 ใบ ===`,
         `=== คลังครูไวรัลครบทั้ง 254 ใบ (พร้อม DNA & ท่าเด่น) ===\n${all254Catalog}\n=== จบคลังครู 254 ใบ ===`,
-        `=== Fact Guard ===\nตัวตนคนในข่าว: ${factGuard?.whoIsWho || '-'}\nคำพูดตรงที่ใช้ "..." ได้: ${JSON.stringify(factGuard?.exactQuotesAllowed || [])}\nตัวเลขและความหมาย: ${JSON.stringify(factGuard?.numberFacts || [])}`,
+        `=== Fact Guard ===\nตัวตนคนในข่าว: ${factGuard?.whoIsWho || '-'}\nชื่อคนที่ต้องเน้น: ${JSON.stringify(factGuard?.keyPeopleNames || [])}\nคำพูดตรงที่ใช้ "..." ได้: ${JSON.stringify(factGuard?.exactQuotesAllowed || [])}\nตัวเลขและความหมาย: ${JSON.stringify(factGuard?.numberFacts || [])}`,
         `=== เนื้อข่าวต้นฉบับ (คลีนคำผิดแล้ว) ===\n${cleanRaw}\n=== จบเนื้อข่าว ===`,
       ].join('\n\n'),
     })
@@ -165,7 +230,7 @@ export async function runPlanBPipeline({ rawText, hub, rootDir, avoidIds = [], r
     .map((v) => String(v.caption).trim());
 
   // ── ขั้นที่ 3 & 4: เขียนด้วย gemini-4-argon / gemini-4-carbon + ตรวจข้ามค่ายด้วย gpt-5.6-sol + เกลาจบ ──
-  emit('step3_argon_carbon_write', 'เขียน 3 เวอร์ชันด้วย gemini-4-argon & gemini-4-carbon + ตรวจความจริงข้ามค่ายด้วย gpt-5.6-sol');
+  emit('step3_argon_carbon_write', 'เขียน 3 เวอร์ชันด้วย gemini-4-argon & gemini-4-carbon + ตรวจความจริงและการเว้นวรรคด้วย gpt-5.6-sol');
 
   const retryUntil = Number.isFinite(retryDeadlineMs) && retryDeadlineMs > 0 ? t0 + retryDeadlineMs : Infinity;
   const canRetry = () => Date.now() < retryUntil;
@@ -181,35 +246,41 @@ export async function runPlanBPipeline({ rawText, hub, rootDir, avoidIds = [], r
 
         const buildPrompt = (prevDraft = '', criticFixes = []) => ({
           system: [
-            'คุณคือแอดมินเพจข่าวไวรัล IG.dara (สำนวน Nisada) ที่เล่าเรื่องผู้คนด้วยน้ำเสียงอบอุ่น ลื่นไหล เหมือนเล่าให้เพื่อนฟัง แต่คมคายระดับหลายล้านวิว',
+            'คุณคือแอดมินเพจข่าวไวรัล IG.dara (สำนวน Nisada) ที่เล่าเรื่องผู้คนด้วยน้ำเสียงอบอุ่น ลื่นไหล อ่านเข้าใจง่ายตั้งแต่กวาดตารอบเดียว',
             '',
-            'กฎเหล็ก 7 ข้อในการเขียนของ Plan B (Gemini 4 Studio):',
-            '1. ย่อหน้า 1 (leadHook): ต้องสั้นและตรงประเด็น (2 ประโยคกระชับ) เปิดตามแผน leadHook และพาดปก แนะนำชื่อและตัวตนคนในข่าวตาม whoIsWho ให้คนอ่านเข้าใจทันทีภายในประโยคแรก ห้ามเปิดอ้อม',
-            '2. ย่อหน้า 2 (middleLens): เล่าเฉพาะแง่มุมที่กำหนดใน middleLens ด้วยสำนวนแอดมินธรรมชาติ เปลี่ยนโครงประโยคและใช้คำของแอดมินเอง (ห้ามยกประโยคยาวติดกันจากเนื้อดิบเกิน 8 คำ) และ **ห้ามปล่อยหมัดจบที่กั๊กไว้ใน closingHoldback ออกมาในย่อหน้า 1 หรือ 2 เด็ดขาด!**',
-            '3. ย่อหน้า 3 (closingHoldback): ปล่อยข้อเท็จจริงจำเพาะหรือคำพูดที่กั๊กไว้ใน closingHoldback เพื่อปิดเรื่องให้สั้น คม และมีความหมายแบบโพสต์ครู **ห้ามพูดซ้ำย่อหน้าแรก และห้ามจบด้วยคำคมสอนใจลอยๆ**',
-            '4. ความจริงและเครื่องหมายคำพูด:',
-            '   - ใส่เครื่องหมายคำพูด "..." ได้เฉพาะประโยคที่อยู่ใน exactQuotesAllowed เท่านั้น! คำบอกเล่าอ้อมห้ามใส่ "..." เด็ดขาด',
-            '   - ตัวเลขต้องผูกกับความหมายตาม numberFacts เท่านั้น ห้ามสลับที่ และห้ามลอกคำเฉพาะใน forbiddenTeacherWords จากโพสต์ครูมาปน',
+            'กฎเหล็ก 8 ข้อในการเขียนของ Plan B (เน้น 3 ย่อหน้าอ่านง่าย + เว้นวรรคถูกจังหวะ + เน้นชื่อคนและคำพูดถูกบริบท):',
+            '1. โครงสร้าง 3 ย่อหน้าที่อ่านเข้าใจง่ายเสมอ (คั่นด้วยบรรทัดว่าง 1 บรรทัด):',
+            '   - ย่อหน้า 1 (พาดหัวเปิดเรื่อง): สั้น กระชับ 2–3 ประโยค เปิดตามแผน leadHook และพาดปก บอกทันทีว่า "ใคร" ทำอะไร หรือเกิดอะไรขึ้น อ่านปุ๊บรู้เรื่องทันที ห้ามเปิดอ้อม',
+            '   - ย่อหน้า 2 (ลำดับเรื่องราว): เล่าแง่มุม middleLens ด้วยประโยคสั้นๆ เรียงลำดับเหตุและผลให้เข้าใจง่าย (ห้ามก๊อปประโยคยาวจากเนื้อดิบมาวางต่อกัน และห้ามปล่อยหมัดจบ closingHoldback ในย่อหน้า 1-2!)',
+            '   - ย่อหน้า 3 (หมัดจบปิดท้าย): ปล่อยข้อเท็จจริงจำเพาะหรือคำพูดใน closingHoldback ปิดเรื่องให้สั้น คม และอิ่มใจ ห้ามพูดซ้ำย่อหน้าแรก',
+            '2. การเว้นวรรคจังหวะหายใจ (Breath Spacing — สำคัญมาก!):',
+            '   - ห้ามเขียนตัวอักษรติดกันเป็นพรืดยาวเกิน 30–35 ตัวอักษรโดยไม่เว้นวรรคเด็ดขาด!',
+            '   - ต้องเคาะเว้นวรรค (spacebar) แบ่งจังหวะทุกอนุประโยค หรือทุกครั้งที่จบหนึ่งความคิดย่อย เพื่อให้คนอ่านบนมือถืออ่านไหลลื่นสบายตา (ใช้ .. คั่นจังหวะอารมณ์ก่อนเข้าประโยคสำคัญได้ 1 จุดแบบโพสต์ครู)',
+            '3. การเน้นชื่อคนและคำพูดด้วยเครื่องหมายคำพูด "..." ให้ถูกบริบท (เหมือนโพสต์ครูต้นแบบ):',
+            '   - **เน้นชื่อคนสำคัญ**: เมื่อเอ่ยชื่อตัวเอกหรือบุคคลสำคัญในข่าวครั้งแรกของบทบาทนั้น ต้องใส่เครื่องหมายคำพูดเน้นชื่อพร้อมเว้นวรรค เช่น "เก่ง" , ครูแนะแนว "สมญา เพ็ชรรุ่ง" , ครูที่ปรึกษา "อรัญญา มโนธนธรรม" , "เฟี้ยว์ฟ้าว" , "ปอ ทฤษฎี" เพื่อไม่ให้ชื่อคนกลืนไปกับตัวอักษรอื่น!',
+            '   - **เน้นคำพูดจริง**: ประโยคคำพูดตรงจาก exactQuotesAllowed ต้องใส่ในเครื่องหมายคำพูด "..." และเว้นวรรคก่อนเปิด-หลังปิดเครื่องหมายคำพูดให้เห็นเด่นชัด',
+            '   - **เน้นคำสำคัญสั้นๆ ตามบริบท**: คำสั้นๆ ที่เป็นจุดเน้นของเรื่อง (ไม่เกิน 2-3 คำ เช่น "ไม่ขาย" , "ครูคนสำคัญ") ใส่ "..." เน้นได้ตามบริบท แต่ห้ามแต่งประโยคคำพูดยาวๆ ที่เจ้าตัวไม่ได้พูดขึ้นมาใส่ "..." เด็ดขาด',
+            '4. ความจริงและตัวเลข: ตัวเลขทุกตัวต้องผูกกับความหมายตาม numberFacts เท่านั้น ห้ามสลับที่ และห้ามลอกคำเฉพาะใน forbiddenTeacherWords จากโพสต์ครูมาปน',
             '5. ห้ามใช้ภาษารายงานข่าวแข็งๆ: ห้ามใช้คำว่า "โดยระบุว่า", "เปิดเผยว่า", "ตน", "อีกฝ่าย", "คงสถานะคู่ชีวิต", "ทั้งนี้", "ท่ามกลางความ..."',
-            '6. รูปแบบ: 3 ย่อหน้าพอดี คั่นด้วยบรรทัดว่าง 1 บรรทัด ห้ามใช้ขีดยาว (—) ห้ามใช้อีโมจิ ห้ามมีแฮชแท็ก ห้ามจบด้วยคำถามถึงคนอ่าน ใช้คำสุภาพแทนคำรุนแรง/เสียชีวิต',
+            '6. รูปแบบสะอาดตา: 3 ย่อหน้าพอดี ห้ามใช้ขีดยาว (—) ห้ามใช้อีโมจิ ห้ามมีแฮชแท็ก ห้ามจบด้วยคำถามถึงคนอ่าน ใช้คำสุภาพแทนคำรุนแรง/เสียชีวิต',
             '7. ตอบเฉพาะเนื้อโพสต์ 3 ย่อหน้าเท่านั้น ไม่ต้องมีหัวข้อหรือคำอธิบายใดๆ',
           ].join('\n'),
           user: [
-            `=== โพสต์ครูต้นแบบที่เลียนโครงสร้าง (${teacher.name} · ${(Number(teacher.views || 0) / 1e6).toFixed(1)}M วิว) ===\n${teacher.post}\n=== จบโพสต์ครู ===`,
+            `=== โพสต์ครูต้นแบบที่เลียนจังหวะการเว้นวรรคและการเน้นคำ (${teacher.name} · ${(Number(teacher.views || 0) / 1e6).toFixed(1)}M วิว) ===\n${teacher.post}\n=== จบโพสต์ครู ===`,
             `=== DNA และกลไกความปังของครูใบนี้ ===\n- DNA & ท่าเด่น: ${teacher.cardEssence || '-'}\n- โครงเปิด: ${teacher.hookStyle || '-'}\n- ทำไมถึงปัง: ${teacher.whyItWorks || '-'}\n- พิมพ์เขียวจังหวะ 3 ย่อหน้า: ${plan.teacherCadenceNote || '-'}\n- คำจากโพสต์ครูที่ห้ามหลุดมาเด็ดขาด: ${(plan.forbiddenTeacherWords || []).join(', ') || '-'}`,
             voiceSamples.length
-              ? `=== ตัวอย่างน้ำเสียงแอดมินเพจจริง (ดูเฉพาะความลื่นไหลของสำนวนไทย ห้ามเอาเนื้อหามาใช้) ===\n${voiceSamples[idx % voiceSamples.length] || voiceSamples[0]}\n${f2xSamples[idx % Math.max(1, f2xSamples.length)] || ''}`
+              ? `=== ตัวอย่างการเว้นวรรคและเน้นชื่อคนด้วย "..." ของแอดมินเพจจริง ===\n${voiceSamples[idx % voiceSamples.length] || voiceSamples[0]}\n${f2xSamples[idx % Math.max(1, f2xSamples.length)] || ''}`
               : '',
             `=== แผนแยกฉากเวอร์ชันที่ ${idx + 1}: ${plan.angleName || ''} ===\n- ประเด็นที่ชู: ${plan.focus}\n- พาดปก: ${(plan.coverLines || []).join(' / ')}\n- [ย่อหน้า 1 - leadHook]: ${plan.leadHook || plan.focus}\n- [ย่อหน้า 2 - middleLens]: ${plan.middleLens || ''}\n- [ย่อหน้า 3 - closingHoldback (กั๊กไว้ปล่อยย่อหน้า 3 เท่านั้น ห้ามใช้ในย่อหน้า 1-2!)]: ${plan.closingHoldback || ''}\n- คำสำคัญที่ต้องมี: ${(plan.mustKeep || []).join(' · ')}`,
-            `=== Fact Guard (ขอบเขตความจริง) ===\n- ตัวตนคนในข่าว: ${factGuard?.whoIsWho || '-'}\n- คำพูดตรงที่ใช้ "..." ได้เท่านั้น: ${JSON.stringify(factGuard?.exactQuotesAllowed || [])}\n- คำบอกเล่าอ้อมที่ห้ามใส่ "...": ${JSON.stringify(factGuard?.indirectDoNotQuote || [])}\n- ตัวเลขและความหมาย: ${JSON.stringify(factGuard?.numberFacts || [])}`,
+            `=== Fact Guard (ขอบเขตความจริง & คำที่ต้องเน้น) ===\n- ตัวตนคนในข่าว: ${factGuard?.whoIsWho || '-'}\n- ชื่อคนสำคัญที่ต้องใส่ "..." เน้นชื่อให้เห็นชัด: ${JSON.stringify(factGuard?.keyPeopleNames || [])}\n- คำพูดตรงที่ต้องใส่ "..." เน้นคำพูด: ${JSON.stringify(factGuard?.exactQuotesAllowed || [])}\n- คำบอกเล่าอ้อมยาวๆ ที่ห้ามแต่งเป็นประโยคคำพูด: ${JSON.stringify(factGuard?.indirectDoNotQuote || [])}\n- ตัวเลขและความหมาย: ${JSON.stringify(factGuard?.numberFacts || [])}`,
             researchFacts.length > 0
               ? `=== ข้อมูลเสริมจากการค้น ===\n${researchFacts.map((f, i) => `${i + 1}. ${f}`).join('\n')}`
               : '',
             `=== เนื้อข่าวต้นฉบับ (คลีนคำผิดแล้ว) ===\n${cleanRaw}\n=== จบเนื้อข่าว ===`,
             prevDraft
-              ? `=== ฉบับร่างก่อนหน้าที่ต้องเกลาแก้ไข ===\n${prevDraft}\n\n=== ข้อติที่ต้องแก้ไขให้ผ่าน 100% (ตัดทอนหรือปรับเฉพาะจุดที่มีปัญหา) ===\n${criticFixes.map((f) => `- ${f}`).join('\n')}`
+              ? `=== ฉบับร่างก่อนหน้าที่ต้องเกลาแก้ไข ===\n${prevDraft}\n\n=== ข้อติที่ต้องแก้ไขให้ผ่าน 100% ===\n${criticFixes.map((f) => `- ${f}`).join('\n')}`
               : '',
-            `งบความยาวเคร่งครัด: ทั้งโพสต์ต้องยาวประมาณ 160–195 คำ (ประมาณ 500–${safeMaxChars} ตัวอักษร และห้ามเกินเพดาน ${budget.maxChars} ตัวอักษรเด็ดขาด ไม่นับช่องว่าง)${pb ? ` · ย่อหน้าแรกสั้นกระชับไม่เกิน ${Math.max(140, pb.openingMax - 15)} ตัวอักษร · ย่อหน้าท้ายไม่เกิน ${Math.max(145, pb.closingMax - 15)} ตัวอักษร` : ''}`,
+            `งบความยาวเคร่งครัด: ทั้งโพสต์ต้องเรียงเป็น 3 ย่อหน้าที่อ่านเข้าใจง่าย เว้นวรรคแบ่งจังหวะทุกอนุประโยค เน้นชื่อคนและคำพูดด้วย "..." ให้ถูกบริบท ความยาวรวมประมาณ 160–195 คำ (ประมาณ 500–${safeMaxChars} ตัวอักษร และห้ามเกินเพดาน ${budget.maxChars} ตัวอักษรเด็ดขาด ไม่นับช่องว่าง)${pb ? ` · ย่อหน้าแรกสั้นกระชับไม่เกิน ${Math.max(140, pb.openingMax - 15)} ตัวอักษร · ย่อหน้าท้ายไม่เกิน ${Math.max(145, pb.closingMax - 15)} ตัวอักษร` : ''}`,
           ].filter(Boolean).join('\n\n'),
         });
 
@@ -241,13 +312,9 @@ export async function runPlanBPipeline({ rawText, hub, rootDir, avoidIds = [], r
             stoppedReason = `นักเขียนล่มในรอบแก้ที่ ${attempt}: ${String(e?.message || e).slice(0, 120)}`;
             break;
           }
-          const content = String(reply || '')
-            .replace(/^```[a-z]*\s*/i, '')
-            .replace(/```\s*$/i, '')
-            .replace(/\r\n/g, '\n')
-            .replace(/[ \t]+\n/g, '\n')
-            .replace(/\n{3,}/g, '\n\n')
-            .trim();
+
+          // จัดระเบียบให้เป็น 3 ย่อหน้า เว้นวรรครอบ "..." และตัวเลขให้สะอาดเสมอ
+          const content = formatReadableThreeParagraphs(reply);
 
           const p1Text = (content.split(/\n\s*\n/)[0] || '').replace(/\s+/g, '');
           const compatMustKeep = (plan.mustKeep || []).filter(
@@ -262,31 +329,52 @@ export async function runPlanBPipeline({ rawText, hub, rootDir, avoidIds = [], r
           };
           const formCheck = checkTeacherForm(content, { rawText: cleanRaw, teacherPost: teacher.post, angle: compatAngle });
 
-          // ใช้ gpt-5.6-sol (คนละค่ายกับผู้เขียน Gemini 4) ตรวจจับข้อผิดพลาดแบบ Cross-Family Adversarial Critic
+          // ตรวจว่ามีการเน้นชื่อคนหรือคำพูดด้วย "..." อย่างน้อย 1 จุดในโพสต์หรือไม่
+          const hasContextualQuoteEmphasis = /"[^"\n]{2,}"/.test(content);
+          if (!hasContextualQuoteEmphasis) {
+            formCheck.fails.push({
+              code: 'MISSING_EMPHASIS',
+              message: `โพสต์ยังไม่ได้ใส่เครื่องหมายคำพูด "..." เพื่อเน้นชื่อคนสำคัญ (${(factGuard?.keyPeopleNames || []).join(', ')}) หรือคำพูดสำคัญเลย — ให้ใส่ "..." เน้นชื่อคนหรือคำพูดตามบริบทให้อ่านง่าย`,
+            });
+            formCheck.ok = false;
+          }
+
+          // ตรวจว่ามีก้อนตัวอักษรติดกันเป็นพรืดเกิน 75 ตัวอักษรโดยไม่เว้นวรรคเลยหรือไม่ (นอกเครื่องหมายคำพูด)
+          const nonQuotedRuns = content.replace(/"[^"\n]*"/g, ' ').split(/\s+/).filter(Boolean);
+          const longestUnspaced = nonQuotedRuns.reduce((m, s) => Math.max(m, s.length), 0);
+          if (longestUnspaced > 75) {
+            formCheck.fails.push({
+              code: 'UNSPACED_WALL',
+              message: `มีประโยคเขียนติดกันเป็นพรืดยาว ${longestUnspaced} ตัวอักษรโดยไม่เว้นวรรค — ให้เคาะเว้นวรรคแบ่งจังหวะทุกอนุประโยคให้อ่านง่าย`,
+            });
+            formCheck.ok = false;
+          }
+
+          // ใช้ gpt-5.6-sol (คนละค่ายกับผู้เขียน Gemini 4) ตรวจความจริง + การเว้นวรรค + การเน้นชื่อคน/คำพูด
           let critic = { pass: true, issues: [] };
           let factChecked = true;
           let factError = '';
           try {
             critic = await activeHub.callOpenAI({
               model: 'gpt-5.6-sol',
-              role: `ผู้ตรวจข้อเท็จจริงข้ามค่าย V${idx + 1}`,
+              role: `ผู้ตรวจข้อเท็จจริงและการอ่าน V${idx + 1}`,
               effort: 'low',
               json: true,
               maxTokens: 2500,
               system: [
-                'คุณคือบรรณาธิการตรวจสอบคุณภาพข้ามค่าย (Cross-Family Adversarial Critic & Blind Reader)',
-                'ตรวจโพสต์ที่เขียนโดยนักเขียน AI เทียบกับเนื้อข่าวต้นฉบับและ Fact Guard อย่างเข้มงวด:',
-                '1. ความจริงและเครื่องหมายคำพูด: มีการมโนข้อมูลเพิ่มไหม? มีการใส่ "..." ให้ประโยคที่ไม่อยู่ใน exactQuotesAllowed ไหม? ตัวเลขสลับความหมายไหม?',
-                '2. ความเข้าใจทันที (Blind Reader): อ่านย่อหน้าแรกแล้วรู้ทันทีไหมว่าใคร ทำอะไร เกิดอะไรขึ้น?',
-                '3. หมัดจบย่อหน้า 3: ย่อหน้าสุดท้ายได้ใช้ closingHoldback และไม่พูดวนซ้ำย่อหน้าแรกใช่ไหม?',
-                '4. ภาษาธรรมชาติ: มีคำภาษานักข่าวแข็งๆ (โดยระบุว่า, ตน, อีกฝ่าย, คงสถานะคู่ชีวิต, เปิดเผยว่า) หรือคำผิดหลุดมาไหม?',
+                'คุณคือบรรณาธิการตรวจสอบคุณภาพข้ามค่าย (Cross-Family Adversarial Critic & Readability Inspector)',
+                'ตรวจโพสต์ที่เขียนเทียบกับเนื้อข่าวต้นฉบับและ Fact Guard ใน 4 มิติ:',
+                '1. ความจริงและเครื่องหมายคำพูด: มีข้อมูลมโนเพิ่มไหม? ประโยคคำพูดยาวใน "..." ตรงกับ exactQuotesAllowed ไหม? (หมายเหตุ: การใส่ "..." รอบชื่อคน เช่น "เก่ง", "สมญา เพ็ชรรุ่ง" หรือคำเน้นสั้นๆ 1-3 คำ ถือว่าถูกต้องตามสไตล์เพจ ห้ามติว่าผิด!)',
+                '2. การเรียง 3 ย่อหน้าและการเว้นวรรค: อ่านเข้าใจง่ายตั้งแต่รอบแรกไหม? เว้นวรรคแบ่งจังหวะดีไหม หรือมีประโยคไหนซ้อนกันจนงง?',
+                '3. การเน้นชื่อคนและคำพูดถูกบริบท: เน้นชื่อคนสำคัญและคำพูดได้ถูกจังหวะไม่กลืนไปกับเนื้อความใช่ไหม?',
+                '4. หมัดจบย่อหน้า 3: ย่อหน้าสุดท้ายได้ใช้ closingHoldback และไม่พูดวนซ้ำย่อหน้าแรกใช่ไหม?',
                 '',
                 'ตอบเป็น JSON เท่านั้น:',
                 '{"pass": true/false, "issues": [{"type": "added|wrong|missing|unclear", "severity": "major|minor", "quote": "ข้อความที่มีปัญหา", "problem": "ผิดอย่างไร", "fix": "วิธีแก้ให้ถูกต้อง"}]}',
               ].join('\n'),
               user: [
                 `=== เนื้อข่าวต้นฉบับ ===\n${cleanRaw}`,
-                `=== Fact Guard ===\nคำพูดตรงที่ใช้ "..." ได้: ${JSON.stringify(factGuard?.exactQuotesAllowed || [])}\nตัวเลข: ${JSON.stringify(factGuard?.numberFacts || [])}\nหมัดจบย่อหน้า 3 ที่กั๊กไว้: ${plan.closingHoldback || ''}`,
+                `=== Fact Guard ===\nชื่อคนที่อนุญาตให้ใส่ "..." เน้นชื่อได้: ${JSON.stringify(factGuard?.keyPeopleNames || [])}\nคำพูดตรงที่ใช้ "..." ได้: ${JSON.stringify(factGuard?.exactQuotesAllowed || [])}\nตัวเลข: ${JSON.stringify(factGuard?.numberFacts || [])}\nหมัดจบย่อหน้า 3 ที่กั๊กไว้: ${plan.closingHoldback || ''}`,
                 `=== โพสต์ที่ต้องตรวจ ===\n${content}`,
               ].join('\n\n'),
             });
