@@ -21,8 +21,10 @@ import { loadTeacherLibrary } from '@/lib/services/teacherLibrary';
 import { loadAngleExemplars } from '@/lib/services/angleDirector';
 import { TEACHER_FORM, READER_MAX_HARD_PARTS } from '@/lib/services/teacherWriter';
 import { runNewsStudio, NEWS_STUDIO, buildAnalyzerPrompt, buildLibrarianPrompt } from './pipeline';
+import { runNewsStudioPlanB, planBModels } from './planBPipeline';
 import { studioModels, makeAnthropicCaller, makeOpenAIJsonCaller, STUDIO_BUDGET } from './callers';
-import { isStudioDiscordEnabled, isStudioDiscordResearchOn } from './switches';
+import { isStudioDiscordEnabled, isStudioDiscordResearchOn, isPlanBEnabled, studioActivePlan } from './switches';
+import { readAnthropicKeys, skippedAnthropicEnvNames, createKeyPool, keyWarning, keyAlertFromRuns } from './keyPool';
 import {
   RUN_LIMITS, newRunId, isRunId, startedRun, finishedRun, failedRun, listRow,
   recentTeacherIds, overflowRunIds, runStats, effectiveStatus, mergeReview, quotaState, RECENT_ROW_ID, mergeRecentTeacherIds,
@@ -42,11 +44,12 @@ function fail(errorType, message, status = 500) {
 const envKey = (name) => String(process.env[name] ?? '').trim();
 
 // ───────── client ของโมเดล (สร้างเมื่อใช้ครั้งแรก · ไม่มีคีย์ = null แล้วตัวเรียกจะบอกเหตุเอง) ─────────
-let _anthropic;
+let _anthropicPool;
 let _openai;
-function anthropicClient() {
-  if (_anthropic === undefined) _anthropic = envKey('ANTHROPIC_API_KEY') ? new Anthropic({ apiKey: envKey('ANTHROPIC_API_KEY') }) : null;
-  return _anthropic;
+/** ชุดคีย์ Anthropic แบบสลับใช้ (ANTHROPIC_API_KEY, ANTHROPIC_API_KEY_2 … _9) — คีย์หมดเครดิต/ใช้ไม่ได้ = คำขอเดียวกันไปต่อที่คีย์ถัดไปเอง (keyPool.js) */
+function anthropicPool() {
+  if (_anthropicPool === undefined) _anthropicPool = createKeyPool({ keys: readAnthropicKeys(), skipped: skippedAnthropicEnvNames(), makeClient: (apiKey) => new Anthropic({ apiKey }) });
+  return _anthropicPool;
 }
 function openaiClient() {
   if (_openai === undefined) _openai = envKey('OPENAI_API_KEY') ? new OpenAI({ apiKey: envKey('OPENAI_API_KEY') }) : null;
@@ -96,18 +99,19 @@ export async function assertStudioQuota(user) {
 function buildDeps({ userId, snapshot }) {
   const models = studioModels();
   const logUsage = (u) => logApiUsage({ ...u, userId: userId || null });
-  const anthropic = anthropicClient();
+  const pool = anthropicPool();
   const openai = openaiClient();
   const analyzeCall = makeOpenAIJsonCaller({ client: openai, spec: models.analyzer, role: 'ตัววิเคราะห์หมวดข่าว', logUsage });
   const librarianCall = makeOpenAIJsonCaller({ client: openai, spec: models.librarian, role: 'บรรณารักษ์เลือกครู', logUsage });
   const deps = {
+    logUsage,
     loadTeachers: () => loadTeacherLibrary(),
     loadExemplars: () => loadAngleExemplars(),
     scoreTeachers: (analysis, teachers) => scoreLibraryPrompts(analysis, teachers, { mismatchPenalty: false }),
-    callDirector: makeAnthropicCaller({ client: anthropic, spec: models.director, role: 'ผู้กำหนดทิศทางข่าว', logUsage }),
-    callWriter: makeAnthropicCaller({ client: anthropic, spec: models.writer, role: 'นักเขียน', logUsage }),
-    callChecker: makeAnthropicCaller({ client: anthropic, spec: models.checker, role: 'ผู้ตรวจข้อเท็จจริง', logUsage }),
-    callReader: makeAnthropicCaller({ client: anthropic, spec: models.reader, role: 'ผู้อ่านจับใจความ', logUsage }),
+    callDirector: makeAnthropicCaller({ pool, spec: models.director, role: 'ผู้กำหนดทิศทางข่าว', logUsage }),
+    callWriter: makeAnthropicCaller({ pool, spec: models.writer, role: 'นักเขียน', logUsage }),
+    callChecker: makeAnthropicCaller({ pool, spec: models.checker, role: 'ผู้ตรวจข้อเท็จจริง', logUsage }),
+    callReader: makeAnthropicCaller({ pool, spec: models.reader, role: 'ผู้อ่านจับใจความ', logUsage }),
     analyze: (raw) => analyzeCall(buildAnalyzerPrompt(raw)),
     librarian: async ({ rawText, shortlist, angles }) => {
       const obj = await librarianCall(buildLibrarianPrompt({ rawText, shortlist, angles }));
@@ -181,19 +185,31 @@ export async function runStudioJob({ rawText, useResearch = false, user, onEvent
     emit({ type: 'start', runId: id, saved, at: row.createdAt });
     const usageUser = fromStudio ? (user?.username ? `studio-${user.username}` : 'studio') : (user?.username || 'discord');
     const { deps, models } = buildDeps({ userId: usageUser, snapshot });
+    const usePlanB = isPlanBEnabled();
+    const activeModels = usePlanB ? planBModels() : models;
     try {
       // เส้นตายแข็งของทั้งงาน: เลยแล้วปิดเป็น "ไม่สำเร็จ" และบันทึกเหตุ ก่อนโฮสต์ตัดฟังก์ชัน (ไม่งั้นงานค้าง "กำลังเขียน" และผลหายเงียบ)
       let hardTimer;
+      const runPipeline = usePlanB
+        ? () => runNewsStudioPlanB({ rawText, useResearch, deps, retryDeadlineMs, onProgress: (e) => emit({ type: 'progress', ...e }) })
+        : () => runNewsStudio({ rawText, useResearch, deps, retryDeadlineMs, onProgress: (e) => emit({ type: 'progress', ...e }) });
       const result = await Promise.race([
-        runNewsStudio({ rawText, useResearch, deps, retryDeadlineMs, onProgress: (e) => emit({ type: 'progress', ...e }) }),
+        runPipeline(),
         new Promise((_, reject) => { hardTimer = setTimeout(() => reject(fail('NEWS_STUDIO_TIMEOUT', `งานใช้เวลาเกิน ${Math.round(hardMs / 1000)} วินาที (โมเดลตอบช้าผิดปกติ) จึงหยุดงานนี้ — ส่งเนื้อดิบเข้าใหม่ได้`, 504)), hardMs); }),
       ]).finally(() => clearTimeout(hardTimer));
-      row = finishedRun(row, { result, models: publicModels(models), finishedAt: new Date().toISOString() });
+      row = finishedRun(row, { result, models: publicModels(activeModels), finishedAt: new Date().toISOString() });
+      // มีคีย์ถูกพักเพราะปัญหาของคีย์เอง — บอกเจ้าของในประวัติงาน (ไม่ส่งถึงพนักงานใน Discord: ไม่ใช่เรื่องที่พนักงานต้องตรวจในเนื้อข่าว)
+      // หน้าสถานะอ่านคำเตือนนี้จากประวัติงาน (keyAlertFromRuns) เพราะสถานะพักคีย์อยู่ในหน่วยความจำของแต่ละเครื่อง
+      const keyNote = keyWarning(anthropicPool().snapshot());
+      if (keyNote) row.warnings = [...(row.warnings || []), keyNote];
       if (!saved) row.warnings = [...(row.warnings || []), { code: 'RUN_NOT_SAVED', message: 'งานนี้ไม่ได้ถูกบันทึกลงคลังประวัติ' }];
       else if (!(await save(row))) row.warnings = [...(row.warnings || []), { code: 'RUN_NOT_SAVED', message: 'งานนี้ไม่ได้ถูกบันทึกลงคลังประวัติ' }];
       emit({ type: 'result', run: row });
     } catch (e) {
       row = failedRun(row, { error: e?.message || String(e), errorType: e?.errorType, finishedAt: new Date().toISOString() });
+      // งานที่ล้มก็พกคำเตือนเรื่องคีย์ไว้ด้วย (หน้าสถานะอ่านจากประวัติงาน — งานล้มด้วยเหตุอื่นต้องไม่ทำให้คำเตือนเรื่องคีย์หายไป)
+      const failNote = keyWarning(anthropicPool().snapshot());
+      if (failNote) row.warnings = [failNote];
       await save(row);
       emit({ type: 'error', runId: id, error: row.error, errorType: row.errorType });
     }
@@ -312,17 +328,24 @@ export function teacherById(id) {
 
 /** สถานะของระบบเขียนตัวใหม่ — บอกแค่ "มี/ไม่มี" คีย์ ไม่ส่งค่าคีย์ออกไป */
 export async function studioStatus() {
-  const models = studioModels();
+  const usePlanB = isPlanBEnabled();
+  const models = usePlanB ? planBModels() : studioModels();
   const safe = (fn) => { try { return { ok: true, ...fn() }; } catch (e) { return { ok: false, error: String(e?.message || e).slice(0, 200), errorType: e?.errorType || 'LIBRARY_FAILED' }; } };
   const teachers = safe(() => { const t = loadTeacherLibrary(); return { count: t.length }; });
   const exemplars = safe(() => { const x = loadAngleExemplars(); return { count: x.length }; });
   let runs = { ok: true };
   let running = activeJobs;
-  try { const all = await allRuns(); runs = { ok: true, ...runStats(all) }; running = Math.max(activeJobs, quotaState(all).running); } catch (e) { runs = { ok: false, error: String(e?.message || e).slice(0, 200) }; }
+  let anthropicAlert = null;
+  try { const all = await allRuns(); runs = { ok: true, ...runStats(all) }; running = Math.max(activeJobs, quotaState(all).running); anthropicAlert = keyAlertFromRuns(all); } catch (e) { runs = { ok: false, error: String(e?.message || e).slice(0, 200) }; }
   // authSecret=false = ระบบล็อกอินทั้งเว็บยังใช้ค่าลับสำรองที่เขียนอยู่ในโค้ด (ใครเห็นซอร์สก็ปลอมบัตรล็อกอินได้) — บอกแค่มี/ไม่มี
-  const keys = { anthropic: !!envKey('ANTHROPIC_API_KEY'), openai: !!envKey('OPENAI_API_KEY'), research: researchAvailable(), authSecret: !!envKey('AUTH_SECRET') };
+  const keyPool = anthropicPool();
+  const hasGemini = !!(envKey('GEMINI_API_KEY') || envKey('GOOGLE_AI_API_KEY'));
+  // anthropicKeys = สถานะในหน่วยความจำของเครื่องที่ตอบคำขอนี้ (อาจไม่ใช่เครื่องที่เขียนงาน) · anthropicAlert = สัญญาณจากประวัติงานที่ทุกเครื่องเห็นร่วมกัน
+  const keys = { gemini: hasGemini, anthropic: keyPool.size > 0, anthropicKeys: keyPool.snapshot(), anthropicAlert, anthropicSkipped: skippedAnthropicEnvNames(), openai: !!envKey('OPENAI_API_KEY'), research: researchAvailable(), authSecret: !!envKey('AUTH_SECRET') };
+  const ready = usePlanB ? (keys.gemini && keys.openai && teachers.ok && exemplars.ok) : (keys.anthropic && keys.openai && teachers.ok && exemplars.ok);
   return {
-    ready: keys.anthropic && keys.openai && teachers.ok && exemplars.ok,
+    ready,
+    plan: studioActivePlan(),
     keys,
     models: publicModels(models),
     libraries: { teachers, exemplars },
@@ -335,6 +358,6 @@ export async function studioStatus() {
       maxRawRun: TEACHER_FORM.maxRawRun, maxRawCopyPct: Math.round(TEACHER_FORM.maxRawCopy * 100), retellMinRawRatio: TEACHER_FORM.retellMinRawRatio, readerMaxHardParts: READER_MAX_HARD_PARTS,
     },
     // ท่อ Discord: โค้ดชุดนี้ส่งงานข้อความล้วนจากบอทเข้าระบบเขียนตัวใหม่ เว้นแต่ตั้ง NEWS_STUDIO_DISCORD=0 (มีผลเมื่อโค้ดชุดนี้ถูก deploy แล้วเท่านั้น)
-    discord: { usesStudio: isStudioDiscordEnabled(), research: isStudioDiscordResearchOn() },
+    discord: { usesStudio: isStudioDiscordEnabled(), plan: studioActivePlan(), research: isStudioDiscordResearchOn() },
   };
 }

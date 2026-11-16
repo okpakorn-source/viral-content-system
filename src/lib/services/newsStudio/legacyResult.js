@@ -78,7 +78,8 @@ export function runQualityWarnings(run) {
   if (failed.length) out.push(`เขียนได้ ${versions.length - failed.length} จาก ${versions.length} เวอร์ชัน (เวอร์ชัน ${failed.map((v) => v.index).join(', ')} เขียนไม่สำเร็จ)`);
   const review = versions.filter((v) => v.content && !fullyPassed(v));
   if (review.length) out.push(`เวอร์ชัน ${review.map((v) => v.index).join(', ')} ยังมีจุดให้ตรวจก่อนโพสต์ (ดูบรรทัดเตือนใต้ข่าว)`);
-  for (const w of arr(run?.warnings)) if (w?.message && w.code !== 'RUN_NOT_SAVED') out.push(cut(w.message, 200));
+  // คำเตือนภายในของระบบ (บันทึกประวัติไม่ได้ · คีย์สำรอง) เป็นเรื่องของเจ้าของ ไม่ใช่จุดที่พนักงานต้องตรวจในเนื้อข่าว — ไม่ส่งถึง Discord
+  for (const w of arr(run?.warnings)) if (w?.message && !['RUN_NOT_SAVED', 'KEY_BENCHED', 'KEYS_ALL_BENCHED'].includes(w.code)) out.push(cut(w.message, 200));
   return out;
 }
 

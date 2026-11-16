@@ -10,6 +10,7 @@
  *
  * ไฟล์นี้ไม่สร้าง client เอง และไม่ import แบบ alias — ผู้เรียกส่ง client + ตัวบันทึกการใช้งานเข้ามา (เทสได้โดยไม่ยิง API)
  */
+import { classifyKeyFailure, redactKeys, KEY_REASON } from './keyPool.js';
 
 const clean = (v) => String(v ?? '').trim().replace(/^["']|["']$/g, '');
 
@@ -62,9 +63,11 @@ function fail(errorType, message) {
  * @param {string} p.role  ชื่อบทบาท (ใช้ในข้อความ error และป้ายบันทึกการใช้งาน)
  * @param {(u:{provider,model,inputTokens,outputTokens,feature}) => any} [p.logUsage]  ล้มได้ ไม่ทำให้งานล้ม
  */
-export function makeAnthropicCaller({ client, spec, role, logUsage, retryClock }) {
+export function makeAnthropicCaller({ client, pool, spec, role, logUsage, retryClock }) {
   return async function callAnthropic({ system, user }) {
-    if (!client) throw fail('ANTHROPIC_KEY_MISSING', `เรียก${role}ไม่ได้: ระบบยังไม่ได้ตั้งค่า ANTHROPIC_API_KEY`);
+    // pool = ชุดคีย์แบบสลับใช้ (keyPool.js): คีย์ที่ใช้อยู่หมดเครดิต/ใช้ไม่ได้ → คำขอเดียวกันนี้ไปต่อที่คีย์ถัดไปเอง · client = คีย์เดียว (ทางเดิม ใช้ในเทส)
+    //   ชุดคีย์ว่าง = pool.run บอกเหตุเอง (ยังไม่ได้ตั้งค่า / ค่าที่วางไว้ใช้เป็นคีย์ไม่ได้)
+    if (!client && !pool) throw fail('ANTHROPIC_KEY_MISSING', `เรียก${role}ไม่ได้: ระบบยังไม่ได้ตั้งค่า ANTHROPIC_API_KEY`);
     const req = {
       model: spec.model,
       max_tokens: spec.maxTokens,
@@ -75,10 +78,19 @@ export function makeAnthropicCaller({ client, spec, role, logUsage, retryClock }
     if (spec.thinking) req.thinking = { type: 'adaptive' };
     let res;
     try {
-      res = await callWithQuickRetry(() => client.messages.create(req, { timeout: spec.timeoutMs, maxRetries: 0 }), retryClock);
+      // ลองซ้ำเร็ว 1 ครั้ง "ต่อคีย์" (เหตุชั่วคราว) ก่อนตัดสินว่าคีย์นั้นใช้ไม่ได้แล้วไปคีย์ถัดไป
+      const once = (c) => callWithQuickRetry(() => c.messages.create(req, { timeout: spec.timeoutMs, maxRetries: 0 }), retryClock);
+      res = pool ? await pool.run(once) : await once(client);
     } catch (e) {
+      // ทุกคีย์ใช้ไม่ได้: ส่งชนิดเหตุและรายการต่อคีย์ต่อไปตรงๆ (คนอ่านต้องรู้ว่าต้องเติมเงิน/แก้คีย์ ไม่ใช่ "เรียกโมเดลไม่สำเร็จ" กลางๆ)
+      if (e?.errorType === 'ANTHROPIC_KEYS_EXHAUSTED' || e?.errorType === 'ANTHROPIC_KEY_MISSING') throw fail(e.errorType, `เรียก${role}ไม่ได้: ${e.message}`);
       const status = e?.status ? ` (HTTP ${e.status})` : '';
-      throw fail('MODEL_CALL_FAILED', `เรียก${role}ไม่สำเร็จ${status}: ${String(e?.message || e).slice(0, 160)}`);
+      // ข้อความจาก SDK/เครือข่ายอาจมีค่า header ติดมา — ลบค่าคีย์ออกก่อนส่งต่อ (ข้อความนี้ไปถึงประวัติงาน หน้าเว็บ และ Discord)
+      const text = pool ? pool.redact(e?.message || e) : redactKeys(e?.message || e);
+      // เหตุที่เจ้าของต้องลงมือเอง (เติมเงิน/แก้คีย์) บอกเป็นภาษาไทยนำหน้าข้อความของผู้ให้บริการ
+      const kind = classifyKeyFailure(e);
+      const hint = kind === 'billing' || kind === 'auth' || kind === 'permission' ? `${KEY_REASON[kind]} · ` : '';
+      throw fail('MODEL_CALL_FAILED', `เรียก${role}ไม่สำเร็จ${status}: ${hint}${text.slice(0, 160)}`);
     }
     try {
       const p = logUsage?.({ provider: 'anthropic', model: spec.model, inputTokens: res.usage?.input_tokens || 0, outputTokens: res.usage?.output_tokens || 0, feature: `newsStudio:${role}` });

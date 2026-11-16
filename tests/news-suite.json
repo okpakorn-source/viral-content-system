@@ -128,7 +128,8 @@
     "tests/angle-director.test.mjs",
     "tests/news-studio-pipeline.test.mjs",
     "tests/news-studio-server.test.mjs",
-    "tests/news-studio-discord.test.mjs"
+    "tests/news-studio-discord.test.mjs",
+    "tests/news-studio-keypool.test.mjs"
   ],
   "exclude": [
     {

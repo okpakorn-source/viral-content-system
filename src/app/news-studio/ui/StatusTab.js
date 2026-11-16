@@ -1,6 +1,6 @@
 'use client';
 // แท็บ "สถานะระบบ": ระบบพร้อมเขียนไหม · ใช้โมเดลอะไรทำหน้าที่ไหน · กติกาที่ใช้ตรวจ · ท่อ Discord ต่อแล้วหรือยัง
-import { ROLE_LABEL } from './api';
+import { ROLE_LABEL, formatWhen } from './api';
 
 const ROLE_ORDER = ['director', 'analyzer', 'librarian', 'writer', 'checker', 'reader'];
 
@@ -27,11 +27,17 @@ export default function StatusTab({ status, statusErr, onReload, busy }) {
       </div>
       {status.discord?.usesStudio ? (
         <div className="ns-note info">
-          <b>ท่อ Discord ใช้ระบบนี้</b> · ข่าวข้อความล้วนที่พนักงานส่งทาง Discord ถูกเขียนด้วยระบบเขียนตัวใหม่ และขึ้นในแท็บประวัติงานพร้อมป้าย “จาก Discord” · ค้นข้อมูลเสริมจากเว็บ{status.discord.research ? 'เปิดอยู่' : 'ปิดอยู่'} · ถอยกลับไปนักเขียนชุดเดิมได้ด้วยการตั้ง NEWS_STUDIO_DISCORD=0
+          <b>ท่อ Discord ใช้ระบบนี้ ({status.plan === 'plan_b' ? 'Plan B: Gemini 4 Carbon + Argon + Hydrogen' : (status.plan || 'v1')})</b> · ข่าวข้อความล้วนที่พนักงานส่งทาง Discord ถูกเขียนด้วยระบบเขียนตัวใหม่ และขึ้นในแท็บประวัติงานพร้อมป้าย “จาก Discord” · ค้นข้อมูลเสริมจากเว็บ{status.discord.research ? 'เปิดอยู่' : 'ปิดอยู่'} · ถอยกลับไปท่อ v1 ได้ด้วยการตั้ง NEWS_STUDIO_PLAN=v1 หรือถอยกลับนักเขียนชุดเดิมด้วยการตั้ง NEWS_STUDIO_DISCORD=0
         </div>
       ) : (
         <div className="ns-note warn">
           <b>ท่อ Discord ถูกสลับกลับไปใช้นักเขียนชุดเดิม</b> · มีการตั้ง NEWS_STUDIO_DISCORD=0 ไว้ ระบบตัวใหม่จึงทำงานเฉพาะในหน้านี้
+        </div>
+      )}
+
+      {keys.anthropicAlert && (
+        <div className={`ns-note ${keys.anthropicAlert.level === 'bad' ? 'bad' : 'warn'}`} role="alert">
+          <b>คีย์ Claude มีปัญหา</b> · {keys.anthropicAlert.message} <span className="ns-muted">(จากงานล่าสุด {formatWhen(keys.anthropicAlert.at)})</span>
         </div>
       )}
 
@@ -45,7 +51,30 @@ export default function StatusTab({ status, statusErr, onReload, busy }) {
         <div className="ns-card">
           <div className="ns-card-head"><span className="ns-h2">สิ่งที่ระบบต้องมี</span><button type="button" className="ns-btn ns-btn-quiet" disabled={busy} onClick={onReload}>{busy ? 'กำลังตรวจ…' : 'ตรวจใหม่'}</button></div>
           <div className="ns-kv">
-            <div>คีย์ Claude (ทิศทาง เขียน ตรวจ อ่าน)</div><div><Have ok={keys.anthropic} /></div>
+            <div>คีย์ Claude (ทิศทาง เขียน ตรวจ อ่าน)</div>
+            <div>
+              <Have ok={keys.anthropic} no={(keys.anthropicSkipped || []).length ? 'ตั้งค่าไว้แต่ค่าใช้ไม่ได้' : 'ยังไม่ได้ตั้งค่า'} />
+              {(keys.anthropicKeys || []).length > 1 && <span className="ns-muted"> มี {keys.anthropicKeys.length} คีย์ สลับใช้เมื่อคีย์ที่ใช้อยู่หมด</span>}
+              {(keys.anthropicKeys || []).length === 1 && <span className="ns-muted"> มี 1 คีย์ ยังไม่มีคีย์สำรอง</span>}
+            </div>
+            {(keys.anthropicSkipped || []).flatMap((name) => [
+              <div key={`${name}sk`}><span className="ns-muted">{name}</span></div>,
+              <div key={`${name}sv`}><span className="ns-pill bad">ค่ามีตัวอักษรที่ใช้เป็นคีย์ไม่ได้ ให้วางคีย์ใหม่</span></div>,
+            ])}
+            {(keys.anthropicKeys || []).length > 1 && (keys.anthropicKeys || []).flatMap((k) => [
+              <div key={`${k.label}k`}>{k.label} <span className="ns-muted">({k.envName})</span></div>,
+              <div key={`${k.label}v`}>
+                {k.benched
+                  ? <><span className="ns-pill bad">พักใช้: {k.reason}</span> <span className="ns-muted">ลองใหม่ {formatWhen(k.retryAt)}</span></>
+                  : k.down
+                    ? <span className="ns-pill bad">ใช้ไม่ได้: {k.downReason}</span>
+                    : k.uses > 0 && k.failures === 0
+                    ? <span className="ns-pill ok">ใช้ได้</span>
+                    : <span className="ns-pill plain">{k.uses > 0 ? 'ใช้อยู่' : 'ยังไม่ได้ลองใช้'}</span>}
+                {k.failures > 0 && !k.benched ? <span className="ns-muted"> เคยล้ม {k.failures} ครั้ง ล่าสุด {formatWhen(k.lastFailAt)}</span> : null}
+              </div>,
+            ])}
+            <div>คีย์ Gemini 4 (Hydrogen / Carbon / Argon)</div><div><Have ok={keys.gemini} /></div>
             <div>คีย์ OpenAI (วิเคราะห์หมวด เลือกครู)</div><div><Have ok={keys.openai} /></div>
             <div>ตัวค้นข้อมูลเสริมจากเว็บ</div><div><Have ok={keys.research} no="ไม่ได้ตั้งค่า (เขียนได้ตามปกติ)" /></div>
             <div>คลังต้นแบบประเด็น</div><div>{libraries.exemplars.ok ? <span className="ns-num">{libraries.exemplars.count} ปก</span> : <span className="ns-pill bad">{libraries.exemplars.error}</span>}</div>
