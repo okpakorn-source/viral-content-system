@@ -47,7 +47,7 @@ const PRICING = {
   'gemini-1.5-flash': { input: 0.075, output: 0.30 },
 };
 
-export async function logApiUsage({ provider, model, inputTokens, outputTokens, feature = 'autoFlow', userId = null }) {
+export async function logApiUsage({ provider, model, inputTokens, outputTokens, feature = 'autoFlow', userId = null, anthropicUsage }) {
   try {
     let costUsd = 0;
     
@@ -62,6 +62,32 @@ export async function logApiUsage({ provider, model, inputTokens, outputTokens, 
     
     if (price) {
       costUsd = ((inputTokens / 1000000) * price.input) + ((outputTokens / 1000000) * price.output);
+    }
+
+    // Emit raw cache usage before the DB await so DB failures/cold starts do not
+    // hide the observed counters. This is a runtime log, not a schema migration:
+    // api_usage_logs.input_tokens keeps its existing weighted-token meaning.
+    if (provider === 'anthropic' && anthropicUsage) {
+      const rawInput = anthropicUsage.inputTokens || 0;
+      const cacheWrite = anthropicUsage.cacheCreationInputTokens || 0;
+      const cacheRead = anthropicUsage.cacheReadInputTokens || 0;
+      console.log('[Anthropic Usage] ' + JSON.stringify({
+        event: 'anthropic_usage', version: 1, at: new Date().toISOString(),
+        provider, model, feature,
+        requestId: anthropicUsage.requestId || null,
+        messageId: anthropicUsage.messageId || null,
+        stopReason: anthropicUsage.stopReason || null,
+        promptMode: anthropicUsage.promptMode,
+        cacheBreakpoints: anthropicUsage.cacheBreakpoints,
+        usageReported: anthropicUsage.usageReported === true,
+        inputTokens: rawInput,
+        cacheCreationInputTokens: cacheWrite,
+        cacheReadInputTokens: cacheRead,
+        totalInputTokens: rawInput + cacheWrite + cacheRead,
+        outputTokens,
+        weightedInputTokens: inputTokens,
+        costUsd,
+      }));
     }
 
     await prisma.apiUsageLog.create({
