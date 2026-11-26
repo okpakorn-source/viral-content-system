@@ -22,8 +22,9 @@ import { loadAngleExemplars } from '@/lib/services/angleDirector';
 import { TEACHER_FORM, READER_MAX_HARD_PARTS } from '@/lib/services/teacherWriter';
 import { runNewsStudio, NEWS_STUDIO, buildAnalyzerPrompt, buildLibrarianPrompt } from './pipeline';
 import { runNewsStudioPlanB, planBModels } from './planBPipeline';
+import { runNewsStudioPlan1, plan1SubUltraModels } from './plan1SubUltraPipeline';
 import { studioModels, makeAnthropicCaller, makeOpenAIJsonCaller, STUDIO_BUDGET } from './callers';
-import { isStudioDiscordEnabled, isStudioDiscordResearchOn, isPlanBEnabled, studioActivePlan } from './switches';
+import { isStudioDiscordEnabled, isStudioDiscordResearchOn, isPlan1SubUltraEnabled, isPlanBEnabled, studioActivePlan } from './switches';
 import { readAnthropicKeys, skippedAnthropicEnvNames, createKeyPool, keyWarning, keyAlertFromRuns } from './keyPool';
 import {
   RUN_LIMITS, newRunId, isRunId, startedRun, finishedRun, failedRun, listRow,
@@ -185,14 +186,17 @@ export async function runStudioJob({ rawText, useResearch = false, user, onEvent
     emit({ type: 'start', runId: id, saved, at: row.createdAt });
     const usageUser = fromStudio ? (user?.username ? `studio-${user.username}` : 'studio') : (user?.username || 'discord');
     const { deps, models } = buildDeps({ userId: usageUser, snapshot });
+    const usePlan1 = isPlan1SubUltraEnabled();
     const usePlanB = isPlanBEnabled();
-    const activeModels = usePlanB ? planBModels() : models;
+    const activeModels = usePlan1 ? plan1SubUltraModels() : (usePlanB ? planBModels() : models);
     try {
       // เส้นตายแข็งของทั้งงาน: เลยแล้วปิดเป็น "ไม่สำเร็จ" และบันทึกเหตุ ก่อนโฮสต์ตัดฟังก์ชัน (ไม่งั้นงานค้าง "กำลังเขียน" และผลหายเงียบ)
       let hardTimer;
-      const runPipeline = usePlanB
-        ? () => runNewsStudioPlanB({ rawText, useResearch, deps, retryDeadlineMs, onProgress: (e) => emit({ type: 'progress', ...e }) })
-        : () => runNewsStudio({ rawText, useResearch, deps, retryDeadlineMs, onProgress: (e) => emit({ type: 'progress', ...e }) });
+      const runPipeline = usePlan1
+        ? () => runNewsStudioPlan1({ rawText, useResearch, deps, retryDeadlineMs, onProgress: (e) => emit({ type: 'progress', ...e }) })
+        : usePlanB
+          ? () => runNewsStudioPlanB({ rawText, useResearch, deps, retryDeadlineMs, onProgress: (e) => emit({ type: 'progress', ...e }) })
+          : () => runNewsStudio({ rawText, useResearch, deps, retryDeadlineMs, onProgress: (e) => emit({ type: 'progress', ...e }) });
       const result = await Promise.race([
         runPipeline(),
         new Promise((_, reject) => { hardTimer = setTimeout(() => reject(fail('NEWS_STUDIO_TIMEOUT', `งานใช้เวลาเกิน ${Math.round(hardMs / 1000)} วินาที (โมเดลตอบช้าผิดปกติ) จึงหยุดงานนี้ — ส่งเนื้อดิบเข้าใหม่ได้`, 504)), hardMs); }),
@@ -328,8 +332,9 @@ export function teacherById(id) {
 
 /** สถานะของระบบเขียนตัวใหม่ — บอกแค่ "มี/ไม่มี" คีย์ ไม่ส่งค่าคีย์ออกไป */
 export async function studioStatus() {
+  const usePlan1 = isPlan1SubUltraEnabled();
   const usePlanB = isPlanBEnabled();
-  const models = usePlanB ? planBModels() : studioModels();
+  const models = usePlan1 ? plan1SubUltraModels() : (usePlanB ? planBModels() : studioModels());
   const safe = (fn) => { try { return { ok: true, ...fn() }; } catch (e) { return { ok: false, error: String(e?.message || e).slice(0, 200), errorType: e?.errorType || 'LIBRARY_FAILED' }; } };
   const teachers = safe(() => { const t = loadTeacherLibrary(); return { count: t.length }; });
   const exemplars = safe(() => { const x = loadAngleExemplars(); return { count: x.length }; });
@@ -342,7 +347,11 @@ export async function studioStatus() {
   const hasGemini = !!(envKey('GEMINI_API_KEY') || envKey('GOOGLE_AI_API_KEY'));
   // anthropicKeys = สถานะในหน่วยความจำของเครื่องที่ตอบคำขอนี้ (อาจไม่ใช่เครื่องที่เขียนงาน) · anthropicAlert = สัญญาณจากประวัติงานที่ทุกเครื่องเห็นร่วมกัน
   const keys = { gemini: hasGemini, anthropic: keyPool.size > 0, anthropicKeys: keyPool.snapshot(), anthropicAlert, anthropicSkipped: skippedAnthropicEnvNames(), openai: !!envKey('OPENAI_API_KEY'), research: researchAvailable(), authSecret: !!envKey('AUTH_SECRET') };
-  const ready = usePlanB ? (keys.gemini && keys.openai && teachers.ok && exemplars.ok) : (keys.anthropic && keys.openai && teachers.ok && exemplars.ok);
+  const ready = usePlan1
+    ? (teachers.ok && exemplars.ok)
+    : usePlanB
+      ? (keys.gemini && keys.openai && teachers.ok && exemplars.ok)
+      : (keys.anthropic && keys.openai && teachers.ok && exemplars.ok);
   return {
     ready,
     plan: studioActivePlan(),

@@ -94,6 +94,7 @@
     "tests/keywords-dream-schema.test.mjs",
     "tests/news-filter-budget-mc13.test.mjs",
     "tests/news-prepush-gate.test.mjs",
+    "tests/news-studio-v2-plans.test.mjs",
     "tests/opus55-effort-cost.test.mjs",
     "tests/queue-parallel.test.mjs",
     "tests/research-agent-codex-runner.test.mjs",

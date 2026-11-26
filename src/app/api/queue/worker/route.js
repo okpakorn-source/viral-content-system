@@ -66,6 +66,14 @@ export async function POST(req) {
       }
     }
     // No auth header = same-origin trigger (web client or server self-call) = allowed
+
+    // ★ 26 พ.ย. 69 (แผนที่ 1 Sub Ultra — เจ้าของสั่งย้ายไปใช้ Sub Ultra แทน API):
+    //   บนคลาวด์ (ไม่ใช่ win32) ไม่มีเซสชัน Sub Ultra (`agy` / `codex`) และงานปก/คลิปก็เป็นของเครื่องทีมอยู่แล้ว
+    //   จึงปล่อยให้งานข่าวใน `job_queue` ถูกรับไปทำโดย Sub-Ultra News Worker บนเครื่องทีมโดยไม่ถูกแย่งเคลม
+    //   ทางถอยฉุกเฉิน: ตั้ง env QUEUE_VERCEL_WORKER=1 บนคลาวด์เพื่อกลับมาดึงงานบนคลาวด์เหมือนเดิม
+    if (process.platform !== 'win32' && process.env.QUEUE_VERCEL_WORKER !== '1') {
+      return NextResponse.json({ success: true, message: 'Delegated to Sub-Ultra local worker' });
+    }
     
     // 1.5. Cleanup stale jobs first (stuck > 6 minutes)
     const cleaned = await cleanupStaleJobs(15).catch(() => 0);

@@ -14,18 +14,25 @@ export function isStudioDiscordEnabled(env = process.env) {
 
 /**
  * แผนโมเดลที่ทำงานอยู่ในท่อหลักของ News Studio (ทั้งหน้าเว็บและท่อ Discord):
- *   - ค่าตั้งต้น = 'plan_b' (Gemini 4 Hydrogen + Carbon + Argon + GPT-5.6-Sol Critic)
+ *   - ค่าตั้งต้น = 'plan_1' (Plan 1 Dual-Sub Masterpiece: Gemini 4 Neon/Argon Sub Ultra × GPT Sub Critic · ค่า API = 0 บาท)
+ *   - ถอยกลับไปใช้ Plan B (API): ตั้ง env NEWS_STUDIO_PLAN=plan_b
  *   - ถอยกลับไปใช้ท่อ v1 เดิมโดยไม่แก้โค้ด: ตั้ง env NEWS_STUDIO_PLAN=v1 (หรือ legacy / old / 0)
  */
 export function studioActivePlan(env = process.env) {
   const v = clean(env.NEWS_STUDIO_PLAN);
   if (['v1', 'legacy', 'old', '0', 'off'].includes(v)) return 'v1';
+  if (['plan_b', 'planb', 'b'].includes(v)) return 'plan_b';
   if (['plan_a', 'plana', 'a'].includes(v)) return 'plan_a';
   if (['plan_c', 'planc', 'c', 'hybrid'].includes(v)) return 'plan_c';
-  return 'plan_b';
+  return 'plan_1';
 }
 
-/** เปิดใช้ Plan B (Gemini 4 Carbon + Argon + Hydrogen) เป็นค่าตั้งต้นในท่อหลัก */
+/** เปิดใช้ Plan 1 (Dual-Sub Masterpiece Sub Ultra: Gemini 4 + GPT Sub) เป็นค่าตั้งต้นในท่อหลัก */
+export function isPlan1SubUltraEnabled(env = process.env) {
+  return studioActivePlan(env) === 'plan_1';
+}
+
+/** เปิดใช้ Plan B (Gemini 4 Carbon + Argon + Hydrogen API) เมื่อตั้ง NEWS_STUDIO_PLAN=plan_b */
 export function isPlanBEnabled(env = process.env) {
   return studioActivePlan(env) === 'plan_b';
 }
