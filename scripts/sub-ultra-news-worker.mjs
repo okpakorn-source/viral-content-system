@@ -59,7 +59,7 @@ loadEnvFiles();
 
 const SUPABASE_URL = String(process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
 const SUPABASE_KEY = String(process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
-const POLL_INTERVAL_MS = Math.max(1500, parseInt(process.env.SUB_ULTRA_POLL_MS || '3000', 10) || 3000);
+const POLL_INTERVAL_MS = Math.max(1000, parseInt(process.env.SUB_ULTRA_POLL_MS || '1500', 10) || 1500);
 const MAX_CONCURRENCY = Math.max(1, Math.min(4, parseInt(process.env.SUB_ULTRA_NEWS_CONCURRENCY || '2', 10) || 2));
 const HEALTH_PORT = parseInt(process.env.SUB_ULTRA_HEALTH_PORT || '3955', 10) || 3955;
 const RUN_ONCE = process.argv.includes('--once');
@@ -314,8 +314,9 @@ async function executeStudioJobSubUltra({ rawText, useResearch = false, user, bu
     },
   };
 
-  const hardMs = Number.isFinite(budget?.hardMs) ? budget.hardMs : 420000;
-  const retryDeadlineMs = Number.isFinite(budget?.retryDeadlineMs) ? budget.retryDeadlineMs : 240000;
+  // เพดานความปลอดภัย 600 วินาที (10 นาที — สอดคล้องกับฝั่งบอท Discord ที่รอได้ 15 นาที ไม่ตัดงานทิ้งก่อนเวลา)
+  const hardMs = Math.max(600000, Number.isFinite(budget?.hardMs) ? budget.hardMs : 600000);
+  const retryDeadlineMs = Math.max(300000, Number.isFinite(budget?.retryDeadlineMs) ? budget.retryDeadlineMs : 300000);
 
   let hardTimer;
   try {

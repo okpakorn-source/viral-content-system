@@ -211,23 +211,24 @@ function prepareCleanCodexHome({ model = 'gpt-6.2-astra', effort = 'medium', slo
 }
 
 export function defaultGeminiFallbackChain(primaryModel) {
-  const m = String(primaryModel || 'gemini-4-carbon-high').trim();
+  const m = String(primaryModel || 'gemini-4-argon-medium').trim();
   const chain = [m];
   const pushUnique = (x) => { if (x && !chain.includes(x)) chain.push(x); };
 
+  // เน้นรุ่นความเร็วสูงที่ไม่ติดสร้าง thinking ยาวเกินเพดาน (-medium / -low) เป็นแกนสำรองเสมอ
   if (m.startsWith('gemini-4-neon')) {
-    pushUnique('gemini-4-carbon-high');
-    pushUnique('gemini-4-argon-high');
+    pushUnique('gemini-4-argon-medium');
+    pushUnique('gemini-4-argon-low');
   } else if (m.startsWith('gemini-4-carbon')) {
-    pushUnique('gemini-4-neon-medium');
-    pushUnique('gemini-4-argon-high');
+    pushUnique('gemini-4-argon-medium');
+    pushUnique('gemini-4-neon-low');
   } else if (m.startsWith('gemini-4-argon')) {
-    pushUnique('gemini-4-carbon-medium');
-    pushUnique('gemini-4-hydrogen-high');
+    pushUnique('gemini-4-argon-low');
+    pushUnique('gemini-4-neon-low');
   } else if (m.startsWith('gemini-4-hydrogen')) {
     pushUnique('gemini-4-argon-low');
   } else {
-    pushUnique('gemini-4-argon-high');
+    pushUnique('gemini-4-argon-medium');
   }
   return chain;
 }
@@ -290,8 +291,8 @@ export function createSubUltraHub({
   logUsage,
   runCommand = defaultSpawnRunner,
   env = process.env,
-  maxParallelGemini = 2,
-  maxParallelGpt = 2,
+  maxParallelGemini = 3,
+  maxParallelGpt = 3,
 } = {}) {
   const agyBin = resolveAgyBinary(env);
   const codexSpec = resolveCodexBinary(env);
@@ -409,11 +410,11 @@ export function createSubUltraHub({
     timeoutMs = 55000,
     role = 'gpt-sub-critic',
     allowGeminiFallback = true,
-    geminiFallbackModels = ['gemini-4-neon-high', 'gemini-4-carbon-high'],
+    geminiFallbackModels = ['gemini-4-argon-medium', 'gemini-4-neon-low'],
   } = {}) {
     const chain = Array.isArray(models) && models.length > 0
       ? models
-      : (model === 'gpt-5.6-sol' ? ['gpt-5.6-sol', 'gpt-6.2-astra'] : ['gpt-6.2-astra', 'gpt-5.6-sol']);
+      : (model === 'gpt-6.2-astra' ? ['gpt-6.2-astra', 'gpt-5.6-sol'] : ['gpt-5.6-sol', 'gpt-6.2-astra']);
     const fullPrompt = composeFullPrompt({ system, user, json });
     const errors = [];
 
